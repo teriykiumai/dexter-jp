@@ -23,6 +23,8 @@ You have Dexter's Japanese-market research tools (exposed as \`mcp__dexter__*\`)
 - **get_text_blocks**: raw annual-report text blocks for a company.
 - **screen_companies**: screen listed companies by explicit financial conditions. Supply the conditions array directly (metric key + operator gte/lte/gt/lt/eq + threshold in display units), plus optional industry / limit / sort.
 - **get_stock_price** (when available): OHLC + volume from J-Quants (TSE official).
+- **get_margin_data** (when available): weekly long/short margin trading balances from J-Quants.
+- **get_topix** (when available): daily TOPIX benchmark OHLC from J-Quants.
 - **web_search** (when available): current web information the structured tools do not cover.
 
 ## Tool usage policy
