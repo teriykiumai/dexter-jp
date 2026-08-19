@@ -1,20 +1,20 @@
 # Repository Guidelines
 
 - Repo: https://github.com/edinetdb/dexter-jp
-- Dexter JP is a CLI-based AI agent for deep financial research on Japanese listed companies, built with TypeScript, Ink (React for CLI), and LangChain. Powered by EDINET DB API.
+- Dexter JP is a CLI-based AI agent for deep financial research on Japanese listed companies, built with TypeScript, pi-tui, and LangChain. Powered by EDINET DB API.
 - This fork extends Dexter JP for a personal, local-only Japanese stock analysis system.
 
 ## Project Structure
 
 - Source code: `src/`
   - Agent core: `src/agent/` (agent loop, prompts, scratchpad, token counting, types)
-  - CLI interface: `src/cli.tsx` (Ink/React), entry point: `src/index.tsx`
-  - Components: `src/components/` (Ink UI components)
-  - Hooks: `src/hooks/` (React hooks for agent runner, model selection, input history)
+  - CLI interface: `src/cli.ts` (pi-tui), entry point: `src/index.tsx`
+  - Components: `src/components/` (pi-tui UI components)
+  - Controllers: `src/controllers/` (agent runner, model selection, input history)
   - Model/LLM: `src/model/llm.ts` (multi-provider LLM abstraction)
   - Tools: `src/tools/` (financial search, web search, browser, skill tool)
   - Finance tools: `src/tools/finance/` (financials, text-blocks, earnings, shareholders, key-ratios, screening)
-  - Search tools: `src/tools/search/` (Exa preferred, Tavily fallback)
+  - Search tools: `src/tools/search/` (Exa, Perplexity, Tavily, LangSearch fallback chain)
   - Browser: `src/tools/browser/` (Playwright-based web scraping)
   - Skills: `src/skills/` (SKILL.md-based extensible workflows, e.g. DCF valuation)
   - Utils: `src/utils/` (env, config, caching, token estimation, markdown tables)
@@ -50,10 +50,10 @@
 
 ## LLM Providers
 
-- Supported: OpenAI (default), Anthropic, Google, xAI (Grok), OpenRouter, Ollama (local).
-- Default model: `gpt-5.4`.
+- Supported: OpenAI (default), Anthropic, Google, xAI (Grok), Moonshot, DeepSeek, OpenRouter, Ollama (local), Claude Agent SDK.
+- Default model: `gpt-5.5`.
 - Provider detection is prefix-based (`claude-` -> Anthropic, `gemini-` -> Google, etc.).
-- Fast models for lightweight tasks: see `FAST_MODELS` map in `src/model/llm.ts`.
+- Fast models for lightweight tasks: see provider `fastModel` values in `src/providers.ts`.
 - Users switch providers/models via `/model` command in the CLI.
 
 ## Tools
@@ -61,7 +61,7 @@
 - `get_financials`: meta-tool for all financial data queries (financials, metrics, earnings, analysis). Routes to sub-tools internally.
 - `read_filings`: reads text from annual securities reports (有価証券報告書) and shareholder data.
 - `company_screener`: screens ~3,800 Japanese listed companies by 100+ financial metrics.
-- `web_search`: general web search (Exa if `EXASEARCH_API_KEY` set, else Tavily if `TAVILY_API_KEY` set).
+- `web_search`: general web search with a configurable fallback chain across available Exa, Perplexity, Tavily, and LangSearch keys.
 - `browser`: Playwright-based web scraping for reading pages the agent discovers.
 - `skill`: invokes SKILL.md-defined workflows (e.g. DCF valuation).
 - Tool registry: `src/tools/registry.ts`. Tools are conditionally included based on env vars.
@@ -81,7 +81,7 @@
 
 ## Environment Variables
 
-- LLM keys: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `XAI_API_KEY`, `OPENROUTER_API_KEY`
+- LLM keys: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `XAI_API_KEY`, `MOONSHOT_API_KEY`, `DEEPSEEK_API_KEY`, `OPENROUTER_API_KEY`
 - Ollama: `OLLAMA_BASE_URL` (default `http://127.0.0.1:11434`)
 - Finance: `EDINETDB_API_KEY`
 - J-Quants: `JQUANTS_API_KEY`
