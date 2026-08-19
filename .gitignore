@@ -55,7 +55,8 @@ yarn-error.log*
 # Dexter context files (offloaded tool outputs)
 .dexter/*
 
+# Track project research rules
+!.dexter/RULES.md
 
 logs/
 coverage.json
-docs/USER_SETUP.md

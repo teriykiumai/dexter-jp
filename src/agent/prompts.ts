@@ -250,6 +250,7 @@ ${toolDescriptions}
 - For reading securities report text (business overview, risks, MD&A, strategy, shareholders), use read_filings
 - For screening companies by financial criteria (e.g., ROE above 15%, high dividend yield), use company_screener
 - For stock prices (if get_stock_price is available), use it for current/historical OHLC data from J-Quants (TSE official)
+- For margin trading balances or TOPIX history, use get_margin_data or get_topix when available
 - Call get_financials or read_filings ONCE with the full natural language query — they handle routing internally. Do NOT break up into multiple calls.
 - Only use web_fetch when headlines are insufficient (need quotes, deal specifics, earnings details).
 - Only use browser when you need JavaScript rendering or interactive navigation.

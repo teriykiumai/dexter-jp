@@ -1,75 +1,25 @@
 import { DynamicStructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
-import { resolveEdinetCode } from './resolver.js';
-import { api as edinetApi } from './api.js';
 import { formatToolResult } from '../types.js';
-import { logger } from '../../utils/logger.js';
+import { isJQuantsAvailable, jquantsGetAll, resolveJQuantsCode } from './jquants-client.js';
 
 /**
- * J-Quants V2 API client for stock price data.
+ * J-Quants V2 tool for stock price data.
  * Optional — only works when JQUANTS_API_KEY is set.
  *
  * V2 auth: API key via x-api-key header (no token refresh needed, no expiry).
  * Free plan: daily OHLC for all TSE-listed stocks (data may have a delay).
  */
 
-const JQUANTS_BASE = 'https://api.jquants.com/v2';
-
-function getJQuantsApiKey(): string {
-  return process.env.JQUANTS_API_KEY || '';
-}
-
-/**
- * Call J-Quants V2 API.
- */
-async function jquantsGet(
-  endpoint: string,
-  params: Record<string, string | undefined>,
-): Promise<Record<string, unknown>> {
-  const apiKey = getJQuantsApiKey();
-  if (!apiKey) {
-    throw new Error('JQUANTS_API_KEY not set');
-  }
-
-  const url = new URL(`${JQUANTS_BASE}${endpoint}`);
-  for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined) {
-      url.searchParams.set(key, value);
-    }
-  }
-
-  const response = await fetch(url.toString(), {
-    headers: { 'x-api-key': apiKey },
-  });
-
-  if (!response.ok) {
-    const detail = `${response.status} ${response.statusText}`;
-    logger.error(`[J-Quants] API error: ${detail}`);
-    throw new Error(`J-Quants API error: ${detail}`);
-  }
-
-  return (await response.json()) as Record<string, unknown>;
-}
-
-/**
- * Resolve ticker to J-Quants code format (5 digits, e.g. "72030").
- * J-Quants uses 5-digit codes; EDINET/TSE uses 4-digit.
- */
-async function resolveJQuantsCode(ticker: string): Promise<string> {
-  // If already 5 digits, use as-is
-  if (/^\d{5}$/.test(ticker)) return ticker;
-
-  // If 4 digits, append "0" (standard J-Quants format)
-  if (/^\d{4}$/.test(ticker)) return ticker + '0';
-
-  // Otherwise resolve through EDINET DB to get sec_code
-  const edinetCode = await resolveEdinetCode(ticker);
-  const { data: response } = await edinetApi.get(`/companies/${edinetCode}`, {});
-  const company = (response.data || response) as Record<string, unknown>;
-  const secCode = (company.sec_code || company.secCode) as string | undefined;
-  if (!secCode) throw new Error(`No securities code found for ${ticker}`);
-  // sec_code from EDINET is 4 digits; J-Quants needs 5
-  return secCode.replace(/\D/g, '').slice(0, 4) + '0';
+interface JQuantsStockBar extends Record<string, unknown> {
+  Date: string;
+  Code: string;
+  AdjO: number | null;
+  AdjH: number | null;
+  AdjL: number | null;
+  AdjC: number | null;
+  AdjVo: number | null;
+  Va: number | null;
 }
 
 // ============================================================================
@@ -129,10 +79,9 @@ export const getStockPrice = new DynamicStructuredTool({
       to: input.to,
     };
 
-    const response = await jquantsGet('/equities/bars/daily', params);
-    const bars = response.data as Array<Record<string, unknown>> | undefined;
+    const bars = await jquantsGetAll<JQuantsStockBar>('/equities/bars/daily', params);
 
-    if (!bars || bars.length === 0) {
+    if (bars.length === 0) {
       return formatToolResult({ error: `No price data found for ${input.ticker}` }, []);
     }
 
@@ -168,6 +117,4 @@ export const getStockPrice = new DynamicStructuredTool({
 /**
  * Check if J-Quants is available (JQUANTS_API_KEY is set).
  */
-export function isJQuantsAvailable(): boolean {
-  return Boolean(process.env.JQUANTS_API_KEY);
-}
+export { isJQuantsAvailable };

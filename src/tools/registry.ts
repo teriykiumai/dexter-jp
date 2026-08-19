@@ -1,5 +1,5 @@
 import { StructuredToolInterface } from '@langchain/core/tools';
-import { createGetFinancials, createReadFilings, createScreenCompanies, getStockPrice, isJQuantsAvailable, STOCK_PRICE_DESCRIPTION } from './finance/index.js';
+import { createGetFinancials, createReadFilings, createScreenCompanies, getMarginData, getStockPrice, getTopix, isJQuantsAvailable, MARGIN_DATA_DESCRIPTION, STOCK_PRICE_DESCRIPTION, TOPIX_DESCRIPTION } from './finance/index.js';
 import { exaSearch, perplexitySearch, tavilySearch, langSearch, WEB_SEARCH_DESCRIPTION, xSearchTool, X_SEARCH_DESCRIPTION } from './search/index.js';
 import { createWebSearchTool, type WebSearchProvider } from './search/web-search.js';
 import { getSetting } from '../utils/config.js';
@@ -160,15 +160,31 @@ export function getToolRegistry(model: string): RegisteredTool[] {
     );
   }
 
-  // Include stock price tool if J-Quants refresh token is configured
+  // Include J-Quants market data tools when an API key is configured.
   if (isJQuantsAvailable()) {
-    tools.push({
-      name: 'get_stock_price',
-      tool: getStockPrice,
-      description: STOCK_PRICE_DESCRIPTION,
-      compactDescription: 'Japanese stock price OHLC and volume from J-Quants (TSE official data).',
-      concurrencySafe: true,
-    });
+    tools.push(
+      {
+        name: 'get_stock_price',
+        tool: getStockPrice,
+        description: STOCK_PRICE_DESCRIPTION,
+        compactDescription: 'Japanese stock price OHLC and volume from J-Quants (TSE official data).',
+        concurrencySafe: true,
+      },
+      {
+        name: 'get_margin_data',
+        tool: getMarginData,
+        description: MARGIN_DATA_DESCRIPTION,
+        compactDescription: 'Weekly Japanese stock margin trading balances from J-Quants (Standard plan or higher).',
+        concurrencySafe: true,
+      },
+      {
+        name: 'get_topix',
+        tool: getTopix,
+        description: TOPIX_DESCRIPTION,
+        compactDescription: 'Daily TOPIX benchmark OHLC from J-Quants (Light plan or higher).',
+        concurrencySafe: true,
+      },
+    );
   }
 
   // Build web_search as a fallback chain over whichever providers have keys configured.
