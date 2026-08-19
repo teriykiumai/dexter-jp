@@ -6,6 +6,20 @@ export { getShareholders } from './shareholders.js';
 export { getStockPrice, isJQuantsAvailable, STOCK_PRICE_DESCRIPTION } from './stock-price.js';
 export { getMarginData, MARGIN_DATA_DESCRIPTION } from './margin-data.js';
 export { getTopix, TOPIX_DESCRIPTION } from './topix.js';
+export {
+  analyzeTechnical,
+  calculateAtr,
+  calculateAverageVolume,
+  calculateSma,
+  classifyTrend,
+  findSwingHighs,
+  findSwingLows,
+  TECHNICAL_DEFAULTS,
+  type SwingPoint,
+  type TechnicalBar,
+  type TechnicalResult,
+  type TechnicalTrend,
+} from './technical-engine.js';
 export { createGetFinancials } from './get-financials.js';
 export { createReadFilings } from './read-filings.js';
 export { createScreenCompanies } from './screen-companies.js';
