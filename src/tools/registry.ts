@@ -1,5 +1,26 @@
 import { StructuredToolInterface } from '@langchain/core/tools';
-import { createGetFinancials, createReadFilings, createScreenCompanies, getMarginData, getStockPrice, getTopix, isJQuantsAvailable, MARGIN_DATA_DESCRIPTION, STOCK_PRICE_DESCRIPTION, TOPIX_DESCRIPTION } from './finance/index.js';
+import {
+  ANALYZE_MARKET_CORRELATION_DESCRIPTION,
+  ANALYZE_PEER_COMPARISON_DESCRIPTION,
+  ANALYZE_STRATEGY_DESCRIPTION,
+  ANALYZE_SUPPLY_DEMAND_DESCRIPTION,
+  ANALYZE_TECHNICAL_DESCRIPTION,
+  analyzeMarketCorrelationTool,
+  analyzePeerComparisonTool,
+  analyzeStrategyTool,
+  analyzeSupplyDemandTool,
+  analyzeTechnicalTool,
+  createGetFinancials,
+  createReadFilings,
+  createScreenCompanies,
+  getMarginData,
+  getStockPrice,
+  getTopix,
+  isJQuantsAvailable,
+  MARGIN_DATA_DESCRIPTION,
+  STOCK_PRICE_DESCRIPTION,
+  TOPIX_DESCRIPTION,
+} from './finance/index.js';
 import { exaSearch, perplexitySearch, tavilySearch, langSearch, WEB_SEARCH_DESCRIPTION, xSearchTool, X_SEARCH_DESCRIPTION } from './search/index.js';
 import { createWebSearchTool, type WebSearchProvider } from './search/web-search.js';
 import { getSetting } from '../utils/config.js';
@@ -80,6 +101,41 @@ export function getToolRegistry(model: string): RegisteredTool[] {
       tool: createWebFetch(model),
       description: WEB_FETCH_DESCRIPTION,
       compactDescription: 'Fetch and extract content from a URL as markdown. Use when you need full article text beyond headlines.',
+      concurrencySafe: true,
+    },
+    {
+      name: 'analyze_technical',
+      tool: analyzeTechnicalTool,
+      description: ANALYZE_TECHNICAL_DESCRIPTION,
+      compactDescription: 'Deterministic SMA20, ATR14, Swing High/Low, trend, and average-volume calculations from chronological OHLCV.',
+      concurrencySafe: true,
+    },
+    {
+      name: 'analyze_supply_demand',
+      tool: analyzeSupplyDemandTool,
+      description: ANALYZE_SUPPLY_DEMAND_DESCRIPTION,
+      compactDescription: 'Deterministic Japanese margin-balance statistics and digestion days from margin and volume histories.',
+      concurrencySafe: true,
+    },
+    {
+      name: 'analyze_peer_comparison',
+      tool: analyzePeerComparisonTool,
+      description: ANALYZE_PEER_COMPARISON_DESCRIPTION,
+      compactDescription: 'Deterministic same-sector peer selection, median, rank, and directional percentile from sourced company metrics.',
+      concurrencySafe: true,
+    },
+    {
+      name: 'analyze_market_correlation',
+      tool: analyzeMarketCorrelationTool,
+      description: ANALYZE_MARKET_CORRELATION_DESCRIPTION,
+      compactDescription: 'Deterministic 60/250-day stock-versus-TOPIX correlation, beta, alpha, R², volatility, and excess return.',
+      concurrencySafe: true,
+    },
+    {
+      name: 'analyze_strategy',
+      tool: analyzeStrategyTool,
+      description: ANALYZE_STRATEGY_DESCRIPTION,
+      compactDescription: 'Deterministic Swing breakout Entry, Swing/ATR Stops, 2R Targets, and reward/risk from technical results.',
       concurrencySafe: true,
     },
   ];

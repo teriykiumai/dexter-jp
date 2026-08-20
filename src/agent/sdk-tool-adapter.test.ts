@@ -17,6 +17,11 @@ const CORE_TOOL_NAMES = [
   'get_text_blocks',
   'read_filings',
   'screen_companies',
+  'analyze_technical',
+  'analyze_supply_demand',
+  'analyze_peer_comparison',
+  'analyze_market_correlation',
+  'analyze_strategy',
 ];
 
 /** Meta-tools that route via an internal LLM — must NOT be exposed raw. */
