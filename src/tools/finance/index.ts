@@ -20,6 +20,15 @@ export {
   type TechnicalResult,
   type TechnicalTrend,
 } from './technical-engine.js';
+export {
+  analyzeSupplyDemand,
+  calculateMean,
+  calculatePercentileRank,
+  SUPPLY_DEMAND_DEFAULTS,
+  type MarginHistoryPoint,
+  type SupplyDemandResult,
+  type VolumeHistoryPoint,
+} from './supply-demand-engine.js';
 export { createGetFinancials } from './get-financials.js';
 export { createReadFilings } from './read-filings.js';
 export { createScreenCompanies } from './screen-companies.js';
