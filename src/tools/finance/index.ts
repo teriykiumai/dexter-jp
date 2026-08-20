@@ -29,6 +29,23 @@ export {
   type SupplyDemandResult,
   type VolumeHistoryPoint,
 } from './supply-demand-engine.js';
+export {
+  analyzePeerComparison,
+  calculateMedian,
+  calculatePeerPercentile,
+  PEER_COMPARISON_DEFAULTS,
+  PEER_METRIC_DIRECTIONS,
+  PEER_METRICS,
+  selectPeers,
+  type PeerCompany,
+  type PeerComparisonResult,
+  type PeerMetric,
+  type PeerMetricDirection,
+  type PeerMetricPosition,
+  type PeerMetricUnavailableReason,
+  type PeerSelectionSummary,
+  type UnavailablePeerMetric,
+} from './peer-comparison-engine.js';
 export { createGetFinancials } from './get-financials.js';
 export { createReadFilings } from './read-filings.js';
 export { createScreenCompanies } from './screen-companies.js';
