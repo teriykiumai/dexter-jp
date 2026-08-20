@@ -307,6 +307,22 @@ For each Step:
    - results
    - remaining issues
 
+### Git branch and pull request workflow
+
+For each implementation Step:
+
+1. Confirm that the previous Step is merged, then update local `main` from `origin/main` with a fast-forward-only pull.
+2. Delete the previous Step's local branch only after confirming that it is merged into `main`.
+3. Create a new branch from the updated `main` using `feat/<short-scope>-step<number>`.
+4. Before committing, inspect the diff and stage only the files that belong to the current Step.
+5. Run the required tests and typecheck before publishing the branch.
+6. Commit, push, and create a draft pull request to `main` only after explicit user authorization for each publishing action.
+7. Use a Conventional Commit-style title that summarizes the Step, for example `feat: add deterministic supply-demand analysis engine`.
+8. Confirm that the pull request CI runs both typecheck and tests. Do not merge the pull request without user approval.
+9. After the user merges the pull request, update local `main` with a fast-forward-only pull and delete the merged local Step branch.
+
+Do not delete remote branches unless the user explicitly requests it.
+
 ## 14. Completion standard
 
 A Step is not complete merely because code was written.
