@@ -25,6 +25,11 @@ import {
   getMarginData,
   getStockPrice,
   getTopix,
+  analyzeTechnicalTool,
+  analyzeSupplyDemandTool,
+  analyzePeerComparisonTool,
+  analyzeMarketCorrelationTool,
+  analyzeStrategyTool,
   isJQuantsAvailable,
   createReadFilings,
 } from '../tools/finance/index.js';
@@ -120,6 +125,12 @@ export function buildDexterSdkTools(): ReturnType<typeof adaptLangChainTool>[] {
     createReadFilings(''),
     // Structured screener — main model supplies conditions directly (no NL→LLM step).
     createRawScreener(),
+    // Pure deterministic engines — calculate from sourced structured inputs.
+    analyzeTechnicalTool,
+    analyzeSupplyDemandTool,
+    analyzePeerComparisonTool,
+    analyzeMarketCorrelationTool,
+    analyzeStrategyTool,
   ];
 
   // Optional raw tools gated by env.

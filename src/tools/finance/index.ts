@@ -7,6 +7,19 @@ export { getStockPrice, isJQuantsAvailable, STOCK_PRICE_DESCRIPTION } from './st
 export { getMarginData, MARGIN_DATA_DESCRIPTION } from './margin-data.js';
 export { getTopix, TOPIX_DESCRIPTION } from './topix.js';
 export {
+  ANALYZE_MARKET_CORRELATION_DESCRIPTION,
+  ANALYZE_PEER_COMPARISON_DESCRIPTION,
+  ANALYZE_STRATEGY_DESCRIPTION,
+  ANALYZE_SUPPLY_DEMAND_DESCRIPTION,
+  ANALYZE_TECHNICAL_DESCRIPTION,
+  analyzeMarketCorrelationTool,
+  analyzePeerComparisonTool,
+  analyzeStrategyTool,
+  analyzeSupplyDemandTool,
+  analyzeTechnicalTool,
+  deterministicAnalysisTools,
+} from './analysis-tools.js';
+export {
   analyzeTechnical,
   calculateAtr,
   calculateAverageVolume,
