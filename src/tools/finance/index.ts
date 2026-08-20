@@ -46,6 +46,20 @@ export {
   type PeerSelectionSummary,
   type UnavailablePeerMetric,
 } from './peer-comparison-engine.js';
+export {
+  alignMarketPrices,
+  analyzeMarketCorrelation,
+  calculateAlignedLogReturns,
+  MARKET_CORRELATION_DEFAULTS,
+  type AlignedMarketPricePoint,
+  type AlignedMarketReturn,
+  type MarketCorrelationMetric,
+  type MarketCorrelationResult,
+  type MarketCorrelationUnavailableReason,
+  type MarketCorrelationWindowResult,
+  type MarketPricePoint,
+  type UnavailableMarketCorrelationMetric,
+} from './market-correlation-engine.js';
 export { createGetFinancials } from './get-financials.js';
 export { createReadFilings } from './read-filings.js';
 export { createScreenCompanies } from './screen-companies.js';
