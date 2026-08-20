@@ -60,6 +60,23 @@ export {
   type MarketPricePoint,
   type UnavailableMarketCorrelationMetric,
 } from './market-correlation-engine.js';
+export {
+  analyzeStrategy,
+  nextTickAbove,
+  STRATEGY_DEFAULTS,
+  type StrategyCandidate,
+  type StrategyCandidateType,
+  type StrategyEntry,
+  type StrategyEntryReason,
+  type StrategyOptions,
+  type StrategyPriceLevel,
+  type StrategyResult,
+  type StrategyStopReason,
+  type StrategyTargetReason,
+  type StrategyTechnicalInput,
+  type StrategyUnavailableReason,
+  type UnavailableStrategyCandidate,
+} from './strategy-engine.js';
 export { createGetFinancials } from './get-financials.js';
 export { createReadFilings } from './read-filings.js';
 export { createScreenCompanies } from './screen-companies.js';
