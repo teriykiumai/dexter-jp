@@ -12,6 +12,8 @@ description: >
 
 Use only the workflow requested by the user. Do not run every workflow or create a comprehensive report unless explicitly requested; comprehensive orchestration belongs to a later workflow.
 
+For a broad whole-company request such as `7203を分析して`, use the `comprehensive-analysis` skill instead.
+
 ## Non-negotiable rules
 
 - Data tools acquire facts; `analyze_*` tools perform every financial or statistical calculation.

@@ -8,6 +8,7 @@
  * on when to use each tool and how to stay accurate.
  */
 import { getCurrentDate, loadSoulDocument, loadRulesDocument } from './prompts.js';
+import { getSkill } from '../skills/index.js';
 
 const SDK_TOOL_POLICY = `## Available data tools
 
@@ -44,6 +45,17 @@ You have Dexter's Japanese-market research tools (exposed as \`mcp__dexter__*\`)
 - If you need clarification from the user, ask a concise question.
 - Respond in the same language the user uses (Japanese or English).`;
 
+function buildComprehensiveAnalysisSection(): string | null {
+  const skill = getSkill('comprehensive-analysis');
+  if (!skill) return null;
+
+  return `## Comprehensive analysis workflow
+
+For broad whole-company analysis requests, follow this bundled workflow directly. The SDK Skill tool is intentionally disabled, so do not try to invoke it.
+
+${skill.instructions}`;
+}
+
 /**
  * Build the SDK-mode system prompt. Best-effort loads soul/rules; if the
  * filesystem docs are unavailable it still returns a complete prompt.
@@ -75,6 +87,11 @@ export async function buildSdkAgentSystemPrompt(model: string, channel?: string)
   }
 
   parts.push(SDK_TOOL_POLICY);
+
+  const comprehensiveAnalysis = buildComprehensiveAnalysisSection();
+  if (comprehensiveAnalysis) {
+    parts.push(comprehensiveAnalysis);
+  }
 
   if (rules && rules.trim()) {
     parts.push(
