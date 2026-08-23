@@ -2,7 +2,7 @@
 name: mvp-analysis
 description: >
   Runs one requested deterministic Japanese-stock analysis workflow: technical
-  indicators, margin supply-demand, peer comparison, TOPIX correlation, or
+  valuation/growth metrics, indicators, margin supply-demand, peer comparison, TOPIX correlation, or
   Entry/Stop/Target strategy. Use for questions about chart trend,
   SMA/ATR/Swing levels, credit balances, peer valuation/quality ranking,
   market beta/correlation, or evidence-based trade levels.
@@ -17,10 +17,17 @@ For a broad whole-company request such as `7203を分析して`, use the `compre
 ## Non-negotiable rules
 
 - Data tools acquire facts; `analyze_*` tools perform every financial or statistical calculation.
-- Never calculate or repair SMA, ATR, percentiles, correlation, beta, alpha, R², Entry, Stop, Target, or reward/risk in prose.
+- Never calculate or repair PER, PBR, dividend yield, CAGR, SMA, ATR, percentiles, correlation, beta, alpha, R², Entry, Stop, Target, or reward/risk in prose.
 - Preserve null values and source dates. Do not forward-fill market dates or infer missing API fields.
 - If a tool reports an unavailable metric, disclose it instead of estimating it.
 - Interpret the structured result only after the deterministic tool returns.
+
+## Financial metrics
+
+1. Acquire chronological annual financial rows and the latest adjusted close with source dates.
+2. Map the sourced revenue, adjusted EPS, adjusted BPS, and adjusted dividend values into `analyze_financial_metrics`.
+3. Interpret its PER, PBR, dividend yield, and revenue CAGR only after the Engine returns.
+4. Carry every unavailable reason into the answer instead of calculating a replacement.
 
 ## Technical analysis
 
@@ -55,7 +62,8 @@ For a broad whole-company request such as `7203を分析して`, use the `compre
 1. Complete the Technical analysis workflow first.
 2. Pass `dataDate`, `latestSwingHigh`, `latestSwingLow`, and `atr14` from `analyze_technical` to `analyze_strategy`.
 3. Supply `tickSize` or `resistanceLevels` only when they come from a reliable source. Otherwise omit them.
-4. Present each candidate's price, reason, risk, reward, and reward/risk. Never invent an alternative price.
+4. Without a sourced `tickSize`, present only the strictly-above trigger and disclose that exact Entry/Stop/Target and reward/risk are unavailable.
+5. With a sourced `tickSize`, present each candidate's executable price, reason, risk, reward, and reward/risk. Never invent an alternative price.
 
 ## Output
 

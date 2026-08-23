@@ -13,6 +13,7 @@ describe('MVP analysis skill', () => {
     const skill = getSkill('mvp-analysis');
     expect(skill?.source).toBe('builtin');
     for (const toolName of [
+      'analyze_financial_metrics',
       'analyze_technical',
       'analyze_supply_demand',
       'analyze_peer_comparison',
@@ -44,6 +45,7 @@ describe('comprehensive analysis skill', () => {
       'get_stock_price',
       'get_margin_data',
       'get_topix',
+      'analyze_financial_metrics',
       'analyze_technical',
       'analyze_supply_demand',
       'analyze_peer_comparison',

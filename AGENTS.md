@@ -51,7 +51,7 @@
 ## LLM Providers
 
 - Supported: OpenAI (default), Anthropic, Google, xAI (Grok), Moonshot, DeepSeek, OpenRouter, Ollama (local), Claude Agent SDK.
-- Default model: `gpt-5.5`.
+- Default model: `gpt-5.6-terra`.
 - Provider detection is prefix-based (`claude-` -> Anthropic, `gemini-` -> Google, etc.).
 - Fast models for lightweight tasks: see provider `fastModel` values in `src/providers.ts`.
 - Users switch providers/models via `/model` command in the CLI.

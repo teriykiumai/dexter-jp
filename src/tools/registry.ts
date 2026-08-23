@@ -1,10 +1,12 @@
 import { StructuredToolInterface } from '@langchain/core/tools';
 import {
+  ANALYZE_FINANCIAL_METRICS_DESCRIPTION,
   ANALYZE_MARKET_CORRELATION_DESCRIPTION,
   ANALYZE_PEER_COMPARISON_DESCRIPTION,
   ANALYZE_STRATEGY_DESCRIPTION,
   ANALYZE_SUPPLY_DEMAND_DESCRIPTION,
   ANALYZE_TECHNICAL_DESCRIPTION,
+  analyzeFinancialMetricsTool,
   analyzeMarketCorrelationTool,
   analyzePeerComparisonTool,
   analyzeStrategyTool,
@@ -101,6 +103,13 @@ export function getToolRegistry(model: string): RegisteredTool[] {
       tool: createWebFetch(model),
       description: WEB_FETCH_DESCRIPTION,
       compactDescription: 'Fetch and extract content from a URL as markdown. Use when you need full article text beyond headlines.',
+      concurrencySafe: true,
+    },
+    {
+      name: 'analyze_financial_metrics',
+      tool: analyzeFinancialMetricsTool,
+      description: ANALYZE_FINANCIAL_METRICS_DESCRIPTION,
+      compactDescription: 'Deterministic current PER, PBR, dividend yield, and revenue CAGR from sourced price and financial history.',
       concurrencySafe: true,
     },
     {

@@ -1,6 +1,7 @@
 import { DynamicStructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
 import { formatToolResult } from '../types.js';
+import { analyzeFinancialMetrics } from './financial-metrics-engine.js';
 import { analyzeMarketCorrelation } from './market-correlation-engine.js';
 import { analyzePeerComparison } from './peer-comparison-engine.js';
 import { analyzeStrategy } from './strategy-engine.js';
@@ -61,6 +62,15 @@ const strategyTechnicalInputSchema = z.object({
   latestSwingHigh: nullableNumber,
   latestSwingLow: nullableNumber,
   atr14: nullableNumber,
+});
+
+const financialMetricPointSchema = z.object({
+  fiscalYear: z.number(),
+  submitDate: z.string().nullable(),
+  revenue: nullableNumber,
+  eps: nullableNumber,
+  bps: nullableNumber,
+  dividendPerShare: nullableNumber,
 });
 
 const tickerSourceFields = {
@@ -249,7 +259,7 @@ export const analyzeMarketCorrelationTool = new DynamicStructuredTool({
 });
 
 export const ANALYZE_STRATEGY_DESCRIPTION = `
-Generate deterministic long Entry, Stop, Target, risk, reward, and reward/risk candidates from analyze_technical output. Tick size and resistance levels are optional sourced inputs only; never infer them when unavailable.
+Generate deterministic long Entry, Stop, Target, risk, reward, and reward/risk candidates from analyze_technical output. Tick size and resistance levels are optional sourced inputs only; never infer them when unavailable. Without a sourced tick size, return only the strictly-above trigger and do not claim an exact entry or 2R target.
 `.trim();
 
 export const analyzeStrategyTool = new DynamicStructuredTool({
@@ -272,7 +282,28 @@ export const analyzeStrategyTool = new DynamicStructuredTool({
   ),
 });
 
+export const ANALYZE_FINANCIAL_METRICS_DESCRIPTION = `
+Calculate current PER, PBR, dividend yield, and revenue CAGR deterministically from a sourced current price and chronological financial history. Pass adjusted EPS/BPS/dividend values when the source provides them. Never calculate these metrics in the model.
+`.trim();
+
+export const analyzeFinancialMetricsTool = new DynamicStructuredTool({
+  name: 'analyze_financial_metrics',
+  description: ANALYZE_FINANCIAL_METRICS_DESCRIPTION,
+  schema: z.object({
+    currentPrice: nullableNumber.describe('Latest sourced adjusted closing price.'),
+    priceDataDate: z.string().nullable().describe('Data date of currentPrice.'),
+    financials: z.array(financialMetricPointSchema).describe(
+      'Strictly chronological financial rows. Preserve missing values; use adjusted per-share values when sourced.',
+    ),
+  }),
+  func: async ({ currentPrice, priceDataDate, financials }) => formatToolResult(
+    analyzeFinancialMetrics(currentPrice, priceDataDate, financials),
+    [],
+  ),
+});
+
 export const deterministicAnalysisTools = [
+  analyzeFinancialMetricsTool,
   analyzeTechnicalTool,
   analyzeSupplyDemandTool,
   analyzePeerComparisonTool,

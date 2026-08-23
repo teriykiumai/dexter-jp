@@ -197,10 +197,10 @@ describe('analyzePeerComparison', () => {
 
   test('excludes non-positive PER and PBR values from valuation rankings', () => {
     const result = analyzePeerComparison(
-      company('target', 100, { per: 15, pbr: 1.5, roe: -5 }),
+      company('target', 100, { per: 15, pbr: 1.5, roe: -5, dividendYield: 3 }),
       [
-        company('loss-maker', 90, { per: -3, pbr: 0, roe: -10 }),
-        company('profitable', 110, { per: 10, pbr: 1, roe: 10 }),
+        company('loss-maker', 90, { per: -3, pbr: 0, roe: -10, dividendYield: -1 }),
+        company('profitable', 110, { per: 10, pbr: 1, roe: 10, dividendYield: 0 }),
       ],
     );
 
@@ -222,6 +222,11 @@ describe('analyzePeerComparison', () => {
       peerSampleSize: 2,
       cohortSize: 3,
       median: -5,
+    });
+    expect(result.positions.dividendYield).toMatchObject({
+      peerSampleSize: 1,
+      cohortSize: 2,
+      median: 1.5,
     });
   });
 

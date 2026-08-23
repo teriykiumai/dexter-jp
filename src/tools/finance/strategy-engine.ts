@@ -20,10 +20,16 @@ export type StrategyStopReason = 'latest_swing_low' | 'entry_minus_1_5_atr';
 export type StrategyTargetReason = 'risk_reward_2R' | 'resistance_level';
 
 export interface StrategyEntry {
-  price: number;
+  triggerPrice: number;
+  price: number | null;
   reason: StrategyEntryReason;
   trigger: 'strictly_above';
   tickSizeApplied: number | null;
+}
+
+export interface ExecutableStrategyEntry extends StrategyEntry {
+  price: number;
+  tickSizeApplied: number;
 }
 
 export interface StrategyPriceLevel<Reason extends string> {
@@ -32,7 +38,7 @@ export interface StrategyPriceLevel<Reason extends string> {
 }
 
 export interface StrategyCandidate {
-  entry: StrategyEntry;
+  entry: ExecutableStrategyEntry;
   stop: StrategyPriceLevel<StrategyStopReason>;
   target: StrategyPriceLevel<StrategyTargetReason>;
   risk: number;
@@ -48,6 +54,7 @@ export type StrategyCandidateType =
 
 export type StrategyUnavailableReason =
   | 'missing_or_invalid_swing_high'
+  | 'missing_tick_size_for_executable_entry'
   | 'missing_entry'
   | 'missing_or_invalid_swing_low'
   | 'missing_or_invalid_atr'
@@ -97,6 +104,24 @@ export function nextTickAbove(price: number, tickSize: number): number {
   return normalizeFloatingPoint((baseTick + 1) * tickSize);
 }
 
+function tickAtOrBelow(price: number, tickSize: number): number {
+  const quotient = price / tickSize;
+  const nearestInteger = Math.round(quotient);
+  const tickIndex = Math.abs(quotient - nearestInteger) <= 1e-10
+    ? nearestInteger
+    : Math.floor(quotient);
+  return normalizeFloatingPoint(tickIndex * tickSize);
+}
+
+function tickAtOrAbove(price: number, tickSize: number): number {
+  const quotient = price / tickSize;
+  const nearestInteger = Math.round(quotient);
+  const tickIndex = Math.abs(quotient - nearestInteger) <= 1e-10
+    ? nearestInteger
+    : Math.ceil(quotient);
+  return normalizeFloatingPoint(tickIndex * tickSize);
+}
+
 function validateStop(
   entryPrice: number,
   stopPrice: number,
@@ -115,7 +140,7 @@ function validateStop(
 }
 
 function buildCandidate(
-  entry: StrategyEntry,
+  entry: ExecutableStrategyEntry,
   stop: StrategyPriceLevel<StrategyStopReason>,
   target: StrategyPriceLevel<StrategyTargetReason>,
 ): StrategyCandidate {
@@ -132,13 +157,14 @@ function buildCandidate(
 }
 
 function buildTwoRCandidate(
-  entry: StrategyEntry,
+  entry: ExecutableStrategyEntry,
   stop: StrategyPriceLevel<StrategyStopReason>,
 ): StrategyCandidate {
   const risk = entry.price - stop.price;
   return buildCandidate(entry, stop, {
-    price: normalizeFloatingPoint(
+    price: tickAtOrAbove(
       entry.price + STRATEGY_DEFAULTS.rewardRiskMultiple * risk,
+      entry.tickSizeApplied,
     ),
     reason: 'risk_reward_2R',
   });
@@ -168,10 +194,30 @@ export function analyzeStrategy(
     throw new RangeError('tickSize must be positive and finite.');
   }
   const entry: StrategyEntry = {
-    price: tickSize === null ? swingHigh : nextTickAbove(swingHigh, tickSize),
+    triggerPrice: swingHigh,
+    price: tickSize === null ? null : nextTickAbove(swingHigh, tickSize),
     reason: 'breakout_above_swing_high',
     trigger: 'strictly_above',
     tickSizeApplied: tickSize,
+  };
+
+  if (entry.price === null || entry.tickSizeApplied === null) {
+    unavailable.push({
+      candidate: 'entry',
+      reason: 'missing_tick_size_for_executable_entry',
+      price: swingHigh,
+    });
+    return {
+      dataDate: technical.dataDate,
+      entry,
+      candidates: [],
+      unavailable,
+    };
+  }
+  const executableEntry: ExecutableStrategyEntry = {
+    ...entry,
+    price: entry.price,
+    tickSizeApplied: entry.tickSizeApplied,
   };
 
   const validStops: StrategyPriceLevel<StrategyStopReason>[] = [];
@@ -179,9 +225,10 @@ export function analyzeStrategy(
   if (!isPositivePrice(swingLow)) {
     unavailable.push({ candidate: 'swing_stop', reason: 'missing_or_invalid_swing_low' });
   } else {
-    const invalidSwingStop = validateStop(entry.price, swingLow, 'swing_stop');
+    const swingStopPrice = tickAtOrBelow(swingLow, executableEntry.tickSizeApplied);
+    const invalidSwingStop = validateStop(executableEntry.price, swingStopPrice, 'swing_stop');
     if (invalidSwingStop === null) {
-      validStops.push({ price: swingLow, reason: 'latest_swing_low' });
+      validStops.push({ price: swingStopPrice, reason: 'latest_swing_low' });
     } else {
       unavailable.push(invalidSwingStop);
     }
@@ -191,10 +238,11 @@ export function analyzeStrategy(
   if (!isPositivePrice(atr)) {
     unavailable.push({ candidate: 'atr_stop', reason: 'missing_or_invalid_atr' });
   } else {
-    const atrStopPrice = normalizeFloatingPoint(
-      entry.price - STRATEGY_DEFAULTS.atrMultiplier * atr,
+    const atrStopPrice = tickAtOrBelow(
+      executableEntry.price - STRATEGY_DEFAULTS.atrMultiplier * atr,
+      executableEntry.tickSizeApplied,
     );
-    const invalidAtrStop = validateStop(entry.price, atrStopPrice, 'atr_stop');
+    const invalidAtrStop = validateStop(executableEntry.price, atrStopPrice, 'atr_stop');
     if (invalidAtrStop === null) {
       validStops.push({ price: atrStopPrice, reason: 'entry_minus_1_5_atr' });
     } else {
@@ -212,26 +260,30 @@ export function analyzeStrategy(
       });
       continue;
     }
-    if (resistance <= entry.price) {
+    const executableResistance = tickAtOrBelow(
+      resistance,
+      executableEntry.tickSizeApplied,
+    );
+    if (executableResistance <= executableEntry.price) {
       unavailable.push({
         candidate: 'resistance_target',
         reason: 'target_not_above_entry',
-        price: resistance,
+        price: executableResistance,
       });
       continue;
     }
-    if (!seenResistance.has(resistance)) {
-      seenResistance.add(resistance);
-      resistanceLevels.push(resistance);
+    if (!seenResistance.has(executableResistance)) {
+      seenResistance.add(executableResistance);
+      resistanceLevels.push(executableResistance);
     }
   }
   resistanceLevels.sort((left, right) => left - right);
 
   const candidates: StrategyCandidate[] = [];
   for (const stop of validStops) {
-    candidates.push(buildTwoRCandidate(entry, stop));
+    candidates.push(buildTwoRCandidate(executableEntry, stop));
     for (const resistance of resistanceLevels) {
-      candidates.push(buildCandidate(entry, stop, {
+      candidates.push(buildCandidate(executableEntry, stop, {
         price: resistance,
         reason: 'resistance_level',
       }));

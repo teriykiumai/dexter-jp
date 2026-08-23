@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  analyzeFinancialMetrics,
   analyzeMarketCorrelation,
   analyzePeerComparison,
   analyzeStrategy,
@@ -8,6 +9,7 @@ import {
   type PeerCompany,
 } from './index.js';
 import {
+  analyzeFinancialMetricsTool,
   analyzeMarketCorrelationTool,
   analyzePeerComparisonTool,
   analyzeStrategyTool,
@@ -32,6 +34,7 @@ describe('deterministic analysis tools', () => {
   test('have stable unique names', () => {
     const names = deterministicAnalysisTools.map((tool) => tool.name);
     expect(names).toEqual([
+      'analyze_financial_metrics',
       'analyze_technical',
       'analyze_supply_demand',
       'analyze_peer_comparison',
@@ -39,6 +42,34 @@ describe('deterministic analysis tools', () => {
       'analyze_strategy',
     ]);
     expect(new Set(names).size).toBe(names.length);
+  });
+
+  test('delegates valuation and CAGR calculations to the Financial Metrics Engine', async () => {
+    const financials = [
+      {
+        fiscalYear: 2021,
+        submitDate: '2021-06-24',
+        revenue: 100,
+        eps: 10,
+        bps: 50,
+        dividendPerShare: 2,
+      },
+      {
+        fiscalYear: 2026,
+        submitDate: '2026-06-10',
+        revenue: 200,
+        eps: 20,
+        bps: 80,
+        dividendPerShare: 4,
+      },
+    ];
+    const actual = toolData(await analyzeFinancialMetricsTool.invoke({
+      currentPrice: 100,
+      priceDataDate: '2026-08-21',
+      financials,
+    }));
+
+    expect(actual).toEqual(analyzeFinancialMetrics(100, '2026-08-21', financials));
   });
 
   test('delegates OHLCV calculations to the Technical Engine', async () => {
@@ -124,6 +155,8 @@ describe('deterministic analysis tools', () => {
       return date.toISOString().slice(0, 10);
     });
     const originalFetch = globalThis.fetch;
+    const previousApiKey = process.env.JQUANTS_API_KEY;
+    process.env.JQUANTS_API_KEY = 'test-jquants-key';
 
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const href = input instanceof URL
@@ -199,6 +232,8 @@ describe('deterministic analysis tools', () => {
       });
     } finally {
       globalThis.fetch = originalFetch;
+      if (previousApiKey === undefined) delete process.env.JQUANTS_API_KEY;
+      else process.env.JQUANTS_API_KEY = previousApiKey;
     }
   });
 });

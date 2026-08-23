@@ -85,6 +85,9 @@ export const ScreenerConditionSchema = z.object({
 export type ScreenerConditions = z.infer<typeof ScreenerConditionSchema>;
 
 const ScreenerLlmOutputSchema = z.object({
+  mode: z.enum(['screen', 'peer_cohort']).describe(
+    'Use peer_cohort only for broad same-industry peer comparison requests.',
+  ),
   conditions: ScreenerConditionSchema.shape.conditions,
   industry: z.string().nullable().describe('Industry filter, or null when not requested'),
   limit: z.number().nullable().describe('Maximum results, or null to use the default'),
@@ -92,6 +95,78 @@ const ScreenerLlmOutputSchema = z.object({
 });
 
 type ScreenerLlmOutput = z.infer<typeof ScreenerLlmOutputSchema>;
+
+export const PEER_COHORT_METRICS = [
+  'revenue',
+  'per',
+  'pbr',
+  'roe',
+  'roic',
+  'operating-margin',
+  'revenue-growth',
+  'dividend-yield',
+] as const;
+
+interface PeerCohortResponse {
+  data: Record<string, unknown>;
+  sourceUrls: string[];
+}
+
+function companiesFromScreenerResponse(response: Record<string, unknown>): Record<string, unknown>[] {
+  const payload = response.data;
+  if (!payload || typeof payload !== 'object') return [];
+  const companies = (payload as { companies?: unknown }).companies;
+  return Array.isArray(companies)
+    ? companies.filter((company): company is Record<string, unknown> => (
+      company !== null && typeof company === 'object'
+    ))
+    : [];
+}
+
+/** Fetch each peer metric independently, then merge by securities code. */
+export async function fetchPeerCohort(
+  industry: string,
+  limit: number = 20,
+): Promise<PeerCohortResponse> {
+  const boundedLimit = Math.min(Math.max(Math.trunc(limit), 1), 200);
+  const responses = await Promise.all(PEER_COHORT_METRICS.map(async (metric) => {
+    const condition = {
+      metric,
+      operator: 'gte',
+      value: metric === 'revenue' ? 0 : -1_000_000,
+    };
+    const { data, url } = await api.get('/screener', {
+      conditions: JSON.stringify([condition]),
+      industry,
+      limit: boundedLimit,
+      sort: 'revenue',
+    });
+    return { metric, data, url };
+  }));
+
+  const merged = new Map<string, Record<string, unknown>>();
+  for (const response of responses) {
+    for (const company of companiesFromScreenerResponse(response.data)) {
+      const code = company.secCode ?? company.edinetCode;
+      if (typeof code !== 'string') continue;
+      merged.set(code, { ...(merged.get(code) ?? {}), ...company });
+    }
+  }
+
+  const firstMeta = responses[0]?.data.meta;
+  return {
+    data: {
+      data: {
+        companies: [...merged.values()],
+        mode: 'peer_cohort',
+        metricQueries: [...PEER_COHORT_METRICS],
+        showing: merged.size,
+      },
+      ...(firstMeta && typeof firstMeta === 'object' ? { meta: firstMeta } : {}),
+    },
+    sourceUrls: responses.map((response) => response.url),
+  };
+}
 
 /** Ensure the EDINET DB screener receives at least one API condition. */
 export function normalizeScreenerConditions(
@@ -138,8 +213,12 @@ ${AVAILABLE_METRICS}
 4. Set limit to 25 unless the user specifies otherwise
 5. For industry filters, use Japanese industry names (exact match)
 6. If the user mentions sorting, set sort_by to the relevant metric
-7. If only an industry is requested, use revenue gte 0 as a neutral API condition
-8. Return null for industry, limit, or sort_by when the user did not request it
+7. For a broad same-industry peer comparison, set mode to peer_cohort, set the industry,
+   and leave conditions empty. The application retrieves each comparison metric separately
+   and merges companies by securities code so missing one metric does not exclude a company.
+8. For ordinary screening, set mode to screen. If only an industry is requested, use
+   revenue gte 0 as a neutral API condition.
+9. Return null for industry, limit, or sort_by when the user did not request it
 
 Return only the structured output fields.`;
 }
@@ -166,14 +245,14 @@ export function createScreenCompanies(model: string): DynamicStructuredTool {
 
       // LLM structured output — translate natural language → screening conditions
       onProgress?.('Building screening criteria...');
-      let conditions: ScreenerConditions;
+      let output: ScreenerLlmOutput;
       try {
         const { response } = await callLlm(input.query, {
           model,
           systemPrompt: buildScreenerPrompt(),
           outputSchema: ScreenerLlmOutputSchema,
         });
-        conditions = fromLlmOutput(ScreenerLlmOutputSchema.parse(response));
+        output = ScreenerLlmOutputSchema.parse(response);
       } catch (error) {
         return formatToolResult(
           {
@@ -187,6 +266,15 @@ export function createScreenCompanies(model: string): DynamicStructuredTool {
       // GET /screener with conditions as JSON query param
       onProgress?.('Screening companies...');
       try {
+        if (output.mode === 'peer_cohort') {
+          if (output.industry === null) {
+            throw new Error('Peer cohort screening requires an industry.');
+          }
+          const cohort = await fetchPeerCohort(output.industry, output.limit ?? 20);
+          return formatToolResult(cohort.data, cohort.sourceUrls);
+        }
+
+        const conditions = fromLlmOutput(output);
         const params: Record<string, string | number | undefined> = {
           conditions: JSON.stringify(conditions.conditions),
           limit: conditions.limit ?? 25,
@@ -201,7 +289,7 @@ export function createScreenCompanies(model: string): DynamicStructuredTool {
           {
             error: 'Screener request failed',
             details: error instanceof Error ? error.message : String(error),
-            conditions: conditions.conditions,
+            conditions: output.conditions,
           },
           [],
         );

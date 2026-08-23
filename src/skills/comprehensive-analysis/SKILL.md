@@ -16,7 +16,7 @@ Run the complete MVP workflow for one company. Reuse retrieved datasets between 
 
 - Standard Agent: call `get_financials` once with a complete request for company identity, six-year financial history, latest valuation/quality ratios, and recent earnings. Use `company_screener` for the same-sector candidate set.
 - Claude Agent SDK: use the available leaf tools `get_company_info`, `get_financial_statements`, `get_key_ratios`, and `get_earnings`; use `screen_companies` for the candidate set.
-- Both modes: use `read_filings`, `get_stock_price`, `get_margin_data`, `get_topix`, and the five `analyze_*` tools when available.
+- Both modes: use `read_filings`, `get_stock_price`, `get_margin_data`, `get_topix`, and the six `analyze_*` tools when available.
 
 Never call a tool name that is absent from the current tool list.
 
@@ -48,7 +48,7 @@ Acquire up to six annual periods when available, the latest ratios, and recent e
 - PER, PBR, dividend yield, payout ratio, PSR, EV/EBITDA, or FCF yield only when returned by a tool
 - current versus company history and later versus Peer median when comparable observations exist
 
-Do not calculate a missing growth rate, cash-flow value, valuation ratio, or fair value in prose. If a required deterministic calculation tool does not exist, report the sourced series without inventing the derived value.
+After acquiring the latest adjusted close, map the chronological annual rows into `analyze_financial_metrics`. Use its PER, PBR, dividend yield, and revenue CAGR in the report. Do not calculate or repair these values in prose. If the Engine marks one unavailable, report the sourced inputs and limitation without inventing the derived value.
 
 Use `read_filings` for material business risks and management context when available. Treat tool-provided AI analysis as a secondary interpretation, not a replacement for reported facts.
 
@@ -56,11 +56,12 @@ Use `read_filings` for material business risks and management context when avail
 
 Obtain a broad same-sector candidate set from `company_screener` or `screen_companies`; never choose peers from memory. Map only sourced sector, market cap, metric, and data-date fields into `analyze_peer_comparison`. Let the engine select 5–10 peers, prioritize the 0.3x–3x market-cap range, include the sector leader where applicable, and calculate median/rank/percentile.
 
-For the Standard Agent, request a broad comparable cohort with explicit neutral
-metric bounds so the screener returns the comparison fields: PER >= 0, PBR >= 0,
-ROE >= -100, operating margin >= -100, revenue growth >= -100, and dividend
-yield >= 0, sorted by revenue with a limit of 20. Then map the returned fields
-into `analyze_peer_comparison`; do not stop at merely listing company names.
+For the Standard Agent, explicitly request `peer_cohort` behavior for the verified
+industry, sorted by revenue with a limit of 20. The screener retrieves each Peer
+metric independently and merges the same-sector union by securities code. Do not
+replace this with combined PER/PBR/profitability/growth AND conditions, because a
+company missing one metric must remain eligible for every other metric. Map the
+merged sourced fields into `analyze_peer_comparison`; do not stop at listing names.
 
 Disclose `tooFewPeers`, missing target metrics, and insufficient peer data.
 
@@ -76,11 +77,12 @@ Preserve dates and nulls. Do not forward-fill, interpolate, or silently remove m
 
 ## 5. Run deterministic engines
 
-1. Pass adjusted OHLCV to `analyze_technical`.
-2. Pass margin balances and stock volume to `analyze_supply_demand`.
-3. Pass stock and TOPIX closes to `analyze_market_correlation`.
-4. Pass `dataDate`, `latestSwingHigh`, `latestSwingLow`, and `atr14` from the Technical result to `analyze_strategy`.
-5. Supply Strategy `tickSize` or `resistanceLevels` only when a reliable source provided them; otherwise omit them.
+1. Pass the latest adjusted close plus chronological annual financial rows to `analyze_financial_metrics`.
+2. Pass adjusted OHLCV to `analyze_technical`.
+3. Pass margin balances and stock volume to `analyze_supply_demand`.
+4. Pass stock and TOPIX closes to `analyze_market_correlation`.
+5. Pass `dataDate`, `latestSwingHigh`, `latestSwingLow`, and `atr14` from the Technical result to `analyze_strategy`.
+6. Supply Strategy `tickSize` or `resistanceLevels` only when a reliable source provided them; otherwise omit them. Without a sourced tick size, report the strictly-above trigger but no exact entry or 2R target.
 
 Never reproduce or repair the Engine calculations in narrative reasoning. Carry every `unavailable` reason into the report.
 

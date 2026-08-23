@@ -85,6 +85,7 @@ function isAvailableMetricValue(
   if (!isFiniteNumber(value)) return false;
   // Non-positive valuation multiples do not express meaningful relative value.
   if (metric === 'per' || metric === 'pbr') return value > 0;
+  if (metric === 'dividendYield') return value >= 0;
   return true;
 }
 
