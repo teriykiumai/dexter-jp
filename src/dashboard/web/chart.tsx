@@ -11,6 +11,11 @@ import {
 } from 'lightweight-charts';
 import type { ChartBar, ChartPriceLine } from './presentation.js';
 
+export const LIGHTWEIGHT_CHARTS_NOTICE = [
+  'TradingView Lightweight Charts™',
+  'Copyright (с) 2025 TradingView, Inc.',
+] as const;
+
 interface PriceChartProps {
   bars: ChartBar[];
   priceLines: ChartPriceLine[];

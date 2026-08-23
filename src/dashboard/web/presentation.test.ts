@@ -128,6 +128,23 @@ describe('dashboard presentation helpers', () => {
 });
 
 describe('snapshot presentation mapping', () => {
+  test('keeps structured narrative nullable and only passes through typed values', () => {
+    const unavailableView = mapSnapshotToDashboard(baseSnapshot());
+    expect(unavailableView.scenarios).toBeNull();
+    expect(unavailableView.risks).toBeNull();
+
+    const scenarios = {
+      bull: { condition: 'Bull condition', evidence: ['Bull evidence'], invalidation: 'Bull invalidation' },
+      base: { condition: 'Base condition', evidence: ['Base evidence'], invalidation: 'Base invalidation' },
+      bear: { condition: 'Bear condition', evidence: ['Bear evidence'], invalidation: 'Bear invalidation' },
+    };
+    const risks = [{ category: 'Market', description: 'Typed risk', relatedSection: 'strategy' as const }];
+    const typedView = mapSnapshotToDashboard({ ...baseSnapshot(), scenarios, risks });
+
+    expect(typedView.scenarios).toEqual(scenarios);
+    expect(typedView.risks).toEqual(risks);
+  });
+
   test('does not invent an exact entry from a strictly-above trigger', () => {
     const snapshot: AnalysisSnapshot = {
       ...baseSnapshot(),

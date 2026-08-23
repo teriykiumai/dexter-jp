@@ -48,7 +48,7 @@ a { color: var(--blue); }
 .eyebrow { color: var(--faint); font: 700 10px/1 "SFMono-Regular", Consolas, monospace; letter-spacing: .1em; text-transform: uppercase; }
 .chart-panel { padding-bottom: 14px; }
 .price-chart { width: 100%; height: 480px; }
-.chart-credit { margin: 10px 0 0; color: var(--faint); font-size: 10px; text-align: right; }
+.chart-credit { display: grid; gap: 3px; margin: 10px 0 0; color: var(--faint); font-size: 10px; text-align: right; }
 .chart-credit a { color: #7e98ad; }
 .two-column { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(300px, .75fr); gap: 22px; }
 .two-column > .panel { min-width: 0; }

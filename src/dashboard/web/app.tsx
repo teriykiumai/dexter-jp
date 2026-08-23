@@ -1,7 +1,7 @@
 import { StrictMode, useEffect, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { AnalysisSnapshot } from '../../analysis/snapshot/index.js';
-import { PriceChart } from './chart.js';
+import { LIGHTWEIGHT_CHARTS_NOTICE, PriceChart } from './chart.js';
 import {
   UNAVAILABLE_TEXT,
   mapSnapshotToDashboard,
@@ -81,8 +81,13 @@ function Dashboard({ snapshot }: { snapshot: AnalysisSnapshot }) {
       <Card title="Price Structure" eyebrow="Adjusted OHLCV" className="chart-panel">
         <PriceChart bars={view.chart.bars} priceLines={view.chart.priceLines} />
         <p className="chart-credit">
-          This product uses TradingView Lightweight Charts™.{' '}
-          <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">TradingView</a>
+          <span>{LIGHTWEIGHT_CHARTS_NOTICE[0]}</span>
+          <span>
+            {LIGHTWEIGHT_CHARTS_NOTICE[1]}{' '}
+            <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">
+              https://www.tradingview.com/
+            </a>
+          </span>
         </p>
       </Card>
 
