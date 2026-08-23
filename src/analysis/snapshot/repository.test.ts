@@ -195,6 +195,58 @@ describe('AnalysisSnapshotRepository', () => {
     await expectPersistenceError(repository.loadLatest('7203'), 'filesystem_error');
   });
 
+  test('rejects a schema-valid latest Snapshot for a different canonical ticker', async () => {
+    const { repository, root } = await createRepository();
+    const tickerDirectory = join(root, '7203');
+    await mkdir(tickerDirectory, { recursive: true });
+    await writeFile(
+      join(tickerDirectory, 'latest.json'),
+      JSON.stringify(partialSnapshot('2026-08-23T01:02:03.000Z', '6758')),
+      'utf8',
+    );
+
+    await expectPersistenceError(
+      repository.loadLatest('7203'),
+      'snapshot_identity_mismatch',
+    );
+  });
+
+  test('rejects a schema-valid history Snapshot for a different canonical ticker', async () => {
+    const { repository, root } = await createRepository();
+    const snapshot = partialSnapshot('2026-08-23T01:02:03.000Z', '6758');
+    const snapshotId = createSnapshotId(snapshot.generatedAt);
+    const tickerDirectory = join(root, '7203');
+    await mkdir(tickerDirectory, { recursive: true });
+    await writeFile(
+      join(tickerDirectory, `${snapshotId}.json`),
+      JSON.stringify(snapshot),
+      'utf8',
+    );
+
+    await expectPersistenceError(
+      repository.loadHistory('7203', snapshotId),
+      'snapshot_identity_mismatch',
+    );
+  });
+
+  test('rejects history whose filename does not match the Snapshot generatedAt', async () => {
+    const { repository, root } = await createRepository();
+    const snapshot = partialSnapshot('2026-08-23T01:02:03.000Z');
+    const mismatchedId = createSnapshotId('2026-08-22T01:02:03.000Z');
+    const tickerDirectory = join(root, '7203');
+    await mkdir(tickerDirectory, { recursive: true });
+    await writeFile(
+      join(tickerDirectory, `${mismatchedId}.json`),
+      JSON.stringify(snapshot),
+      'utf8',
+    );
+
+    await expectPersistenceError(
+      repository.loadHistory('7203', mismatchedId),
+      'snapshot_identity_mismatch',
+    );
+  });
+
   test('rejects ticker directories that resolve outside the repository root', async () => {
     const { repository, root } = await createRepository();
     const external = await createRepository();

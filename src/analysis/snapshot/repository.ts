@@ -173,19 +173,23 @@ export class AnalysisSnapshotRepository {
 
   async loadLatest(ticker: string): Promise<AnalysisSnapshot> {
     const canonicalTicker = assertCanonicalTicker(ticker);
-    return this.readSnapshot(
+    const snapshot = await this.readSnapshot(
       this.resolveSnapshotPath(canonicalTicker, 'latest.json'),
       `${canonicalTicker}/latest.json`,
     );
+    this.assertSnapshotIdentity(snapshot, canonicalTicker);
+    return snapshot;
   }
 
   async loadHistory(ticker: string, snapshotId: string): Promise<AnalysisSnapshot> {
     const canonicalTicker = assertCanonicalTicker(ticker);
     const safeSnapshotId = assertSnapshotId(snapshotId);
-    return this.readSnapshot(
+    const snapshot = await this.readSnapshot(
       this.resolveSnapshotPath(canonicalTicker, `${safeSnapshotId}.json`),
       `${canonicalTicker}/${safeSnapshotId}.json`,
     );
+    this.assertSnapshotIdentity(snapshot, canonicalTicker, safeSnapshotId);
+    return snapshot;
   }
 
   async listHistory(ticker: string): Promise<AnalysisSnapshotHistoryItem[]> {
@@ -248,6 +252,22 @@ export class AnalysisSnapshotRepository {
     const rel = relative(this.rootDirectory, target);
     if (rel === '' || rel === '..' || rel.startsWith(`..${sep}`) || rel.startsWith('/')) {
       throw filesystemError('Resolved snapshot path is outside the repository root.', target);
+    }
+  }
+
+  private assertSnapshotIdentity(
+    snapshot: AnalysisSnapshot,
+    canonicalTicker: string,
+    snapshotId?: SnapshotId,
+  ): void {
+    if (
+      snapshot.canonicalTicker !== canonicalTicker
+      || (snapshotId !== undefined && createSnapshotId(snapshot.generatedAt) !== snapshotId)
+    ) {
+      throw new AnalysisSnapshotPersistenceError(
+        'snapshot_identity_mismatch',
+        'Snapshot identity does not match its repository path.',
+      );
     }
   }
 

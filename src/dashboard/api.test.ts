@@ -8,7 +8,7 @@ import {
   type AnalysisSnapshot,
   type AnalysisSnapshotInput,
 } from '../analysis/snapshot/index.js';
-import { handleDashboardRequest } from './api.js';
+import { handleDashboardRequest, isAllowedDashboardHost } from './api.js';
 
 const temporaryDirectories: string[] = [];
 
@@ -58,8 +58,11 @@ function partialSnapshot(
   return buildAnalysisSnapshot(input);
 }
 
-function request(path: string, method = 'GET'): Request {
-  return new Request(`http://127.0.0.1${path}`, { method });
+function request(path: string, method = 'GET', host = '127.0.0.1'): Request {
+  return new Request(`http://127.0.0.1${path}`, {
+    method,
+    headers: { Host: host },
+  });
 }
 
 async function responseJson(response: Response): Promise<Record<string, unknown> | unknown[]> {
@@ -174,6 +177,38 @@ describe('dashboard request handler', () => {
     expect(response.headers.has('access-control-allow-origin')).toBeFalse();
   });
 
+  test('allows only local IPv4 and localhost Host headers', async () => {
+    expect([
+      '127.0.0.1',
+      '127.0.0.1:3000',
+      'localhost',
+      'localhost:65535',
+      'LOCALHOST:3000',
+    ].every(isAllowedDashboardHost)).toBeTrue();
+    expect([
+      null,
+      '127.0.0.2',
+      'localhost:0',
+      'localhost:65536',
+      'localhost.example.com',
+      '[::1]:3000',
+    ].some(isAllowedDashboardHost)).toBeFalse();
+
+    const { repository } = await createRepository();
+    const response = await handleDashboardRequest(
+      request('/api/analyses', 'GET', 'example.com'),
+      repository,
+    );
+
+    expect(response.status).toBe(403);
+    expect(await responseJson(response)).toEqual({
+      error: {
+        code: 'forbidden_host',
+        message: 'The request Host is not allowed.',
+      },
+    });
+  });
+
   test('serves only the minimal static entry with CSP and an explicit content type', async () => {
     const { repository } = await createRepository();
 
@@ -221,5 +256,28 @@ describe('dashboard request handler', () => {
     }));
     expect(body).not.toContain(root);
     expect(body).not.toContain('SyntaxError');
+  });
+
+  test('does not expose identity mismatch details through the API', async () => {
+    const { repository, root } = await createRepository();
+    await mkdir(join(root, '7203'), { recursive: true });
+    await writeFile(
+      join(root, '7203', 'latest.json'),
+      JSON.stringify(partialSnapshot('2026-08-23T01:02:03.000Z', '6758')),
+      'utf8',
+    );
+
+    const response = await handleDashboardRequest(request('/api/analyses/7203'), repository);
+    const body = await response.text();
+
+    expect(response.status).toBe(500);
+    expect(body).toBe(JSON.stringify({
+      error: {
+        code: 'snapshot_unavailable',
+        message: 'The requested analysis snapshot is unavailable.',
+      },
+    }));
+    expect(body).not.toContain('6758');
+    expect(body).not.toContain(root);
   });
 });

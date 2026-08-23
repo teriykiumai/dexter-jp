@@ -69,10 +69,20 @@ function persistenceErrorResponse(error: AnalysisSnapshotPersistenceError): Resp
     case 'malformed_json':
     case 'schema_validation_failed':
     case 'unsupported_schema_version':
+    case 'snapshot_identity_mismatch':
     case 'filesystem_error':
     case 'latest_update_failed':
       return internalServerErrorResponse();
   }
+}
+
+export function isAllowedDashboardHost(host: string | null): boolean {
+  if (host === null) return false;
+  const match = /^(?:127\.0\.0\.1|localhost)(?::([1-9]\d{0,4}))?$/.exec(
+    host.trim().toLowerCase(),
+  );
+  if (!match) return false;
+  return match[1] === undefined || Number(match[1]) <= 65_535;
 }
 
 export async function handleDashboardRequest(
@@ -80,6 +90,9 @@ export async function handleDashboardRequest(
   repository: AnalysisSnapshotReader,
 ): Promise<Response> {
   const url = new URL(request.url);
+  if (!isAllowedDashboardHost(request.headers.get('host'))) {
+    return errorResponse(403, 'forbidden_host', 'The request Host is not allowed.');
+  }
   if (request.method !== 'GET') {
     return errorResponse(405, 'method_not_allowed', 'Only GET requests are supported.', {
       Allow: 'GET',
