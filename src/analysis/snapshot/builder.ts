@@ -151,6 +151,14 @@ function peerComparisonState(input: AnalysisSnapshotInput) {
     };
   }
 
+  if (input.peerCandidateMarketCapsComplete !== true) {
+    return {
+      result: input.peerComparison,
+      marketCapPriorityApplied: false,
+      marketCapPriorityUnavailableReason: 'incomplete_peer_market_cap' as const,
+    };
+  }
+
   const peers = input.peerComparison.selection.peers;
   const hasIncompletePeerMarketCap = peers.length === 0 || peers.some(peer => {
     const marketCap = peer.marketCap;

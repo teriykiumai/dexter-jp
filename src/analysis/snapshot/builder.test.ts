@@ -91,6 +91,7 @@ function completeInput(): AnalysisSnapshotInput {
       },
       unavailable: [{ metric: 'pbr', reason: 'insufficient_peer_data' }],
     },
+    peerCandidateMarketCapsComplete: true,
     technical: {
       dataDate: '2026-08-21',
       ma20: 2_950,
@@ -217,6 +218,18 @@ describe('buildAnalysisSnapshot', () => {
   test('does not claim market-cap prioritization when a selected peer lacks market cap', () => {
     const input = completeInput();
     input.peerComparison!.selection.peers[0].marketCap = null;
+
+    const snapshot = buildAnalysisSnapshot(input);
+
+    expect(snapshot.peerComparison).toMatchObject({
+      marketCapPriorityApplied: false,
+      marketCapPriorityUnavailableReason: 'incomplete_peer_market_cap',
+    });
+  });
+
+  test('does not claim market-cap prioritization when the input candidate set is incomplete', () => {
+    const input = completeInput();
+    input.peerCandidateMarketCapsComplete = false;
 
     const snapshot = buildAnalysisSnapshot(input);
 

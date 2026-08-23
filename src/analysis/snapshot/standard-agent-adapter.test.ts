@@ -71,7 +71,11 @@ function lockToyota(collector: StandardAgentSnapshotCollector): void {
   end(collector, 'get_financials', 'financials-1', financialResult());
 }
 
-function peerResult(rank: number | null = null) {
+function peerResult(
+  rank: number | null = null,
+  targetMarketCap: number | null = null,
+  peerMarketCap: number | null = null,
+) {
   const position = (metric: string) => ({
     metric,
     direction: metric === 'per' || metric === 'pbr' ? 'lower_is_better' : 'higher_is_better',
@@ -83,9 +87,9 @@ function peerResult(rank: number | null = null) {
     cohortSize: 1,
   });
   return {
-    target: { id: '7203', name: 'トヨタ', sector: '輸送用機器', marketCap: null, metrics: {} },
+    target: { id: '7203', name: 'トヨタ', sector: '輸送用機器', marketCap: targetMarketCap, metrics: {} },
     selection: {
-      peers: [{ id: '7267', name: 'ホンダ', sector: '輸送用機器', marketCap: null, metrics: {} }],
+      peers: [{ id: '7267', name: 'ホンダ', sector: '輸送用機器', marketCap: peerMarketCap, metrics: {} }],
       sameSectorCandidateCount: 1,
       marketCapPrioritizedPeerCount: 0,
       sectorLeaderId: null,
@@ -188,6 +192,34 @@ describe('StandardAgentSnapshotCollector', () => {
       sourceUrls: ['https://example.test/company_screener'],
     });
     expect(collector.rejections).toHaveLength(0);
+  });
+
+  test('retains incomplete candidate market-cap coverage without storing candidate args', () => {
+    const collector = new StandardAgentSnapshotCollector();
+    invokeSkill(collector);
+    lockToyota(collector);
+
+    start(collector, 'analyze_peer_comparison', 'peer-incomplete-cap', {
+      target: { id: '7203', marketCap: 1_000 },
+      candidates: [
+        { id: '7267', marketCap: 900 },
+        { id: '7270', marketCap: null },
+      ],
+    });
+    end(
+      collector,
+      'analyze_peer_comparison',
+      'peer-incomplete-cap',
+      peerResult(null, 1_000, 900),
+    );
+
+    const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
+
+    expect(snapshot?.peerComparison).toMatchObject({
+      marketCapPriorityApplied: false,
+      marketCapPriorityUnavailableReason: 'incomplete_peer_market_cap',
+    });
+    expect(JSON.stringify(snapshot)).not.toContain('7270');
   });
 
   test('records J-Quants as the underlying source for direct ticker engine calls', () => {

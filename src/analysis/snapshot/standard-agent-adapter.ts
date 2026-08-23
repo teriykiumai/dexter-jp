@@ -41,6 +41,10 @@ type TrackedToolName = (typeof trackedToolNames)[number];
 
 const trackedToolNameSet = new Set<string>(trackedToolNames);
 const tickerArgsSchema = z.object({ ticker: z.string().min(1) }).passthrough();
+const peerCompanyMarketCapArgsSchema = z.object({
+  id: z.string().min(1),
+  marketCap: z.number().finite().nullable().optional(),
+}).passthrough();
 const startArgsSchemas: Record<TrackedToolName, z.ZodType<Record<string, unknown>>> = {
   skill: z.object({ skill: z.string().min(1), args: z.string().optional() }).passthrough(),
   get_financials: z.object({ query: z.string().min(1) }).passthrough(),
@@ -50,8 +54,8 @@ const startArgsSchemas: Record<TrackedToolName, z.ZodType<Record<string, unknown
   analyze_technical: tickerArgsSchema,
   analyze_supply_demand: tickerArgsSchema,
   analyze_peer_comparison: z.object({
-    target: z.object({ id: z.string().min(1) }).passthrough(),
-    candidates: z.array(z.object({ id: z.string().min(1) }).passthrough()),
+    target: peerCompanyMarketCapArgsSchema,
+    candidates: z.array(peerCompanyMarketCapArgsSchema),
   }).passthrough(),
   analyze_market_correlation: tickerArgsSchema,
   analyze_strategy: tickerArgsSchema,
@@ -163,6 +167,7 @@ export class StandardAgentSnapshotCollector {
   private fundamental: FundamentalSnapshot | null = null;
   private valuation: AnalysisSnapshotInput['valuation'] = null;
   private peerComparison: AnalysisSnapshotInput['peerComparison'] = null;
+  private peerCandidateMarketCapsComplete: boolean | null = null;
   private technical: AnalysisSnapshotInput['technical'] = null;
   private supplyDemand: AnalysisSnapshotInput['supplyDemand'] = null;
   private marketCorrelation: AnalysisSnapshotInput['marketCorrelation'] = null;
@@ -252,6 +257,7 @@ export class StandardAgentSnapshotCollector {
       fundamental: this.fundamental,
       valuation: this.valuation,
       peerComparison: this.peerComparison,
+      peerCandidateMarketCapsComplete: this.peerCandidateMarketCapsComplete,
       technical: this.technical,
       supplyDemand: this.supplyDemand,
       marketCorrelation: this.marketCorrelation,
@@ -430,7 +436,17 @@ export class StandardAgentSnapshotCollector {
           });
           return;
         }
-        this.peerComparison ??= peerComparison;
+        if (!this.peerComparison) {
+          const candidates = call.validatedArgs.candidates as Array<{
+            marketCap?: number | null;
+          }>;
+          this.peerComparison = peerComparison;
+          this.peerCandidateMarketCapsComplete = candidates.length > 0 && candidates.every(
+            candidate => candidate.marketCap !== undefined
+              && candidate.marketCap !== null
+              && candidate.marketCap > 0,
+          );
+        }
         break;
       }
       case 'analyze_market_correlation':

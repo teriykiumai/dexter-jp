@@ -503,6 +503,7 @@ export const AnalysisSnapshotInputSchema = z.object({
   fundamental: FundamentalSnapshotSchema.nullable(),
   valuation: FinancialMetricsResultSchema.nullable(),
   peerComparison: PeerComparisonResultSchema.nullable(),
+  peerCandidateMarketCapsComplete: z.boolean().nullable(),
   technical: TechnicalResultSchema.nullable(),
   supplyDemand: SupplyDemandResultSchema.nullable(),
   marketCorrelation: MarketCorrelationResultSchema.nullable(),
