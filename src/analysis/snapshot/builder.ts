@@ -1,0 +1,290 @@
+import {
+  ANALYSIS_SNAPSHOT_SCHEMA_VERSION,
+  AnalysisSnapshotInputSchema,
+  AnalysisSnapshotSchema,
+  type AnalysisSnapshot,
+  type AnalysisSnapshotInput,
+  type SnapshotProvenance,
+  type SnapshotSection,
+  type SnapshotUnavailable,
+} from './schema.js';
+
+export const REQUIRED_ANALYSIS_SNAPSHOT_SECTIONS = [
+  'identity',
+  'fundamental',
+  'valuation',
+  'peerComparison',
+  'technical',
+  'supplyDemand',
+  'marketCorrelation',
+  'strategy',
+  'priceHistory',
+] as const satisfies readonly SnapshotSection[];
+
+type RequiredSnapshotSection = (typeof REQUIRED_ANALYSIS_SNAPSHOT_SECTIONS)[number];
+
+const UNITS = {
+  fundamental: {
+    revenue: 'JPY',
+    operatingIncome: 'JPY',
+    ordinaryIncome: 'JPY',
+    netIncome: 'JPY',
+    eps: 'JPY',
+    roe: 'ratio',
+    equityRatio: 'ratio',
+    operatingCashFlow: 'JPY',
+    freeCashFlow: 'JPY',
+  },
+  valuation: {
+    currentPrice: 'JPY',
+    per: 'multiple',
+    pbr: 'multiple',
+    dividendYieldPercent: 'percent',
+    revenueCagrPercent: 'percent',
+    cagrPeriods: 'count',
+  },
+  peerComparison: {
+    per: 'multiple',
+    pbr: 'multiple',
+    roe: 'percent',
+    roic: 'percent',
+    operatingMargin: 'percent',
+    revenueGrowth: 'percent',
+    dividendYield: 'percent',
+    rank: 'count',
+    percentile: 'ratio',
+  },
+  technical: {
+    ma20: 'JPY',
+    atr14: 'JPY',
+    averageVolume20: 'shares',
+    latestSwingHigh: 'JPY',
+    latestSwingLow: 'JPY',
+  },
+  supplyDemand: {
+    buyingBalance: 'shares',
+    sellingBalance: 'shares',
+    marginRatio: 'ratio',
+    buyingBalanceWeeklyChange: 'shares',
+    sellingBalanceWeeklyChange: 'shares',
+    mean13w: 'shares',
+    mean52w: 'shares',
+    deviation52w: 'ratio',
+    percentile52w: 'ratio',
+    averageDailyVolume20: 'shares',
+    digestionDays: 'days',
+  },
+  marketCorrelation: {
+    alignedPriceCount: 'count',
+    observations: 'count',
+    correlation: 'ratio',
+    beta: 'ratio',
+    alphaAnnualized: 'ratio',
+    rSquared: 'ratio',
+    stockVolatilityAnnualized: 'ratio',
+    benchmarkVolatilityAnnualized: 'ratio',
+    excessReturn: 'ratio',
+  },
+  strategy: {
+    triggerPrice: 'JPY',
+    price: 'JPY',
+    tickSizeApplied: 'JPY',
+    risk: 'JPY',
+    reward: 'JPY',
+    rewardRisk: 'ratio',
+  },
+  priceHistory: {
+    open: 'JPY',
+    high: 'JPY',
+    low: 'JPY',
+    close: 'JPY',
+    volume: 'shares',
+  },
+} as const;
+
+function provenance(
+  source: SnapshotProvenance['source'],
+  asOfDate: string | null,
+  sourceUrls: string[] = [],
+): SnapshotProvenance[] {
+  return [{ source, asOfDate, sourceUrls }];
+}
+
+function latestFundamentalDate(input: AnalysisSnapshotInput): string | null {
+  const periods = input.fundamental?.periods ?? [];
+  return periods.reduce<string | null>((latest, period) => {
+    if (!period.submitDate) return latest;
+    return latest === null || period.submitDate > latest ? period.submitDate : latest;
+  }, null);
+}
+
+function latestPeerDate(input: AnalysisSnapshotInput): string | null {
+  if (!input.peerComparison) return null;
+  return [input.peerComparison.target, ...input.peerComparison.selection.peers]
+    .map(company => company.dataDate ?? null)
+    .filter((date): date is string => date !== null)
+    .sort()
+    .at(-1) ?? null;
+}
+
+function latestPriceDate(input: AnalysisSnapshotInput): string | null {
+  return input.priceHistory?.at(-1)?.date ?? null;
+}
+
+function missingSections(input: AnalysisSnapshotInput): RequiredSnapshotSection[] {
+  return REQUIRED_ANALYSIS_SNAPSHOT_SECTIONS.filter(section => {
+    if (section === 'identity') return false;
+    return input[section] === null;
+  });
+}
+
+function peerComparisonState(input: AnalysisSnapshotInput) {
+  if (!input.peerComparison) return null;
+
+  const targetMarketCap = input.peerComparison.target.marketCap;
+  if (targetMarketCap === undefined || targetMarketCap === null || targetMarketCap <= 0) {
+    return {
+      result: input.peerComparison,
+      marketCapPriorityApplied: false,
+      marketCapPriorityUnavailableReason: 'missing_target_market_cap' as const,
+    };
+  }
+
+  const peers = input.peerComparison.selection.peers;
+  const hasIncompletePeerMarketCap = peers.length === 0 || peers.some(peer => {
+    const marketCap = peer.marketCap;
+    return marketCap === undefined || marketCap === null || marketCap <= 0;
+  });
+
+  if (hasIncompletePeerMarketCap) {
+    return {
+      result: input.peerComparison,
+      marketCapPriorityApplied: false,
+      marketCapPriorityUnavailableReason: 'incomplete_peer_market_cap' as const,
+    };
+  }
+
+  return {
+    result: input.peerComparison,
+    marketCapPriorityApplied: true,
+    marketCapPriorityUnavailableReason: null,
+  };
+}
+
+function aggregateUnavailable(input: AnalysisSnapshotInput): SnapshotUnavailable[] {
+  const unavailable: SnapshotUnavailable[] = missingSections(input).map(section => ({
+    section,
+    reason: 'missing_required_section',
+  }));
+
+  for (const item of input.valuation?.unavailable ?? []) {
+    unavailable.push({ section: 'valuation', metric: item.metric, reason: item.reason });
+  }
+  for (const metric of input.technical?.unavailable ?? []) {
+    unavailable.push({ section: 'technical', metric, reason: 'engine_reported_unavailable' });
+  }
+  for (const item of input.supplyDemand?.unavailable ?? []) {
+    unavailable.push({ section: 'supplyDemand', metric: item.metric, reason: item.reason });
+  }
+  for (const item of input.peerComparison?.unavailable ?? []) {
+    unavailable.push({ section: 'peerComparison', metric: item.metric, reason: item.reason });
+  }
+  for (const window of input.marketCorrelation?.windows ?? []) {
+    for (const item of window.unavailable) {
+      unavailable.push({
+        section: 'marketCorrelation',
+        metric: `${window.period}.${item.metric}`,
+        reason: item.reason,
+      });
+    }
+  }
+  for (const item of input.strategy?.unavailable ?? []) {
+    unavailable.push({ section: 'strategy', metric: item.candidate, reason: item.reason });
+  }
+
+  if (input.scenarios === null) {
+    unavailable.push({ section: 'scenarios', reason: 'structured_narrative_not_captured_v1' });
+  }
+  if (input.risks === null) {
+    unavailable.push({ section: 'risks', reason: 'structured_narrative_not_captured_v1' });
+  }
+
+  return [...unavailable, ...input.additionalUnavailable];
+}
+
+export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): AnalysisSnapshot {
+  const input = AnalysisSnapshotInputSchema.parse(rawInput);
+  const fundamentalDate = latestFundamentalDate(input);
+  const peerDate = latestPeerDate(input);
+  const priceDate = latestPriceDate(input);
+  const missing = missingSections(input);
+
+  return AnalysisSnapshotSchema.parse({
+    schemaVersion: ANALYSIS_SNAPSHOT_SCHEMA_VERSION,
+    status: missing.length === 0 ? 'complete' : 'partial',
+    canonicalTicker: input.identity.canonicalTicker,
+    companyName: input.identity.companyName,
+    generatedAt: input.generatedAt,
+    dataDates: {
+      identity: input.identity.dataDate,
+      fundamental: fundamentalDate,
+      valuation: {
+        price: input.valuation?.priceDataDate ?? null,
+        financial: input.valuation?.financialDataDate ?? null,
+      },
+      peerComparison: peerDate,
+      technical: input.technical?.dataDate ?? null,
+      supplyDemand: input.supplyDemand?.dataDate ?? null,
+      marketCorrelation: input.marketCorrelation?.dataDate ?? null,
+      strategy: input.strategy?.dataDate ?? null,
+      priceHistory: priceDate,
+    },
+    provenance: {
+      identity: provenance('edinet_db', input.identity.dataDate, input.identity.sourceUrls),
+      fundamental: input.fundamental
+        ? provenance('edinet_db', fundamentalDate, input.fundamental.sourceUrls)
+        : [],
+      valuation: input.valuation
+        ? provenance('financial_metrics_engine', input.valuation.priceDataDate)
+        : [],
+      peerComparison: input.peerComparison
+        ? [
+            ...provenance('peer_comparison_engine', peerDate),
+            ...(input.peerSourceUrls.length > 0
+              ? provenance('edinet_db', peerDate, input.peerSourceUrls)
+              : []),
+          ]
+        : [],
+      technical: input.technical
+        ? provenance('technical_engine', input.technical.dataDate)
+        : [],
+      supplyDemand: input.supplyDemand
+        ? provenance('supply_demand_engine', input.supplyDemand.dataDate)
+        : [],
+      marketCorrelation: input.marketCorrelation
+        ? provenance('market_correlation_engine', input.marketCorrelation.dataDate)
+        : [],
+      strategy: input.strategy
+        ? provenance('strategy_engine', input.strategy.dataDate)
+        : [],
+      priceHistory: input.priceHistory
+        ? provenance('jquants', priceDate, input.priceSourceUrls)
+        : [],
+      scenarios: input.scenarios ? provenance('llm', input.generatedAt) : [],
+      risks: input.risks ? provenance('llm', input.generatedAt) : [],
+    },
+    units: UNITS,
+    fundamental: input.fundamental,
+    valuation: input.valuation,
+    peerComparison: peerComparisonState(input),
+    technical: input.technical,
+    supplyDemand: input.supplyDemand,
+    marketCorrelation: input.marketCorrelation,
+    strategy: input.strategy,
+    priceHistory: input.priceHistory,
+    scenarios: input.scenarios,
+    risks: input.risks,
+    unavailable: aggregateUnavailable(input),
+    finalReportMarkdown: input.finalReportMarkdown,
+  });
+}

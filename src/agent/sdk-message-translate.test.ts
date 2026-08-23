@@ -6,6 +6,7 @@ import type { AgentEvent } from './types.js';
 class Recorder {
   readonly seenTools: string[] = [];
   readonly finalAnswers: string[] = [];
+  readonly terminalOutcomes: string[] = [];
   terminals = 0;
   readonly ctx: TranslateContext;
   constructor(overrides: Partial<TranslateContext> = {}) {
@@ -14,7 +15,10 @@ class Recorder {
       maxTurns: 40,
       onToolSeen: (n) => this.seenTools.push(n),
       onFinalAnswer: (t) => this.finalAnswers.push(t),
-      onTerminal: () => { this.terminals += 1; },
+      onTerminal: (outcome) => {
+        this.terminals += 1;
+        this.terminalOutcomes.push(outcome);
+      },
       ...overrides,
     };
   }
@@ -99,6 +103,7 @@ describe('translateSdkMessage — result (terminal)', () => {
     expect(events).toHaveLength(0); // translator does not emit `done` itself
     expect(c.finalAnswers).toContain('The answer is 42.');
     expect(c.terminals).toBe(1);
+    expect(c.terminalOutcomes).toEqual(['success']);
   });
 
   test.each([
@@ -109,6 +114,7 @@ describe('translateSdkMessage — result (terminal)', () => {
     const c = ctx();
     translateSdkMessage(msg({ type: 'result', subtype, errors: [] }), c.ctx);
     expect(c.terminals).toBe(1);
+    expect(c.terminalOutcomes).toEqual(['error']);
     expect(c.finalAnswers.join(' ')).toContain(needle);
   });
 

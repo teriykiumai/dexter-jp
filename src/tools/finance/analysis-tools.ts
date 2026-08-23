@@ -266,6 +266,9 @@ export const analyzeStrategyTool = new DynamicStructuredTool({
   name: 'analyze_strategy',
   description: ANALYZE_STRATEGY_DESCRIPTION,
   schema: z.object({
+    ticker: z.string().optional().describe(
+      'Verified target securities code. Used only to attribute this deterministic result to the active analysis run.',
+    ),
     technical: strategyTechnicalInputSchema.describe(
       'The dataDate, latestSwingHigh, latestSwingLow, and atr14 fields returned by analyze_technical.',
     ),
@@ -290,6 +293,9 @@ export const analyzeFinancialMetricsTool = new DynamicStructuredTool({
   name: 'analyze_financial_metrics',
   description: ANALYZE_FINANCIAL_METRICS_DESCRIPTION,
   schema: z.object({
+    ticker: z.string().optional().describe(
+      'Verified target securities code. Used only to attribute this deterministic result to the active analysis run.',
+    ),
     currentPrice: nullableNumber.describe('Latest sourced adjusted closing price.'),
     priceDataDate: z.string().nullable().describe('Data date of currentPrice.'),
     financials: z.array(financialMetricPointSchema).describe(
