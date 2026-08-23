@@ -170,6 +170,11 @@ export class StandardAgentSnapshotCollector {
   private priceHistory: AnalysisSnapshotInput['priceHistory'] = null;
   private priceSourceUrls: string[] = [];
   private peerSourceUrls: string[] = [];
+  private technicalUsesDirectJQuants = false;
+  private supplyDemandMarginUsesDirectJQuants = false;
+  private supplyDemandVolumeUsesDirectJQuants = false;
+  private correlationStockUsesDirectJQuants = false;
+  private correlationBenchmarkUsesDirectJQuants = false;
   private readonly additionalUnavailable: SnapshotUnavailable[] = [];
 
   get canonicalTicker(): string | null {
@@ -257,6 +262,23 @@ export class StandardAgentSnapshotCollector {
       finalReportMarkdown,
       priceSourceUrls: this.priceSourceUrls,
       peerSourceUrls: this.peerSourceUrls,
+      sourceUsage: {
+        valuation: {
+          priceFromJQuants: this.priceHistory !== null,
+          financialsFromEdinetDb: this.fundamental !== null,
+        },
+        technical: {
+          priceFromJQuants: this.technicalUsesDirectJQuants || this.priceHistory !== null,
+        },
+        supplyDemand: {
+          marginFromJQuants: this.supplyDemandMarginUsesDirectJQuants,
+          volumeFromJQuants: this.supplyDemandVolumeUsesDirectJQuants || this.priceHistory !== null,
+        },
+        marketCorrelation: {
+          stockFromJQuants: this.correlationStockUsesDirectJQuants || this.priceHistory !== null,
+          benchmarkFromJQuants: this.correlationBenchmarkUsesDirectJQuants,
+        },
+      },
       additionalUnavailable: this.additionalUnavailable,
     });
   }
@@ -379,10 +401,17 @@ export class StandardAgentSnapshotCollector {
         this.valuation ??= FinancialMetricsResultSchema.parse(call.validatedResult);
         break;
       case 'analyze_technical':
-        this.technical ??= TechnicalResultSchema.parse(call.validatedResult);
+        if (!this.technical) {
+          this.technical = TechnicalResultSchema.parse(call.validatedResult);
+          this.technicalUsesDirectJQuants = !Array.isArray(call.validatedArgs.bars);
+        }
         break;
       case 'analyze_supply_demand':
-        this.supplyDemand ??= SupplyDemandResultSchema.parse(call.validatedResult);
+        if (!this.supplyDemand) {
+          this.supplyDemand = SupplyDemandResultSchema.parse(call.validatedResult);
+          this.supplyDemandMarginUsesDirectJQuants = !Array.isArray(call.validatedArgs.marginHistory);
+          this.supplyDemandVolumeUsesDirectJQuants = !Array.isArray(call.validatedArgs.volumeHistory);
+        }
         break;
       case 'analyze_peer_comparison': {
         const peerComparison = PeerComparisonResultSchema.parse(call.validatedResult);
@@ -405,7 +434,11 @@ export class StandardAgentSnapshotCollector {
         break;
       }
       case 'analyze_market_correlation':
-        this.marketCorrelation ??= MarketCorrelationResultSchema.parse(call.validatedResult);
+        if (!this.marketCorrelation) {
+          this.marketCorrelation = MarketCorrelationResultSchema.parse(call.validatedResult);
+          this.correlationStockUsesDirectJQuants = !Array.isArray(call.validatedArgs.stockPrices);
+          this.correlationBenchmarkUsesDirectJQuants = !Array.isArray(call.validatedArgs.topixPrices);
+        }
         break;
       case 'analyze_strategy':
         this.strategy ??= StrategyResultSchema.parse(call.validatedResult);

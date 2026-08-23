@@ -129,8 +129,10 @@ describe('jquantsGetAll', () => {
 });
 
 describe('resolveJQuantsCode', () => {
-  test('converts four-digit securities codes and preserves five-digit codes', async () => {
+  test('converts numeric and alphanumeric canonical codes to J-Quants codes', async () => {
     expect(await resolveJQuantsCode('7203')).toBe('72030');
     expect(await resolveJQuantsCode('72030')).toBe('72030');
+    expect(await resolveJQuantsCode('130A')).toBe('130A0');
+    expect(await resolveJQuantsCode('130A0')).toBe('130A0');
   });
 });

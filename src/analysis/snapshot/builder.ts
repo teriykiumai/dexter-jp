@@ -104,10 +104,11 @@ const UNITS = {
 
 function provenance(
   source: SnapshotProvenance['source'],
+  role: SnapshotProvenance['role'],
   asOfDate: string | null,
   sourceUrls: string[] = [],
 ): SnapshotProvenance[] {
-  return [{ source, asOfDate, sourceUrls }];
+  return [{ source, role, asOfDate, sourceUrls }];
 }
 
 function latestFundamentalDate(input: AnalysisSnapshotInput): string | null {
@@ -240,38 +241,77 @@ export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): Analysis
       priceHistory: priceDate,
     },
     provenance: {
-      identity: provenance('edinet_db', input.identity.dataDate, input.identity.sourceUrls),
+      identity: provenance(
+        'edinet_db',
+        'identity',
+        input.identity.dataDate,
+        input.identity.sourceUrls,
+      ),
       fundamental: input.fundamental
-        ? provenance('edinet_db', fundamentalDate, input.fundamental.sourceUrls)
+        ? provenance('edinet_db', 'financial_data', fundamentalDate, input.fundamental.sourceUrls)
         : [],
       valuation: input.valuation
-        ? provenance('financial_metrics_engine', input.valuation.priceDataDate)
+        ? [
+            ...provenance('financial_metrics_engine', 'calculation', input.valuation.priceDataDate),
+            ...(input.sourceUsage.valuation.priceFromJQuants
+              ? provenance('jquants', 'price_data', input.valuation.priceDataDate, input.priceSourceUrls)
+              : []),
+            ...(input.sourceUsage.valuation.financialsFromEdinetDb
+              ? provenance(
+                  'edinet_db',
+                  'financial_data',
+                  input.valuation.financialDataDate,
+                  input.fundamental?.sourceUrls ?? [],
+                )
+              : []),
+          ]
         : [],
       peerComparison: input.peerComparison
         ? [
-            ...provenance('peer_comparison_engine', peerDate),
+            ...provenance('peer_comparison_engine', 'calculation', peerDate),
             ...(input.peerSourceUrls.length > 0
-              ? provenance('edinet_db', peerDate, input.peerSourceUrls)
+              ? provenance('edinet_db', 'financial_data', peerDate, input.peerSourceUrls)
               : []),
           ]
         : [],
       technical: input.technical
-        ? provenance('technical_engine', input.technical.dataDate)
+        ? [
+            ...provenance('technical_engine', 'calculation', input.technical.dataDate),
+            ...(input.sourceUsage.technical.priceFromJQuants
+              ? provenance('jquants', 'price_data', input.technical.dataDate, input.priceSourceUrls)
+              : []),
+          ]
         : [],
       supplyDemand: input.supplyDemand
-        ? provenance('supply_demand_engine', input.supplyDemand.dataDate)
+        ? [
+            ...provenance('supply_demand_engine', 'calculation', input.supplyDemand.dataDate),
+            ...(input.sourceUsage.supplyDemand.marginFromJQuants
+              ? provenance('jquants', 'margin_data', input.supplyDemand.dataDate)
+              : []),
+            ...(input.sourceUsage.supplyDemand.volumeFromJQuants
+              ? provenance('jquants', 'price_data', input.supplyDemand.volumeDataDate, input.priceSourceUrls)
+              : []),
+          ]
         : [],
       marketCorrelation: input.marketCorrelation
-        ? provenance('market_correlation_engine', input.marketCorrelation.dataDate)
+        ? [
+            ...provenance('market_correlation_engine', 'calculation', input.marketCorrelation.dataDate),
+            ...(input.sourceUsage.marketCorrelation.stockFromJQuants
+              ? provenance('jquants', 'price_data', input.marketCorrelation.dataDate, input.priceSourceUrls)
+              : []),
+            ...(input.sourceUsage.marketCorrelation.benchmarkFromJQuants
+              ? provenance('jquants', 'benchmark_data', input.marketCorrelation.dataDate)
+              : []),
+          ]
         : [],
       strategy: input.strategy
-        ? provenance('strategy_engine', input.strategy.dataDate)
+        ? provenance('strategy_engine', 'calculation', input.strategy.dataDate)
         : [],
       priceHistory: input.priceHistory
-        ? provenance('jquants', priceDate, input.priceSourceUrls)
+        ? provenance('jquants', 'price_data', priceDate, input.priceSourceUrls)
         : [],
-      scenarios: input.scenarios ? provenance('llm', input.generatedAt) : [],
-      risks: input.risks ? provenance('llm', input.generatedAt) : [],
+      scenarios: input.scenarios ? provenance('llm', 'narrative', input.generatedAt) : [],
+      risks: input.risks ? provenance('llm', 'narrative', input.generatedAt) : [],
     },
     units: UNITS,
     fundamental: input.fundamental,

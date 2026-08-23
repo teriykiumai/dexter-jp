@@ -71,13 +71,13 @@ function lockToyota(collector: StandardAgentSnapshotCollector): void {
   end(collector, 'get_financials', 'financials-1', financialResult());
 }
 
-function peerResult() {
+function peerResult(rank: number | null = null) {
   const position = (metric: string) => ({
     metric,
     direction: metric === 'per' || metric === 'pbr' ? 'lower_is_better' : 'higher_is_better',
     targetValue: null,
     median: null,
-    rank: null,
+    rank,
     percentile: null,
     peerSampleSize: 0,
     cohortSize: 1,
@@ -116,12 +116,32 @@ describe('StandardAgentSnapshotCollector', () => {
     end(collector, 'get_stock_price', 'price-1', [
       { date: '2026-08-20', open: 3_000, high: 3_050, low: 2_990, close: 3_040, volume: 10_000 },
     ], { ticker: '9999' });
+    start(collector, 'analyze_financial_metrics', 'valuation-1', { ticker: '7203' });
+    end(collector, 'analyze_financial_metrics', 'valuation-1', {
+      priceDataDate: '2026-08-20',
+      financialDataDate: '2026-06-10',
+      latestFiscalYear: 2026,
+      currentPrice: 3_040,
+      per: 15.2,
+      pbr: 1.3,
+      dividendYieldPercent: 2.5,
+      revenueCagrPercent: 5,
+      cagrStartFiscalYear: 2021,
+      cagrEndFiscalYear: 2026,
+      cagrPeriods: 5,
+      unavailable: [],
+    });
 
     const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
 
     expect(snapshot?.canonicalTicker).toBe('7203');
     expect(snapshot?.priceHistory?.[0].close).toBe(3_040);
     expect(snapshot?.status).toBe('partial');
+    expect(snapshot?.provenance.valuation).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'financial_metrics_engine', role: 'calculation' }),
+      expect.objectContaining({ source: 'jquants', role: 'price_data' }),
+      expect.objectContaining({ source: 'edinet_db', role: 'financial_data' }),
+    ]));
   });
 
   test('rejects an unpaired result and a target result for a different ticker', () => {
@@ -155,17 +175,82 @@ describe('StandardAgentSnapshotCollector', () => {
       target: { id: '7203' },
       candidates: [{ id: '7267' }],
     });
-    end(collector, 'analyze_peer_comparison', 'peer-1', peerResult());
+    end(collector, 'analyze_peer_comparison', 'peer-1', peerResult(2.5));
 
     const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
 
     expect(snapshot?.peerComparison?.result.selection.peers[0]?.id).toBe('7267');
+    expect(snapshot?.peerComparison?.result.positions.per.rank).toBe(2.5);
     expect(snapshot?.provenance.peerComparison).toContainEqual({
       source: 'edinet_db',
+      role: 'financial_data',
       asOfDate: null,
       sourceUrls: ['https://example.test/company_screener'],
     });
     expect(collector.rejections).toHaveLength(0);
+  });
+
+  test('records J-Quants as the underlying source for direct ticker engine calls', () => {
+    const collector = new StandardAgentSnapshotCollector();
+    invokeSkill(collector);
+    lockToyota(collector);
+
+    start(collector, 'analyze_technical', 'technical-1', {
+      ticker: '7203', from: '2025-08-01', to: '2026-08-20',
+    });
+    end(collector, 'analyze_technical', 'technical-1', {
+      dataDate: '2026-08-20',
+      ma20: 3_000,
+      atr14: 80,
+      averageVolume20: 10_000,
+      trend: 'uptrend',
+      latestSwingHigh: 3_100,
+      latestSwingLow: 2_900,
+      unavailable: [],
+    });
+    start(collector, 'analyze_supply_demand', 'supply-1', {
+      ticker: '7203', from: '2025-08-01', to: '2026-08-20',
+    });
+    end(collector, 'analyze_supply_demand', 'supply-1', {
+      dataDate: '2026-08-18',
+      volumeDataDate: '2026-08-20',
+      buyingBalance: 1_000,
+      sellingBalance: 500,
+      marginRatio: 2,
+      buyingBalanceWeeklyChange: 10,
+      sellingBalanceWeeklyChange: -10,
+      mean13w: 900,
+      mean52w: 800,
+      deviation52w: 0.25,
+      percentile52w: 0.8,
+      averageDailyVolume20: 10_000,
+      digestionDays: 0.1,
+      unavailable: [],
+    });
+    start(collector, 'analyze_market_correlation', 'correlation-1', {
+      ticker: '7203', from: '2025-08-01', to: '2026-08-20',
+    });
+    end(collector, 'analyze_market_correlation', 'correlation-1', {
+      benchmark: 'TOPIX',
+      dataDate: '2026-08-20',
+      alignedPriceCount: 251,
+      windows: [],
+    });
+
+    const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
+    expect(snapshot?.provenance.technical).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'technical_engine', role: 'calculation' }),
+      expect.objectContaining({ source: 'jquants', role: 'price_data' }),
+    ]));
+    expect(snapshot?.provenance.supplyDemand).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'jquants', role: 'margin_data' }),
+      expect.objectContaining({ source: 'jquants', role: 'price_data' }),
+    ]));
+    expect(snapshot?.provenance.marketCorrelation).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'jquants', role: 'price_data' }),
+      expect.objectContaining({ source: 'jquants', role: 'benchmark_data' }),
+    ]));
+    expect(JSON.stringify(snapshot)).not.toContain('2025-08-01');
   });
 
   test('rejects a peer result whose target differs from its paired locked-target args', () => {

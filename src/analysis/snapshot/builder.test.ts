@@ -144,6 +144,12 @@ function completeInput(): AnalysisSnapshotInput {
     finalReportMarkdown: '# Analysis',
     priceSourceUrls: ['https://example.test/prices'],
     peerSourceUrls: ['https://example.test/peers'],
+    sourceUsage: {
+      valuation: { priceFromJQuants: true, financialsFromEdinetDb: true },
+      technical: { priceFromJQuants: true },
+      supplyDemand: { marginFromJQuants: true, volumeFromJQuants: true },
+      marketCorrelation: { stockFromJQuants: true, benchmarkFromJQuants: true },
+    },
     additionalUnavailable: [],
   };
 }
@@ -169,7 +175,27 @@ describe('buildAnalysisSnapshot', () => {
       metric: 'entry',
       reason: 'missing_tick_size_for_executable_entry',
     });
-    expect(snapshot.provenance.priceHistory[0]?.source).toBe('jquants');
+    expect(snapshot.provenance.priceHistory[0]).toMatchObject({
+      source: 'jquants',
+      role: 'price_data',
+    });
+    expect(snapshot.provenance.valuation).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'financial_metrics_engine', role: 'calculation' }),
+      expect.objectContaining({ source: 'jquants', role: 'price_data' }),
+      expect.objectContaining({ source: 'edinet_db', role: 'financial_data' }),
+    ]));
+    expect(snapshot.provenance.technical).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'technical_engine', role: 'calculation' }),
+      expect.objectContaining({ source: 'jquants', role: 'price_data' }),
+    ]));
+    expect(snapshot.provenance.supplyDemand).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'jquants', role: 'margin_data' }),
+      expect.objectContaining({ source: 'jquants', role: 'price_data' }),
+    ]));
+    expect(snapshot.provenance.marketCorrelation).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'jquants', role: 'price_data' }),
+      expect.objectContaining({ source: 'jquants', role: 'benchmark_data' }),
+    ]));
     expect(snapshot.units.valuation.per).toBe('multiple');
     expect(snapshot.units.peerComparison.percentile).toBe('ratio');
     expect(snapshot.units.supplyDemand.percentile52w).toBe('ratio');
@@ -200,9 +226,20 @@ describe('buildAnalysisSnapshot', () => {
     });
   });
 
-  test('accepts only canonical four-digit or EDINET-style trailing-zero securities codes', () => {
+  test('normalizes numeric and JPX alphanumeric canonical/J-Quants securities codes', () => {
+    expect(normalizeCanonicalTicker('7203')).toBe('7203');
     expect(normalizeCanonicalTicker('72030')).toBe('7203');
+    expect(normalizeCanonicalTicker('130A')).toBe('130A');
+    expect(normalizeCanonicalTicker('130A0')).toBe('130A');
+    expect(normalizeCanonicalTicker('130a')).toBe('130A');
+    expect(normalizeCanonicalTicker('1A00')).toBe('1A00');
+    expect(normalizeCanonicalTicker('9A7A0')).toBe('9A7A');
     expect(() => normalizeCanonicalTicker('E02144')).toThrow();
+    expect(() => normalizeCanonicalTicker('130B')).toThrow();
+
+    const input = completeInput();
+    input.identity.canonicalTicker = '130A';
+    expect(buildAnalysisSnapshot(input).canonicalTicker).toBe('130A');
   });
 
   test('rejects malformed typed input instead of repairing it', () => {

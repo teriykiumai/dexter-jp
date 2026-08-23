@@ -78,22 +78,28 @@ describe('AgentRunnerController snapshot finalization', () => {
   });
 
   test('returns a partial snapshot after a normally completed comprehensive run', async () => {
-    const result = await createController().runQuery('7203を総合分析して');
+    const controller = createController();
+    const result = await controller.runQuery('7203を総合分析して');
 
     expect(result?.snapshot).toMatchObject({
       status: 'partial',
       canonicalTicker: '7203',
       companyName: 'トヨタ自動車株式会社',
     });
+    expect(controller.history.at(-1)?.status).toBe('complete');
   });
 
   test('does not create a snapshot for an interrupted or failed terminal outcome', async () => {
     nextOutcome = 'interrupted';
-    const interrupted = await createController().runQuery('7203を総合分析して');
+    const interruptedController = createController();
+    const interrupted = await interruptedController.runQuery('7203を総合分析して');
     nextOutcome = 'error';
-    const failed = await createController().runQuery('7203を総合分析して');
+    const failedController = createController();
+    const failed = await failedController.runQuery('7203を総合分析して');
 
     expect(interrupted?.snapshot).toBeUndefined();
     expect(failed?.snapshot).toBeUndefined();
+    expect(interruptedController.history.at(-1)?.status).toBe('interrupted');
+    expect(failedController.history.at(-1)?.status).toBe('error');
   });
 });

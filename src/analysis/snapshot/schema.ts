@@ -1,4 +1,8 @@
 import { z } from 'zod';
+import {
+  JAPANESE_SECURITIES_CODE_PATTERN,
+  normalizeJapaneseSecuritiesCode,
+} from '../../utils/japanese-securities-code.js';
 
 const finiteNumber = z.number().finite();
 const nullableFiniteNumber = finiteNumber.nullable();
@@ -9,15 +13,12 @@ const utcIsoDateTime = z.string().datetime({ offset: true }).refine(value => val
 
 export const ANALYSIS_SNAPSHOT_SCHEMA_VERSION = 1 as const;
 
-export const CanonicalTickerSchema = z.string().regex(/^\d{4}$/, {
-  message: 'canonicalTicker must be a four-digit Japanese securities code.',
+export const CanonicalTickerSchema = z.string().regex(JAPANESE_SECURITIES_CODE_PATTERN, {
+  message: 'canonicalTicker must be a valid four-character Japanese securities code.',
 });
 
 export function normalizeCanonicalTicker(value: string): string {
-  const normalized = value.trim();
-  if (/^\d{4}$/.test(normalized)) return normalized;
-  if (/^\d{4}0$/.test(normalized)) return normalized.slice(0, 4);
-  throw new Error(`Unsupported Japanese securities code: ${value}`);
+  return normalizeJapaneseSecuritiesCode(value);
 }
 
 export const MetricUnitSchema = z.enum([
@@ -59,6 +60,15 @@ export const SnapshotProvenanceSchema = z.object({
     'market_correlation_engine',
     'strategy_engine',
     'llm',
+  ]),
+  role: z.enum([
+    'identity',
+    'financial_data',
+    'price_data',
+    'margin_data',
+    'benchmark_data',
+    'calculation',
+    'narrative',
   ]),
   asOfDate: nullableDate,
   sourceUrls: z.array(z.string().min(1)),
@@ -276,7 +286,7 @@ const peerPositionSchema = z.object({
   direction: z.enum(['higher_is_better', 'lower_is_better']),
   targetValue: nullableFiniteNumber,
   median: nullableFiniteNumber,
-  rank: z.number().int().nullable(),
+  rank: nullableFiniteNumber,
   percentile: nullableFiniteNumber,
   peerSampleSize: z.number().int().nonnegative(),
   cohortSize: z.number().int().nonnegative(),
@@ -503,6 +513,23 @@ export const AnalysisSnapshotInputSchema = z.object({
   finalReportMarkdown: z.string().min(1),
   priceSourceUrls: z.array(z.string().min(1)),
   peerSourceUrls: z.array(z.string().min(1)),
+  sourceUsage: z.object({
+    valuation: z.object({
+      priceFromJQuants: z.boolean(),
+      financialsFromEdinetDb: z.boolean(),
+    }),
+    technical: z.object({
+      priceFromJQuants: z.boolean(),
+    }),
+    supplyDemand: z.object({
+      marginFromJQuants: z.boolean(),
+      volumeFromJQuants: z.boolean(),
+    }),
+    marketCorrelation: z.object({
+      stockFromJQuants: z.boolean(),
+      benchmarkFromJQuants: z.boolean(),
+    }),
+  }),
   additionalUnavailable: z.array(SnapshotUnavailableSchema),
 });
 

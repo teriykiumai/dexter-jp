@@ -100,7 +100,7 @@ V1では、Standard Agent実行中に既知のsource / analysis toolが完了し
 
 collectorは`tool_start`と`tool_end`を`toolCallId`で対応付け、`toolCallId -> { tool, validatedArgs, validatedResult }`を確立してからSnapshot inputへ渡す。result単独、欠損ID、tool名不一致のeventは採用しない。
 
-最初に検証済みcompany identityから4桁`canonicalTicker`を確定し、そのrunのtargetとしてlockする。以後のtarget用source / engine resultが別tickerならcollectorが拒否する。Peer Comparisonの候補tickerだけは明示的な例外とし、Peer targetはlock済みtickerとの一致を必須とする。
+最初に検証済みcompany identityから4文字`canonicalTicker`を確定し、そのrunのtargetとしてlockする。数字コードに加え、JPX規則に適合する`130A`等の英文字入りコードを受け付ける。以後のtarget用source / engine resultが別tickerならcollectorが拒否する。Peer Comparisonの候補tickerだけは明示的な例外とし、Peer targetはlock済みtickerとの一致を必須とする。
 
 Builderは次だけを担当する純粋なapplication layerとする。
 
@@ -191,6 +191,8 @@ V1の必須sectionは実装上の定数として`identity / fundamental / valuat
 - `count`
 
 unit mappingはBuilderが決定し、LLMやBrowserへ推測させない。percentage pointとdecimal ratioを混同しないよう既存field名とengine contractを優先する。
+
+provenanceはsectionごとにcalculation engineとunderlying data sourceを別recordで保持する。direct ticker modeのTechnical、Supply & Demand、Market CorrelationではJ-Quantsをprice / margin / benchmark sourceとして明示し、Financial MetricsではJ-Quants price、EDINET DB financials、Financial Metrics Engine calculationを区別する。raw tool args、prompt、credentialは保存しない。
 
 ### 6.4 Fundamental
 

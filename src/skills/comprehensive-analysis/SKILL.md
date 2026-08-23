@@ -37,7 +37,7 @@ Never call a tool name that is absent from the current tool list.
 
 ## 1. Verify the company
 
-Resolve the user-supplied identifier with a company-data tool before repeating a securities code or EDINET code. Confirm company name, listing status, TSE 33-sector, and the latest company-data date. Lock that verified four-digit securities code as the target ticker for the rest of the run. Every target-company source and `analyze_*` call must use that ticker; only peer candidates may use different tickers. Stop presenting the company as an active investment candidate if it is delisted.
+Resolve the user-supplied identifier with a company-data tool before repeating a securities code or EDINET code. Confirm company name, listing status, TSE 33-sector, and the latest company-data date. Lock that verified four-character securities code, including a valid JPX alphanumeric code when applicable, as the target ticker for the rest of the run. Every target-company source and `analyze_*` call must use that ticker; only peer candidates may use different tickers. Stop presenting the company as an active investment candidate if it is delisted.
 
 ## 2. Fundamental and valuation
 

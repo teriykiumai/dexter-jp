@@ -413,7 +413,7 @@ export class AgentRunnerController {
         this.updateLastItem((last) => ({
           ...last,
           answer: done.answer,
-          status: 'complete',
+          status: done.outcome === 'success' ? 'complete' : done.outcome,
           duration: done.totalTime,
           tokenUsage: done.tokenUsage,
           tokensPerSecond: done.tokensPerSecond,
