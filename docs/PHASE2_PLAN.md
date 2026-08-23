@@ -267,7 +267,7 @@ Initial implementation contract:
 
 - period: 14
 - source: strictly chronological adjusted close
-- minimum history: 15 positive finite closes
+- formula-helper minimum history: 15 positive finite closes
 - initial average gain / loss: arithmetic mean of the first 14 price changes
 - subsequent average gain / loss: Wilder smoothing
 - a `null` close in the supplied calculation sequence => `missing_data`
@@ -305,7 +305,7 @@ Initial implementation contract:
 - subsequent EMA: `value * (2 / (period + 1)) + previousEma * (1 - 2 / (period + 1))`
 - MACD series begins when the 26-period slow EMA is available
 - signal seed: arithmetic mean of the first 9 MACD values
-- minimum history for MACD + signal + histogram: 34 positive finite closes
+- formula-helper minimum history for MACD + signal + histogram: 34 positive finite closes
 - histogram: `macd - signal`
 - `null` in the supplied recursive sequence => `missing_data`
 - non-finite or non-positive close => `invalid_data`
@@ -372,12 +372,14 @@ Do not implement until RSI/MACD/Bollinger are stable.
 
 ## 8. Technical Result Contract Strategy
 
-Keep the existing Phase 1 `TechnicalResult` and `analyze_technical` contract
-unchanged. The current Snapshot collector validates the exact V1 technical
+Keep the existing Phase 1 `TechnicalResult` and `analyze_technical` contract unchanged
+through P2-T4. The current Snapshot collector validates the exact V1 technical
 `unavailable` vocabulary, so adding Phase 2 metric names before Snapshot integration
 could cause an otherwise valid comprehensive run to lose its Technical section.
+P2-T5 may add an exposure envelope while keeping `TechnicalResult` and
+`AdvancedTechnicalResult` as separate typed calculation results.
 
-### Rejected for the first tranche — Extend existing TechnicalResult
+### Deferred through P2-T4 — Extend the existing tool result surface
 
 Example:
 
@@ -396,9 +398,10 @@ Example:
 }
 ```
 
-Do not use this sequence while Snapshot V1 still validates the old result contract.
-It may be reconsidered only after a versioned compatibility boundary exists and a
-demonstrated simplification justifies it.
+Do not use this sequence in P2-T1–T4 while Snapshot V1 still validates the old result
+contract. P2-T5 may compose the separate `AdvancedTechnicalResult` into the existing
+`analyze_technical` tool output only after comparing it with a separate tool and
+proving collector compatibility at the versioned Snapshot boundary.
 
 ### Adopted — Add an AdvancedTechnicalResult
 

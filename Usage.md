@@ -1303,6 +1303,14 @@ Volume Profile
 Backtest
 ```
 
+Phase 2Aの計画では、recursiveなRSI/MACDは251本以上ある場合に最新251本の株価バーを
+固定sequenceとして使い、251本未満ではavailableな全barsに各指標のminimum historyを
+適用します。同じ最新251本に古いhistoryを追加してもlatest値は変わりません。
+`AdvancedTechnicalResult`はpure moduleとして追加し、既存`analyze_technical`から返すか
+別toolにするかはSnapshot V2 integration時に重複取得、collector compatibility、
+minimal diffを比較して決定します。現在のPhase 1.5 runtimeには、これらの指標やV2
+contractはまだ実装されていません。
+
 ---
 
 # 34. Architecture Summary

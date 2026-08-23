@@ -542,7 +542,7 @@ Start with deterministic Technical expansion.
 Primary sequence:
 
 ```text
-P2-D0 Contract Review
+P2-D0 Baseline / Compatibility Verification
         ↓
 RSI 14
         ↓
@@ -552,7 +552,7 @@ Bollinger 20 / 2σ
         ↓
 AdvancedTechnicalResult
         ↓
-Tool + Snapshot V2 integration
+Exposure choice + Snapshot V2 integration
         ↓
 Dashboard presentation
         ↓
@@ -577,7 +577,7 @@ Fixed Phase 2A indicator contracts:
 ```text
 RSI14
 - adjusted close
-- 15 minimum closes
+- 15-close formula-helper minimum
 - first 14 changes use arithmetic-mean gain/loss seeds
 - Wilder smoothing thereafter
 - zero loss → 100, zero gain → 0, both zero → 50
@@ -586,7 +586,7 @@ MACD 12/26/9
 - adjusted close
 - EMA seeds use the first period's arithmetic mean
 - signal seed uses the first 9 MACD values' arithmetic mean
-- 34 minimum closes
+- 34-close formula-helper minimum
 - histogram = MACD - signal
 
 Bollinger 20 / 2σ
@@ -594,11 +594,25 @@ Bollinger 20 / 2σ
 - latest 20 closes
 - population standard deviation, divisor 20
 - no bandwidth in the initial contract
+
+Production recursive range
+- with at least 251 stock OHLCV bars, AdvancedTechnicalResult uses exactly the latest 251
+- with fewer than 251 bars, it uses all available bars and applies the helper minimums
+- selection occurs before adjusted-close validation; do not filter bars first
+- prepending older bars cannot change results when the latest 251 bars are identical
+- stock bars are not inner-joined with TOPIX for Technical calculation
 ```
 
 Do not skip or fill missing observations. Use typed
 `insufficient_history | missing_data | invalid_data` reasons. RSI uses the Snapshot
 unit `index`; MACD and Bollinger price values use `JPY`.
+
+Keep `AdvancedTechnicalResult` as a separate pure module. P2-T1–T4 must not change
+the existing `TechnicalResult` or Agent tool surface. In P2-T5, compare returning the
+separate result alongside the current result from `analyze_technical` with adding
+`analyze_advanced_technical`;
+choose using duplicate J-Quants retrieval, tool surface, collector compatibility, and
+minimal diff rather than assuming a new tool is required.
 
 See `docs/PHASE2_PLAN.md` for full details.
 
@@ -698,12 +712,14 @@ dexter-jp Phase 2A Technical Expansion専用threadです。
 Builder、Standard Agent collector、Dashboard presentationを確認してください。
 
 Phase 1 / Phase 1.5のcontractを変更しないことを最優先に、
-P2-D0の設計レビューだけを行ってください。
+P2-D0のbaseline / compatibility verificationだけを行ってください。
 
-RSI 14、MACD 12/26/9、Bollinger 20/2σについて、
-正確なformula、初期化、必要history、missing-data semantics、
-既存utility再利用候補、Snapshot V1/V2 read compatibility、
-PR分割案を報告してください。
+fixed formula、最新251 barsのrecursive calculation range、
+AdvancedTechnicalResult、Snapshot V1/V2 read compatibilityとcurrent mainの
+concrete conflict有無、既存utility再利用候補、変更候補ファイル、テスト計画、
+Snapshot V2 implementation risksを報告してください。
+
+concrete incompatibilityがない限り、fixed contractを再設計しないでください。
 
 まだ実装しないでください。
 
