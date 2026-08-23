@@ -1,10 +1,10 @@
 # 日本株AI分析システム 仕様書
 
-**Version:** 0.2  
+**Version:** 0.3
 **Status:** Draft  
 **Base Project:** `edinetdb/dexter-jp`  
 **Use:** Personal / Local only  
-**Last Updated:** 2026-08-19
+**Last Updated:** 2026-08-23
 
 ## 1. 目的
 
@@ -328,6 +328,69 @@ AIは以下を担当する。
 12. データ基準日表示
 
 ## 10. MVP後
+
+### Phase 1.5 — Local Web Visualization MVP
+
+Phase 1.5は、Step 10で満たしたMVP完成条件を変更または再度開くものではない。MVP完了後に、分析結果の保存・可視化・Presentation Layerを追加する拡張である。
+
+目的は、CLI中心の分析結果を、CLI、ローカルDashboard、将来のPDF、過去比較、Portfolio分析から再利用できるCanonical Analysis Artifactへ変換することにある。
+
+依存方向:
+
+```text
+EDINET DB / J-Quants
+         ↓
+typed source results
+         ↓
+deterministic engines
+         ↓
+provider-neutral AnalysisSnapshotBuilder
+         ↓
+Canonical AnalysisSnapshot
+         ├─→ CLI / LLM report
+         ├─→ local JSON persistence
+         └─→ local read-only Dashboard
+```
+
+原則:
+
+- DashboardはPresentation Layerとし、金融・統計計算を再実装しない
+- LLM最終Markdown、raw prompt、偶発的なtool履歴解析から金融数値を復元しない
+- Snapshotはtyped source resultとdeterministic engine resultからコードで構築する
+- source date、provenance、unit、partial / unavailable状態を保持する
+- APIキー、auth token、raw tool argumentsをSnapshotやBrowserへ渡さない
+- Local Web Serverは`127.0.0.1`のみにbindし、Read-onlyとする
+- 個人・ローカル・単一ユーザー用途を維持し、外部公開しない
+- Phase 2以降の分析機能を先取りしない
+
+実施順序:
+
+1. V1 — Canonical Analysis Snapshot
+2. V2 — Local Persistence
+3. V3 — Local Web Server
+4. V4 — Single Stock Dashboard
+5. V5 — Analysis Portfolio / Watchlist
+
+Phase 1.5初期の価格Chartは、adjusted OHLC、Volume、計算済みの最新SMA20、Swing High、Swing Low水準を表示対象とする。全SMA時系列等が必要になった場合は、Dashboardではなく決定論的analysis / chart-series layerで生成する。
+
+Phase 1.5完了条件の概要:
+
+- Standard Agentの分析から、provider-neutral schemaに適合するSnapshotを生成できる
+- 欠損を推測せず、provenance、unit、data date、unavailable理由を保持できる
+- SnapshotをローカルJSONへ安全に保存・読込できる
+- `bun run dashboard`で保存済み分析を`127.0.0.1`からRead-only表示できる
+- 7203のSingle Stock Dashboardと保存済み銘柄一覧を表示できる
+- Browserへsecretを返さず、既存のCLI分析と金融計算結果を変更しない
+
+Phase 1.5の非目標:
+
+- Phase 2以降の指標、Evaluator、総合score、Radar chart、Backtest
+- 実保有株数、平均取得単価、資産配分、Portfolio Beta、VaR、銘柄間相関
+- 証券口座連携、自動売買、リアルタイム配信、WebSocket
+- Login、OAuth、SaaS、Cloud deployment、外部公開API
+- PostgreSQL、Prisma、GraphQL、別backend
+
+詳細は `docs/VISUALIZATION_MVP_PLAN.md` を参照する。
 
 ### Phase 2
 - RSI / MACD
