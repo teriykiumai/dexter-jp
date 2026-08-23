@@ -1,5 +1,6 @@
 import type {
   AnalysisSnapshot,
+  AnalysisSnapshotLatestItem,
   MetricUnit,
   SnapshotUnavailable,
 } from '../../analysis/snapshot/index.js';
@@ -88,6 +89,28 @@ export interface DashboardViewModel {
   unavailable: SnapshotUnavailable[];
   finalReportMarkdown: string;
 }
+
+export const WATCHLIST_STALE_AFTER_DAYS = 7;
+
+export interface WatchlistItemView {
+  ticker: string;
+  companyName: string;
+  status: AnalysisSnapshot['status'];
+  price: DisplayValue;
+  per: DisplayValue;
+  pbr: DisplayValue;
+  roe: DisplayValue;
+  trend: DisplayValue;
+  marginPercentile: DisplayValue;
+  beta250: DisplayValue;
+  latestDataDate: DisplayValue;
+  latestDataDateRaw: string | null;
+  generatedAt: DisplayValue;
+  generatedAtRaw: string;
+  stale: boolean;
+}
+
+export type WatchlistSortKey = 'latestDataDate' | 'generatedAt';
 
 interface FormatOptions {
   ratioAsPercent?: boolean;
@@ -184,6 +207,82 @@ const dataDateLabels = {
 
 function reasonText(reason: string): string {
   return reason.replaceAll('_', ' ');
+}
+
+function isStaleDataDate(
+  dataDate: string | null,
+  referenceDate: Date,
+  staleAfterDays = WATCHLIST_STALE_AFTER_DAYS,
+): boolean {
+  if (dataDate === null) return false;
+  const dataTime = Date.parse(`${dataDate}T00:00:00.000Z`);
+  if (Number.isNaN(dataTime)) return false;
+  const referenceDay = Date.UTC(
+    referenceDate.getUTCFullYear(),
+    referenceDate.getUTCMonth(),
+    referenceDate.getUTCDate(),
+  );
+  return referenceDay - dataTime > staleAfterDays * 24 * 60 * 60 * 1000;
+}
+
+export function mapLatestAnalysisToWatchlistItem(
+  item: AnalysisSnapshotLatestItem,
+  referenceDate = new Date(),
+): WatchlistItemView {
+  return {
+    ticker: item.canonicalTicker,
+    companyName: item.companyName,
+    status: item.status,
+    price: formatMetric(item.metrics.latestPrice, item.units.latestPrice),
+    per: formatMetric(item.metrics.per, item.units.per),
+    pbr: formatMetric(item.metrics.pbr, item.units.pbr),
+    roe: formatMetric(item.metrics.roe, item.units.roe, {
+      ratioAsPercent: true,
+    }),
+    trend: displayText(item.metrics.trend === 'unavailable'
+      ? null
+      : item.metrics.trend),
+    marginPercentile: formatMetric(
+      item.metrics.marginPercentile,
+      item.units.marginPercentile,
+      { ratioAsPercent: true },
+    ),
+    beta250: formatMetric(item.metrics.beta250, item.units.beta250, {
+      maximumFractionDigits: 3,
+    }),
+    latestDataDate: displayText(item.latestSourceDataDate),
+    latestDataDateRaw: item.latestSourceDataDate,
+    generatedAt: displayText(formatDateTime(item.generatedAt)),
+    generatedAtRaw: item.generatedAt,
+    stale: isStaleDataDate(item.latestSourceDataDate, referenceDate),
+  };
+}
+
+export function sortWatchlistItems(
+  items: WatchlistItemView[],
+  sortKey: WatchlistSortKey,
+): WatchlistItemView[] {
+  return [...items].sort((left, right) => {
+    const leftValue = sortKey === 'generatedAt'
+      ? left.generatedAtRaw
+      : left.latestDataDateRaw;
+    const rightValue = sortKey === 'generatedAt'
+      ? right.generatedAtRaw
+      : right.latestDataDateRaw;
+    if (leftValue === null && rightValue !== null) return 1;
+    if (rightValue === null && leftValue !== null) return -1;
+    const byDate = (rightValue ?? '').localeCompare(leftValue ?? '');
+    return byDate !== 0 ? byDate : left.ticker.localeCompare(right.ticker);
+  });
+}
+
+export function buildDetailPath(ticker: string): string {
+  return `/?ticker=${encodeURIComponent(ticker)}`;
+}
+
+export function parseDetailTicker(search: string): string | null {
+  const ticker = new URLSearchParams(search).get('ticker');
+  return ticker && /^(?:\d{4}|\d{3}[A-Z])$/.test(ticker) ? ticker : null;
 }
 
 export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardViewModel {

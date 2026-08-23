@@ -88,6 +88,18 @@ describe('dashboard request handler', () => {
     const listResponse = await handleDashboardRequest(request('/api/analyses'), repository);
     const list = await responseJson(listResponse) as Array<Record<string, unknown>>;
     expect(list.map(item => item.canonicalTicker)).toEqual(['130A', '7203']);
+    expect(list[0]).toMatchObject({
+      latestSourceDataDate: '2026-08-21',
+      metrics: {
+        latestPrice: null,
+        per: null,
+        pbr: null,
+        roe: null,
+        trend: null,
+        marginPercentile: null,
+        beta250: null,
+      },
+    });
     expect(list[0]).not.toHaveProperty('finalReportMarkdown');
 
     const latestResponse = await handleDashboardRequest(request('/api/analyses/7203'), repository);

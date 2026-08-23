@@ -32,6 +32,27 @@ export interface AnalysisSnapshotHistoryItem {
   dataDates: AnalysisSnapshot['dataDates'];
 }
 
+export interface AnalysisSnapshotLatestItem extends AnalysisSnapshotHistoryItem {
+  latestSourceDataDate: string | null;
+  metrics: {
+    latestPrice: number | null;
+    per: number | null;
+    pbr: number | null;
+    roe: number | null;
+    trend: 'uptrend' | 'downtrend' | 'range_or_transition' | 'unavailable' | null;
+    marginPercentile: number | null;
+    beta250: number | null;
+  };
+  units: {
+    latestPrice: AnalysisSnapshot['units']['valuation'][string];
+    per: AnalysisSnapshot['units']['valuation'][string];
+    pbr: AnalysisSnapshot['units']['valuation'][string];
+    roe: AnalysisSnapshot['units']['fundamental'][string];
+    marginPercentile: AnalysisSnapshot['units']['supplyDemand'][string];
+    beta250: AnalysisSnapshot['units']['marketCorrelation'][string];
+  };
+}
+
 function historyItem(
   snapshot: AnalysisSnapshot,
   snapshotId = createSnapshotId(snapshot.generatedAt),
@@ -43,6 +64,50 @@ function historyItem(
     generatedAt: snapshot.generatedAt,
     status: snapshot.status,
     dataDates: snapshot.dataDates,
+  };
+}
+
+function latestSourceDataDate(snapshot: AnalysisSnapshot): string | null {
+  const dates = snapshot.dataDates;
+  return [
+    dates.identity,
+    dates.fundamental,
+    dates.valuation.price,
+    dates.valuation.financial,
+    dates.peerComparison,
+    dates.technical,
+    dates.supplyDemand,
+    dates.marketCorrelation,
+    dates.strategy,
+    dates.priceHistory,
+  ].filter((date): date is string => date !== null).sort().at(-1) ?? null;
+}
+
+export function buildAnalysisSnapshotLatestItem(
+  snapshot: AnalysisSnapshot,
+): AnalysisSnapshotLatestItem {
+  const latestFundamental = snapshot.fundamental?.periods.at(-1);
+  const beta250 = snapshot.marketCorrelation?.windows.find(window => window.period === 250)?.beta;
+  return {
+    ...historyItem(snapshot),
+    latestSourceDataDate: latestSourceDataDate(snapshot),
+    metrics: {
+      latestPrice: snapshot.valuation?.currentPrice ?? null,
+      per: snapshot.valuation?.per ?? null,
+      pbr: snapshot.valuation?.pbr ?? null,
+      roe: latestFundamental?.roe ?? null,
+      trend: snapshot.technical?.trend ?? null,
+      marginPercentile: snapshot.supplyDemand?.percentile52w ?? null,
+      beta250: beta250 ?? null,
+    },
+    units: {
+      latestPrice: snapshot.units.valuation.currentPrice,
+      per: snapshot.units.valuation.per,
+      pbr: snapshot.units.valuation.pbr,
+      roe: snapshot.units.fundamental.roe,
+      marginPercentile: snapshot.units.supplyDemand.percentile52w,
+      beta250: snapshot.units.marketCorrelation.beta,
+    },
   };
 }
 
@@ -218,7 +283,7 @@ export class AnalysisSnapshotRepository {
       .map(({ snapshotId, snapshot }) => historyItem(snapshot, snapshotId));
   }
 
-  async listLatest(): Promise<AnalysisSnapshotHistoryItem[]> {
+  async listLatest(): Promise<AnalysisSnapshotLatestItem[]> {
     let entries;
     try {
       entries = await readdir(this.rootDirectory, { withFileTypes: true });
@@ -232,7 +297,7 @@ export class AnalysisSnapshotRepository {
       .map(entry => entry.name);
     const latest = await Promise.all(tickers.map(ticker => this.loadLatest(ticker)));
     return latest
-      .map(snapshot => historyItem(snapshot))
+      .map(snapshot => buildAnalysisSnapshotLatestItem(snapshot))
       .sort((left, right) => left.canonicalTicker.localeCompare(right.canonicalTicker));
   }
 

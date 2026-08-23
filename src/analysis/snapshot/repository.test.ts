@@ -130,7 +130,18 @@ describe('AnalysisSnapshotRepository', () => {
       snapshotId: '2026-08-23T02-03-04-000Z',
       companyName: 'テスト株式会社',
       status: 'partial',
+      latestSourceDataDate: '2026-08-21',
+      metrics: {
+        latestPrice: null,
+        per: null,
+        pbr: null,
+        roe: null,
+        trend: null,
+        marginPercentile: null,
+        beta250: null,
+      },
     });
+    expect(latest[0]).not.toHaveProperty('finalReportMarkdown');
   });
 
   test('uses an alphanumeric canonical ticker as a safe directory segment', async () => {

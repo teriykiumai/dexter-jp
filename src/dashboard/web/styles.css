@@ -21,8 +21,13 @@ body { margin: 0; min-width: 320px; min-height: 100vh; background:
   linear-gradient(180deg, #080c11 0%, #0a0f15 100%); }
 button, input, table { font: inherit; }
 a { color: var(--blue); }
+button { color: inherit; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 .dashboard-shell { width: min(1500px, calc(100% - 48px)); margin: 0 auto; padding: 32px 0 72px; }
+.back-button { margin: 0 0 18px; padding: 8px 0; border: 0; background: transparent; color: #8fa6b8; cursor: pointer; font: 700 11px/1 "SFMono-Regular", Consolas, monospace; letter-spacing: .05em; }
+.back-button:hover { color: var(--accent); }
+.back-button.centered { margin: 12px auto 0; }
 .hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding: 20px 0 30px; border-bottom: 1px solid var(--border); }
 .brand-line { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; }
 .brand-mark { color: var(--accent); font-family: "SFMono-Regular", Consolas, monospace; font-size: 12px; font-weight: 800; letter-spacing: .18em; }
@@ -35,6 +40,39 @@ a { color: var(--blue); }
 .status-badge.complete { color: var(--accent); border-color: #275747; }
 .status-badge.partial { color: var(--amber); border-color: #654d2b; }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 10px currentColor; }
+
+.watchlist-shell { padding-top: 48px; }
+.portfolio-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 40px; padding: 22px 0 34px; border-bottom: 1px solid var(--border); }
+.portfolio-hero h1 { margin: 0; color: #eef3f6; font-size: clamp(38px, 6vw, 76px); line-height: .95; letter-spacing: -.06em; }
+.portfolio-hero p { max-width: 650px; margin: 18px 0 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.portfolio-summary { display: grid; grid-template-columns: repeat(3, minmax(90px, 1fr)); min-width: 360px; margin: 0; border: 1px solid var(--border); background: var(--surface); }
+.portfolio-summary div { padding: 15px 18px; border-right: 1px solid var(--border); }
+.portfolio-summary div:last-child { border-right: 0; }
+.portfolio-summary dt { color: var(--faint); font: 700 9px/1 "SFMono-Regular", Consolas, monospace; letter-spacing: .1em; text-transform: uppercase; }
+.portfolio-summary dd { margin: 9px 0 0; color: #eef4f7; font: 500 23px/1 "SFMono-Regular", Consolas, monospace; }
+.watchlist-panel { margin-top: 26px; border: 1px solid var(--border); background: linear-gradient(155deg, #111922, #0d131a 70%); }
+.watchlist-header { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 20px 22px; border-bottom: 1px solid var(--border); }
+.watchlist-header h2 { margin: 7px 0 0; font-size: 18px; }
+.sort-control { display: flex; align-items: center; gap: 6px; }
+.sort-control > span { margin-right: 6px; color: var(--faint); font: 700 9px/1 "SFMono-Regular", Consolas, monospace; letter-spacing: .1em; text-transform: uppercase; }
+.sort-control button { padding: 7px 10px; border: 1px solid #2a3946; background: #101820; color: var(--muted); cursor: pointer; font: 600 10px/1 "SFMono-Regular", Consolas, monospace; }
+.sort-control button:hover, .sort-control button.active { border-color: #3d6a62; color: var(--accent); background: #11211f; }
+.watchlist-table th, .watchlist-table td { height: 74px; padding-right: 16px; padding-left: 16px; }
+.watchlist-table th:first-child { min-width: 230px; padding-left: 22px; }
+.watchlist-table td:nth-child(9), .watchlist-table td:nth-child(10) { min-width: 130px; }
+.watchlist-table tbody tr { transition: background-color .15s ease; }
+.watchlist-table tbody tr:hover { background: #13202a; }
+.company-link { display: grid; gap: 6px; width: 100%; padding: 0; border: 0; background: transparent; cursor: pointer; text-align: left; }
+.company-link span { color: var(--amber); font: 600 12px/1 "SFMono-Regular", Consolas, monospace; }
+.company-link strong { overflow: hidden; color: #e5ebef; font-size: 12px; font-weight: 600; text-overflow: ellipsis; }
+.company-link:hover strong { color: var(--accent); }
+.compact-status { display: inline-flex; padding: 5px 7px; border: 1px solid #35424e; color: var(--muted); font: 700 9px/1 "SFMono-Regular", Consolas, monospace; letter-spacing: .05em; text-transform: uppercase; }
+.compact-status.complete { border-color: #275747; color: var(--accent); }
+.compact-status.partial { border-color: #654d2b; color: var(--amber); }
+.stale-label { display: block; width: fit-content; margin: 6px 0 0 auto; padding: 3px 5px; background: #332417; color: var(--amber); font: 700 8px/1 "SFMono-Regular", Consolas, monospace; text-transform: uppercase; }
+.detail-button { padding: 7px 10px; border: 1px solid #2c4659; background: #111d26; color: #8fb9d6; cursor: pointer; font: 700 10px/1 "SFMono-Regular", Consolas, monospace; white-space: nowrap; }
+.detail-button:hover { border-color: var(--blue); color: #d6ecfb; }
+.watchlist-empty { min-height: 280px; margin: 22px; }
 
 .kpi-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px; margin: 22px 0; background: var(--border); border: 1px solid var(--border); }
 .kpi-card { min-width: 0; padding: 20px; background: var(--surface); }
@@ -111,6 +149,8 @@ tbody th { color: #dce4ea; }
 @media (max-width: 980px) {
   .kpi-grid { grid-template-columns: repeat(3, 1fr); }
   .two-column { grid-template-columns: 1fr; gap: 0; }
+  .portfolio-hero { align-items: flex-start; flex-direction: column; }
+  .portfolio-summary { width: 100%; min-width: 0; }
 }
 @media (max-width: 680px) {
   .dashboard-shell { width: min(100% - 24px, 1500px); padding-top: 16px; }
@@ -123,4 +163,8 @@ tbody th { color: #dce4ea; }
   .price-chart { height: 390px; }
   .correlation-grid, .scenario-grid, .risk-list { grid-template-columns: 1fr; }
   .footer { flex-direction: column; }
+  .watchlist-shell { padding-top: 24px; }
+  .watchlist-header { align-items: flex-start; flex-direction: column; }
+  .portfolio-summary { grid-template-columns: repeat(3, 1fr); }
+  .portfolio-summary div { padding: 12px; }
 }
