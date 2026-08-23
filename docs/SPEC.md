@@ -321,8 +321,8 @@ AIは以下を担当する。
 5. Technical計算
 6. 信用分析
 7. TOPIX分析
-8. Entry / Stop / Target計算
-9. Risk / Reward計算
+8. Swing HighからEntry triggerを計算し、sourced tickSizeがある場合はexact Entry / Stop / Targetも計算
+9. exact価格を計算できる場合はRisk / Rewardを計算し、できない場合は利用不可理由を明示
 10. Bull / Base / Bear生成
 11. リスク説明
 12. データ基準日表示

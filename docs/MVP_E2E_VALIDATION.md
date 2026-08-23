@@ -105,7 +105,7 @@ PER、PBR、配当利回り、CAGRをLLM単独では計算していない。Valu
 # Conclusion
 ```
 
-実API検証は45.287秒、入力271,485 tokens、出力4,411 tokens、合計275,896 tokensで完了した。呼び出された主要ツールは`get_financials`、`company_screener`、J-Quants 3 tools、6 deterministic analysis tools、`read_filings`、`skill`で、必須フェーズの欠落やtool errorはなかった。
+実API検証は45.287秒、main Agent loopで観測された入力271,485 tokens、出力4,411 tokens、合計275,896 tokensで完了した。この値は`get_financials`や`company_screener`内部のnested LLM callを含む総API token量ではない。呼び出された主要ツールは`get_financials`、`company_screener`、J-Quants 3 tools、6 deterministic analysis tools、`read_filings`、`skill`で、必須フェーズの欠落やtool errorはなかった。
 
 ## 検証コマンド
 
