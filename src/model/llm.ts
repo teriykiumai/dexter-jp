@@ -16,7 +16,7 @@ import { classifyError, isNonRetryableError } from '@/utils/errors';
 import { resolveProvider, getProviderById } from '@/providers';
 
 export const DEFAULT_PROVIDER = 'openai';
-export const DEFAULT_MODEL = 'gpt-5.5';
+export const DEFAULT_MODEL = 'gpt-5.6-terra';
 
 /**
  * Gets the fast model variant for the given provider.
@@ -178,6 +178,7 @@ const DEFAULT_FACTORY: ModelFactory = (name, opts) =>
     model: name,
     ...opts,
     apiKey: getApiKey('OPENAI_API_KEY'),
+    ...(name.startsWith('gpt-5.6') ? { useResponsesApi: true } : {}),
   });
 
 export function getChatModel(

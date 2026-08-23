@@ -39,18 +39,20 @@ describe('analyzeStrategy', () => {
     const result = analyzeStrategy(technical(), { tickSize: 5 });
 
     expect(result.dataDate).toBe('2026-08-20');
-    expect(result.entry).toEqual({
+    const executableEntry = {
+      triggerPrice: 4_200,
       price: 4_205,
-      reason: 'breakout_above_swing_high',
-      trigger: 'strictly_above',
+      reason: 'breakout_above_swing_high' as const,
+      trigger: 'strictly_above' as const,
       tickSizeApplied: 5,
-    });
+    };
+    expect(result.entry).toEqual(executableEntry);
     if (!result.entry) {
       throw new Error('Expected a valid breakout entry');
     }
     expect(result.candidates).toHaveLength(2);
     expect(result.candidates[0]).toEqual({
-      entry: result.entry,
+      entry: executableEntry,
       stop: { price: 4_050, reason: 'latest_swing_low' },
       target: { price: 4_515, reason: 'risk_reward_2R' },
       risk: 155,
@@ -58,7 +60,7 @@ describe('analyzeStrategy', () => {
       rewardRisk: 2,
     });
     expect(result.candidates[1]).toEqual({
-      entry: result.entry,
+      entry: executableEntry,
       stop: { price: 4_055, reason: 'entry_minus_1_5_atr' },
       target: { price: 4_505, reason: 'risk_reward_2R' },
       risk: 150,
@@ -68,17 +70,25 @@ describe('analyzeStrategy', () => {
     expect(result.unavailable).toEqual([]);
   });
 
-  test('uses the swing high as an unrounded strictly-above trigger without tick data', () => {
+  test('does not calculate an exact entry or 2R target without sourced tick data', () => {
     const result = analyzeStrategy(technical());
-    expect(result.entry).toMatchObject({
-      price: 4_200,
+    expect(result.entry).toEqual({
+      triggerPrice: 4_200,
+      price: null,
+      reason: 'breakout_above_swing_high',
       trigger: 'strictly_above',
       tickSizeApplied: null,
+    });
+    expect(result.candidates).toEqual([]);
+    expect(result.unavailable).toContainEqual({
+      candidate: 'entry',
+      reason: 'missing_tick_size_for_executable_entry',
+      price: 4_200,
     });
   });
 
   test('rejects a swing stop above entry but keeps a valid ATR setup', () => {
-    const result = analyzeStrategy(technical({ latestSwingLow: 4_300 }));
+    const result = analyzeStrategy(technical({ latestSwingLow: 4_300 }), { tickSize: 5 });
 
     expect(result.candidates).toHaveLength(1);
     expect(result.candidates[0].stop.reason).toBe('entry_minus_1_5_atr');
@@ -90,19 +100,19 @@ describe('analyzeStrategy', () => {
   });
 
   test('makes zero risk explicit and omits the invalid candidate', () => {
-    const result = analyzeStrategy(technical({ latestSwingLow: 4_200 }));
+    const result = analyzeStrategy(technical({ latestSwingLow: 4_205 }), { tickSize: 5 });
 
     expect(result.candidates).toHaveLength(1);
     expect(result.unavailable).toContainEqual({
       candidate: 'swing_stop',
       reason: 'zero_risk',
-      price: 4_200,
+      price: 4_205,
     });
   });
 
   test('makes unavailable or invalid ATR explicit without losing the swing setup', () => {
     for (const atr14 of [null, 0, -1, Number.NaN]) {
-      const result = analyzeStrategy(technical({ atr14 }));
+      const result = analyzeStrategy(technical({ atr14 }), { tickSize: 5 });
       expect(result.candidates).toHaveLength(1);
       expect(result.candidates[0].stop.reason).toBe('latest_swing_low');
       expect(result.unavailable).toContainEqual({
@@ -117,13 +127,13 @@ describe('analyzeStrategy', () => {
       latestSwingHigh: 100,
       latestSwingLow: 90,
       atr14: 100,
-    }));
+    }), { tickSize: 1 });
 
     expect(result.candidates).toHaveLength(1);
     expect(result.unavailable).toContainEqual({
       candidate: 'atr_stop',
       reason: 'non_positive_stop',
-      price: -50,
+      price: -49,
     });
   });
 
@@ -144,6 +154,7 @@ describe('analyzeStrategy', () => {
 
   test('adds only sourced resistance targets above entry', () => {
     const result = analyzeStrategy(technical(), {
+      tickSize: 5,
       resistanceLevels: [4_500, 4_400, 4_500, 4_100, null],
     });
 
@@ -155,9 +166,9 @@ describe('analyzeStrategy', () => {
       4_400, 4_500, 4_400, 4_500,
     ]);
     expect(resistanceCandidates[0]).toMatchObject({
-      risk: 150,
-      reward: 200,
-      rewardRisk: 4 / 3,
+      risk: 155,
+      reward: 195,
+      rewardRisk: 39 / 31,
     });
     expect(result.unavailable).toContainEqual({
       candidate: 'resistance_target',
@@ -168,5 +179,37 @@ describe('analyzeStrategy', () => {
       candidate: 'resistance_target',
       reason: 'missing_or_invalid_resistance',
     });
+  });
+
+  test('aligns unaligned stops and targets to executable ticks', () => {
+    const result = analyzeStrategy(technical({
+      latestSwingHigh: 4_200.1,
+      latestSwingLow: 4_052,
+      atr14: 101,
+    }), {
+      tickSize: 5,
+      resistanceLevels: [4_499],
+    });
+
+    expect(result.entry).toMatchObject({
+      triggerPrice: 4_200.1,
+      price: 4_205,
+      tickSizeApplied: 5,
+    });
+    expect(result.candidates.map((candidate) => ({
+      stop: candidate.stop.price,
+      target: candidate.target.price,
+      reason: candidate.target.reason,
+    }))).toEqual([
+      { stop: 4_050, target: 4_515, reason: 'risk_reward_2R' },
+      { stop: 4_050, target: 4_495, reason: 'resistance_level' },
+      { stop: 4_050, target: 4_515, reason: 'risk_reward_2R' },
+      { stop: 4_050, target: 4_495, reason: 'resistance_level' },
+    ]);
+    for (const candidate of result.candidates) {
+      expect(candidate.entry.price % 5).toBe(0);
+      expect(candidate.stop.price % 5).toBe(0);
+      expect(candidate.target.price % 5).toBe(0);
+    }
   });
 });

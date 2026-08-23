@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { getToolRegistry } from './registry.js';
 
 const ANALYSIS_TOOL_NAMES = [
+  'analyze_financial_metrics',
   'analyze_technical',
   'analyze_supply_demand',
   'analyze_peer_comparison',

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  analyzeFinancialMetrics,
   analyzeMarketCorrelation,
   analyzePeerComparison,
   analyzeStrategy,
@@ -8,6 +9,7 @@ import {
   type PeerCompany,
 } from './index.js';
 import {
+  analyzeFinancialMetricsTool,
   analyzeMarketCorrelationTool,
   analyzePeerComparisonTool,
   analyzeStrategyTool,
@@ -32,6 +34,7 @@ describe('deterministic analysis tools', () => {
   test('have stable unique names', () => {
     const names = deterministicAnalysisTools.map((tool) => tool.name);
     expect(names).toEqual([
+      'analyze_financial_metrics',
       'analyze_technical',
       'analyze_supply_demand',
       'analyze_peer_comparison',
@@ -39,6 +42,34 @@ describe('deterministic analysis tools', () => {
       'analyze_strategy',
     ]);
     expect(new Set(names).size).toBe(names.length);
+  });
+
+  test('delegates valuation and CAGR calculations to the Financial Metrics Engine', async () => {
+    const financials = [
+      {
+        fiscalYear: 2021,
+        submitDate: '2021-06-24',
+        revenue: 100,
+        eps: 10,
+        bps: 50,
+        dividendPerShare: 2,
+      },
+      {
+        fiscalYear: 2026,
+        submitDate: '2026-06-10',
+        revenue: 200,
+        eps: 20,
+        bps: 80,
+        dividendPerShare: 4,
+      },
+    ];
+    const actual = toolData(await analyzeFinancialMetricsTool.invoke({
+      currentPrice: 100,
+      priceDataDate: '2026-08-21',
+      financials,
+    }));
+
+    expect(actual).toEqual(analyzeFinancialMetrics(100, '2026-08-21', financials));
   });
 
   test('delegates OHLCV calculations to the Technical Engine', async () => {
@@ -115,5 +146,94 @@ describe('deterministic analysis tools', () => {
       ...options,
     }));
     expect(actual).toEqual(analyzeStrategy(technical, options));
+  });
+
+  test('fetches complete J-Quants histories in direct ticker mode', async () => {
+    const priceDates = dates(251);
+    const marginDates = Array.from({ length: 52 }, (_, index) => {
+      const date = new Date(Date.UTC(2026, 0, 2 + index * 7));
+      return date.toISOString().slice(0, 10);
+    });
+    const originalFetch = globalThis.fetch;
+    const previousApiKey = process.env.JQUANTS_API_KEY;
+    process.env.JQUANTS_API_KEY = 'test-jquants-key';
+
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const href = input instanceof URL
+        ? input.href
+        : typeof input === 'string'
+          ? input
+          : input.url;
+      const url = new URL(href);
+      let data: Record<string, unknown>[];
+
+      if (url.pathname.endsWith('/equities/bars/daily')) {
+        data = priceDates.map((date, index) => ({
+          Date: date,
+          Code: '72030',
+          AdjO: 100 + index,
+          AdjH: 102 + index,
+          AdjL: 99 + index,
+          AdjC: 101 + index,
+          AdjVo: 1_000 + index,
+          Va: null,
+        }));
+      } else if (url.pathname.endsWith('/markets/margin-interest')) {
+        data = marginDates.map((date, index) => ({
+          Date: date,
+          Code: '72030',
+          ShrtVol: 100 + index,
+          LongVol: 1_000 + index,
+          ShrtNegVol: null,
+          LongNegVol: null,
+          ShrtStdVol: null,
+          LongStdVol: null,
+          IssType: '2',
+        }));
+      } else if (url.pathname.endsWith('/indices/bars/daily/topix')) {
+        data = priceDates.map((date, index) => ({
+          Date: date,
+          O: 200 + index,
+          H: 202 + index,
+          L: 199 + index,
+          C: 201 + index * 1.01,
+        }));
+      } else {
+        throw new Error(`Unexpected test URL: ${url.pathname}`);
+      }
+
+      return new Response(JSON.stringify({ data }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    try {
+      const source = { ticker: '7203', from: '2025-01-01', to: '2026-12-31' };
+      const technical = toolData(await analyzeTechnicalTool.invoke(source)) as {
+        dataDate: string | null;
+      };
+      const supplyDemand = toolData(await analyzeSupplyDemandTool.invoke(source)) as {
+        mean52w: number | null;
+        unavailable: unknown[];
+      };
+      const correlation = toolData(await analyzeMarketCorrelationTool.invoke(source)) as {
+        alignedPriceCount: number;
+        windows: Array<{ period: number; observations: number; unavailable: unknown[] }>;
+      };
+
+      expect(technical.dataDate).toBe(priceDates[priceDates.length - 1]);
+      expect(supplyDemand.mean52w).not.toBeNull();
+      expect(supplyDemand.unavailable).toEqual([]);
+      expect(correlation.alignedPriceCount).toBe(251);
+      expect(correlation.windows.find((window) => window.period === 250)).toMatchObject({
+        observations: 250,
+        unavailable: [],
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (previousApiKey === undefined) delete process.env.JQUANTS_API_KEY;
+      else process.env.JQUANTS_API_KEY = previousApiKey;
+    }
   });
 });

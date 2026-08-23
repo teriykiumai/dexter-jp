@@ -11,6 +11,7 @@ import { formatToolResult } from '../types.js';
 import { api } from './api.js';
 import {
   AVAILABLE_METRICS,
+  normalizeScreenerConditions,
   ScreenerConditionSchema,
   type ScreenerConditions,
 } from './screen-companies.js';
@@ -27,13 +28,14 @@ export function createRawScreener(): DynamicStructuredTool {
     description: RAW_SCREENER_DESCRIPTION,
     schema: ScreenerConditionSchema,
     func: async (input: ScreenerConditions) => {
+      const normalized = normalizeScreenerConditions(input);
       try {
         const params: Record<string, string | number | undefined> = {
-          conditions: JSON.stringify(input.conditions),
-          limit: input.limit ?? 25,
+          conditions: JSON.stringify(normalized.conditions),
+          limit: normalized.limit ?? 25,
         };
-        if (input.industry) params.industry = input.industry;
-        if (input.sort_by) params.sort = input.sort_by;
+        if (normalized.industry) params.industry = normalized.industry;
+        if (normalized.sort_by) params.sort = normalized.sort_by;
 
         const { data, url } = await api.get('/screener', params);
         return formatToolResult(data, [url]);
@@ -42,7 +44,7 @@ export function createRawScreener(): DynamicStructuredTool {
           {
             error: 'Screener request failed',
             details: error instanceof Error ? error.message : String(error),
-            conditions: input.conditions,
+            conditions: normalized.conditions,
           },
           [],
         );

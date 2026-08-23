@@ -1,5 +1,6 @@
-import { describe, expect, test, mock, beforeEach, afterEach } from 'bun:test';
+import { describe, expect, test, mock, beforeEach, afterEach, spyOn } from 'bun:test';
 import { AgentRunnerController } from './agent-runner.js';
+import { Agent } from '../agent/agent.js';
 import { InMemoryChatHistory } from '../utils/in-memory-chat-history.js';
 import type { AgentConfig, AgentEvent } from '../agent/types.js';
 import type { Question } from '../tools/ask-user-question/types.js';
@@ -16,6 +17,18 @@ const QUESTIONS: Question[] = [
   },
 ];
 
+class MockAgent {
+  constructor(private config: AgentConfig) {}
+
+  async *run(): AsyncGenerator<AgentEvent> {
+    const requestUserInput = this.config.requestUserInput;
+    if (requestUserInput) {
+      await requestUserInput({ questions: QUESTIONS });
+    }
+    yield { type: 'done', answer: 'done', toolCalls: [], iterations: 1, totalTime: 10 };
+  }
+}
+
 function createController() {
   const controller = new AgentRunnerController(
     { model: 'gpt-5.5', modelProvider: 'openai', maxIterations: 10 },
@@ -26,21 +39,10 @@ function createController() {
 
 describe('AgentRunnerController — question flow', () => {
   beforeEach(() => {
-    mock.module('../agent/agent.js', () => ({
-      Agent: class MockAgent {
-        static async create(config: AgentConfig) {
-          return new MockAgent(config);
-        }
-        constructor(private config: AgentConfig) {}
-        async *run(): AsyncGenerator<AgentEvent> {
-          const requestUserInput = this.config.requestUserInput;
-          if (requestUserInput) {
-            await requestUserInput({ questions: QUESTIONS });
-          }
-          yield { type: 'done', answer: 'done', toolCalls: [], iterations: 1, totalTime: 10 };
-        }
-      },
-    }));
+    spyOn(Agent, 'create').mockImplementation(async (config: AgentConfig = {}) => {
+      return new MockAgent(config) as unknown as Agent;
+    });
+    spyOn(InMemoryChatHistory.prototype, 'saveAnswer').mockResolvedValue(undefined);
   });
 
   afterEach(() => {

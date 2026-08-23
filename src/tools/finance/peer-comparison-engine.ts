@@ -78,6 +78,17 @@ function isFiniteNumber(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
+function isAvailableMetricValue(
+  metric: PeerMetric,
+  value: number | null | undefined,
+): value is number {
+  if (!isFiniteNumber(value)) return false;
+  // Non-positive valuation multiples do not express meaningful relative value.
+  if (metric === 'per' || metric === 'pbr') return value > 0;
+  if (metric === 'dividendYield') return value >= 0;
+  return true;
+}
+
 function asPositiveNumber(value: number | null | undefined): number | null {
   return isFiniteNumber(value) && value > 0 ? value : null;
 }
@@ -247,10 +258,12 @@ function buildPosition(
 ): { position: PeerMetricPosition; unavailable: UnavailablePeerMetric | null } {
   const direction = PEER_METRIC_DIRECTIONS[metric];
   const rawTargetValue = target.metrics[metric];
-  const targetValue = isFiniteNumber(rawTargetValue) ? rawTargetValue : null;
+  const targetValue = isAvailableMetricValue(metric, rawTargetValue)
+    ? rawTargetValue
+    : null;
   const peerValues = peers
     .map((peer) => peer.metrics[metric])
-    .filter(isFiniteNumber);
+    .filter((value): value is number => isAvailableMetricValue(metric, value));
 
   const unavailablePosition = (
     reason: PeerMetricUnavailableReason,

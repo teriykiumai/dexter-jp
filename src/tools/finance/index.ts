@@ -7,11 +7,13 @@ export { getStockPrice, isJQuantsAvailable, STOCK_PRICE_DESCRIPTION } from './st
 export { getMarginData, MARGIN_DATA_DESCRIPTION } from './margin-data.js';
 export { getTopix, TOPIX_DESCRIPTION } from './topix.js';
 export {
+  ANALYZE_FINANCIAL_METRICS_DESCRIPTION,
   ANALYZE_MARKET_CORRELATION_DESCRIPTION,
   ANALYZE_PEER_COMPARISON_DESCRIPTION,
   ANALYZE_STRATEGY_DESCRIPTION,
   ANALYZE_SUPPLY_DEMAND_DESCRIPTION,
   ANALYZE_TECHNICAL_DESCRIPTION,
+  analyzeFinancialMetricsTool,
   analyzeMarketCorrelationTool,
   analyzePeerComparisonTool,
   analyzeStrategyTool,
@@ -19,6 +21,14 @@ export {
   analyzeTechnicalTool,
   deterministicAnalysisTools,
 } from './analysis-tools.js';
+export {
+  analyzeFinancialMetrics,
+  type FinancialMetric,
+  type FinancialMetricPoint,
+  type FinancialMetricUnavailableReason,
+  type FinancialMetricsResult,
+  type UnavailableFinancialMetric,
+} from './financial-metrics-engine.js';
 export {
   analyzeTechnical,
   calculateAtr,
@@ -75,6 +85,7 @@ export {
 } from './market-correlation-engine.js';
 export {
   analyzeStrategy,
+  type ExecutableStrategyEntry,
   nextTickAbove,
   STRATEGY_DEFAULTS,
   type StrategyCandidate,
