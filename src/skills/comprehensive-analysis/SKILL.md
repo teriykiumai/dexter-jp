@@ -56,6 +56,12 @@ Use `read_filings` for material business risks and management context when avail
 
 Obtain a broad same-sector candidate set from `company_screener` or `screen_companies`; never choose peers from memory. Map only sourced sector, market cap, metric, and data-date fields into `analyze_peer_comparison`. Let the engine select 5–10 peers, prioritize the 0.3x–3x market-cap range, include the sector leader where applicable, and calculate median/rank/percentile.
 
+For the Standard Agent, request a broad comparable cohort with explicit neutral
+metric bounds so the screener returns the comparison fields: PER >= 0, PBR >= 0,
+ROE >= -100, operating margin >= -100, revenue growth >= -100, and dividend
+yield >= 0, sorted by revenue with a limit of 20. Then map the returned fields
+into `analyze_peer_comparison`; do not stop at merely listing company names.
+
 Disclose `tooFewPeers`, missing target metrics, and insufficient peer data.
 
 ## 4. Acquire market histories
@@ -77,6 +83,18 @@ Preserve dates and nulls. Do not forward-fill, interpolate, or silently remove m
 5. Supply Strategy `tickSize` or `resistanceLevels` only when a reliable source provided them; otherwise omit them.
 
 Never reproduce or repair the Engine calculations in narrative reasoning. Carry every `unavailable` reason into the report.
+
+Pass the complete retrieved histories to the Engines. Do not shorten OHLCV to the
+latest 20 bars before Technical, do not omit any weekly margin observations, and
+do not reuse a Technical-only slice for Supply & Demand or Market Correlation.
+When stock and TOPIX histories are available, call `analyze_market_correlation`
+before writing the report.
+
+For comprehensive analysis, prefer the direct ticker mode supported by
+`analyze_technical`, `analyze_supply_demand`, and `analyze_market_correlation`:
+pass the company ticker plus the same `from` and `to` dates used for retrieval.
+This reuses the existing J-Quants tools inside each deterministic analysis tool
+and avoids re-serializing or accidentally shortening large histories.
 
 ## 6. Build conditional scenarios
 

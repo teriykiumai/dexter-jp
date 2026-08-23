@@ -178,6 +178,7 @@ const DEFAULT_FACTORY: ModelFactory = (name, opts) =>
     model: name,
     ...opts,
     apiKey: getApiKey('OPENAI_API_KEY'),
+    ...(name.startsWith('gpt-5.6') ? { useResponsesApi: true } : {}),
   });
 
 export function getChatModel(

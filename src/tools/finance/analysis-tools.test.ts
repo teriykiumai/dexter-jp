@@ -116,4 +116,89 @@ describe('deterministic analysis tools', () => {
     }));
     expect(actual).toEqual(analyzeStrategy(technical, options));
   });
+
+  test('fetches complete J-Quants histories in direct ticker mode', async () => {
+    const priceDates = dates(251);
+    const marginDates = Array.from({ length: 52 }, (_, index) => {
+      const date = new Date(Date.UTC(2026, 0, 2 + index * 7));
+      return date.toISOString().slice(0, 10);
+    });
+    const originalFetch = globalThis.fetch;
+
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const href = input instanceof URL
+        ? input.href
+        : typeof input === 'string'
+          ? input
+          : input.url;
+      const url = new URL(href);
+      let data: Record<string, unknown>[];
+
+      if (url.pathname.endsWith('/equities/bars/daily')) {
+        data = priceDates.map((date, index) => ({
+          Date: date,
+          Code: '72030',
+          AdjO: 100 + index,
+          AdjH: 102 + index,
+          AdjL: 99 + index,
+          AdjC: 101 + index,
+          AdjVo: 1_000 + index,
+          Va: null,
+        }));
+      } else if (url.pathname.endsWith('/markets/margin-interest')) {
+        data = marginDates.map((date, index) => ({
+          Date: date,
+          Code: '72030',
+          ShrtVol: 100 + index,
+          LongVol: 1_000 + index,
+          ShrtNegVol: null,
+          LongNegVol: null,
+          ShrtStdVol: null,
+          LongStdVol: null,
+          IssType: '2',
+        }));
+      } else if (url.pathname.endsWith('/indices/bars/daily/topix')) {
+        data = priceDates.map((date, index) => ({
+          Date: date,
+          O: 200 + index,
+          H: 202 + index,
+          L: 199 + index,
+          C: 201 + index * 1.01,
+        }));
+      } else {
+        throw new Error(`Unexpected test URL: ${url.pathname}`);
+      }
+
+      return new Response(JSON.stringify({ data }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    try {
+      const source = { ticker: '7203', from: '2025-01-01', to: '2026-12-31' };
+      const technical = toolData(await analyzeTechnicalTool.invoke(source)) as {
+        dataDate: string | null;
+      };
+      const supplyDemand = toolData(await analyzeSupplyDemandTool.invoke(source)) as {
+        mean52w: number | null;
+        unavailable: unknown[];
+      };
+      const correlation = toolData(await analyzeMarketCorrelationTool.invoke(source)) as {
+        alignedPriceCount: number;
+        windows: Array<{ period: number; observations: number; unavailable: unknown[] }>;
+      };
+
+      expect(technical.dataDate).toBe(priceDates[priceDates.length - 1]);
+      expect(supplyDemand.mean52w).not.toBeNull();
+      expect(supplyDemand.unavailable).toEqual([]);
+      expect(correlation.alignedPriceCount).toBe(251);
+      expect(correlation.windows.find((window) => window.period === 250)).toMatchObject({
+        observations: 250,
+        unavailable: [],
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });

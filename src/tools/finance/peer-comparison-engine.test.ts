@@ -195,6 +195,54 @@ describe('analyzePeerComparison', () => {
     });
   });
 
+  test('excludes non-positive PER and PBR values from valuation rankings', () => {
+    const result = analyzePeerComparison(
+      company('target', 100, { per: 15, pbr: 1.5, roe: -5 }),
+      [
+        company('loss-maker', 90, { per: -3, pbr: 0, roe: -10 }),
+        company('profitable', 110, { per: 10, pbr: 1, roe: 10 }),
+      ],
+    );
+
+    expect(result.positions.per).toMatchObject({
+      peerSampleSize: 1,
+      cohortSize: 2,
+      median: 12.5,
+      rank: 2,
+      percentile: 0,
+    });
+    expect(result.positions.pbr).toMatchObject({
+      peerSampleSize: 1,
+      cohortSize: 2,
+      median: 1.25,
+      rank: 2,
+      percentile: 0,
+    });
+    expect(result.positions.roe).toMatchObject({
+      peerSampleSize: 2,
+      cohortSize: 3,
+      median: -5,
+    });
+  });
+
+  test('marks a non-positive target valuation multiple unavailable', () => {
+    const result = analyzePeerComparison(
+      company('target', 100, { per: -5, pbr: 0 }),
+      [company('peer', 90, { per: 10, pbr: 1 })],
+    );
+
+    expect(result.positions.per.targetValue).toBeNull();
+    expect(result.positions.pbr.targetValue).toBeNull();
+    expect(result.unavailable).toContainEqual({
+      metric: 'per',
+      reason: 'missing_target_metric',
+    });
+    expect(result.unavailable).toContainEqual({
+      metric: 'pbr',
+      reason: 'missing_target_metric',
+    });
+  });
+
   test('marks a missing target metric unavailable', () => {
     const result = analyzePeerComparison(
       company('target', 100, { roe: null }),

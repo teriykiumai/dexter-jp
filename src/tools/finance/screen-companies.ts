@@ -84,6 +84,36 @@ export const ScreenerConditionSchema = z.object({
 
 export type ScreenerConditions = z.infer<typeof ScreenerConditionSchema>;
 
+const ScreenerLlmOutputSchema = z.object({
+  conditions: ScreenerConditionSchema.shape.conditions,
+  industry: z.string().nullable().describe('Industry filter, or null when not requested'),
+  limit: z.number().nullable().describe('Maximum results, or null to use the default'),
+  sort_by: z.string().nullable().describe('Metric key to sort by, or null when not requested'),
+});
+
+type ScreenerLlmOutput = z.infer<typeof ScreenerLlmOutputSchema>;
+
+/** Ensure the EDINET DB screener receives at least one API condition. */
+export function normalizeScreenerConditions(
+  input: ScreenerConditions,
+): ScreenerConditions {
+  return input.conditions.length > 0
+    ? input
+    : {
+      ...input,
+      conditions: [{ metric: 'revenue', operator: 'gte', value: 0 }],
+    };
+}
+
+function fromLlmOutput(output: ScreenerLlmOutput): ScreenerConditions {
+  return normalizeScreenerConditions({
+    conditions: output.conditions,
+    ...(output.industry !== null ? { industry: output.industry } : {}),
+    ...(output.limit !== null ? { limit: output.limit } : {}),
+    ...(output.sort_by !== null ? { sort_by: output.sort_by } : {}),
+  });
+}
+
 function buildScreenerPrompt(): string {
   return `You are a Japanese stock screening assistant.
 Current date: ${getCurrentDate()}
@@ -108,6 +138,8 @@ ${AVAILABLE_METRICS}
 4. Set limit to 25 unless the user specifies otherwise
 5. For industry filters, use Japanese industry names (exact match)
 6. If the user mentions sorting, set sort_by to the relevant metric
+7. If only an industry is requested, use revenue gte 0 as a neutral API condition
+8. Return null for industry, limit, or sort_by when the user did not request it
 
 Return only the structured output fields.`;
 }
@@ -139,9 +171,9 @@ export function createScreenCompanies(model: string): DynamicStructuredTool {
         const { response } = await callLlm(input.query, {
           model,
           systemPrompt: buildScreenerPrompt(),
-          outputSchema: ScreenerConditionSchema,
+          outputSchema: ScreenerLlmOutputSchema,
         });
-        conditions = ScreenerConditionSchema.parse(response);
+        conditions = fromLlmOutput(ScreenerLlmOutputSchema.parse(response));
       } catch (error) {
         return formatToolResult(
           {

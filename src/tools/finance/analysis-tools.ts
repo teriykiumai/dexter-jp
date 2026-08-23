@@ -6,6 +6,9 @@ import { analyzePeerComparison } from './peer-comparison-engine.js';
 import { analyzeStrategy } from './strategy-engine.js';
 import { analyzeSupplyDemand } from './supply-demand-engine.js';
 import { analyzeTechnical } from './technical-engine.js';
+import { getMarginData } from './margin-data.js';
+import { getStockPrice } from './stock-price.js';
+import { getTopix } from './topix.js';
 
 const nullableNumber = z.number().nullable();
 
@@ -60,6 +63,70 @@ const strategyTechnicalInputSchema = z.object({
   atr14: nullableNumber,
 });
 
+const tickerSourceFields = {
+  ticker: z.string().optional().describe(
+    'Ticker to fetch directly instead of re-serializing a retrieved history.',
+  ),
+  from: z.string().optional().describe('History start date for direct ticker mode.'),
+  to: z.string().optional().describe('History end date for direct ticker mode.'),
+};
+
+function parseToolArray<T>(result: unknown, toolName: string): T[] {
+  const parsed = JSON.parse(
+    typeof result === 'string' ? result : JSON.stringify(result),
+  ) as { data?: unknown };
+  if (!Array.isArray(parsed.data)) {
+    const error = parsed.data && typeof parsed.data === 'object'
+      ? (parsed.data as { error?: unknown }).error
+      : undefined;
+    throw new Error(
+      typeof error === 'string' ? error : `${toolName} did not return a history array.`,
+    );
+  }
+  return parsed.data as T[];
+}
+
+function requireTickerRange(
+  ticker: string | undefined,
+  from: string | undefined,
+  to: string | undefined,
+  toolName: string,
+): { ticker: string; from: string; to: string | undefined } {
+  if (!ticker || !from) {
+    throw new Error(`${toolName} requires its history arrays or both ticker and from.`);
+  }
+  return { ticker, from, to };
+}
+
+async function fetchStockHistory(
+  ticker: string,
+  from: string,
+  to: string | undefined,
+) {
+  return parseToolArray<z.infer<typeof technicalBarSchema>>(
+    await getStockPrice.invoke({ ticker, from, to }),
+    'get_stock_price',
+  );
+}
+
+async function fetchMarginHistory(
+  ticker: string,
+  from: string,
+  to: string | undefined,
+) {
+  return parseToolArray<z.infer<typeof marginHistoryPointSchema>>(
+    await getMarginData.invoke({ ticker, from, to }),
+    'get_margin_data',
+  );
+}
+
+async function fetchTopixHistory(from: string, to: string | undefined) {
+  return parseToolArray<z.infer<typeof marketPricePointSchema>>(
+    await getTopix.invoke({ from, to }),
+    'get_topix',
+  );
+}
+
 export const ANALYZE_TECHNICAL_DESCRIPTION = `
 Calculate the fixed MVP technical snapshot from chronological OHLCV bars. Returns SMA20, ATR14, average volume, Swing High/Low, trend, data date, and explicit unavailable metrics. All calculations are deterministic; do not calculate these values in the model.
 `.trim();
@@ -68,11 +135,18 @@ export const analyzeTechnicalTool = new DynamicStructuredTool({
   name: 'analyze_technical',
   description: ANALYZE_TECHNICAL_DESCRIPTION,
   schema: z.object({
-    bars: z.array(technicalBarSchema).describe(
+    bars: z.array(technicalBarSchema).optional().describe(
       'Chronological adjusted OHLCV bars from get_stock_price. Preserve null values and dates.',
     ),
+    ...tickerSourceFields,
   }),
-  func: async ({ bars }) => formatToolResult(analyzeTechnical(bars), []),
+  func: async ({ bars, ticker, from, to }) => {
+    if (!bars) {
+      const source = requireTickerRange(ticker, from, to, 'analyze_technical');
+      bars = await fetchStockHistory(source.ticker, source.from, source.to);
+    }
+    return formatToolResult(analyzeTechnical(bars), []);
+  },
 });
 
 export const ANALYZE_SUPPLY_DEMAND_DESCRIPTION = `
@@ -83,17 +157,36 @@ export const analyzeSupplyDemandTool = new DynamicStructuredTool({
   name: 'analyze_supply_demand',
   description: ANALYZE_SUPPLY_DEMAND_DESCRIPTION,
   schema: z.object({
-    marginHistory: z.array(marginHistoryPointSchema).describe(
+    marginHistory: z.array(marginHistoryPointSchema).optional().describe(
       'Chronological rows from get_margin_data, mapped to date, longBalance, and shortBalance.',
     ),
-    volumeHistory: z.array(volumeHistoryPointSchema).describe(
+    volumeHistory: z.array(volumeHistoryPointSchema).optional().describe(
       'Chronological rows from get_stock_price, mapped to date and volume.',
     ),
+    ...tickerSourceFields,
   }),
-  func: async ({ marginHistory, volumeHistory }) => formatToolResult(
-    analyzeSupplyDemand(marginHistory, volumeHistory),
-    [],
-  ),
+  func: async ({ marginHistory, volumeHistory, ticker, from, to }) => {
+    if (!marginHistory || !volumeHistory) {
+      const source = requireTickerRange(ticker, from, to, 'analyze_supply_demand');
+      if (!marginHistory && !volumeHistory) {
+        const [fetchedMargin, fetchedStock] = await Promise.all([
+          fetchMarginHistory(source.ticker, source.from, source.to),
+          fetchStockHistory(source.ticker, source.from, source.to),
+        ]);
+        marginHistory = fetchedMargin;
+        volumeHistory = fetchedStock.map(({ date, volume }) => ({ date, volume }));
+      } else if (!marginHistory) {
+        marginHistory = await fetchMarginHistory(source.ticker, source.from, source.to);
+      } else if (!volumeHistory) {
+        const fetchedStock = await fetchStockHistory(source.ticker, source.from, source.to);
+        volumeHistory = fetchedStock.map(({ date, volume }) => ({ date, volume }));
+      }
+    }
+    if (!marginHistory || !volumeHistory) {
+      throw new Error('analyze_supply_demand could not resolve complete histories.');
+    }
+    return formatToolResult(analyzeSupplyDemand(marginHistory, volumeHistory), []);
+  },
 });
 
 export const ANALYZE_PEER_COMPARISON_DESCRIPTION = `
@@ -123,17 +216,36 @@ export const analyzeMarketCorrelationTool = new DynamicStructuredTool({
   name: 'analyze_market_correlation',
   description: ANALYZE_MARKET_CORRELATION_DESCRIPTION,
   schema: z.object({
-    stockPrices: z.array(marketPricePointSchema).describe(
+    stockPrices: z.array(marketPricePointSchema).optional().describe(
       'Chronological adjusted stock closes from get_stock_price.',
     ),
-    topixPrices: z.array(marketPricePointSchema).describe(
+    topixPrices: z.array(marketPricePointSchema).optional().describe(
       'Chronological TOPIX closes from get_topix.',
     ),
+    ...tickerSourceFields,
   }),
-  func: async ({ stockPrices, topixPrices }) => formatToolResult(
-    analyzeMarketCorrelation(stockPrices, topixPrices),
-    [],
-  ),
+  func: async ({ stockPrices, topixPrices, ticker, from, to }) => {
+    if (!stockPrices || !topixPrices) {
+      const source = requireTickerRange(ticker, from, to, 'analyze_market_correlation');
+      if (!stockPrices && !topixPrices) {
+        const [fetchedStock, fetchedTopix] = await Promise.all([
+          fetchStockHistory(source.ticker, source.from, source.to),
+          fetchTopixHistory(source.from, source.to),
+        ]);
+        stockPrices = fetchedStock.map(({ date, close }) => ({ date, close }));
+        topixPrices = fetchedTopix;
+      } else if (!stockPrices) {
+        const fetchedStock = await fetchStockHistory(source.ticker, source.from, source.to);
+        stockPrices = fetchedStock.map(({ date, close }) => ({ date, close }));
+      } else if (!topixPrices) {
+        topixPrices = await fetchTopixHistory(source.from, source.to);
+      }
+    }
+    if (!stockPrices || !topixPrices) {
+      throw new Error('analyze_market_correlation could not resolve complete histories.');
+    }
+    return formatToolResult(analyzeMarketCorrelation(stockPrices, topixPrices), []);
+  },
 });
 
 export const ANALYZE_STRATEGY_DESCRIPTION = `
