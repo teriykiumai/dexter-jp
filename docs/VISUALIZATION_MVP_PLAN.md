@@ -264,7 +264,7 @@ V1では次を許容する。
 - structured narrative未取得を`unavailable`へ記録
 - `finalReportMarkdown`をそのまま表示用に保存
 
-V4までに、LLMへ金融数値を再入力させず、narrativeだけをtyped resultとして取得する小さなfinalization境界を設計する。Markdown parseへのfallbackは禁止する。
+V4ではSnapshotに存在するstructured narrativeのconditional表示までを実装する。Standard Agentからnarrativeだけをtyped resultとして取得する小さなfinalization境界は、Agent全体へ影響するため後続taskへ延期する。LLMへ金融数値を再入力させず、Markdown parseへのfallbackを禁止する方針は維持する。
 
 ## 9. Local Persistence
 

@@ -1,16 +1,15 @@
-import { readFile } from 'node:fs/promises';
 import {
   AnalysisSnapshotPersistenceError,
   AnalysisSnapshotSchema,
   type AnalysisSnapshotRepository,
 } from '../analysis/snapshot/index.js';
+import { loadDashboardAsset } from './assets.js';
 
 export type AnalysisSnapshotReader = Pick<
   AnalysisSnapshotRepository,
   'listLatest' | 'loadLatest' | 'listHistory' | 'loadHistory'
 >;
 
-const INDEX_HTML_URL = new URL('./web/index.html', import.meta.url);
 const BASE_HEADERS = {
   'Cache-Control': 'no-store',
   'X-Content-Type-Options': 'nosniff',
@@ -40,13 +39,22 @@ export function internalServerErrorResponse(): Response {
   return errorResponse(500, 'snapshot_unavailable', 'The requested analysis snapshot is unavailable.');
 }
 
-async function staticIndexResponse(): Promise<Response> {
-  const html = await readFile(INDEX_HTML_URL, 'utf8');
-  return new Response(html, {
+async function staticAssetResponse(pathname: string): Promise<Response | null> {
+  const asset = await loadDashboardAsset(pathname);
+  if (!asset) return null;
+  return new Response(asset.body, {
     headers: {
       ...BASE_HEADERS,
-      'Content-Type': 'text/html; charset=utf-8',
-      'Content-Security-Policy': "default-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+      'Content-Type': asset.contentType,
+      ...(asset.isHtml ? {
+        'Content-Security-Policy': [
+          "default-src 'self'",
+          "img-src 'self' data:",
+          "object-src 'none'",
+          "base-uri 'none'",
+          "frame-ancestors 'none'",
+        ].join('; '),
+      } : {}),
     },
   });
 }
@@ -99,9 +107,10 @@ export async function handleDashboardRequest(
     });
   }
 
-  if (url.pathname === '/' || url.pathname === '/index.html') {
+  if (!url.pathname.startsWith('/api/')) {
     try {
-      return await staticIndexResponse();
+      const assetResponse = await staticAssetResponse(url.pathname);
+      if (assetResponse) return assetResponse;
     } catch {
       return internalServerErrorResponse();
     }

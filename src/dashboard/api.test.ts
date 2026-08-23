@@ -209,7 +209,7 @@ describe('dashboard request handler', () => {
     });
   });
 
-  test('serves only the minimal static entry with CSP and an explicit content type', async () => {
+  test('serves the bundled dashboard and its same-origin assets with CSP', async () => {
     const { repository } = await createRepository();
 
     const response = await handleDashboardRequest(request('/'), repository);
@@ -220,7 +220,14 @@ describe('dashboard request handler', () => {
     expect(response.headers.get('content-security-policy')).toContain("default-src 'self'");
     expect(response.headers.get('content-security-policy')).toContain("object-src 'none'");
     expect(html).toContain('Dexter JP Dashboard');
-    expect(html).not.toContain('<script');
+    expect(html).toContain('<script');
+
+    const scriptPath = /<script[^>]+src="([^"]+)"/.exec(html)?.[1];
+    expect(scriptPath).toBeDefined();
+    const scriptResponse = await handleDashboardRequest(request(scriptPath!), repository);
+    expect(scriptResponse.status).toBe(200);
+    expect(scriptResponse.headers.get('content-type')).toContain('javascript');
+    expect(scriptResponse.headers.get('cache-control')).toBe('no-store');
   });
 
   test('does not return extraneous secret-like persisted input', async () => {
