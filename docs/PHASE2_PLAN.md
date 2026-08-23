@@ -229,9 +229,37 @@ silently absorbed into Phase 2A.
 
 ## 7. Indicator Conventions
 
-Exact formulas must be fixed before implementation and documented in tests.
+Exact formulas are fixed by this plan before implementation and must be documented in tests.
 
 Do not rely on ambiguous textbook names alone.
+
+### 7.0 Canonical calculation sequence
+
+RSI and MACD are recursive indicators whose latest value depends on where their seed
+sequence starts. To make the integrated Advanced Technical result reproducible for the
+same analysis date, Phase 2A fixes the canonical calculation sequence instead of
+letting an arbitrary caller-selected `from` date determine the seed.
+
+For `AdvancedTechnicalResult` aggregation:
+
+- input bars must be strictly chronological adjusted OHLCV
+- when at least 251 bars are available through the analysis end date, use exactly the latest 251 bars as the canonical calculation sequence
+- when fewer than 251 bars are available because of listing history or source coverage, use all available bars
+- the 251-bar choice deliberately reuses the existing comprehensive-analysis contract that requests a range long enough for at least 251 common trading closes
+- `dataDate` is the date of the latest bar in the canonical calculation sequence
+- RSI and MACD are seeded from the beginning of that canonical sequence using the fixed rules below
+- Bollinger Bands use the latest 20 closes within that same canonical sequence
+- a missing or invalid observation inside the relevant calculation sequence/window is never skipped, forward-filled, interpolated, or used as a point at which to restart a recursive indicator
+- indicator-specific minimum-history rules still apply after the canonical sequence is selected
+
+The narrow RSI/MACD helpers may operate on an explicitly supplied sequence, but the
+aggregate `AdvancedTechnicalResult` is responsible for selecting the canonical latest
+251-bar sequence. This keeps helper behavior simple while making the integrated result
+stable against arbitrary extra history before that boundary.
+
+The aggregate-engine test plan must include a regression case where two inputs have the
+same latest 251 bars but one input contains additional older bars. Latest RSI and MACD
+must be identical for both inputs.
 
 ### 7.1 RSI
 
@@ -393,9 +421,20 @@ The module may expose narrow calculation helpers first and later aggregate them 
 }
 ```
 
-Do not register a new Agent tool or alter `TechnicalResult` in the RSI, MACD, or
-Bollinger helper PRs. Aggregate and expose the stable result only after all three
+Do not register a new Agent tool or alter `TechnicalResult` in the RSI, MACD,
+Bollinger, or aggregate-engine PRs. Aggregate the stable result only after all three
 calculation contracts are merged.
+
+At the Tool + Snapshot V2 integration step, compare these two consumer boundaries
+before changing the Agent tool surface:
+
+- **A. Existing tool integration:** preserve the existing `analyze_technical` identity and expose the Advanced Technical result through a version-aware extension/companion field without changing Phase 1 `TechnicalResult` semantics.
+- **B. Separate tool integration:** register a dedicated `analyze_advanced_technical` tool that delegates to the pure module.
+
+Choose between A and B based on concrete code evidence at that time: duplicate
+J-Quants retrieval, Agent tool-surface complexity, Standard Agent collector/schema
+compatibility, Skill changes, and minimal diff. A separate Agent tool is not a fixed
+Phase 2A requirement.
 
 This is a concrete compatibility boundary, not a generic indicator framework or an
 abstraction added for symmetry.
@@ -464,8 +503,8 @@ Never derive Phase 2 snapshot fields from:
 Snapshot V2 unit additions:
 
 ```text
-rsi14                         index
-macd.value/signal/histogram   JPY
+rsi14                          index
+macd.value/signal/histogram    JPY
 bollinger20.middle/upper/lower JPY
 ```
 
@@ -500,28 +539,38 @@ Do not reconstruct historical RSI/MACD/Bollinger series in React.
 
 ## 11. Suggested Implementation Sequence
 
-### P2-D0 — Phase 2 Baseline / Contract Review
+### P2-D0 — Phase 2 Baseline / Compatibility Verification
 
-**Goal:** No code changes.
+**Goal:** No code changes. Verify that the fixed Phase 2A contracts can be implemented
+against current `main` without reopening design decisions unnecessarily.
 
 Tasks:
 
 - confirm Phase 1.5 V1–V5 are merged
 - run baseline tests/typecheck
-- inspect Technical Engine
+- inspect Technical Engine and tests
 - inspect Snapshot schema/builder/collector
 - inspect Dashboard presentation mapping
 - search for existing EMA/RSI/std-dev utilities
-- confirm formulas and unavailable semantics
+- verify that the fixed RSI/MACD/Bollinger contracts do not conflict with current code
+- verify that the adopted AdvancedTechnicalResult and Snapshot V2/V1-read-compatibility boundaries are implementable with minimal diff
+- identify any concrete compatibility risks before coding
 
 Deliverable:
 
-- proposed exact indicator contracts
+- confirmation of fixed-contract compatibility, or a concrete incompatibility with code/test evidence
+- existing utility reuse candidates
 - files likely to change
-- test plan
-- schema-version recommendation
+- implementation-focused test plan
+- Snapshot V2 compatibility/implementation risks
 
-**Done when:** formulas are unambiguous before coding.
+Do not propose replacement formulas, a different schema version, or a different
+Snapshot evolution strategy unless current merged code exposes a concrete
+incompatibility that makes the fixed contract unsafe or impossible. In that case,
+report the evidence before changing the plan.
+
+**Done when:** the fixed contracts are verified against current `main`, implementation
+risks are understood, and no unresolved incompatibility blocks P2-T1.
 
 ### P2-T1 — RSI 14
 
@@ -612,6 +661,7 @@ feat/technical-bollinger-phase2-step3
 
 Tasks:
 
+- select the canonical latest-251-bar calculation sequence defined in Section 7.0
 - aggregate RSI, MACD, and Bollinger latest values
 - one `dataDate`
 - typed metric-level unavailable reasons
@@ -626,6 +676,7 @@ Tests:
 - empty / insufficient history
 - missing and invalid close behavior
 - existing Phase 1 Technical result unchanged
+- two inputs with identical latest 251 bars but different additional older history produce identical latest RSI and MACD
 
 Suggested branch:
 
@@ -638,15 +689,27 @@ feat/advanced-technical-phase2-step4
 **Goal:** Expose the stable Advanced Technical result through the Agent and Canonical
 Snapshot without breaking V1 persistence.
 
-Tasks:
+Before changing the tool surface, compare:
 
-- register one deterministic analysis tool
+```text
+A. existing analyze_technical integration
+B. separate analyze_advanced_technical tool
+```
+
+Evaluate duplicate J-Quants retrieval, tool-surface complexity, collector/schema
+compatibility, Skill changes, and minimal diff. Choose the smaller safe integration;
+a new Agent tool is not mandatory.
+
+Tasks after that boundary is selected:
+
+- expose AdvancedTechnicalResult through the selected deterministic analysis-tool boundary
 - update the relevant Skill instructions minimally
 - add Snapshot V1 / V2 schemas and supported-version read boundary
 - update Builder units, data dates, provenance, and unavailable aggregation
-- update Standard Agent collector / decoder with ticker lock
+- update Standard Agent collector / decoder with ticker lock as required by the selected boundary
 - preserve V1 read behavior and save V2 only
 - verify persistence round trip and API output
+- keep the Phase 1 `TechnicalResult` semantics unchanged
 
 Tests:
 
@@ -657,6 +720,7 @@ Tests:
 - unknown schema version rejection
 - old required-section status semantics unchanged
 - no Markdown parsing or secret-like extraneous fields
+- selected tool boundary does not cause redundant market-history retrieval in the normal comprehensive-analysis path
 
 Suggested branch:
 
@@ -872,6 +936,7 @@ Phase 2A Technical is complete when:
 - RSI 14 is deterministic and tested
 - MACD 12/26/9 is deterministic and tested
 - Bollinger 20/2σ is deterministic and tested
+- recursive indicators use the fixed canonical calculation-sequence contract
 - typed unavailable states exist
 - canonical snapshot carries the stable values
 - Standard Agent analysis can interpret them
@@ -910,18 +975,23 @@ main の現在状態と直近のmerged PRも確認してください。
 Phase 1 / Phase 1.5 の既存contractを維持したまま、
 Phase 2A Technical ExpansionのP2-D0だけを実施してください。
 
+P2-D0はfixed contractの再設計ではなくbaseline / compatibility verificationです。
 特に以下を確認してください。
 
 - current Technical Engine and tests
 - AnalysisSnapshot schema / Builder / Standard Agent collector
 - Dashboard presentation layer
 - RSI / EMA / standard deviation utilityの既存実装有無
-- RSI 14, MACD 12/26/9, Bollinger 20/2σ の正確なformula contract
-- insufficient history / missing data semantics
-- Snapshot V1/V2 read compatibility boundary
+- fixed RSI 14, MACD 12/26/9, Bollinger 20/2σ contractsとcurrent codeの衝突有無
+- latest 251 barsを使うcanonical calculation-sequence contractの実装影響
+- Snapshot V2 + V1 read compatibility boundaryの実装risk
+- files likely to change and test plan
 
-実装はまだ行わず、
-推奨contract、変更候補ファイル、テスト計画、PR分割案を報告してください。
+concrete incompatibilityが見つからない限り、formula、AdvancedTechnicalResult、
+Snapshot V2方針を再設計しないでください。
+
+実装はまだ行わず、compatibility確認結果、再利用候補、変更候補ファイル、
+テスト計画、実装riskを報告してください。
 
 Code calculates, AI interprets.
 No data means no claim.
