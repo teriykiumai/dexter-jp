@@ -1,14 +1,20 @@
 import { describe, expect, test } from 'bun:test';
 import {
   buildAnalysisSnapshot,
+  buildAnalysisSnapshotLatestItem,
   type AnalysisSnapshot,
   type AnalysisSnapshotInput,
 } from '../../analysis/snapshot/index.js';
 import {
   UNAVAILABLE_TEXT,
+  WATCHLIST_STALE_AFTER_DAYS,
+  buildDetailPath,
   displayText,
   formatMetric,
   mapSnapshotToDashboard,
+  mapLatestAnalysisToWatchlistItem,
+  parseDetailTicker,
+  sortWatchlistItems,
 } from './presentation.js';
 
 function baseSnapshot(): AnalysisSnapshot {
@@ -104,6 +110,106 @@ function peerComparison(marketCapPriorityApplied: boolean): AnalysisSnapshot['pe
     marketCapPriorityUnavailableReason: marketCapPriorityApplied
       ? null
       : 'incomplete_peer_market_cap',
+  };
+}
+
+function watchlistSnapshot(
+  ticker: string,
+  generatedAt: string,
+  latestDataDate: string,
+): AnalysisSnapshot {
+  return {
+    ...baseSnapshot(),
+    canonicalTicker: ticker,
+    companyName: `${ticker}株式会社`,
+    generatedAt,
+    status: 'complete',
+    dataDates: {
+      identity: latestDataDate,
+      fundamental: latestDataDate,
+      valuation: { price: latestDataDate, financial: latestDataDate },
+      peerComparison: latestDataDate,
+      technical: latestDataDate,
+      supplyDemand: latestDataDate,
+      marketCorrelation: latestDataDate,
+      strategy: latestDataDate,
+      priceHistory: latestDataDate,
+    },
+    fundamental: {
+      periods: [{
+        fiscalYear: 2026,
+        submitDate: latestDataDate,
+        revenue: 1_000,
+        operatingIncome: 100,
+        ordinaryIncome: 100,
+        netIncome: 80,
+        eps: 100,
+        roe: 0.12,
+        equityRatio: 0.4,
+        operatingCashFlow: 120,
+        freeCashFlow: 90,
+      }],
+      sourceUrls: [],
+    },
+    valuation: {
+      priceDataDate: latestDataDate,
+      financialDataDate: latestDataDate,
+      latestFiscalYear: 2026,
+      currentPrice: 2_850,
+      per: 12.4,
+      pbr: 1.1,
+      dividendYieldPercent: 2.5,
+      revenueCagrPercent: 4,
+      cagrStartFiscalYear: 2023,
+      cagrEndFiscalYear: 2026,
+      cagrPeriods: 3,
+      unavailable: [],
+    },
+    technical: {
+      dataDate: latestDataDate,
+      ma20: 2_800,
+      atr14: 65,
+      averageVolume20: 12_000_000,
+      trend: 'uptrend',
+      latestSwingHigh: 2_900,
+      latestSwingLow: 2_650,
+      unavailable: [],
+    },
+    supplyDemand: {
+      dataDate: latestDataDate,
+      volumeDataDate: latestDataDate,
+      buyingBalance: 10_000,
+      sellingBalance: 5_000,
+      marginRatio: 2,
+      buyingBalanceWeeklyChange: 100,
+      sellingBalanceWeeklyChange: -100,
+      mean13w: 9_000,
+      mean52w: 8_000,
+      deviation52w: 0.25,
+      percentile52w: 0.8,
+      averageDailyVolume20: 2_000,
+      digestionDays: 5,
+      unavailable: [],
+    },
+    marketCorrelation: {
+      benchmark: 'TOPIX',
+      dataDate: latestDataDate,
+      alignedPriceCount: 250,
+      windows: [{
+        period: 250,
+        startDate: '2025-08-21',
+        endDate: latestDataDate,
+        observations: 250,
+        correlation: 0.7,
+        beta: 1.05,
+        alphaAnnualized: 0.02,
+        rSquared: 0.49,
+        stockVolatilityAnnualized: 0.2,
+        benchmarkVolatilityAnnualized: 0.15,
+        excessReturn: 0.03,
+        unavailable: [],
+      }],
+    },
   };
 }
 
@@ -220,5 +326,112 @@ describe('snapshot presentation mapping', () => {
       ['Swing High', 2_900],
       ['Swing Low', 2_650],
     ]);
+  });
+});
+
+describe('watchlist presentation mapping', () => {
+  test('maps latest metrics without recalculation and keeps missing values unavailable', () => {
+    const snapshot = watchlistSnapshot(
+      '7203',
+      '2026-08-23T01:02:03.000Z',
+      '2026-08-21',
+    );
+    const view = mapLatestAnalysisToWatchlistItem(
+      buildAnalysisSnapshotLatestItem(snapshot),
+      new Date('2026-08-23T00:00:00.000Z'),
+    );
+
+    expect(view).toMatchObject({
+      ticker: '7203',
+      price: { text: '¥2,850', available: true },
+      per: { text: '12.4x', available: true },
+      pbr: { text: '1.1x', available: true },
+      roe: { text: '12%', available: true },
+      trend: { text: 'uptrend', available: true },
+      marginPercentile: { text: '80%', available: true },
+      beta250: { text: '1.05', available: true },
+      latestDataDateRaw: '2026-08-21',
+      stale: false,
+    });
+
+    const missing = mapLatestAnalysisToWatchlistItem(
+      buildAnalysisSnapshotLatestItem(baseSnapshot()),
+    );
+    expect(missing.price).toEqual({ text: UNAVAILABLE_TEXT, available: false });
+    expect(missing.marginPercentile).toEqual({ text: UNAVAILABLE_TEXT, available: false });
+    expect(missing.beta250).toEqual({ text: UNAVAILABLE_TEXT, available: false });
+  });
+
+  test('marks only source dates older than the explicit seven-day UI threshold stale', () => {
+    const referenceDate = new Date('2026-08-23T18:30:00.000Z');
+    const boundary = mapLatestAnalysisToWatchlistItem(
+      buildAnalysisSnapshotLatestItem(
+        watchlistSnapshot('7203', '2026-08-23T00:00:00.000Z', '2026-08-16'),
+      ),
+      referenceDate,
+    );
+    const stale = mapLatestAnalysisToWatchlistItem(
+      buildAnalysisSnapshotLatestItem(
+        watchlistSnapshot('6758', '2026-08-23T00:00:00.000Z', '2026-08-15'),
+      ),
+      referenceDate,
+    );
+
+    expect(WATCHLIST_STALE_AFTER_DAYS).toBe(7);
+    expect(boundary.stale).toBeFalse();
+    expect(stale.stale).toBeTrue();
+  });
+
+  test('sorts by generatedAt or latest source data date with missing dates last', () => {
+    const referenceDate = new Date('2026-08-23T00:00:00.000Z');
+    const newestGenerated = mapLatestAnalysisToWatchlistItem(
+      buildAnalysisSnapshotLatestItem(
+        watchlistSnapshot('7203', '2026-08-23T02:00:00.000Z', '2026-08-20'),
+      ),
+      referenceDate,
+    );
+    const newestData = mapLatestAnalysisToWatchlistItem(
+      buildAnalysisSnapshotLatestItem(
+        watchlistSnapshot('6758', '2026-08-22T02:00:00.000Z', '2026-08-21'),
+      ),
+      referenceDate,
+    );
+    const missingSnapshot: AnalysisSnapshot = {
+      ...baseSnapshot(),
+      canonicalTicker: '130A',
+      companyName: '130A株式会社',
+      dataDates: {
+        identity: null,
+        fundamental: null,
+        valuation: { price: null, financial: null },
+        peerComparison: null,
+        technical: null,
+        supplyDemand: null,
+        marketCorrelation: null,
+        strategy: null,
+        priceHistory: null,
+      },
+    };
+    const missingData = mapLatestAnalysisToWatchlistItem(
+      buildAnalysisSnapshotLatestItem(missingSnapshot),
+      referenceDate,
+    );
+
+    expect(sortWatchlistItems(
+      [newestGenerated, newestData, missingData],
+      'generatedAt',
+    ).map(item => item.ticker)).toEqual(['7203', '130A', '6758']);
+    expect(sortWatchlistItems(
+      [newestGenerated, newestData, missingData],
+      'latestDataDate',
+    ).map(item => item.ticker)).toEqual(['6758', '7203', '130A']);
+  });
+
+  test('builds and parses safe detail navigation without a router dependency', () => {
+    expect(buildDetailPath('130A')).toBe('/?ticker=130A');
+    expect(parseDetailTicker('?ticker=7203')).toBe('7203');
+    expect(parseDetailTicker('?ticker=130A')).toBe('130A');
+    expect(parseDetailTicker('?ticker=../7203')).toBeNull();
+    expect(parseDetailTicker('?ticker=72030')).toBeNull();
   });
 });

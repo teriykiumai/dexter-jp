@@ -1,15 +1,23 @@
-import { StrictMode, useEffect, useState, type ReactNode } from 'react';
+import { StrictMode, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { AnalysisSnapshot } from '../../analysis/snapshot/index.js';
+import type {
+  AnalysisSnapshot,
+  AnalysisSnapshotLatestItem,
+} from '../../analysis/snapshot/index.js';
 import { LIGHTWEIGHT_CHARTS_NOTICE, PriceChart } from './chart.js';
 import {
   UNAVAILABLE_TEXT,
+  WATCHLIST_STALE_AFTER_DAYS,
+  buildDetailPath,
   mapSnapshotToDashboard,
+  mapLatestAnalysisToWatchlistItem,
+  parseDetailTicker,
+  sortWatchlistItems,
   type DashboardMetric,
   type DisplayValue,
+  type WatchlistItemView,
+  type WatchlistSortKey,
 } from './presentation.js';
-
-const DASHBOARD_TICKER = '7203';
 
 function Value({ value }: { value: DisplayValue }) {
   return <span className={value.available ? undefined : 'unavailable'}>{value.text}</span>;
@@ -46,11 +54,14 @@ function MetricGrid({ metrics }: { metrics: DashboardMetric[] }) {
   );
 }
 
-function Dashboard({ snapshot }: { snapshot: AnalysisSnapshot }) {
+function Dashboard({ snapshot, onBack }: { snapshot: AnalysisSnapshot; onBack: () => void }) {
   const view = mapSnapshotToDashboard(snapshot);
 
   return (
     <main className="dashboard-shell">
+      <button className="back-button" type="button" onClick={onBack}>
+        ← Analysis Portfolio
+      </button>
       <header className="hero">
         <div>
           <div className="brand-line">
@@ -239,50 +250,257 @@ function Dashboard({ snapshot }: { snapshot: AnalysisSnapshot }) {
   );
 }
 
+function Watchlist({
+  items,
+  sortKey,
+  onSort,
+  onSelect,
+}: {
+  items: WatchlistItemView[];
+  sortKey: WatchlistSortKey;
+  onSort: (sortKey: WatchlistSortKey) => void;
+  onSelect: (ticker: string) => void;
+}) {
+  const sortedItems = useMemo(() => sortWatchlistItems(items, sortKey), [items, sortKey]);
+  const completeCount = items.filter(item => item.status === 'complete').length;
+  const staleCount = items.filter(item => item.stale).length;
+
+  return (
+    <main className="dashboard-shell watchlist-shell">
+      <header className="portfolio-hero">
+        <div>
+          <div className="brand-line">
+            <span className="brand-mark">DEXTER / JP</span>
+            <span className="local-badge">ANALYSIS PORTFOLIO</span>
+          </div>
+          <h1>Saved Analysis</h1>
+          <p>保存済み企業分析のlatest Snapshot。保有資産・配分情報は含みません。</p>
+        </div>
+        <dl className="portfolio-summary">
+          <div><dt>Tracked</dt><dd>{items.length}</dd></div>
+          <div><dt>Complete</dt><dd>{completeCount}</dd></div>
+          <div><dt>Stale</dt><dd>{staleCount}</dd></div>
+        </dl>
+      </header>
+
+      <section className="watchlist-panel" aria-labelledby="watchlist-title">
+        <header className="watchlist-header">
+          <div>
+            <span className="eyebrow">Latest snapshots</span>
+            <h2 id="watchlist-title">Analysis Watchlist</h2>
+          </div>
+          <div className="sort-control" aria-label="一覧の並び順">
+            <span>Sort</span>
+            <button
+              className={sortKey === 'latestDataDate' ? 'active' : undefined}
+              type="button"
+              onClick={() => onSort('latestDataDate')}
+            >
+              Source date
+            </button>
+            <button
+              className={sortKey === 'generatedAt' ? 'active' : undefined}
+              type="button"
+              onClick={() => onSort('generatedAt')}
+            >
+              Generated
+            </button>
+          </div>
+        </header>
+
+        {sortedItems.length === 0 ? (
+          <div className="empty-state watchlist-empty">
+            保存済みAnalysis Snapshotはありません。
+          </div>
+        ) : (
+          <div className="table-scroll">
+            <table className="watchlist-table">
+              <thead>
+                <tr>
+                  <th>Company</th>
+                  <th>Price</th>
+                  <th>PER</th>
+                  <th>PBR</th>
+                  <th>ROE</th>
+                  <th>Trend</th>
+                  <th>Margin %ile</th>
+                  <th>Beta 250</th>
+                  <th>Latest source</th>
+                  <th>Generated</th>
+                  <th>Status</th>
+                  <th><span className="visually-hidden">Detail</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {sortedItems.map(item => (
+                  <tr key={item.ticker}>
+                    <th>
+                      <button
+                        className="company-link"
+                        type="button"
+                        onClick={() => onSelect(item.ticker)}
+                      >
+                        <span>{item.ticker}</span>
+                        <strong>{item.companyName}</strong>
+                      </button>
+                    </th>
+                    <td><Value value={item.price} /></td>
+                    <td><Value value={item.per} /></td>
+                    <td><Value value={item.pbr} /></td>
+                    <td><Value value={item.roe} /></td>
+                    <td><Value value={item.trend} /></td>
+                    <td><Value value={item.marginPercentile} /></td>
+                    <td><Value value={item.beta250} /></td>
+                    <td>
+                      <Value value={item.latestDataDate} />
+                      {item.stale
+                        ? <small className="stale-label">{WATCHLIST_STALE_AFTER_DAYS}日超</small>
+                        : null}
+                    </td>
+                    <td><Value value={item.generatedAt} /></td>
+                    <td>
+                      <span className={`compact-status ${item.status}`}>
+                        {item.status}
+                      </span>
+                    </td>
+                    <td>
+                      <button
+                        className="detail-button"
+                        type="button"
+                        aria-label={`${item.ticker} ${item.companyName}の詳細を表示`}
+                        onClick={() => onSelect(item.ticker)}
+                      >
+                        詳細 →
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <footer className="footer">
+        <span>DEXTER JP / READ-ONLY LOCAL ANALYSIS</span>
+        <span>Sorted and formatted from canonical Snapshot values.</span>
+      </footer>
+    </main>
+  );
+}
+
+async function fetchSnapshot(ticker: string, signal: AbortSignal): Promise<AnalysisSnapshot> {
+  const response = await fetch(`/api/analyses/${ticker}`, {
+    headers: { Accept: 'application/json' },
+    signal,
+  });
+  if (!response.ok) {
+    throw new Error(response.status === 404
+      ? `${ticker} の保存済みSnapshotがありません。`
+      : 'Snapshotを読み込めませんでした。');
+  }
+  return await response.json() as AnalysisSnapshot;
+}
+
 function App() {
+  const [selectedTicker, setSelectedTicker] = useState<string | null>(() => (
+    parseDetailTicker(window.location.search)
+  ));
   const [snapshot, setSnapshot] = useState<AnalysisSnapshot | null>(null);
+  const [watchlistItems, setWatchlistItems] = useState<WatchlistItemView[]>([]);
+  const [sortKey, setSortKey] = useState<WatchlistSortKey>('latestDataDate');
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const abortController = new AbortController();
-    void fetch(`/api/analyses/${DASHBOARD_TICKER}`, {
-      headers: { Accept: 'application/json' },
-      signal: abortController.signal,
-    }).then(async response => {
-      if (!response.ok) {
-        throw new Error(response.status === 404
-          ? `${DASHBOARD_TICKER} の保存済みSnapshotがありません。`
-          : 'Snapshotを読み込めませんでした。');
-      }
-      return await response.json() as AnalysisSnapshot;
-    }).then(setSnapshot).catch((cause: unknown) => {
-      if (!abortController.signal.aborted) {
-        setError(cause instanceof Error ? cause.message : 'Snapshotを読み込めませんでした。');
-      }
-    });
-    return () => abortController.abort();
+    const handlePopState = () => setSelectedTicker(parseDetailTicker(window.location.search));
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
   }, []);
+
+  useEffect(() => {
+    const abortController = new AbortController();
+    setLoading(true);
+    setError(null);
+    if (selectedTicker) {
+      setSnapshot(null);
+      void fetchSnapshot(selectedTicker, abortController.signal)
+        .then(setSnapshot)
+        .catch((cause: unknown) => {
+          if (!abortController.signal.aborted) {
+            setError(cause instanceof Error ? cause.message : 'Snapshotを読み込めませんでした。');
+          }
+        })
+        .finally(() => {
+          if (!abortController.signal.aborted) setLoading(false);
+        });
+    } else {
+      void fetch('/api/analyses', {
+        headers: { Accept: 'application/json' },
+        signal: abortController.signal,
+      }).then(async response => {
+        if (!response.ok) throw new Error('Analysis一覧を読み込めませんでした。');
+        return await response.json() as AnalysisSnapshotLatestItem[];
+      }).then(latest => {
+        const referenceDate = new Date();
+        setWatchlistItems(latest.map(item => (
+          mapLatestAnalysisToWatchlistItem(item, referenceDate)
+        )));
+      }).catch((cause: unknown) => {
+        if (!abortController.signal.aborted) {
+          setError(cause instanceof Error ? cause.message : 'Analysis一覧を読み込めませんでした。');
+        }
+      }).finally(() => {
+        if (!abortController.signal.aborted) setLoading(false);
+      });
+    }
+    return () => abortController.abort();
+  }, [selectedTicker]);
+
+  const navigateToTicker = (ticker: string) => {
+    window.history.pushState({}, '', buildDetailPath(ticker));
+    setSelectedTicker(ticker);
+  };
+  const navigateToWatchlist = () => {
+    window.history.pushState({}, '', '/');
+    setSelectedTicker(null);
+  };
 
   if (error) {
     return (
       <main className="load-state">
         <span className="brand-mark">DEXTER / JP</span>
-        <h1>Single Stock Dashboard</h1>
+        <h1>{selectedTicker ? 'Single Stock Dashboard' : 'Analysis Watchlist'}</h1>
         <p>{error}</p>
         <small>{UNAVAILABLE_TEXT}は0を意味しません。</small>
+        {selectedTicker ? (
+          <button className="back-button centered" type="button" onClick={navigateToWatchlist}>
+            ← Analysis Portfolio
+          </button>
+        ) : null}
       </main>
     );
   }
-  if (!snapshot) {
+  if (loading) {
     return (
       <main className="load-state">
         <span className="brand-mark">DEXTER / JP</span>
         <div className="loading-bar" />
-        <p>7203 Snapshotを読み込み中…</p>
+        <p>{selectedTicker ? `${selectedTicker} Snapshotを読み込み中…` : '保存済みAnalysisを読み込み中…'}</p>
       </main>
     );
   }
-  return <Dashboard snapshot={snapshot} />;
+  if (selectedTicker && snapshot) {
+    return <Dashboard snapshot={snapshot} onBack={navigateToWatchlist} />;
+  }
+  return (
+    <Watchlist
+      items={watchlistItems}
+      sortKey={sortKey}
+      onSort={setSortKey}
+      onSelect={navigateToTicker}
+    />
+  );
 }
 
 const rootElement = document.getElementById('root');
