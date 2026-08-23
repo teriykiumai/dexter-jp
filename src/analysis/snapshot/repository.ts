@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
-import { dirname, relative, resolve, sep } from 'node:path';
+import { mkdir, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import { dexterPath } from '../../utils/paths.js';
 import { AnalysisSnapshotPersistenceError } from './errors.js';
@@ -30,6 +30,20 @@ export interface AnalysisSnapshotHistoryItem {
   generatedAt: string;
   status: AnalysisSnapshot['status'];
   dataDates: AnalysisSnapshot['dataDates'];
+}
+
+function historyItem(
+  snapshot: AnalysisSnapshot,
+  snapshotId = createSnapshotId(snapshot.generatedAt),
+): AnalysisSnapshotHistoryItem {
+  return {
+    snapshotId,
+    canonicalTicker: snapshot.canonicalTicker,
+    companyName: snapshot.companyName,
+    generatedAt: snapshot.generatedAt,
+    status: snapshot.status,
+    dataDates: snapshot.dataDates,
+  };
 }
 
 function filesystemError(message: string, causeValue: unknown): AnalysisSnapshotPersistenceError {
@@ -137,7 +151,9 @@ export class AnalysisSnapshotRepository {
 
     try {
       await mkdir(tickerDirectory, { recursive: true });
+      await this.assertRealPathContained(tickerDirectory);
     } catch (error) {
+      if (error instanceof AnalysisSnapshotPersistenceError) throw error;
       throw filesystemError(`Could not create snapshot directory for ${canonicalTicker}.`, error);
     }
 
@@ -157,19 +173,23 @@ export class AnalysisSnapshotRepository {
 
   async loadLatest(ticker: string): Promise<AnalysisSnapshot> {
     const canonicalTicker = assertCanonicalTicker(ticker);
-    return this.readSnapshot(
+    const snapshot = await this.readSnapshot(
       this.resolveSnapshotPath(canonicalTicker, 'latest.json'),
       `${canonicalTicker}/latest.json`,
     );
+    this.assertSnapshotIdentity(snapshot, canonicalTicker);
+    return snapshot;
   }
 
   async loadHistory(ticker: string, snapshotId: string): Promise<AnalysisSnapshot> {
     const canonicalTicker = assertCanonicalTicker(ticker);
     const safeSnapshotId = assertSnapshotId(snapshotId);
-    return this.readSnapshot(
+    const snapshot = await this.readSnapshot(
       this.resolveSnapshotPath(canonicalTicker, `${safeSnapshotId}.json`),
       `${canonicalTicker}/${safeSnapshotId}.json`,
     );
+    this.assertSnapshotIdentity(snapshot, canonicalTicker, safeSnapshotId);
+    return snapshot;
   }
 
   async listHistory(ticker: string): Promise<AnalysisSnapshotHistoryItem[]> {
@@ -195,14 +215,25 @@ export class AnalysisSnapshotRepository {
 
     return snapshots
       .sort((left, right) => right.snapshot.generatedAt.localeCompare(left.snapshot.generatedAt))
-      .map(({ snapshotId, snapshot }) => ({
-        snapshotId,
-        canonicalTicker: snapshot.canonicalTicker,
-        companyName: snapshot.companyName,
-        generatedAt: snapshot.generatedAt,
-        status: snapshot.status,
-        dataDates: snapshot.dataDates,
-      }));
+      .map(({ snapshotId, snapshot }) => historyItem(snapshot, snapshotId));
+  }
+
+  async listLatest(): Promise<AnalysisSnapshotHistoryItem[]> {
+    let entries;
+    try {
+      entries = await readdir(this.rootDirectory, { withFileTypes: true });
+    } catch (error) {
+      if (isNodeError(error) && error.code === 'ENOENT') return [];
+      throw filesystemError('Could not list latest analysis snapshots.', error);
+    }
+
+    const tickers = entries
+      .filter(entry => entry.isDirectory() && CanonicalTickerSchema.safeParse(entry.name).success)
+      .map(entry => entry.name);
+    const latest = await Promise.all(tickers.map(ticker => this.loadLatest(ticker)));
+    return latest
+      .map(snapshot => historyItem(snapshot))
+      .sort((left, right) => left.canonicalTicker.localeCompare(right.canonicalTicker));
   }
 
   private resolveTickerDirectory(ticker: string): string {
@@ -224,9 +255,37 @@ export class AnalysisSnapshotRepository {
     }
   }
 
+  private assertSnapshotIdentity(
+    snapshot: AnalysisSnapshot,
+    canonicalTicker: string,
+    snapshotId?: SnapshotId,
+  ): void {
+    if (
+      snapshot.canonicalTicker !== canonicalTicker
+      || (snapshotId !== undefined && createSnapshotId(snapshot.generatedAt) !== snapshotId)
+    ) {
+      throw new AnalysisSnapshotPersistenceError(
+        'snapshot_identity_mismatch',
+        'Snapshot identity does not match its repository path.',
+      );
+    }
+  }
+
+  private async assertRealPathContained(target: string): Promise<void> {
+    const [realRoot, realTarget] = await Promise.all([
+      realpath(this.rootDirectory),
+      realpath(target),
+    ]);
+    const rel = relative(realRoot, realTarget);
+    if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+      throw filesystemError('Resolved snapshot path is outside the repository root.', target);
+    }
+  }
+
   private async readSnapshot(path: string, source: string): Promise<AnalysisSnapshot> {
     let contents: string;
     try {
+      await this.assertRealPathContained(path);
       contents = await readFile(path, 'utf8');
     } catch (error) {
       if (isNodeError(error) && error.code === 'ENOENT') {

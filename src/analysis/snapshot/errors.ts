@@ -3,6 +3,7 @@ export type AnalysisSnapshotPersistenceErrorKind =
   | 'malformed_json'
   | 'schema_validation_failed'
   | 'unsupported_schema_version'
+  | 'snapshot_identity_mismatch'
   | 'unsafe_ticker'
   | 'unsafe_snapshot_id'
   | 'filesystem_error'
