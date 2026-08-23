@@ -1,10 +1,10 @@
 # 日本株AI分析システム — Codex実装計画
 
-**Version:** 0.2  
+**Version:** 0.3
 **Audience:** Codex / Implementation Agent  
 **Base Repository:** `edinetdb/dexter-jp`  
 **Target:** Personal-use local application  
-**Date:** 2026-08-19
+**Date:** 2026-08-23
 
 ## 1. このファイルの役割
 
@@ -679,6 +679,22 @@ MVP全体を実データで検証する。
 # Post-MVP
 
 MVP中は実装しない。MVP完了後に別計画を作る。
+
+## Phase 1.5 — Local Web Visualization MVP
+
+Phase 1.5は、Step 10で完成したMVPの完成条件を変更または再度開かず、保存・可視化・Presentation Layerを追加するPost-MVP拡張である。Step 0〜10の仕様、Done条件、検証記録は変更しない。
+
+詳細なarchitecture、schema方針、provider境界、V1〜V5、テスト、リスク、Done条件は `docs/VISUALIZATION_MVP_PLAN.md` を唯一の詳細計画として扱う。
+
+実施順序:
+
+1. V1 — Canonical Analysis Snapshot
+2. V2 — Local Persistence
+3. V3 — Local Web Server
+4. V4 — Single Stock Dashboard
+5. V5 — Analysis Portfolio / Watchlist
+
+実装時も `AGENTS.md` のMinimal diff、Reuse before Build、テスト、Git branch / pull request workflowを維持する。Phase 1.5ではPhase 2以降の分析機能や実保有Portfolio管理を先取りしない。
 
 ## Phase 2
 
