@@ -128,7 +128,7 @@ export class Agent {
     const startTime = Date.now();
 
     if (this.tools.length === 0) {
-      yield { type: 'done', answer: 'No tools available. Please check your API key configuration.', toolCalls: [], iterations: 0, totalTime: Date.now() - startTime };
+      yield { type: 'done', outcome: 'error', answer: 'No tools available. Please check your API key configuration.', toolCalls: [], iterations: 0, totalTime: Date.now() - startTime };
       return;
     }
 
@@ -185,6 +185,7 @@ export class Agent {
           const provider = resolveProvider(this.model).displayName;
           yield {
             type: 'done',
+            outcome: 'error',
             answer: `Error: ${formatUserFacingError(errorMessage, provider)}`,
             toolCalls: ctx.scratchpad.getToolCallRecords(),
             iterations: ctx.iteration,
@@ -245,6 +246,7 @@ export class Agent {
         const totalTime = Date.now() - ctx.startTime;
         yield {
           type: 'done',
+          outcome: 'interrupted',
           answer: '',
           toolCalls: ctx.scratchpad.getToolCallRecords(),
           iterations: ctx.iteration,
@@ -278,6 +280,7 @@ export class Agent {
     const totalTime = Date.now() - ctx.startTime;
     yield {
       type: 'done',
+      outcome: 'error',
       answer: `Reached maximum iterations (${this.maxIterations}). I was unable to complete the research in the allotted steps.`,
       toolCalls: ctx.scratchpad.getToolCallRecords(),
       iterations: ctx.iteration,
@@ -457,6 +460,7 @@ export class Agent {
     const totalTime = Date.now() - ctx.startTime;
     yield {
       type: 'done',
+      outcome: 'success',
       answer: responseText,
       toolCalls: ctx.scratchpad.getToolCallRecords(),
       iterations: ctx.iteration,

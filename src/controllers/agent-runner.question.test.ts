@@ -25,7 +25,7 @@ class MockAgent {
     if (requestUserInput) {
       await requestUserInput({ questions: QUESTIONS });
     }
-    yield { type: 'done', answer: 'done', toolCalls: [], iterations: 1, totalTime: 10 };
+    yield { type: 'done', outcome: 'success', answer: 'done', toolCalls: [], iterations: 1, totalTime: 10 };
   }
 }
 

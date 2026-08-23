@@ -1,5 +1,9 @@
 import { api as edinetApi } from './api.js';
 import { resolveEdinetCode } from './resolver.js';
+import {
+  normalizeJapaneseSecuritiesCode,
+  toJQuantsSecuritiesCode,
+} from '../../utils/japanese-securities-code.js';
 
 export const JQUANTS_BASE_URL = 'https://api.jquants.com/v2';
 
@@ -152,8 +156,11 @@ export async function jquantsGetAll<T extends Record<string, unknown>>(
 
 /** Resolve a ticker to the five-digit code used by J-Quants. */
 export async function resolveJQuantsCode(ticker: string): Promise<string> {
-  if (/^\d{5}$/.test(ticker)) return ticker;
-  if (/^\d{4}$/.test(ticker)) return `${ticker}0`;
+  try {
+    return toJQuantsSecuritiesCode(ticker);
+  } catch {
+    // Company names and EDINET codes continue through the existing resolver.
+  }
 
   const edinetCode = await resolveEdinetCode(ticker);
   const { data: response } = await edinetApi.get(`/companies/${edinetCode}`, {});
@@ -162,7 +169,7 @@ export async function resolveJQuantsCode(ticker: string): Promise<string> {
   if (typeof secCode !== 'string') {
     throw new Error(`No securities code found for ${ticker}`);
   }
-  return `${secCode.replace(/\D/g, '').slice(0, 4)}0`;
+  return `${normalizeJapaneseSecuritiesCode(secCode)}0`;
 }
 
 export function isJQuantsAvailable(): boolean {

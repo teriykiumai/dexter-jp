@@ -182,12 +182,14 @@ export class AgentSdkAgent {
         `Claude Agent SDK mode halted before running to avoid an unintended billing path.\n\n${instructions}`,
         startTime,
         undefined,
+        'interrupted',
       );
       return;
     }
 
     let finalAnswer = '';
     let terminalSeen = false;
+    let terminalOutcome: DoneEvent['outcome'] = 'error';
     let lastUsage: TokenUsage | undefined;
 
     const translateCtx: TranslateContext = {
@@ -196,7 +198,10 @@ export class AgentSdkAgent {
       onToolSeen: (name) => this.toolsSeen.add(name),
       onFinalAnswer: (t) => { finalAnswer = t; },
       onUsage: (u) => { lastUsage = u; },
-      onTerminal: () => { terminalSeen = true; },
+      onTerminal: (outcome) => {
+        terminalSeen = true;
+        terminalOutcome = outcome;
+      },
     };
 
     try {
@@ -207,7 +212,7 @@ export class AgentSdkAgent {
         // A `result` frame is terminal — emit the Dexter `done` right after so the
         // spinner closes exactly once, carrying the captured answer + usage.
         if (terminalSeen) {
-          yield this.doneEvent(finalAnswer, startTime, lastUsage);
+          yield this.doneEvent(finalAnswer, startTime, lastUsage, terminalOutcome);
           return;
         }
       }
@@ -215,16 +220,16 @@ export class AgentSdkAgent {
       const message = error instanceof Error ? error.message : String(error);
       if (error instanceof Error && (error.name === 'AbortError' || /abort/i.test(message))) {
         // Interrupted — emit a terminal done so the spinner closes.
-        yield this.doneEvent(finalAnswer, startTime, lastUsage);
+        yield this.doneEvent(finalAnswer, startTime, lastUsage, 'interrupted');
         return;
       }
       // Any other throw (incl. auth/spawn failures) → terminal error done.
-      yield this.doneEvent(`Error: ${message}`, startTime, lastUsage);
+      yield this.doneEvent(`Error: ${message}`, startTime, lastUsage, 'error');
       return;
     }
 
     // Stream ended without a terminal result — still close the turn.
-    yield this.doneEvent(finalAnswer, startTime, lastUsage);
+    yield this.doneEvent(finalAnswer, startTime, lastUsage, 'error');
   }
 
   /** Names of tools the SDK actually reported using (for the built-in-tools check). */
@@ -232,9 +237,15 @@ export class AgentSdkAgent {
     return [...this.toolsSeen];
   }
 
-  private doneEvent(answer: string, startTime: number, usage: TokenUsage | undefined): DoneEvent {
+  private doneEvent(
+    answer: string,
+    startTime: number,
+    usage: TokenUsage | undefined,
+    outcome: DoneEvent['outcome'] = 'success',
+  ): DoneEvent {
     return {
       type: 'done',
+      outcome,
       answer,
       toolCalls: [],
       iterations: 0,

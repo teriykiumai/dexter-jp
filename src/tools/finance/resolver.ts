@@ -1,5 +1,9 @@
 import { api } from './api.js';
 import { logger } from '../../utils/logger.js';
+import {
+  JAPANESE_SECURITIES_CODE_PATTERN,
+  normalizeJapaneseSecuritiesCode,
+} from '../../utils/japanese-securities-code.js';
 
 /**
  * In-memory cache for secCode/name → edinet_code resolution.
@@ -31,9 +35,14 @@ function normalize(s: string | undefined): string {
   return (s ?? '').normalize('NFKC').toLowerCase().trim();
 }
 
-/** A securities-code-shaped query like "7203" or "135A" (4 digits + optional char). */
-function isSecCodeQuery(key: string): boolean {
-  return /^[0-9]{4}[0-9A-Za-z]?$/.test(key);
+/** Return the canonical four-character code for a valid JPX/J-Quants code query. */
+function normalizeSecCodeQuery(key: string): string | null {
+  try {
+    const canonical = normalizeJapaneseSecuritiesCode(key);
+    return JAPANESE_SECURITIES_CODE_PATTERN.test(canonical) ? canonical : null;
+  } catch {
+    return null;
+  }
 }
 
 function isHitDelisted(h: SearchHit): boolean {
@@ -52,20 +61,19 @@ function pickBestMatch(key: string, hits: SearchHit[]): SearchHit | undefined {
   if (hits.length === 0) return undefined;
 
   let pool: SearchHit[];
-  if (isSecCodeQuery(key)) {
-    // EDINET DB sec_code is 5 chars ("7203" → "72030"); match the leading 4.
-    pool = hits.filter(h => {
-      const s = h.sec_code || '';
-      return s === key || s === `${key}0` || s.slice(0, 4) === key.slice(0, 4);
-    });
+  const canonicalSecCode = normalizeSecCodeQuery(key);
+  if (canonicalSecCode !== null) {
+    pool = hits.filter(h => normalizeSecCodeQuery(h.sec_code) === canonicalSecCode);
+    // A code-shaped query must never resolve to an unrelated first search hit.
+    if (pool.length === 0) return undefined;
   } else {
     const q = normalize(key);
     pool = hits.filter(h =>
       normalize(h.name).includes(q) ||
       normalize(h.name_ja).includes(q) ||
       normalize(h.name_en).includes(q));
+    if (pool.length === 0) pool = hits;
   }
-  if (pool.length === 0) pool = hits;
 
   // Prefer a currently-listed match; fall back to the first (possibly delisted)
   // so a name that ONLY resolves to a delisted company still resolves — tagged.

@@ -98,6 +98,10 @@ AnalysisSnapshotを以下から生成してはならない。
 
 V1では、Standard Agent実行中に既知のsource / analysis toolが完了した時点で、tool名ごとのtyped decoderが結果を検証し、run-scopedな`AnalysisSnapshotInput`へ渡す明示的adapterを設計する。任意の過去履歴を事後探索せず、対象toolとschemaをallowlistする。
 
+collectorは`tool_start`と`tool_end`を`toolCallId`で対応付け、`toolCallId -> { tool, validatedArgs, validatedResult }`を確立してからSnapshot inputへ渡す。result単独、欠損ID、tool名不一致のeventは採用しない。
+
+最初に検証済みcompany identityから4文字`canonicalTicker`を確定し、そのrunのtargetとしてlockする。数字コードに加え、JPX規則に適合する`130A`等の英文字入りコードを受け付ける。以後のtarget用source / engine resultが別tickerならcollectorが拒否する。Peer Comparisonの候補tickerだけは明示的な例外とし、Peer targetはlock済みtickerとの一致を必須とする。
+
 Builderは次だけを担当する純粋なapplication layerとする。
 
 - typed inputの整合性検証
@@ -119,6 +123,8 @@ V1の必須範囲はStandard AgentからのSnapshot生成とする。既存tool 
 2. Agentが生成した既知tool resultをControllerで逐次adapterへ渡す
 
 `DoneEvent.toolCalls`全体を後から推測的に走査する実装は採用しない。
+
+Snapshot生成はStandard Agent runが正常に最終回答を返した場合だけ行う。正常終了したrunで一部sectionを取得できない場合は`partial`とするが、cancel、exception、approval deny、max-iteration等のinterrupted / error runはV1ではSnapshotを生成しない。
 
 ### 5.4 Claude Agent SDK
 
@@ -161,6 +167,8 @@ finalReportMarkdown
 - `complete`: V1で必須としたdeterministic sectionがすべて存在し、各sectionの欠損がstructured unavailableとして表現されている
 - `partial`: 必須section自体がtool、plan、history、source failure等で取得できない
 
+V1の必須sectionは実装上の定数として`identity / fundamental / valuation / peerComparison / technical / supplyDemand / marketCorrelation / strategy / priceHistory`を明示する。実装者ごとに`complete`判定を変えない。
+
 一部metricが明示的にunavailableでも、section resultが有効なら直ちに`partial`とはしない。例えばsourced tick size欠損によりexact Strategy価格が利用不可でも、strictly-above triggerと理由が有効ならStrategy sectionは成立する。
 
 ### 6.3 Section schema
@@ -183,6 +191,8 @@ finalReportMarkdown
 - `count`
 
 unit mappingはBuilderが決定し、LLMやBrowserへ推測させない。percentage pointとdecimal ratioを混同しないよう既存field名とengine contractを優先する。
+
+provenanceはsectionごとにcalculation engineとunderlying data sourceを別recordで保持する。direct ticker modeのTechnical、Supply & Demand、Market CorrelationではJ-Quantsをprice / margin / benchmark sourceとして明示し、Financial MetricsではJ-Quants price、EDINET DB financials、Financial Metrics Engine calculationを区別する。raw tool args、prompt、credentialは保存しない。
 
 ### 6.4 Fundamental
 

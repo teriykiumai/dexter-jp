@@ -11,7 +11,7 @@
  * ends abruptly.
  */
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { AgentEvent, TokenUsage } from './types.js';
+import type { AgentEvent, DoneEvent, TokenUsage } from './types.js';
 
 export const DEXTER_MCP_PREFIX = 'mcp__dexter__';
 
@@ -26,8 +26,8 @@ export interface TranslateContext {
   onFinalAnswer?: (text: string) => void;
   /** Receives usage when a result message arrives. */
   onUsage?: (usage: TokenUsage | undefined) => void;
-  /** Signals a terminal result was translated (caller stops emitting its own done). */
-  onTerminal?: () => void;
+  /** Signals a terminal result and its outcome (caller emits the matching done). */
+  onTerminal?: (outcome: DoneEvent['outcome']) => void;
 }
 
 /** Strip the mcp__dexter__ namespace for display. */
@@ -136,7 +136,7 @@ export function translateSdkMessage(message: SDKMessage, ctx: TranslateContext):
         const errors = (message as { errors?: string[] }).errors ?? [];
         ctx.onFinalAnswer?.(describeResultError(subtype, errors, ctx.maxTurns));
       }
-      ctx.onTerminal?.();
+      ctx.onTerminal?.(subtype === 'success' ? 'success' : 'error');
       return events;
     }
 

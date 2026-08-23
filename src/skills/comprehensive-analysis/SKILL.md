@@ -37,7 +37,7 @@ Never call a tool name that is absent from the current tool list.
 
 ## 1. Verify the company
 
-Resolve the user-supplied identifier with a company-data tool before repeating a securities code or EDINET code. Confirm company name, listing status, TSE 33-sector, and the latest company-data date. Stop presenting the company as an active investment candidate if it is delisted.
+Resolve the user-supplied identifier with a company-data tool before repeating a securities code or EDINET code. Confirm company name, listing status, TSE 33-sector, and the latest company-data date. Lock that verified four-character securities code, including a valid JPX alphanumeric code when applicable, as the target ticker for the rest of the run. Every target-company source and `analyze_*` call must use that ticker; only peer candidates may use different tickers. Stop presenting the company as an active investment candidate if it is delisted.
 
 ## 2. Fundamental and valuation
 
@@ -77,11 +77,11 @@ Preserve dates and nulls. Do not forward-fill, interpolate, or silently remove m
 
 ## 5. Run deterministic engines
 
-1. Pass the latest adjusted close plus chronological annual financial rows to `analyze_financial_metrics`.
+1. Pass the verified target `ticker`, latest adjusted close, and chronological annual financial rows to `analyze_financial_metrics`.
 2. Pass adjusted OHLCV to `analyze_technical`.
 3. Pass margin balances and stock volume to `analyze_supply_demand`.
 4. Pass stock and TOPIX closes to `analyze_market_correlation`.
-5. Pass `dataDate`, `latestSwingHigh`, `latestSwingLow`, and `atr14` from the Technical result to `analyze_strategy`.
+5. Pass the verified target `ticker` plus `dataDate`, `latestSwingHigh`, `latestSwingLow`, and `atr14` from the Technical result to `analyze_strategy`.
 6. Supply Strategy `tickSize` or `resistanceLevels` only when a reliable source provided them; otherwise omit them. Without a sourced tick size, report the strictly-above trigger but no exact entry or 2R target.
 
 Never reproduce or repair the Engine calculations in narrative reasoning. Carry every `unavailable` reason into the report.

@@ -11,6 +11,10 @@ import type {
 import type { Question, UserAnswers } from '../tools/ask-user-question/types.js';
 import type { DisplayEvent, StreamMode } from '../agent/types.js';
 import type { HistoryItem, HistoryItemStatus, WorkingState } from '../types.js';
+import {
+  StandardAgentSnapshotCollector,
+  type AnalysisSnapshot,
+} from '../analysis/snapshot/index.js';
 
 export interface TurnStats {
   turnStartMs: number;
@@ -29,6 +33,7 @@ function isEnvFlagEnabled(value: string | undefined): boolean {
 
 export interface RunQueryResult {
   answer: string;
+  snapshot?: AnalysisSnapshot;
 }
 
 export class AgentRunnerController {
@@ -157,6 +162,10 @@ export class AgentRunnerController {
   async runQuery(query: string): Promise<RunQueryResult | undefined> {
     this.abortController = new AbortController();
     let finalAnswer: string | undefined;
+    let snapshot: AnalysisSnapshot | undefined;
+    const snapshotCollector = this.agentConfig.modelProvider === 'claude-agent-sdk'
+      ? null
+      : new StandardAgentSnapshotCollector();
 
     const startTime = Date.now();
     const item: HistoryItem = {
@@ -179,8 +188,19 @@ export class AgentRunnerController {
     try {
       const stream = await this.createAgentStream(query);
       for await (const event of stream) {
+        if (snapshotCollector) {
+          if (event.type === 'tool_start') snapshotCollector.recordToolStart(event);
+          if (event.type === 'tool_end') snapshotCollector.recordToolEnd(event);
+          if (event.type === 'tool_error' || event.type === 'tool_denied') {
+            snapshotCollector.recordToolFailure(event);
+          }
+        }
         if (event.type === 'done') {
-          finalAnswer = (event as DoneEvent).answer;
+          const done = event as DoneEvent;
+          finalAnswer = done.answer;
+          if (snapshotCollector && done.outcome === 'success') {
+            snapshot = snapshotCollector.finalize(done.answer) ?? undefined;
+          }
         }
         await this.handleEvent(event);
       }
@@ -193,7 +213,7 @@ export class AgentRunnerController {
       }
 
       if (finalAnswer) {
-        return { answer: finalAnswer };
+        return snapshot ? { answer: finalAnswer, snapshot } : { answer: finalAnswer };
       }
       return undefined;
     } catch (error) {
@@ -393,7 +413,7 @@ export class AgentRunnerController {
         this.updateLastItem((last) => ({
           ...last,
           answer: done.answer,
-          status: 'complete',
+          status: done.outcome === 'success' ? 'complete' : done.outcome,
           duration: done.totalTime,
           tokenUsage: done.tokenUsage,
           tokensPerSecond: done.tokensPerSecond,

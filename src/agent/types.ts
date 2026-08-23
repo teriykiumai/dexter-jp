@@ -271,6 +271,7 @@ export interface CompactionEvent {
  */
 export interface DoneEvent {
   type: 'done';
+  outcome: 'success' | 'error' | 'interrupted';
   answer: string;
   toolCalls: Array<{ tool: string; args: Record<string, unknown>; result: string }>;
   iterations: number;
