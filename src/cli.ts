@@ -32,6 +32,7 @@ import {
 import { editorTheme, theme } from './theme.js';
 import { matchCommands, type SlashCommand } from './commands/index.js';
 import { initSpinner } from './utils/spinner.js';
+import { AnalysisSnapshotRepository } from './analysis/snapshot/index.js';
 
 function truncateForHistory(text: string): string {
   const lines = text.split('\n');
@@ -179,6 +180,7 @@ export async function runCli() {
   const root = new Container();
   const chatLog = new ChatLogComponent(tui);
   const inputHistory = new InputHistoryController(() => tui.requestRender());
+  const snapshotRepository = new AnalysisSnapshotRepository();
   let lastError: string | null = null;
 
   const onError = (message: string) => {
@@ -451,6 +453,14 @@ export async function runCli() {
     const result = await agentRunner.runQuery(query);
     if (result?.answer) {
       await inputHistory.updateAgentResponse(result.answer);
+    }
+    if (result?.snapshot) {
+      try {
+        await snapshotRepository.save(result.snapshot);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        agentRunner.setError(`Snapshot save failed: ${message}`);
+      }
     }
     refreshError();
     tui.requestRender();
