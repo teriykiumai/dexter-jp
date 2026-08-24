@@ -788,6 +788,8 @@ The first Phase 2B source is the individual-stock J-Quants V2 endpoint:
 GET /v2/markets/short-sale-report
 ```
 
+It publishes reports for short-position ratios of 0.5% or more.
+
 The 33-sector `/markets/short-ratio` endpoint is deferred to P2-B5 evaluation.
 
 ### No-look-ahead
@@ -807,7 +809,10 @@ Preserve a `ReportedShortPosition[]` with source-provided:
 - disclosure and calculation dates
 - exact `SSName`, `DICName`, and `FundName` strings
 - short-position ratio and shares
-- `PrevRptDate` and `PrevRptRatio`
+- `PrevRptDate` (the previous calculation date) and `PrevRptRatio`
+
+Map `PrevRptDate` to `previousCalculatedDate`; it is not a previous disclosure
+date.
 
 The only initial deterministic calculation is:
 
@@ -823,9 +828,10 @@ with different calculation dates and do not forward-fill a silent reporter.
 
 ### Missing-data and units
 
-An empty response is `no_public_disclosure_data`; it does not mean zero short
-interest, no short sellers, complete covering, or absence of positions below the
-public-disclosure threshold.
+An empty response is `no_public_disclosure_data`; it means only that no public
+report for a short-position ratio of 0.5% or more was obtained. It does not mean
+zero short interest, no short sellers, complete covering, or absence of positions
+below 0.5%.
 
 ```text
 shortPositionRatio     = ratio

@@ -1127,9 +1127,9 @@ GET /v2/markets/short-sale-report
 Reuse the existing J-Quants API-key authentication, pagination, securities-code
 resolution, and typed plan/error behavior. Do not build a second J-Quants client.
 
-The official source contract reports positions meeting the public-disclosure
-criteria. An absent row is not evidence that the position is zero or that no
-short seller exists.
+The official source contract publishes reports for short-position ratios of 0.5%
+or more. An absent row is not evidence that the position is zero, that no short
+seller exists, or that no position below 0.5% exists.
 
 Official references:
 
@@ -1161,7 +1161,7 @@ interface ReportedShortPosition {
   shortPositionRatio: number;
   shortPositionShares: number;
 
-  previousReportedDate: string | null;
+  previousCalculatedDate: string | null;
   previousReportedRatio: number | null;
 
   ratioDelta: number | null;
@@ -1199,10 +1199,11 @@ J-Quants field mapping is fixed as follows:
 | `FundName` | `fundName` |
 | `ShrtPosToSO` | `shortPositionRatio` |
 | `ShrtPosShares` | `shortPositionShares` |
-| `PrevRptDate` | `previousReportedDate` |
+| `PrevRptDate` | `previousCalculatedDate` |
 | `PrevRptRatio` | `previousReportedRatio` |
 
-An empty source string for an optional identity or previous-date field may map to
+`PrevRptDate` is the previous position calculation date, not a disclosure date.
+An empty source string for an optional identity or previous-calculation-date field may map to
 `null`. Every non-empty `SSName`, `DICName`, and `FundName` must otherwise remain
 the exact source string. Do not trim into a canonical identity, normalize case or
 language, fuzzy-match, or merge entities.
@@ -1234,8 +1235,10 @@ reference date.
 
 #### Previous-report and calculation contract
 
-Preserve the source-provided `PrevRptDate` and `PrevRptRatio`. The only new
-deterministic calculation in the initial engine is:
+Preserve the source-provided `PrevRptDate` as `previousCalculatedDate` and
+`PrevRptRatio` as `previousReportedRatio`. Do not reinterpret the previous
+calculation date as a disclosure date. The only new deterministic calculation in
+the initial engine is:
 
 ```text
 ratioDelta = shortPositionRatio - previousReportedRatio
@@ -1265,13 +1268,14 @@ An empty source response uses the typed reason:
 no_public_disclosure_data
 ```
 
-This means only that no public short-position report was obtained for the request
-and as-of boundary. It must not support any of these claims:
+This means only that no public report for a short-position ratio of 0.5% or more
+was obtained for the request and as-of boundary. It must not support any of these
+claims:
 
 - short position is zero
 - no short sellers exist
 - every short position was covered
-- no position below the public-disclosure threshold exists
+- no position below 0.5% exists
 
 Expected source absence and invalid fields use narrow typed states rather than a
 fabricated default. Non-finite or negative ratios/shares are invalid; do not skip,
