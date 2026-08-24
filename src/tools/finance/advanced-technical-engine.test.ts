@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { calculateMacd, calculateRsi } from './advanced-technical-engine.js';
+import {
+  calculateBollingerBands,
+  calculateMacd,
+  calculateRsi,
+} from './advanced-technical-engine.js';
 
 const deterministicCloses = [
   100, 102, 101, 104, 103, 105, 106, 104,
@@ -214,5 +218,94 @@ describe('calculateMacd', () => {
       unavailable: [],
     });
     expect(fullHistoryResult.macd).not.toEqual(latest251Result.macd);
+  });
+});
+
+const variableBollingerCloses = Array.from({ length: 20 }, (_, index) => index + 1);
+
+describe('calculateBollingerBands', () => {
+  test('calculates hand-verifiable bands for a variable series', () => {
+    const result = calculateBollingerBands(variableBollingerCloses);
+
+    expect(result.unavailable).toEqual([]);
+    expect(result.bollinger20?.middle).toBe(10.5);
+    expect(result.bollinger20?.upper).toBeCloseTo(10.5 + Math.sqrt(133), 12);
+    expect(result.bollinger20?.lower).toBeCloseTo(10.5 - Math.sqrt(133), 12);
+  });
+
+  test('returns equal bands for a constant 20-close series', () => {
+    expect(calculateBollingerBands(Array<number>(20).fill(100))).toEqual({
+      bollinger20: { middle: 100, upper: 100, lower: 100 },
+      unavailable: [],
+    });
+  });
+
+  test('requires 20 closes for the first available result', () => {
+    expect(calculateBollingerBands(Array<number>(19).fill(100))).toEqual({
+      bollinger20: null,
+      unavailable: [{ metric: 'bollinger20', reason: 'insufficient_history' }],
+    });
+    expect(calculateBollingerBands(Array<number>(20).fill(100)).bollinger20).not.toBeNull();
+  });
+
+  test('uses population standard deviation with divisor 20', () => {
+    const result = calculateBollingerBands(variableBollingerCloses);
+
+    if (result.bollinger20 === null) throw new Error('Expected Bollinger Bands.');
+    const standardDeviation = (result.bollinger20.upper - result.bollinger20.lower) / 4;
+    expect(standardDeviation).toBeCloseTo(Math.sqrt(33.25), 12);
+  });
+
+  test('uses only the latest 20 closes for the latest value', () => {
+    const withOlderHistory = [1_000_000, ...variableBollingerCloses];
+
+    expect(calculateBollingerBands(withOlderHistory)).toEqual(
+      calculateBollingerBands(variableBollingerCloses),
+    );
+  });
+
+  test('reports missing data inside the latest 20 closes without skipping it', () => {
+    const closes: Array<number | null> = [...variableBollingerCloses];
+    closes[5] = null;
+
+    expect(calculateBollingerBands(closes)).toEqual({
+      bollinger20: null,
+      unavailable: [{ metric: 'bollinger20', reason: 'missing_data' }],
+    });
+  });
+
+  test('reports non-finite and non-positive data inside the latest 20 closes', () => {
+    for (const invalidClose of [
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+      0,
+      -1,
+    ]) {
+      const closes = [...variableBollingerCloses];
+      closes[5] = invalidClose;
+      expect(calculateBollingerBands(closes)).toEqual({
+        bollinger20: null,
+        unavailable: [{ metric: 'bollinger20', reason: 'invalid_data' }],
+      });
+    }
+  });
+
+  test('ignores missing and invalid observations before the latest 20 closes', () => {
+    const olderObservations = [null, Number.NaN, Number.POSITIVE_INFINITY, 0, -1];
+    const history: Array<number | null> = [...olderObservations, ...variableBollingerCloses];
+
+    expect(calculateBollingerBands(history)).toEqual(
+      calculateBollingerBands(variableBollingerCloses),
+    );
+  });
+
+  test('does not mutate the input sequence', () => {
+    const closes = [1_000_000, ...variableBollingerCloses];
+    const original = [...closes];
+
+    calculateBollingerBands(closes);
+
+    expect(closes).toEqual(original);
   });
 });

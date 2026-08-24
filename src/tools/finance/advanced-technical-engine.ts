@@ -167,3 +167,68 @@ export function calculateMacd(
     unavailable: [],
   };
 }
+
+export const BOLLINGER_PERIOD = 20 as const;
+export const BOLLINGER_STANDARD_DEVIATIONS = 2 as const;
+
+export type BollingerUnavailableReason =
+  | 'insufficient_history'
+  | 'missing_data'
+  | 'invalid_data';
+
+export interface UnavailableBollingerMetric {
+  metric: 'bollinger20';
+  reason: BollingerUnavailableReason;
+}
+
+export interface BollingerValues {
+  middle: number;
+  upper: number;
+  lower: number;
+}
+
+export interface BollingerResult {
+  bollinger20: BollingerValues | null;
+  unavailable: UnavailableBollingerMetric[];
+}
+
+function unavailableBollinger(reason: BollingerUnavailableReason): BollingerResult {
+  return {
+    bollinger20: null,
+    unavailable: [{ metric: 'bollinger20', reason }],
+  };
+}
+
+/** Calculate Bollinger Bands 20/2σ from the latest supplied adjusted closes. */
+export function calculateBollingerBands(
+  chronologicalAdjustedCloses: readonly (number | null)[],
+): BollingerResult {
+  if (chronologicalAdjustedCloses.length < BOLLINGER_PERIOD) {
+    return unavailableBollinger('insufficient_history');
+  }
+
+  const latestCloses = chronologicalAdjustedCloses.slice(-BOLLINGER_PERIOD);
+  if (latestCloses.some((close) => close === null)) {
+    return unavailableBollinger('missing_data');
+  }
+  if (!latestCloses.every(isPositiveFiniteClose)) {
+    return unavailableBollinger('invalid_data');
+  }
+
+  const middle = latestCloses.reduce((sum, close) => sum + close, 0) / BOLLINGER_PERIOD;
+  const variance = latestCloses.reduce(
+    (sum, close) => sum + (close - middle) ** 2,
+    0,
+  ) / BOLLINGER_PERIOD;
+  const standardDeviation = Math.sqrt(variance);
+  const bandOffset = BOLLINGER_STANDARD_DEVIATIONS * standardDeviation;
+
+  return {
+    bollinger20: {
+      middle,
+      upper: middle + bandOffset,
+      lower: middle - bandOffset,
+    },
+    unavailable: [],
+  };
+}
