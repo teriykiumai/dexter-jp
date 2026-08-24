@@ -25,10 +25,13 @@ describe('OpenAI model transport', () => {
 
     try {
       const terra = getChatModel('gpt-5.6-terra') as ChatOpenAI;
+      const future = getChatModel('gpt-5.6-future') as ChatOpenAI;
       const existing = getChatModel('gpt-5.5') as ChatOpenAI;
 
       expect(terra.useResponsesApi).toBeTrue();
       expect(terra.reasoning).toBeUndefined();
+      expect(future.useResponsesApi).toBeTrue();
+      expect(future.reasoning).toBeUndefined();
       expect(existing.useResponsesApi).toBeFalse();
     } finally {
       if (previousApiKey === undefined) delete process.env.OPENAI_API_KEY;

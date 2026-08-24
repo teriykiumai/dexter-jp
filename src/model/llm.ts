@@ -27,12 +27,16 @@ export type ResolvedLlmRuntime = Readonly<{
   reasoningEffort?: LlmReasoningEffort;
 }>;
 
-const OPENAI_GPT_5_6_RESPONSES_MODELS = new Set([
+const OPENAI_GPT_5_6_REASONING_MODELS = new Set([
   'gpt-5.6',
   'gpt-5.6-sol',
   'gpt-5.6-terra',
   'gpt-5.6-luna',
 ]);
+
+function usesOpenAiResponsesApi(model: string): boolean {
+  return model.startsWith('gpt-5.6');
+}
 
 const OPENAI_REASONING_EFFORT_BY_PROFILE: Record<LlmTaskProfile, LlmReasoningEffort> = {
   deep_analysis: 'high',
@@ -67,7 +71,7 @@ export function resolveReasoningEffort(
   if (
     taskProfile === undefined
     || effectiveProviderId !== 'openai'
-    || !OPENAI_GPT_5_6_RESPONSES_MODELS.has(effectiveModel)
+    || !OPENAI_GPT_5_6_REASONING_MODELS.has(effectiveModel)
   ) {
     return undefined;
   }
@@ -237,7 +241,7 @@ const createOpenAiModel = (
     model: runtime.model,
     ...opts,
     apiKey: getApiKey('OPENAI_API_KEY'),
-    ...(OPENAI_GPT_5_6_RESPONSES_MODELS.has(runtime.model) ? { useResponsesApi: true } : {}),
+    ...(usesOpenAiResponsesApi(runtime.model) ? { useResponsesApi: true } : {}),
     ...(runtime.reasoningEffort
       ? { reasoning: { effort: runtime.reasoningEffort } }
       : {}),
