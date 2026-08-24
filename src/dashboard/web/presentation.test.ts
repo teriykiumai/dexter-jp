@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  AnalysisSnapshotV1Schema,
   buildAnalysisSnapshot,
   buildAnalysisSnapshotLatestItem,
   type AnalysisSnapshot,
@@ -54,6 +55,30 @@ function baseSnapshot(): AnalysisSnapshotV2 {
     additionalUnavailable: [],
   };
   return buildAnalysisSnapshot(input);
+}
+
+function v1Snapshot(): AnalysisSnapshot {
+  const v2 = baseSnapshot();
+  const {
+    advancedTechnical: _advancedTechnical,
+    dataDates: v2DataDates,
+    provenance: v2Provenance,
+    units: v2Units,
+    unavailable: v2Unavailable,
+    ...common
+  } = v2;
+  const { advancedTechnical: _advancedDate, ...dataDates } = v2DataDates;
+  const { advancedTechnical: _advancedProvenance, ...provenance } = v2Provenance;
+  const { advancedTechnical: _advancedUnits, ...units } = v2Units;
+
+  return AnalysisSnapshotV1Schema.parse({
+    ...common,
+    schemaVersion: 1,
+    dataDates,
+    provenance,
+    units,
+    unavailable: v2Unavailable.filter(item => item.section !== 'advancedTechnical'),
+  });
 }
 
 function peerComparison(marketCapPriorityApplied: boolean): AnalysisSnapshot['peerComparison'] {
@@ -233,10 +258,85 @@ describe('dashboard presentation helpers', () => {
     expect(formatMetric(2.5, 'multiple').text).toBe('2.5x');
     expect(formatMetric(1200, 'shares').text).toBe('1,200 株');
     expect(formatMetric(0.123, 'ratio', { ratioAsPercent: true }).text).toBe('12.3%');
+    expect(formatMetric(62.345, 'index').text).toBe('62.35');
   });
 });
 
 describe('snapshot presentation mapping', () => {
+  test('passes through and formats the seven latest Advanced Technical values', () => {
+    const snapshot: AnalysisSnapshotV2 = {
+      ...baseSnapshot(),
+      advancedTechnical: {
+        dataDate: '2026-08-21',
+        rsi14: 62.345,
+        macd: { value: 45.5, signal: 40.25, histogram: 5.25 },
+        bollinger20: { middle: 2_950, upper: 3_150.5, lower: 2_749.5 },
+        unavailable: [],
+      },
+      dataDates: { ...baseSnapshot().dataDates, advancedTechnical: '2026-08-21' },
+    };
+
+    const view = mapSnapshotToDashboard(snapshot);
+
+    expect(view.advancedTechnical?.metrics).toEqual([
+      { label: 'RSI 14', value: { text: '62.35', available: true } },
+      { label: 'MACD', value: { text: '¥45.5', available: true } },
+      { label: 'MACD Signal', value: { text: '¥40.25', available: true } },
+      { label: 'MACD Histogram', value: { text: '¥5.25', available: true } },
+      { label: 'Bollinger Middle', value: { text: '¥2,950', available: true } },
+      { label: 'Bollinger Upper', value: { text: '¥3,150.5', available: true } },
+      { label: 'Bollinger Lower', value: { text: '¥2,749.5', available: true } },
+    ]);
+    expect(view.advancedTechnical?.metrics.map(metric => metric.label)).not.toContain('Buy');
+    expect(view.advancedTechnical?.metrics.map(metric => metric.label)).not.toContain('Sell');
+    expect(view.dataDates).toContainEqual({
+      label: 'Advanced Technical',
+      value: { text: '2026-08-21', available: true },
+    });
+  });
+
+  test('keeps unavailable Advanced Technical metrics distinct from zero', () => {
+    const snapshot: AnalysisSnapshotV2 = {
+      ...baseSnapshot(),
+      advancedTechnical: {
+        dataDate: '2026-08-21',
+        rsi14: null,
+        macd: null,
+        bollinger20: { middle: 2_800, upper: 3_000, lower: 2_600 },
+        unavailable: [
+          { metric: 'rsi14', reason: 'missing_data' },
+          { metric: 'macd', reason: 'insufficient_history' },
+        ],
+      },
+    };
+
+    const view = mapSnapshotToDashboard(snapshot);
+
+    expect(view.advancedTechnical?.metrics[0].value).toEqual({
+      text: UNAVAILABLE_TEXT,
+      available: false,
+    });
+    expect(view.advancedTechnical?.metrics[1].value).toEqual({
+      text: UNAVAILABLE_TEXT,
+      available: false,
+    });
+    expect(view.advancedTechnical?.metrics[4].value).toEqual({
+      text: '¥2,800',
+      available: true,
+    });
+    expect(view.advancedTechnical?.unavailableReasons).toEqual([
+      'rsi14: missing data',
+      'macd: insufficient history',
+    ]);
+  });
+
+  test('treats V1 Advanced Technical as not collected', () => {
+    const view = mapSnapshotToDashboard(v1Snapshot());
+
+    expect(view.advancedTechnical).toBeNull();
+    expect(view.dataDates.map(item => item.label)).not.toContain('Advanced Technical');
+  });
+
   test('keeps structured narrative nullable and only passes through typed values', () => {
     const unavailableView = mapSnapshotToDashboard(baseSnapshot());
     expect(unavailableView.scenarios).toBeNull();
@@ -306,6 +406,13 @@ describe('snapshot presentation mapping', () => {
         trend: 'uptrend',
         latestSwingHigh: 2_900,
         latestSwingLow: 2_650,
+        unavailable: [],
+      },
+      advancedTechnical: {
+        dataDate: '2026-08-21',
+        rsi14: 60,
+        macd: { value: 10, signal: 8, histogram: 2 },
+        bollinger20: { middle: 2_800, upper: 3_100, lower: 2_500 },
         unavailable: [],
       },
       priceHistory: [
