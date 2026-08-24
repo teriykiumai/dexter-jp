@@ -13,17 +13,73 @@ import { DEFAULT_SYSTEM_PROMPT } from '@/agent/prompts';
 import type { TokenUsage } from '@/agent/types';
 import { logger } from '@/utils';
 import { classifyError, isNonRetryableError } from '@/utils/errors';
-import { resolveProvider, getProviderById } from '@/providers';
+import { resolveProvider, getProviderById, type ProviderDef } from '@/providers';
 
 export const DEFAULT_PROVIDER = 'openai';
 export const DEFAULT_MODEL = 'gpt-5.6-terra';
 
-/**
- * Gets the fast model variant for the given provider.
- * Falls back to the provided model if no fast variant is configured (e.g., Ollama).
- */
-export function getFastModel(modelProvider: string, fallbackModel: string): string {
-  return getProviderById(modelProvider)?.fastModel ?? fallbackModel;
+export type LlmTaskProfile = 'deep_analysis' | 'balanced' | 'fast_structured';
+export type LlmReasoningEffort = 'low' | 'medium' | 'high';
+
+export type ResolvedLlmRuntime = Readonly<{
+  model: string;
+  providerId: string;
+  reasoningEffort?: LlmReasoningEffort;
+}>;
+
+const OPENAI_GPT_5_6_RESPONSES_MODELS = new Set([
+  'gpt-5.6',
+  'gpt-5.6-sol',
+  'gpt-5.6-terra',
+  'gpt-5.6-luna',
+]);
+
+const OPENAI_REASONING_EFFORT_BY_PROFILE: Record<LlmTaskProfile, LlmReasoningEffort> = {
+  deep_analysis: 'high',
+  balanced: 'medium',
+  fast_structured: 'low',
+};
+
+/** Resolve provider-neutral task intent into one immutable LLM runtime. */
+export function resolveLlmRuntime(
+  selectedModel: string = DEFAULT_MODEL,
+  taskProfile?: LlmTaskProfile,
+): ResolvedLlmRuntime {
+  const selectedProvider = resolveProvider(selectedModel);
+  const model = taskProfile === 'fast_structured'
+    ? selectedProvider.fastModel ?? selectedModel
+    : selectedModel;
+  const provider = resolveProvider(model);
+  const reasoningEffort = resolveReasoningEffort(model, provider.id, taskProfile);
+
+  return Object.freeze({
+    model,
+    providerId: provider.id,
+    ...(reasoningEffort ? { reasoningEffort } : {}),
+  });
+}
+
+export function resolveReasoningEffort(
+  effectiveModel: string,
+  effectiveProviderId: string,
+  taskProfile?: LlmTaskProfile,
+): LlmReasoningEffort | undefined {
+  if (
+    taskProfile === undefined
+    || effectiveProviderId !== 'openai'
+    || !OPENAI_GPT_5_6_RESPONSES_MODELS.has(effectiveModel)
+  ) {
+    return undefined;
+  }
+  return OPENAI_REASONING_EFFORT_BY_PROFILE[taskProfile];
+}
+
+function getResolvedProvider(runtime: ResolvedLlmRuntime): ProviderDef {
+  const provider = getProviderById(runtime.providerId);
+  if (!provider) {
+    throw new Error(`[LLM] Unknown provider: ${runtime.providerId}`);
+  }
+  return provider;
 }
 
 // Generic retry helper with exponential backoff
@@ -173,22 +229,37 @@ const MODEL_FACTORIES: Record<string, ModelFactory> = {
     }),
 };
 
-const DEFAULT_FACTORY: ModelFactory = (name, opts) =>
+const createOpenAiModel = (
+  runtime: ResolvedLlmRuntime,
+  opts: ModelOpts,
+): BaseChatModel =>
   new ChatOpenAI({
-    model: name,
+    model: runtime.model,
     ...opts,
     apiKey: getApiKey('OPENAI_API_KEY'),
-    ...(name.startsWith('gpt-5.6') ? { useResponsesApi: true } : {}),
+    ...(OPENAI_GPT_5_6_RESPONSES_MODELS.has(runtime.model) ? { useResponsesApi: true } : {}),
+    ...(runtime.reasoningEffort
+      ? { reasoning: { effort: runtime.reasoningEffort } }
+      : {}),
   });
 
 export function getChatModel(
-  modelName: string = DEFAULT_MODEL,
+  modelOrRuntime: string | ResolvedLlmRuntime = DEFAULT_MODEL,
   streaming: boolean = false
 ): BaseChatModel {
   const opts: ModelOpts = { streaming };
-  const provider = resolveProvider(modelName);
-  const factory = MODEL_FACTORIES[provider.id] ?? DEFAULT_FACTORY;
-  return factory(modelName, opts);
+  const runtime = typeof modelOrRuntime === 'string'
+    ? resolveLlmRuntime(modelOrRuntime)
+    : modelOrRuntime;
+  const provider = getResolvedProvider(runtime);
+  if (provider.id === 'openai') {
+    return createOpenAiModel(runtime, opts);
+  }
+  const factory = MODEL_FACTORIES[provider.id];
+  if (!factory) {
+    throw new Error(`[LLM] No model factory for provider: ${provider.id}`);
+  }
+  return factory(runtime.model, opts);
 }
 
 /**
@@ -263,17 +334,36 @@ function sanitizeSchemaForGemini(schema: Record<string, unknown>): Record<string
   return result;
 }
 
-interface CallLlmOptions {
-  model?: string;
+type LlmRuntimeSelection =
+  | {
+      model?: string;
+      taskProfile?: LlmTaskProfile;
+      resolvedRuntime?: never;
+    }
+  | {
+      model?: never;
+      taskProfile?: never;
+      resolvedRuntime: ResolvedLlmRuntime;
+    };
+
+type CallLlmOptions = LlmRuntimeSelection & {
   systemPrompt?: string;
   outputSchema?: z.ZodType<unknown>;
   tools?: StructuredToolInterface[];
   signal?: AbortSignal;
-}
+};
 
 export interface LlmResult {
   response: AIMessage | string;
   usage?: TokenUsage;
+  runtime: ResolvedLlmRuntime;
+}
+
+function resolveRuntimeSelection(options: LlmRuntimeSelection): ResolvedLlmRuntime {
+  if (options.resolvedRuntime) {
+    return options.resolvedRuntime;
+  }
+  return resolveLlmRuntime(options.model ?? DEFAULT_MODEL, options.taskProfile);
 }
 
 function extractUsage(result: unknown): TokenUsage | undefined {
@@ -324,23 +414,31 @@ function buildAnthropicMessages(systemPrompt: string, userPrompt: string) {
   ];
 }
 
-export async function callLlm(prompt: string, options: CallLlmOptions = {}): Promise<LlmResult> {
-  const { model = DEFAULT_MODEL, systemPrompt, outputSchema, tools, signal } = options;
-  const finalSystemPrompt = systemPrompt || DEFAULT_SYSTEM_PROMPT;
-
-  const llm = getChatModel(model, false);
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let runnable: Runnable<any, any> = llm;
-
+export function configureLlmRunnable(
+  llm: BaseChatModel,
+  outputSchema?: z.ZodType<unknown>,
+  tools?: StructuredToolInterface[],
+): Runnable<unknown, unknown> {
   if (outputSchema) {
-    runnable = llm.withStructuredOutput(outputSchema, { strict: false });
-  } else if (tools && tools.length > 0 && llm.bindTools) {
-    runnable = llm.bindTools(tools);
+    return llm.withStructuredOutput(outputSchema, { strict: false });
   }
+  if (tools && tools.length > 0 && llm.bindTools) {
+    return llm.bindTools(tools);
+  }
+  return llm;
+}
+
+export async function callLlm(prompt: string, options: CallLlmOptions = {}): Promise<LlmResult> {
+  const { systemPrompt, outputSchema, tools, signal } = options;
+  const finalSystemPrompt = systemPrompt || DEFAULT_SYSTEM_PROMPT;
+  const runtime = resolveRuntimeSelection(options);
+
+  const llm = getChatModel(runtime, false);
+
+  const runnable = configureLlmRunnable(llm, outputSchema, tools);
 
   const invokeOpts = signal ? { signal } : undefined;
-  const provider = resolveProvider(model);
+  const provider = getResolvedProvider(runtime);
   let result;
 
   if (provider.id === 'anthropic') {
@@ -361,9 +459,9 @@ export async function callLlm(prompt: string, options: CallLlmOptions = {}): Pro
   // If no outputSchema and no tools, extract content from AIMessage
   // When tools are provided, return the full AIMessage to preserve tool_calls
   if (!outputSchema && !tools && result && typeof result === 'object' && 'content' in result) {
-    return { response: (result as { content: string }).content, usage };
+    return { response: (result as { content: string }).content, usage, runtime };
   }
-  return { response: result as AIMessage, usage };
+  return { response: result as AIMessage, usage, runtime };
 }
 
 // ---------------------------------------------------------------------------
@@ -397,11 +495,10 @@ function annotateSystemMessageForCaching(messages: BaseMessage[]): BaseMessage[]
   return [annotated, ...messages.slice(1)];
 }
 
-interface CallLlmWithMessagesOptions {
-  model?: string;
+type CallLlmWithMessagesOptions = LlmRuntimeSelection & {
   tools?: StructuredToolInterface[];
   signal?: AbortSignal;
-}
+};
 
 /**
  * Call an LLM with a full message array (multi-turn tool-calling).
@@ -418,19 +515,15 @@ export async function callLlmWithMessages(
   messages: BaseMessage[],
   options: CallLlmWithMessagesOptions = {},
 ): Promise<LlmResult> {
-  const { model = DEFAULT_MODEL, tools, signal } = options;
+  const { tools, signal } = options;
+  const runtime = resolveRuntimeSelection(options);
 
-  const llm = getChatModel(model, false);
+  const llm = getChatModel(runtime, false);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let runnable: Runnable<any, any> = llm;
-
-  if (tools && tools.length > 0 && llm.bindTools) {
-    runnable = llm.bindTools(tools);
-  }
+  const runnable = configureLlmRunnable(llm, undefined, tools);
 
   const invokeOpts = signal ? { signal } : undefined;
-  const provider = resolveProvider(model);
+  const provider = getResolvedProvider(runtime);
 
   // For Anthropic: annotate SystemMessage with cache_control for prompt caching
   const finalMessages = provider.id === 'anthropic'
@@ -443,7 +536,7 @@ export async function callLlmWithMessages(
   );
 
   const usage = extractUsage(result);
-  return { response: result as AIMessage, usage };
+  return { response: result as AIMessage, usage, runtime };
 }
 
 // ---------------------------------------------------------------------------
@@ -461,19 +554,15 @@ export async function* streamLlmWithMessages(
   messages: BaseMessage[],
   options: CallLlmWithMessagesOptions = {},
 ): AsyncGenerator<AIMessageChunk, void> {
-  const { model = DEFAULT_MODEL, tools, signal } = options;
+  const { tools, signal } = options;
+  const runtime = resolveRuntimeSelection(options);
 
-  const llm = getChatModel(model, true);
+  const llm = getChatModel(runtime, true);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let runnable: Runnable<any, any> = llm;
-
-  if (tools && tools.length > 0 && llm.bindTools) {
-    runnable = llm.bindTools(tools);
-  }
+  const runnable = configureLlmRunnable(llm, undefined, tools);
 
   const invokeOpts = signal ? { signal } : undefined;
-  const provider = resolveProvider(model);
+  const provider = getResolvedProvider(runtime);
 
   const finalMessages = provider.id === 'anthropic'
     ? annotateSystemMessageForCaching(messages)

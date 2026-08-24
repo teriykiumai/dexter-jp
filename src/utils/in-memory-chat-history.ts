@@ -56,6 +56,7 @@ Generate a brief 1-2 sentence summary of this answer.`;
       const { response } = await callLlm(prompt, {
         systemPrompt: MESSAGE_SUMMARY_SYSTEM_PROMPT,
         model: this.model,
+        taskProfile: 'fast_structured',
       });
       return typeof response === 'string' ? response.trim() : String(response).trim();
     } catch {

@@ -112,6 +112,7 @@ export function createGetFinancials(model: string): DynamicStructuredTool {
       onProgress?.('Fetching...');
       const { response } = await callLlm(input.query, {
         model,
+        taskProfile: 'fast_structured',
         systemPrompt: buildRouterPrompt(),
         tools: FINANCE_TOOLS,
       });
