@@ -8,7 +8,6 @@
  */
 
 import { callLlm } from '../model/llm.js';
-import { resolveProvider } from '../providers.js';
 import type { TokenUsage } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -166,7 +165,7 @@ Continue working toward answering the query without asking the user any further 
 // ---------------------------------------------------------------------------
 
 export interface CompactContextParams {
-  /** Main model name (used to resolve provider and fast model). */
+  /** Main model name; task profile resolution selects the effective model. */
   model: string;
   /** System prompt for the compaction call. */
   systemPrompt: string;
@@ -185,6 +184,8 @@ export interface CompactResult {
   rawSummary: string;
   /** Token usage of the compaction LLM call. */
   usage?: TokenUsage;
+  /** Effective model selected by the task profile resolver. */
+  model: string;
 }
 
 /**
@@ -194,16 +195,13 @@ export interface CompactResult {
 export async function compactContext(params: CompactContextParams): Promise<CompactResult> {
   const { model, systemPrompt, query, toolResults, signal } = params;
 
-  // Resolve fast model for the current provider
-  const provider = resolveProvider(model);
-  const fastModel = provider.fastModel ?? model;
-
   // Build the compaction prompt
   const prompt = buildCompactionPrompt(query, toolResults);
 
   // Call LLM with no tools bound — callLlm returns string in this case
   const result = await callLlm(prompt, {
-    model: fastModel,
+    model,
+    taskProfile: 'fast_structured',
     systemPrompt,
     signal,
   });
@@ -223,5 +221,6 @@ export async function compactContext(params: CompactContextParams): Promise<Comp
     summary,
     rawSummary,
     usage: result.usage,
+    model: result.runtime.model,
   };
 }

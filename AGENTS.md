@@ -55,6 +55,10 @@
 - Provider detection is prefix-based (`claude-` -> Anthropic, `gemini-` -> Google, etc.).
 - Fast models for lightweight tasks: see provider `fastModel` values in `src/providers.ts`.
 - Users switch providers/models via `/model` command in the CLI.
+- LLM task profiles are provider-neutral orchestration intent: `deep_analysis`, `balanced`, and `fast_structured`.
+- An omitted task profile must preserve the selected model and legacy provider behavior without adding reasoning parameters.
+- Resolve a task profile once at the LLM boundary. `fastModel` selection belongs only to the central runtime resolver; call sites must not route to it manually.
+- Standard Agent streaming and blocking fallback must share the same immutable resolved runtime for each model turn.
 
 ## Tools
 

@@ -7,8 +7,7 @@
  */
 import axios, { type AxiosResponse } from 'axios';
 import { LRUCache } from 'lru-cache';
-import { callLlm, getFastModel } from '../../model/llm.js';
-import { resolveProvider } from '../../providers.js';
+import { callLlm } from '../../model/llm.js';
 import { logger } from '../../utils/index.js';
 import { isBinaryContentType, persistBinaryContent } from './binary-storage.js';
 import { makeSecondaryModelPrompt } from './prompt.js';
@@ -339,11 +338,11 @@ export async function applyPromptToMarkdown(
       ? markdownContent.slice(0, MAX_MARKDOWN_LENGTH) + '\n\n[Content truncated due to length...]'
       : markdownContent;
 
-  const fastModel = getFastModel(resolveProvider(model).id, model);
   const userPrompt = makeSecondaryModelPrompt(truncatedContent, prompt);
 
   const { response } = await callLlm(userPrompt, {
-    model: fastModel,
+    model,
+    taskProfile: 'fast_structured',
     systemPrompt:
       'You are a web content extraction assistant. Answer the request using only the provided web page content.',
     signal,

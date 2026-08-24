@@ -249,6 +249,7 @@ export function createScreenCompanies(model: string): DynamicStructuredTool {
       try {
         const { response } = await callLlm(input.query, {
           model,
+          taskProfile: 'fast_structured',
           systemPrompt: buildScreenerPrompt(),
           outputSchema: ScreenerLlmOutputSchema,
         });

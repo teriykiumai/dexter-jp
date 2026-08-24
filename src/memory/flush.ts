@@ -55,6 +55,7 @@ ${MEMORY_FLUSH_PROMPT}
 
   const result = await callLlm(prompt, {
     model: params.model,
+    taskProfile: 'balanced',
     systemPrompt: params.systemPrompt,
     signal: params.signal,
   });

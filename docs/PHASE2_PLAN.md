@@ -573,7 +573,81 @@ incompatibility that makes the fixed contract unsafe or impossible. In that case
 report the evidence before changing the plan.
 
 **Done when:** the fixed contracts are verified against current `main`, implementation
-risks are understood, and no unresolved incompatibility blocks P2-T1.
+risks are understood, and no unresolved incompatibility blocks P2-L0 or P2-T1.
+
+### P2-L0 — Task-aware LLM Runtime Profiles
+
+**Goal:** Add a provider-neutral runtime policy between P2-D0 and Technical
+implementation. This is a cross-cutting runtime PR and must remain independent of
+P2-T1–T7.
+
+Profiles express orchestration intent, not provider parameters:
+
+```text
+deep_analysis   = quality-first
+balanced        = normal
+fast_structured = latency/cost-sensitive structured task
+```
+
+`taskProfile` is optional. When omitted, preserve legacy behavior exactly: keep the
+selected model, do not select `fastModel`, and do not add a reasoning effort. Explicit
+profile assignments are:
+
+- Standard Agent multi-turn loop: `deep_analysis`
+- company screener natural-language parsing: `fast_structured`
+- get_financials routing: `fast_structured`
+- context compaction: `fast_structured`
+- LLM-based Web extraction and summarization: `fast_structured`
+- chat-history summarization: `fast_structured`
+- memory flush: `balanced`
+- deterministic calculations, HTTP fetches, and parsing: no profile
+
+Resolve in this fixed order:
+
+```text
+selected model
+→ task profile
+→ effective model
+→ effective provider/model capability
+→ optional reasoning effort
+→ immutable ResolvedLlmRuntime
+```
+
+`fast_structured` selects the selected provider's configured `fastModel`, falling back
+to the selected model when no fast model exists. This selection is the central
+resolver's exclusive responsibility. Remove manual fast-model routing from compaction,
+Web extraction, and any other migrated call site.
+
+For the current OpenAI Responses API path, only the explicit `gpt-5.6`,
+`gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna` capability allowlist receives
+reasoning effort: deep=`high`, balanced=`medium`, fast=`low`. Apply capability checks
+to the effective model, not the selected model. Do not send OpenAI reasoning
+parameters to unsupported providers. Preserve DeepSeek V4's existing high-effort
+thinking configuration and leave Claude Agent SDK unchanged.
+
+For each Standard Agent model turn, resolve once and pass the same immutable runtime
+object to both streaming and blocking fallback. A fallback must not re-resolve or
+change model/provider/effort. Single-shot `callLlm()` may resolve its explicit model +
+profile internally and must return the effective runtime as invocation metadata.
+
+Tests cover resolver determinism, legacy behavior, fast-model fallback, capability
+filtering, effort propagation, structured output/tool binding, shared
+streaming/fallback runtime, `/model` preservation, DeepSeek behavior, and unchanged
+Claude Agent SDK dispatch. Real-output quality comparisons belong to external API
+evals, not exact-output unit tests.
+
+Out of scope: Pro mode, `xhigh`, `max`, `/effort` UI, prompt classification, model
+auto-upgrade, fast-model registry changes, and Phase 2A indicator code.
+
+Suggested branch:
+
+```text
+feat/llm-task-profiles-step0
+```
+
+**Done when:** profile resolution is centralized, all assigned boundaries are explicit,
+streaming/fallback share one runtime, legacy calls remain unchanged, and tests and
+typecheck pass without Technical changes.
 
 ### P2-T1 — RSI 14
 
@@ -954,14 +1028,12 @@ do not replace Phase 2B–2F.
 
 ADX is not required for the first Phase 2 completion unless explicitly approved.
 
-## 19. Recommended First Codex Task
+## 19. Recommended Next Codex Task
 
 Start a new Codex thread and use:
 
 ```text
-dexter-jp Phase 2A Technical Expansionを開始します。
-
-まずコードを変更しないでください。
+dexter-jp Phase 2A Technical ExpansionのP2-T1を実装します。
 
 以下を読んでください。
 
@@ -973,28 +1045,16 @@ dexter-jp Phase 2A Technical Expansionを開始します。
 - docs/PHASE2_PLAN.md
 - docs/PHASE2_HANDOFF.md
 
-main の現在状態と直近のmerged PRも確認してください。
+mainの現在状態と直近のmerged PRを確認し、P2-D0とP2-L0が完了済みであることを
+確認してください。
 
-Phase 1 / Phase 1.5 の既存contractを維持したまま、
-Phase 2A Technical ExpansionのP2-D0だけを実施してください。
+Phase 1 / Phase 1.5の既存contractを維持したまま、P2-T1 RSI 14だけを実装して
+ください。RSI helperはdocs/PHASE2_PLAN.mdのfixed formula、missing-data contract、
+latest calculation sequence contractに従うpure deterministic calculationにします。
 
-P2-D0はfixed contractの再設計ではなくbaseline / compatibility verificationです。
-特に以下を確認してください。
-
-- current Technical Engine and tests
-- AnalysisSnapshot schema / Builder / Standard Agent collector
-- Dashboard presentation layer
-- RSI / EMA / standard deviation utilityの既存実装有無
-- fixed RSI 14, MACD 12/26/9, Bollinger 20/2σ contractsとcurrent codeの衝突有無
-- latest 251 barsを使うcanonical calculation-sequence contractの実装影響
-- Snapshot V2 + V1 read compatibility boundaryの実装risk
-- files likely to change and test plan
-
-concrete incompatibilityが見つからない限り、formula、AdvancedTechnicalResult、
-Snapshot V2方針を再設計しないでください。
-
-実装はまだ行わず、compatibility確認結果、再利用候補、変更候補ファイル、
-テスト計画、実装riskを報告してください。
+既存TechnicalResult、Agent tool、Snapshot、Dashboard、MACD、Bollingerは変更しないで
+ください。normal、flat、insufficient history、zero loss、zero gain、missing value、
+no future-row useのunit testsを追加してください。
 
 Code calculates, AI interprets.
 No data means no claim.

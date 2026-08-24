@@ -1,6 +1,12 @@
 import { AIMessage, AIMessageChunk, SystemMessage, HumanMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { StructuredToolInterface } from '@langchain/core/tools';
-import { callLlmWithMessages, DEFAULT_MODEL, streamLlmWithMessages } from '../model/llm.js';
+import {
+  callLlmWithMessages,
+  DEFAULT_MODEL,
+  resolveLlmRuntime,
+  streamLlmWithMessages,
+  type ResolvedLlmRuntime,
+} from '../model/llm.js';
 import { getTools, getToolConcurrencyMap } from '../tools/registry.js';
 import { buildSystemPrompt, loadSoulDocument, loadRulesDocument } from './prompts.js';
 import { extractTextContent, hasToolCalls } from '../utils/ai-message.js';
@@ -18,6 +24,7 @@ import { AgentToolExecutor } from './tool-executor.js';
 import { MemoryManager } from '../memory/index.js';
 import { runMemoryFlush, shouldRunMemoryFlush } from '../memory/flush.js';
 import { resolveProvider } from '../providers.js';
+import { withStreamingFallback } from './streaming-fallback.js';
 
 
 const DEFAULT_MAX_ITERATIONS = 10;
@@ -301,12 +308,12 @@ export class Agent {
   private async *callModelWithStreaming(
     messages: BaseMessage[],
   ): AsyncGenerator<StreamProgressEvent, { response: AIMessage; usage?: TokenUsage }> {
-    try {
-      return yield* this.streamAndAccumulate(messages);
-    } catch {
-      // Fallback to blocking invoke (handles providers without streaming support)
-      return await this.callModelWithMessages(messages);
-    }
+    const runtime = resolveLlmRuntime(this.model, 'deep_analysis');
+    return yield* withStreamingFallback(
+      runtime,
+      resolvedRuntime => this.streamAndAccumulate(messages, resolvedRuntime),
+      resolvedRuntime => this.callModelWithMessages(messages, resolvedRuntime),
+    );
   }
 
   /**
@@ -318,13 +325,14 @@ export class Agent {
    */
   private async *streamAndAccumulate(
     messages: BaseMessage[],
+    runtime: ResolvedLlmRuntime,
   ): AsyncGenerator<StreamProgressEvent, { response: AIMessage; usage?: TokenUsage }> {
     yield { type: 'stream_progress', charDelta: 0, mode: 'requesting' };
 
     let accumulated: AIMessageChunk | null = null;
 
     for await (const chunk of streamLlmWithMessages(messages, {
-      model: this.model,
+      resolvedRuntime: runtime,
       tools: this.tools,
       signal: this.signal,
     })) {
@@ -367,9 +375,10 @@ export class Agent {
    */
   private async callModelWithMessages(
     messages: BaseMessage[],
+    runtime: ResolvedLlmRuntime,
   ): Promise<{ response: AIMessage; usage?: TokenUsage }> {
     const result = await callLlmWithMessages(messages, {
-      model: this.model,
+      resolvedRuntime: runtime,
       tools: this.tools,
       signal: this.signal,
     });
@@ -637,7 +646,7 @@ export class Agent {
           success: true,
           preCompactTokens: estimatedContextTokens,
           postCompactTokens,
-          compactionModel: resolveProvider(this.model).fastModel ?? this.model,
+          compactionModel: result.model,
         };
 
         return;

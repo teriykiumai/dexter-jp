@@ -537,12 +537,15 @@ Phase 2F — Shikori / Volume Profile / POC / VAH / VAL
 Each Phase 2B–2F tranche requires its own detailed plan. The active first tranche is
 Phase 2A.
 
-Start with deterministic Technical expansion.
+Complete the cross-cutting P2-L0 runtime step, then start deterministic Technical
+expansion.
 
 Primary sequence:
 
 ```text
 P2-D0 Baseline / Compatibility Verification
+        ↓
+P2-L0 Task-aware LLM Runtime Profiles
         ↓
 RSI 14
         ↓
@@ -558,6 +561,24 @@ Dashboard presentation
         ↓
 Optional ADX
 ```
+
+P2-L0 is a separate cross-cutting runtime PR before P2-T1. Its provider-neutral
+profiles are `deep_analysis` (quality-first), `balanced` (normal), and
+`fast_structured` (latency/cost-sensitive structured work). An omitted profile is the
+legacy sentinel: preserve the selected `/model` choice, do not switch to `fastModel`,
+and do not add reasoning parameters.
+
+Resolve `selected model → task profile → effective model → effective capability →
+optional effort` exactly once. Standard Agent uses `deep_analysis` and passes the same
+immutable resolved runtime to streaming and blocking fallback. Internal screening,
+routing, compaction, Web extraction, and summarization use `fast_structured`; memory
+flush uses `balanced`. Deterministic code, HTTP fetches, and parsers have no profile.
+
+The central resolver is the only code allowed to select provider `fastModel` values;
+do not leave manual fast-model routing at call sites. OpenAI reasoning effort is
+limited to the explicit GPT-5.6 Responses capability allowlist and is checked after
+effective-model selection. Unsupported providers receive no OpenAI parameter;
+DeepSeek V4 thinking and Claude Agent SDK behavior remain unchanged.
 
 After Phase 2A Technical is stable:
 
@@ -691,12 +712,10 @@ Record:
 
 Do not attribute a pre-existing failure to Phase 2.
 
-## 19. Recommended New Codex Thread Prompt
+## 19. Recommended Next Codex Thread Prompt
 
 ```text
-dexter-jp Phase 2A Technical Expansion専用threadです。
-
-まずコードを変更しないでください。
+dexter-jp Phase 2A Technical ExpansionのP2-T1専用threadです。
 
 以下を読んでください。
 
@@ -708,20 +727,15 @@ dexter-jp Phase 2A Technical Expansion専用threadです。
 - docs/PHASE2_PLAN.md
 - docs/PHASE2_HANDOFF.md
 
-現在のmain、直近のmerged PR、Technical Engine、Snapshot schema、
-Builder、Standard Agent collector、Dashboard presentationを確認してください。
+現在のmainと直近のmerged PRを確認し、P2-D0とP2-L0が完了済みであることを
+確認してください。
 
-Phase 1 / Phase 1.5のcontractを変更しないことを最優先に、
-P2-D0のbaseline / compatibility verificationだけを行ってください。
+Phase 1 / Phase 1.5のcontractを変更しないことを最優先に、P2-T1 RSI 14だけを
+実装してください。docs/PHASE2_PLAN.mdのfixed RSI formula、missing-data contract、
+latest calculation sequence contractを変更しないでください。
 
-fixed formula、最新251 barsのrecursive calculation range、
-AdvancedTechnicalResult、Snapshot V1/V2 read compatibilityとcurrent mainの
-concrete conflict有無、既存utility再利用候補、変更候補ファイル、テスト計画、
-Snapshot V2 implementation risksを報告してください。
-
-concrete incompatibilityがない限り、fixed contractを再設計しないでください。
-
-まだ実装しないでください。
+既存TechnicalResult、Agent tool、Snapshot、Dashboard、MACD、Bollingerは変更せず、
+nontrivial deterministic calculationに必要なunit testsを追加してください。
 
 Code calculates, AI interprets.
 No data means no claim.
