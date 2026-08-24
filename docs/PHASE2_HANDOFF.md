@@ -3,7 +3,7 @@
 **Purpose:** Context handoff for a new Codex thread
 **Repository:** `teriykiumai/dexter-jp`
 **Target:** Personal-use local Japanese-stock analysis AI
-**Date:** 2026-08-23
+**Date:** 2026-08-24
 
 ## 1. Read This First
 
@@ -523,7 +523,7 @@ History snapshot ID must match `generatedAt`.
 
 Presentation only.
 
-## 15. Phase 2 Scope and Phase 2A Objective
+## 15. Phase 2 Scope and Current Objective
 
 The full Phase 2 scope remains:
 
@@ -536,11 +536,10 @@ Phase 2E — Advanced Dividend Analysis
 Phase 2F — Shikori / Volume Profile / POC / VAH / VAL
 ```
 
-Each Phase 2B–2F tranche requires its own detailed plan. The active first tranche is
-Phase 2A.
+Each Phase 2B–2F tranche requires its own detailed plan. Phase 2A is complete on
+current `main`; Phase 2B Short Selling is the active tranche.
 
-Complete the cross-cutting P2-L0 runtime step, then start deterministic Technical
-expansion.
+The Phase 2A sequence below is retained as implemented historical context.
 
 Primary sequence:
 
@@ -714,7 +713,9 @@ Record:
 
 Do not attribute a pre-existing failure to Phase 2.
 
-## 19. Recommended Next Codex Thread Prompt
+## 19. Historical Phase 2A Codex Thread Prompt
+
+The following prompt records the original Phase 2A implementation handoff:
 
 ```text
 dexter-jp Phase 2A Technical ExpansionのP2-T1専用threadです。
@@ -760,3 +761,89 @@ current main code
 If prior conversation and repository code disagree, inspect the merged code and update the design document if necessary.
 
 The purpose of this handoff is to make the new Codex thread independent of the old conversation while preserving the actual implemented contracts.
+
+## 21. Active Phase 2B Handoff
+
+Phase 2B begins with a docs-only P2-B0 source and contract design. The fixed
+sequence is:
+
+```text
+P2-B0 Source / Contract Design
+  → P2-B1 J-Quants short-sale-report source tool
+  → P2-B2 deterministic reported-position engine
+  → P2-B3 Tool exposure + Snapshot V4
+  → P2-B4 Dashboard + comprehensive-analysis
+  → P2-B5 sector short-ratio evaluation
+```
+
+### Source boundary
+
+Keep weekly margin interest and public short-sale reports separate. Existing
+`sellingBalance` is a margin-trading balance and must not be presented as a
+short-sale report.
+
+The first Phase 2B source is the individual-stock J-Quants V2 endpoint:
+
+```text
+GET /v2/markets/short-sale-report
+```
+
+It publishes reports for short-position ratios of 0.5% or more.
+
+The 33-sector `/markets/short-ratio` endpoint is deferred to P2-B5 evaluation.
+
+### No-look-ahead
+
+```text
+DiscDate = information availability date
+CalcDate = position reference date
+```
+
+Historical analysis requires `DiscDate <= analysisAsOfDate`. Never use `CalcDate`
+alone to admit a report into an earlier analysis.
+
+### Report-level contract
+
+Preserve a `ReportedShortPosition[]` with source-provided:
+
+- disclosure and calculation dates
+- exact `SSName`, `DICName`, and `FundName` strings
+- short-position ratio and shares
+- `PrevRptDate` (the previous calculation date) and `PrevRptRatio`
+
+Map `PrevRptDate` to `previousCalculatedDate`; it is not a previous disclosure
+date.
+
+The only initial deterministic calculation is:
+
+```text
+ratioDelta = shortPositionRatio - previousReportedRatio
+```
+
+If the previous ratio is absent, the delta is `null`. Do not locate or infer a
+previous report, normalize identities, fuzzy-match entities, or merge reports.
+
+Do not aggregate reporters or funds into an issue-level total. Do not add ratios
+with different calculation dates and do not forward-fill a silent reporter.
+
+### Missing-data and units
+
+An empty response is `no_public_disclosure_data`; it means only that no public
+report for a short-position ratio of 0.5% or more was obtained. It does not mean
+zero short interest, no short sellers, complete covering, or absence of positions
+below 0.5%.
+
+```text
+shortPositionRatio     = ratio
+previousReportedRatio  = ratio
+ratioDelta             = ratio
+shortPositionShares    = shares
+```
+
+Do not convert ratios to percent in the Engine. Do not persist addresses or other
+analysis-unnecessary identity details. Do not add Buy/Sell labels, squeeze
+classification, thresholds, or inferred aggregation.
+
+See `docs/PHASE2_PLAN.md` for the full source mapping, result shape, step boundaries,
+and test requirements. P2-B0 changes documentation only; runtime, Snapshot, and
+Dashboard remain unchanged until their separately approved steps.
