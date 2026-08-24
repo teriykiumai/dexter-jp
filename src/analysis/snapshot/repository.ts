@@ -6,7 +6,9 @@ import { dexterPath } from '../../utils/paths.js';
 import { AnalysisSnapshotPersistenceError } from './errors.js';
 import {
   ANALYSIS_SNAPSHOT_SCHEMA_VERSION,
+  ANALYSIS_SNAPSHOT_V1_SCHEMA_VERSION,
   AnalysisSnapshotSchema,
+  AnalysisSnapshotV2Schema,
   CanonicalTickerSchema,
   type AnalysisSnapshot,
 } from './schema.js';
@@ -170,7 +172,10 @@ function parseSnapshotJson(contents: string, source: string): AnalysisSnapshot {
     raw !== null
     && typeof raw === 'object'
     && 'schemaVersion' in raw
-    && (raw as { schemaVersion?: unknown }).schemaVersion !== ANALYSIS_SNAPSHOT_SCHEMA_VERSION
+    && (raw as { schemaVersion?: unknown }).schemaVersion
+      !== ANALYSIS_SNAPSHOT_V1_SCHEMA_VERSION
+    && (raw as { schemaVersion?: unknown }).schemaVersion
+      !== ANALYSIS_SNAPSHOT_SCHEMA_VERSION
   ) {
     throw new AnalysisSnapshotPersistenceError(
       'unsupported_schema_version',
@@ -197,11 +202,11 @@ export class AnalysisSnapshotRepository {
   }
 
   async save(rawSnapshot: unknown): Promise<SavedAnalysisSnapshot> {
-    const parsed = AnalysisSnapshotSchema.safeParse(rawSnapshot);
+    const parsed = AnalysisSnapshotV2Schema.safeParse(rawSnapshot);
     if (!parsed.success) {
       throw new AnalysisSnapshotPersistenceError(
         'schema_validation_failed',
-        'Only a valid canonical AnalysisSnapshot can be saved.',
+        'Only a valid canonical AnalysisSnapshot V2 can be saved.',
         parsed.error,
       );
     }

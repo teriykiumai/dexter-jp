@@ -8,6 +8,7 @@ import {
   analyzeTechnical,
   type PeerCompany,
 } from './index.js';
+import { analyzeAdvancedTechnical } from './advanced-technical-engine.js';
 import {
   analyzeFinancialMetricsTool,
   analyzeMarketCorrelationTool,
@@ -82,8 +83,13 @@ describe('deterministic analysis tools', () => {
       volume: 1_000 + index,
     }));
 
-    const actual = toolData(await analyzeTechnicalTool.invoke({ bars }));
-    expect(actual).toEqual(analyzeTechnical(bars));
+    const actual = toolData(await analyzeTechnicalTool.invoke({ bars })) as ReturnType<
+      typeof analyzeTechnical
+    > & { advancedTechnical: ReturnType<typeof analyzeAdvancedTechnical> };
+    const { advancedTechnical, ...technical } = actual;
+
+    expect(technical).toEqual(analyzeTechnical(bars));
+    expect(advancedTechnical).toEqual(analyzeAdvancedTechnical(bars));
   });
 
   test('delegates margin and volume calculations to the Supply-Demand Engine', async () => {
@@ -157,6 +163,7 @@ describe('deterministic analysis tools', () => {
     const originalFetch = globalThis.fetch;
     const previousApiKey = process.env.JQUANTS_API_KEY;
     process.env.JQUANTS_API_KEY = 'test-jquants-key';
+    let stockHistoryFetches = 0;
 
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const href = input instanceof URL
@@ -168,6 +175,7 @@ describe('deterministic analysis tools', () => {
       let data: Record<string, unknown>[];
 
       if (url.pathname.endsWith('/equities/bars/daily')) {
+        stockHistoryFetches += 1;
         data = priceDates.map((date, index) => ({
           Date: date,
           Code: '72030',
@@ -212,7 +220,9 @@ describe('deterministic analysis tools', () => {
       const source = { ticker: '7203', from: '2025-01-01', to: '2026-12-31' };
       const technical = toolData(await analyzeTechnicalTool.invoke(source)) as {
         dataDate: string | null;
+        advancedTechnical: { rsi14: number | null; dataDate: string | null };
       };
+      expect(stockHistoryFetches).toBe(1);
       const supplyDemand = toolData(await analyzeSupplyDemandTool.invoke(source)) as {
         mean52w: number | null;
         unavailable: unknown[];
@@ -223,6 +233,10 @@ describe('deterministic analysis tools', () => {
       };
 
       expect(technical.dataDate).toBe(priceDates[priceDates.length - 1]);
+      expect(technical.advancedTechnical).toMatchObject({
+        dataDate: priceDates[priceDates.length - 1],
+        rsi14: 100,
+      });
       expect(supplyDemand.mean52w).not.toBeNull();
       expect(supplyDemand.unavailable).toEqual([]);
       expect(correlation.alignedPriceCount).toBe(251);

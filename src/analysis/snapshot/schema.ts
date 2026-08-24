@@ -11,7 +11,8 @@ const utcIsoDateTime = z.string().datetime({ offset: true }).refine(value => val
   message: 'generatedAt must be a UTC ISO 8601 timestamp.',
 });
 
-export const ANALYSIS_SNAPSHOT_SCHEMA_VERSION = 1 as const;
+export const ANALYSIS_SNAPSHOT_V1_SCHEMA_VERSION = 1 as const;
+export const ANALYSIS_SNAPSHOT_SCHEMA_VERSION = 2 as const;
 
 export const CanonicalTickerSchema = z.string().regex(JAPANESE_SECURITIES_CODE_PATTERN, {
   message: 'canonicalTicker must be a valid four-character Japanese securities code.',
@@ -33,6 +34,11 @@ export const MetricUnitSchema = z.enum([
 
 export type MetricUnit = z.infer<typeof MetricUnitSchema>;
 
+export const MetricUnitV2Schema = z.union([
+  MetricUnitSchema,
+  z.literal('index'),
+]);
+
 export const SnapshotSectionSchema = z.enum([
   'identity',
   'fundamental',
@@ -48,6 +54,11 @@ export const SnapshotSectionSchema = z.enum([
 ]);
 
 export type SnapshotSection = z.infer<typeof SnapshotSectionSchema>;
+
+export const SnapshotSectionV2Schema = z.union([
+  SnapshotSectionSchema,
+  z.literal('advancedTechnical'),
+]);
 
 export const SnapshotProvenanceSchema = z.object({
   source: z.enum([
@@ -92,6 +103,11 @@ const provenanceRecordShape = {
 
 export const SnapshotProvenanceRecordSchema = z.object(provenanceRecordShape);
 
+export const SnapshotProvenanceRecordV2Schema = z.object({
+  ...provenanceRecordShape,
+  advancedTechnical: z.array(SnapshotProvenanceSchema),
+});
+
 const unitMap = z.record(z.string().min(1), MetricUnitSchema);
 
 export const SnapshotUnitsSchema = z.object({
@@ -105,6 +121,20 @@ export const SnapshotUnitsSchema = z.object({
   priceHistory: unitMap,
 });
 
+const unitMapV2 = z.record(z.string().min(1), MetricUnitV2Schema);
+
+export const SnapshotUnitsV2Schema = z.object({
+  fundamental: unitMap,
+  valuation: unitMap,
+  peerComparison: unitMap,
+  technical: unitMap,
+  advancedTechnical: unitMapV2,
+  supplyDemand: unitMap,
+  marketCorrelation: unitMap,
+  strategy: unitMap,
+  priceHistory: unitMap,
+});
+
 export const SnapshotUnavailableSchema = z.object({
   section: SnapshotSectionSchema,
   metric: z.string().min(1).optional(),
@@ -112,7 +142,17 @@ export const SnapshotUnavailableSchema = z.object({
   detail: z.string().min(1).optional(),
 });
 
-export type SnapshotUnavailable = z.infer<typeof SnapshotUnavailableSchema>;
+export type SnapshotUnavailableV1 = z.infer<typeof SnapshotUnavailableSchema>;
+
+export const SnapshotUnavailableV2Schema = z.object({
+  section: SnapshotSectionV2Schema,
+  metric: z.string().min(1).optional(),
+  reason: z.string().min(1),
+  detail: z.string().min(1).optional(),
+});
+
+export type SnapshotUnavailable = z.infer<typeof SnapshotUnavailableV2Schema>;
+export type SnapshotUnavailableV2 = SnapshotUnavailable;
 
 export const CompanyIdentitySchema = z.object({
   canonicalTicker: CanonicalTickerSchema,
@@ -209,6 +249,35 @@ export const TechnicalResultSchema = z.object({
 });
 
 export type SnapshotTechnicalResult = z.infer<typeof TechnicalResultSchema>;
+
+const advancedTechnicalUnavailableReason = z.enum([
+  'insufficient_history',
+  'missing_data',
+  'invalid_data',
+]);
+
+export const AdvancedTechnicalResultSchema = z.object({
+  dataDate: nullableDate,
+  rsi14: nullableFiniteNumber,
+  macd: z.object({
+    value: finiteNumber,
+    signal: finiteNumber,
+    histogram: finiteNumber,
+  }).nullable(),
+  bollinger20: z.object({
+    middle: finiteNumber,
+    upper: finiteNumber,
+    lower: finiteNumber,
+  }).nullable(),
+  unavailable: z.array(z.object({
+    metric: z.enum(['rsi14', 'macd', 'bollinger20']),
+    reason: advancedTechnicalUnavailableReason,
+  })),
+});
+
+export type SnapshotAdvancedTechnicalResult = z.infer<
+  typeof AdvancedTechnicalResultSchema
+>;
 
 const supplyDemandMetric = z.enum([
   'buyingBalance',
@@ -472,8 +541,12 @@ export const SnapshotDataDatesSchema = z.object({
   priceHistory: nullableDate,
 });
 
-export const AnalysisSnapshotSchema = z.object({
-  schemaVersion: z.literal(ANALYSIS_SNAPSHOT_SCHEMA_VERSION),
+export const SnapshotDataDatesV2Schema = SnapshotDataDatesSchema.extend({
+  advancedTechnical: nullableDate,
+});
+
+export const AnalysisSnapshotV1Schema = z.object({
+  schemaVersion: z.literal(ANALYSIS_SNAPSHOT_V1_SCHEMA_VERSION),
   status: z.enum(['complete', 'partial']),
   canonicalTicker: CanonicalTickerSchema,
   companyName: z.string().min(1),
@@ -495,6 +568,22 @@ export const AnalysisSnapshotSchema = z.object({
   finalReportMarkdown: z.string().min(1),
 });
 
+export const AnalysisSnapshotV2Schema = AnalysisSnapshotV1Schema.extend({
+  schemaVersion: z.literal(ANALYSIS_SNAPSHOT_SCHEMA_VERSION),
+  dataDates: SnapshotDataDatesV2Schema,
+  provenance: SnapshotProvenanceRecordV2Schema,
+  units: SnapshotUnitsV2Schema,
+  advancedTechnical: AdvancedTechnicalResultSchema.nullable(),
+  unavailable: z.array(SnapshotUnavailableV2Schema),
+});
+
+export const AnalysisSnapshotSchema = z.discriminatedUnion('schemaVersion', [
+  AnalysisSnapshotV1Schema,
+  AnalysisSnapshotV2Schema,
+]);
+
+export type AnalysisSnapshotV1 = z.infer<typeof AnalysisSnapshotV1Schema>;
+export type AnalysisSnapshotV2 = z.infer<typeof AnalysisSnapshotV2Schema>;
 export type AnalysisSnapshot = z.infer<typeof AnalysisSnapshotSchema>;
 
 export const AnalysisSnapshotInputSchema = z.object({
@@ -505,6 +594,7 @@ export const AnalysisSnapshotInputSchema = z.object({
   peerComparison: PeerComparisonResultSchema.nullable(),
   peerCandidateMarketCapsComplete: z.boolean().nullable(),
   technical: TechnicalResultSchema.nullable(),
+  advancedTechnical: AdvancedTechnicalResultSchema.nullable(),
   supplyDemand: SupplyDemandResultSchema.nullable(),
   marketCorrelation: MarketCorrelationResultSchema.nullable(),
   strategy: StrategyResultSchema.nullable(),
@@ -531,7 +621,7 @@ export const AnalysisSnapshotInputSchema = z.object({
       benchmarkFromJQuants: z.boolean(),
     }),
   }),
-  additionalUnavailable: z.array(SnapshotUnavailableSchema),
+  additionalUnavailable: z.array(SnapshotUnavailableV2Schema),
 });
 
 export type AnalysisSnapshotInput = z.infer<typeof AnalysisSnapshotInputSchema>;
