@@ -7,6 +7,7 @@ import type {
 } from '../../agent/types.js';
 import { buildAnalysisSnapshot } from './builder.js';
 import {
+  AdvancedTechnicalResultSchema,
   CompanyIdentitySchema,
   FinancialMetricsResultSchema,
   FundamentalSnapshotSchema,
@@ -17,11 +18,11 @@ import {
   SupplyDemandResultSchema,
   TechnicalResultSchema,
   normalizeCanonicalTicker,
-  type AnalysisSnapshot,
+  type AnalysisSnapshotV2,
   type AnalysisSnapshotInput,
   type CompanyIdentity,
   type FundamentalSnapshot,
-  type SnapshotUnavailable,
+  type SnapshotUnavailableV2,
 } from './schema.js';
 
 const trackedToolNames = [
@@ -64,6 +65,10 @@ const startArgsSchemas: Record<TrackedToolName, z.ZodType<Record<string, unknown
 const toolEnvelopeSchema = z.object({
   data: z.unknown(),
   sourceUrls: z.array(z.string().min(1)).optional(),
+});
+
+const analyzeTechnicalResultSchema = TechnicalResultSchema.extend({
+  advancedTechnical: AdvancedTechnicalResultSchema.optional(),
 });
 
 const companyScreenerResultSchema = z.object({
@@ -169,6 +174,7 @@ export class StandardAgentSnapshotCollector {
   private peerComparison: AnalysisSnapshotInput['peerComparison'] = null;
   private peerCandidateMarketCapsComplete: boolean | null = null;
   private technical: AnalysisSnapshotInput['technical'] = null;
+  private advancedTechnical: AnalysisSnapshotInput['advancedTechnical'] = null;
   private supplyDemand: AnalysisSnapshotInput['supplyDemand'] = null;
   private marketCorrelation: AnalysisSnapshotInput['marketCorrelation'] = null;
   private strategy: AnalysisSnapshotInput['strategy'] = null;
@@ -180,7 +186,7 @@ export class StandardAgentSnapshotCollector {
   private supplyDemandVolumeUsesDirectJQuants = false;
   private correlationStockUsesDirectJQuants = false;
   private correlationBenchmarkUsesDirectJQuants = false;
-  private readonly additionalUnavailable: SnapshotUnavailable[] = [];
+  private readonly additionalUnavailable: SnapshotUnavailableV2[] = [];
 
   get canonicalTicker(): string | null {
     return this.identity?.canonicalTicker ?? null;
@@ -246,7 +252,7 @@ export class StandardAgentSnapshotCollector {
     if (event.toolCallId) this.pendingCalls.delete(event.toolCallId);
   }
 
-  finalize(finalReportMarkdown: string, generatedAt = new Date().toISOString()): AnalysisSnapshot | null {
+  finalize(finalReportMarkdown: string, generatedAt = new Date().toISOString()): AnalysisSnapshotV2 | null {
     if (!this.comprehensiveAnalysisObserved || !this.identity || finalReportMarkdown.length === 0) {
       return null;
     }
@@ -259,6 +265,7 @@ export class StandardAgentSnapshotCollector {
       peerComparison: this.peerComparison,
       peerCandidateMarketCapsComplete: this.peerCandidateMarketCapsComplete,
       technical: this.technical,
+      advancedTechnical: this.advancedTechnical,
       supplyDemand: this.supplyDemand,
       marketCorrelation: this.marketCorrelation,
       strategy: this.strategy,
@@ -408,7 +415,9 @@ export class StandardAgentSnapshotCollector {
         break;
       case 'analyze_technical':
         if (!this.technical) {
-          this.technical = TechnicalResultSchema.parse(call.validatedResult);
+          const result = analyzeTechnicalResultSchema.parse(call.validatedResult);
+          this.technical = TechnicalResultSchema.parse(result);
+          this.advancedTechnical = result.advancedTechnical ?? null;
           this.technicalUsesDirectJQuants = !Array.isArray(call.validatedArgs.bars);
         }
         break;
@@ -466,7 +475,7 @@ export class StandardAgentSnapshotCollector {
     }
   }
 
-  private sectionForTool(tool: TrackedToolName): SnapshotUnavailable['section'] {
+  private sectionForTool(tool: TrackedToolName): SnapshotUnavailableV2['section'] {
     switch (tool) {
       case 'get_financials': return 'identity';
       case 'company_screener': return 'peerComparison';

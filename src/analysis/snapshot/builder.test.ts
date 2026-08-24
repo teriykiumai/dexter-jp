@@ -102,6 +102,13 @@ function completeInput(): AnalysisSnapshotInput {
       latestSwingLow: 2_800,
       unavailable: [],
     },
+    advancedTechnical: {
+      dataDate: '2026-08-21',
+      rsi14: 62.5,
+      macd: { value: 45, signal: 40, histogram: 5 },
+      bollinger20: { middle: 2_950, upper: 3_150, lower: 2_750 },
+      unavailable: [],
+    },
     supplyDemand: {
       dataDate: '2026-08-19',
       volumeDataDate: '2026-08-21',
@@ -159,6 +166,7 @@ describe('buildAnalysisSnapshot', () => {
   test('uses an explicit required-section contract and remains complete for metric-level unavailable states', () => {
     const snapshot = buildAnalysisSnapshot(completeInput());
 
+    expect(snapshot.schemaVersion).toBe(2);
     expect(REQUIRED_ANALYSIS_SNAPSHOT_SECTIONS).toEqual([
       'identity',
       'fundamental',
@@ -189,6 +197,10 @@ describe('buildAnalysisSnapshot', () => {
       expect.objectContaining({ source: 'technical_engine', role: 'calculation' }),
       expect.objectContaining({ source: 'jquants', role: 'price_data' }),
     ]));
+    expect(snapshot.provenance.advancedTechnical).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'technical_engine', role: 'calculation' }),
+      expect.objectContaining({ source: 'jquants', role: 'price_data' }),
+    ]));
     expect(snapshot.provenance.supplyDemand).toEqual(expect.arrayContaining([
       expect.objectContaining({ source: 'jquants', role: 'margin_data' }),
       expect.objectContaining({ source: 'jquants', role: 'price_data' }),
@@ -200,6 +212,38 @@ describe('buildAnalysisSnapshot', () => {
     expect(snapshot.units.valuation.per).toBe('multiple');
     expect(snapshot.units.peerComparison.percentile).toBe('ratio');
     expect(snapshot.units.supplyDemand.percentile52w).toBe('ratio');
+    expect(snapshot.units.advancedTechnical).toEqual({
+      rsi14: 'index',
+      'macd.value': 'JPY',
+      'macd.signal': 'JPY',
+      'macd.histogram': 'JPY',
+      'bollinger20.middle': 'JPY',
+      'bollinger20.upper': 'JPY',
+      'bollinger20.lower': 'JPY',
+    });
+    expect(snapshot.dataDates.advancedTechnical).toBe('2026-08-21');
+    expect(snapshot.advancedTechnical).toEqual(completeInput().advancedTechnical);
+  });
+
+  test('preserves advanced metric unavailable reasons without changing complete status', () => {
+    const input = completeInput();
+    input.advancedTechnical = {
+      dataDate: '2026-08-21',
+      rsi14: null,
+      macd: { value: 45, signal: 40, histogram: 5 },
+      bollinger20: { middle: 2_950, upper: 3_150, lower: 2_750 },
+      unavailable: [{ metric: 'rsi14', reason: 'missing_data' }],
+    };
+
+    const snapshot = buildAnalysisSnapshot(input);
+
+    expect(snapshot.status).toBe('complete');
+    expect(snapshot.advancedTechnical).toEqual(input.advancedTechnical);
+    expect(snapshot.unavailable).toContainEqual({
+      section: 'advancedTechnical',
+      metric: 'rsi14',
+      reason: 'missing_data',
+    });
   });
 
   test('marks a normally completed snapshot partial when a required section is absent', () => {
@@ -274,6 +318,20 @@ describe('buildAnalysisSnapshot', () => {
 
     expect(snapshot.valuation).toBeNull();
     expect(snapshot.finalReportMarkdown).toBe('PER: 99.9倍');
+  });
+
+  test('does not reconstruct Advanced Technical values from final Markdown', () => {
+    const input = completeInput();
+    input.advancedTechnical = null;
+    input.finalReportMarkdown = 'RSI14: 99 / MACD: 123';
+
+    const snapshot = buildAnalysisSnapshot(input);
+
+    expect(snapshot.advancedTechnical).toBeNull();
+    expect(snapshot.unavailable).toContainEqual({
+      section: 'advancedTechnical',
+      reason: 'not_collected',
+    });
   });
 
   test('does not carry extraneous secret-like input into the canonical snapshot', () => {

@@ -1,12 +1,12 @@
 import {
   ANALYSIS_SNAPSHOT_SCHEMA_VERSION,
   AnalysisSnapshotInputSchema,
-  AnalysisSnapshotSchema,
-  type AnalysisSnapshot,
+  AnalysisSnapshotV2Schema,
+  type AnalysisSnapshotV2,
   type AnalysisSnapshotInput,
   type SnapshotProvenance,
   type SnapshotSection,
-  type SnapshotUnavailable,
+  type SnapshotUnavailableV2,
 } from './schema.js';
 
 export const REQUIRED_ANALYSIS_SNAPSHOT_SECTIONS = [
@@ -60,6 +60,15 @@ const UNITS = {
     averageVolume20: 'shares',
     latestSwingHigh: 'JPY',
     latestSwingLow: 'JPY',
+  },
+  advancedTechnical: {
+    rsi14: 'index',
+    'macd.value': 'JPY',
+    'macd.signal': 'JPY',
+    'macd.histogram': 'JPY',
+    'bollinger20.middle': 'JPY',
+    'bollinger20.upper': 'JPY',
+    'bollinger20.lower': 'JPY',
   },
   supplyDemand: {
     buyingBalance: 'shares',
@@ -180,8 +189,8 @@ function peerComparisonState(input: AnalysisSnapshotInput) {
   };
 }
 
-function aggregateUnavailable(input: AnalysisSnapshotInput): SnapshotUnavailable[] {
-  const unavailable: SnapshotUnavailable[] = missingSections(input).map(section => ({
+function aggregateUnavailable(input: AnalysisSnapshotInput): SnapshotUnavailableV2[] {
+  const unavailable: SnapshotUnavailableV2[] = missingSections(input).map(section => ({
     section,
     reason: 'missing_required_section',
   }));
@@ -191,6 +200,17 @@ function aggregateUnavailable(input: AnalysisSnapshotInput): SnapshotUnavailable
   }
   for (const metric of input.technical?.unavailable ?? []) {
     unavailable.push({ section: 'technical', metric, reason: 'engine_reported_unavailable' });
+  }
+  if (input.advancedTechnical === null) {
+    unavailable.push({ section: 'advancedTechnical', reason: 'not_collected' });
+  } else {
+    for (const item of input.advancedTechnical.unavailable) {
+      unavailable.push({
+        section: 'advancedTechnical',
+        metric: item.metric,
+        reason: item.reason,
+      });
+    }
   }
   for (const item of input.supplyDemand?.unavailable ?? []) {
     unavailable.push({ section: 'supplyDemand', metric: item.metric, reason: item.reason });
@@ -221,14 +241,14 @@ function aggregateUnavailable(input: AnalysisSnapshotInput): SnapshotUnavailable
   return [...unavailable, ...input.additionalUnavailable];
 }
 
-export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): AnalysisSnapshot {
+export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): AnalysisSnapshotV2 {
   const input = AnalysisSnapshotInputSchema.parse(rawInput);
   const fundamentalDate = latestFundamentalDate(input);
   const peerDate = latestPeerDate(input);
   const priceDate = latestPriceDate(input);
   const missing = missingSections(input);
 
-  return AnalysisSnapshotSchema.parse({
+  return AnalysisSnapshotV2Schema.parse({
     schemaVersion: ANALYSIS_SNAPSHOT_SCHEMA_VERSION,
     status: missing.length === 0 ? 'complete' : 'partial',
     canonicalTicker: input.identity.canonicalTicker,
@@ -243,6 +263,7 @@ export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): Analysis
       },
       peerComparison: peerDate,
       technical: input.technical?.dataDate ?? null,
+      advancedTechnical: input.advancedTechnical?.dataDate ?? null,
       supplyDemand: input.supplyDemand?.dataDate ?? null,
       marketCorrelation: input.marketCorrelation?.dataDate ?? null,
       strategy: input.strategy?.dataDate ?? null,
@@ -290,6 +311,23 @@ export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): Analysis
               : []),
           ]
         : [],
+      advancedTechnical: input.advancedTechnical
+        ? [
+            ...provenance(
+              'technical_engine',
+              'calculation',
+              input.advancedTechnical.dataDate,
+            ),
+            ...(input.sourceUsage.technical.priceFromJQuants
+              ? provenance(
+                  'jquants',
+                  'price_data',
+                  input.advancedTechnical.dataDate,
+                  input.priceSourceUrls,
+                )
+              : []),
+          ]
+        : [],
       supplyDemand: input.supplyDemand
         ? [
             ...provenance('supply_demand_engine', 'calculation', input.supplyDemand.dataDate),
@@ -326,6 +364,7 @@ export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): Analysis
     valuation: input.valuation,
     peerComparison: peerComparisonState(input),
     technical: input.technical,
+    advancedTechnical: input.advancedTechnical,
     supplyDemand: input.supplyDemand,
     marketCorrelation: input.marketCorrelation,
     strategy: input.strategy,

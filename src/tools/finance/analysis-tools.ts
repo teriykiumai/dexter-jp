@@ -1,6 +1,7 @@
 import { DynamicStructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
 import { formatToolResult } from '../types.js';
+import { analyzeAdvancedTechnical } from './advanced-technical-engine.js';
 import { analyzeFinancialMetrics } from './financial-metrics-engine.js';
 import { analyzeMarketCorrelation } from './market-correlation-engine.js';
 import { analyzePeerComparison } from './peer-comparison-engine.js';
@@ -138,7 +139,7 @@ async function fetchTopixHistory(from: string, to: string | undefined) {
 }
 
 export const ANALYZE_TECHNICAL_DESCRIPTION = `
-Calculate the fixed MVP technical snapshot from chronological OHLCV bars. Returns SMA20, ATR14, average volume, Swing High/Low, trend, data date, and explicit unavailable metrics. All calculations are deterministic; do not calculate these values in the model.
+Calculate technical results from chronological adjusted OHLCV bars. Returns the fixed MVP SMA20, ATR14, average volume, Swing High/Low, trend, data date, and unavailable metrics, plus an advancedTechnical companion with RSI14, MACD 12/26/9, and Bollinger Bands 20/2σ. All calculations are deterministic; do not calculate these values in the model.
 `.trim();
 
 export const analyzeTechnicalTool = new DynamicStructuredTool({
@@ -155,7 +156,10 @@ export const analyzeTechnicalTool = new DynamicStructuredTool({
       const source = requireTickerRange(ticker, from, to, 'analyze_technical');
       bars = await fetchStockHistory(source.ticker, source.from, source.to);
     }
-    return formatToolResult(analyzeTechnical(bars), []);
+    return formatToolResult({
+      ...analyzeTechnical(bars),
+      advancedTechnical: analyzeAdvancedTechnical(bars),
+    }, []);
   },
 });
 

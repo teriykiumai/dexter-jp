@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { ToolEndEvent, ToolStartEvent } from '../../agent/types.js';
+import { analyzeAdvancedTechnical } from '../../tools/finance/advanced-technical-engine.js';
+import { analyzeTechnicalTool } from '../../tools/finance/analysis-tools.js';
 import { StandardAgentSnapshotCollector } from './standard-agent-adapter.js';
 
 function start(
@@ -111,6 +113,35 @@ function peerResult(
 }
 
 describe('StandardAgentSnapshotCollector', () => {
+  test('preserves deterministic Advanced Technical values from tool result to Snapshot', async () => {
+    const collector = new StandardAgentSnapshotCollector();
+    invokeSkill(collector);
+    lockToyota(collector);
+    const bars = Array.from({ length: 251 }, (_, index) => ({
+      date: new Date(Date.UTC(2025, 0, index + 1)).toISOString().slice(0, 10),
+      open: 100 + index,
+      high: 102 + index,
+      low: 99 + index,
+      close: 101 + index,
+      volume: 1_000 + index,
+    }));
+    const args = { ticker: '7203', bars };
+    start(collector, 'analyze_technical', 'technical-engine', args);
+    const result = await analyzeTechnicalTool.invoke(args);
+    collector.recordToolEnd({
+      type: 'tool_end',
+      tool: 'analyze_technical',
+      toolCallId: 'technical-engine',
+      args: {},
+      result: String(result),
+      duration: 1,
+    } as ToolEndEvent);
+
+    const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
+
+    expect(snapshot?.advancedTechnical).toEqual(analyzeAdvancedTechnical(bars));
+  });
+
   test('pairs start args and end results by toolCallId before collecting', () => {
     const collector = new StandardAgentSnapshotCollector();
     invokeSkill(collector);
@@ -230,6 +261,13 @@ describe('StandardAgentSnapshotCollector', () => {
     start(collector, 'analyze_technical', 'technical-1', {
       ticker: '7203', from: '2025-08-01', to: '2026-08-20',
     });
+    const advancedTechnical = {
+      dataDate: '2026-08-20',
+      rsi14: 63.25,
+      macd: { value: 40, signal: 35, histogram: 5 },
+      bollinger20: { middle: 3_000, upper: 3_200, lower: 2_800 },
+      unavailable: [],
+    };
     end(collector, 'analyze_technical', 'technical-1', {
       dataDate: '2026-08-20',
       ma20: 3_000,
@@ -239,6 +277,7 @@ describe('StandardAgentSnapshotCollector', () => {
       latestSwingHigh: 3_100,
       latestSwingLow: 2_900,
       unavailable: [],
+      advancedTechnical,
     });
     start(collector, 'analyze_supply_demand', 'supply-1', {
       ticker: '7203', from: '2025-08-01', to: '2026-08-20',
@@ -270,6 +309,8 @@ describe('StandardAgentSnapshotCollector', () => {
     });
 
     const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
+    expect(snapshot?.advancedTechnical).toEqual(advancedTechnical);
+    expect(snapshot?.dataDates.advancedTechnical).toBe('2026-08-20');
     expect(snapshot?.provenance.technical).toEqual(expect.arrayContaining([
       expect.objectContaining({ source: 'technical_engine', role: 'calculation' }),
       expect.objectContaining({ source: 'jquants', role: 'price_data' }),
@@ -283,6 +324,36 @@ describe('StandardAgentSnapshotCollector', () => {
       expect.objectContaining({ source: 'jquants', role: 'benchmark_data' }),
     ]));
     expect(JSON.stringify(snapshot)).not.toContain('2025-08-01');
+  });
+
+  test('does not reconstruct an absent Advanced Technical companion from Markdown', () => {
+    const collector = new StandardAgentSnapshotCollector();
+    invokeSkill(collector);
+    lockToyota(collector);
+    start(collector, 'analyze_technical', 'technical-legacy', {
+      ticker: '7203', from: '2025-08-01', to: '2026-08-20',
+    });
+    end(collector, 'analyze_technical', 'technical-legacy', {
+      dataDate: '2026-08-20',
+      ma20: 3_000,
+      atr14: 80,
+      averageVolume20: 10_000,
+      trend: 'uptrend',
+      latestSwingHigh: 3_100,
+      latestSwingLow: 2_900,
+      unavailable: [],
+    });
+
+    const snapshot = collector.finalize(
+      '# Report\nRSI14: 99 / MACD: 123',
+      '2026-08-23T01:02:03.000Z',
+    );
+
+    expect(snapshot?.advancedTechnical).toBeNull();
+    expect(snapshot?.unavailable).toContainEqual({
+      section: 'advancedTechnical',
+      reason: 'not_collected',
+    });
   });
 
   test('rejects a peer result whose target differs from its paired locked-target args', () => {

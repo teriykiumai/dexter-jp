@@ -8,7 +8,12 @@ import {
   AnalysisSnapshotRepository,
   createSnapshotId,
 } from './repository.js';
-import type { AnalysisSnapshot, AnalysisSnapshotInput } from './schema.js';
+import {
+  AnalysisSnapshotV1Schema,
+  type AnalysisSnapshotInput,
+  type AnalysisSnapshotV1,
+  type AnalysisSnapshotV2,
+} from './schema.js';
 
 const temporaryDirectories: string[] = [];
 
@@ -21,7 +26,7 @@ async function createRepository(): Promise<{ repository: AnalysisSnapshotReposit
 function partialSnapshot(
   generatedAt = '2026-08-23T01:02:03.000Z',
   canonicalTicker = '7203',
-): AnalysisSnapshot {
+): AnalysisSnapshotV2 {
   const input: AnalysisSnapshotInput = {
     identity: {
       canonicalTicker,
@@ -38,6 +43,7 @@ function partialSnapshot(
     peerComparison: null,
     peerCandidateMarketCapsComplete: null,
     technical: null,
+    advancedTechnical: null,
     supplyDemand: null,
     marketCorrelation: null,
     strategy: null,
@@ -56,6 +62,33 @@ function partialSnapshot(
     additionalUnavailable: [],
   };
   return buildAnalysisSnapshot(input);
+}
+
+function v1Snapshot(
+  generatedAt = '2026-08-23T01:02:03.000Z',
+  canonicalTicker = '7203',
+): AnalysisSnapshotV1 {
+  const v2 = partialSnapshot(generatedAt, canonicalTicker) as AnalysisSnapshotV2;
+  const {
+    advancedTechnical: _advancedTechnical,
+    dataDates: v2DataDates,
+    provenance: v2Provenance,
+    units: v2Units,
+    unavailable: v2Unavailable,
+    ...common
+  } = v2;
+  const { advancedTechnical: _advancedDate, ...dataDates } = v2DataDates;
+  const { advancedTechnical: _advancedProvenance, ...provenance } = v2Provenance;
+  const { advancedTechnical: _advancedUnits, ...units } = v2Units;
+
+  return AnalysisSnapshotV1Schema.parse({
+    ...common,
+    schemaVersion: 1,
+    dataDates,
+    provenance,
+    units,
+    unavailable: v2Unavailable.filter(item => item.section !== 'advancedTechnical'),
+  });
 }
 
 async function expectPersistenceError(
@@ -94,10 +127,40 @@ describe('AnalysisSnapshotRepository', () => {
     });
     expect(history).toEqual(snapshot);
     expect(latest).toEqual(snapshot);
+    expect(latest.schemaVersion).toBe(2);
     expect(filenames.sort()).toEqual([
       '2026-08-23T01-02-03-000Z.json',
       'latest.json',
     ]);
+  });
+
+  test('reads existing V1 history and latest JSON without rewriting either file', async () => {
+    const { repository, root } = await createRepository();
+    const snapshot = v1Snapshot();
+    const snapshotId = createSnapshotId(snapshot.generatedAt);
+    const tickerDirectory = join(root, '7203');
+    const historyPath = join(tickerDirectory, `${snapshotId}.json`);
+    const latestPath = join(tickerDirectory, 'latest.json');
+    const originalJson = `${JSON.stringify(snapshot, null, 2)}\n`;
+    await mkdir(tickerDirectory, { recursive: true });
+    await writeFile(historyPath, originalJson, 'utf8');
+    await writeFile(latestPath, originalJson, 'utf8');
+
+    const history = await repository.loadHistory('7203', snapshotId);
+    const latest = await repository.loadLatest('7203');
+
+    expect(history).toEqual(snapshot);
+    expect(latest).toEqual(snapshot);
+    expect(history.schemaVersion).toBe(1);
+    expect('advancedTechnical' in history).toBeFalse();
+    expect(await readFile(historyPath, 'utf8')).toBe(originalJson);
+    expect(await readFile(latestPath, 'utf8')).toBe(originalJson);
+  });
+
+  test('rejects V1 at the V2-only save boundary', async () => {
+    const { repository } = await createRepository();
+
+    await expectPersistenceError(repository.save(v1Snapshot()), 'schema_validation_failed');
   });
 
   test('lists history metadata in descending generatedAt order', async () => {
@@ -180,7 +243,7 @@ describe('AnalysisSnapshotRepository', () => {
     await writeFile(join(tickerDirectory, 'latest.json'), JSON.stringify({ schemaVersion: 1 }), 'utf8');
     await expectPersistenceError(repository.loadLatest('7203'), 'schema_validation_failed');
 
-    await writeFile(join(tickerDirectory, 'latest.json'), JSON.stringify({ schemaVersion: 2 }), 'utf8');
+    await writeFile(join(tickerDirectory, 'latest.json'), JSON.stringify({ schemaVersion: 3 }), 'utf8');
     await expectPersistenceError(repository.loadLatest('7203'), 'unsupported_schema_version');
   });
 

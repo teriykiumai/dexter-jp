@@ -3,6 +3,7 @@ import {
   buildAnalysisSnapshot,
   buildAnalysisSnapshotLatestItem,
   type AnalysisSnapshot,
+  type AnalysisSnapshotV2,
   type AnalysisSnapshotInput,
 } from '../../analysis/snapshot/index.js';
 import {
@@ -17,7 +18,7 @@ import {
   sortWatchlistItems,
 } from './presentation.js';
 
-function baseSnapshot(): AnalysisSnapshot {
+function baseSnapshot(): AnalysisSnapshotV2 {
   const input: AnalysisSnapshotInput = {
     identity: {
       canonicalTicker: '7203',
@@ -34,6 +35,7 @@ function baseSnapshot(): AnalysisSnapshot {
     peerComparison: null,
     peerCandidateMarketCapsComplete: null,
     technical: null,
+    advancedTechnical: null,
     supplyDemand: null,
     marketCorrelation: null,
     strategy: null,
@@ -117,7 +119,7 @@ function watchlistSnapshot(
   ticker: string,
   generatedAt: string,
   latestDataDate: string,
-): AnalysisSnapshot {
+): AnalysisSnapshotV2 {
   return {
     ...baseSnapshot(),
     canonicalTicker: ticker,
@@ -130,6 +132,7 @@ function watchlistSnapshot(
       valuation: { price: latestDataDate, financial: latestDataDate },
       peerComparison: latestDataDate,
       technical: latestDataDate,
+      advancedTechnical: latestDataDate,
       supplyDemand: latestDataDate,
       marketCorrelation: latestDataDate,
       strategy: latestDataDate,
@@ -396,7 +399,7 @@ describe('watchlist presentation mapping', () => {
       ),
       referenceDate,
     );
-    const missingSnapshot: AnalysisSnapshot = {
+    const missingSnapshot: AnalysisSnapshotV2 = {
       ...baseSnapshot(),
       canonicalTicker: '130A',
       companyName: '130A株式会社',
@@ -406,6 +409,7 @@ describe('watchlist presentation mapping', () => {
         valuation: { price: null, financial: null },
         peerComparison: null,
         technical: null,
+        advancedTechnical: null,
         supplyDemand: null,
         marketCorrelation: null,
         strategy: null,

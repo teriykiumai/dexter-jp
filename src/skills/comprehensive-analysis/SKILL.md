@@ -78,7 +78,7 @@ Preserve dates and nulls. Do not forward-fill, interpolate, or silently remove m
 ## 5. Run deterministic engines
 
 1. Pass the verified target `ticker`, latest adjusted close, and chronological annual financial rows to `analyze_financial_metrics`.
-2. Pass adjusted OHLCV to `analyze_technical`.
+2. Pass adjusted OHLCV to `analyze_technical`; use its existing Technical fields and its structured `advancedTechnical` companion from the same call.
 3. Pass margin balances and stock volume to `analyze_supply_demand`.
 4. Pass stock and TOPIX closes to `analyze_market_correlation`.
 5. Pass the verified target `ticker` plus `dataDate`, `latestSwingHigh`, `latestSwingLow`, and `atr14` from the Technical result to `analyze_strategy`.
