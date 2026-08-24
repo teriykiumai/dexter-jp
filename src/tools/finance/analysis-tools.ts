@@ -223,7 +223,7 @@ export const analyzePeerComparisonTool = new DynamicStructuredTool({
 });
 
 export const ANALYZE_MARKET_CORRELATION_DESCRIPTION = `
-Calculate deterministic 60-day and 250-day stock-versus-TOPIX return statistics. Dates are inner-joined, missing dates are never forward-filled, and insufficient history or zero variance is reported explicitly.
+Calculate deterministic 20-day, 60-day, and 250-day stock-versus-TOPIX return statistics. Dates are inner-joined, missing dates are never forward-filled, and insufficient history or zero variance is reported explicitly.
 `.trim();
 
 export const analyzeMarketCorrelationTool = new DynamicStructuredTool({

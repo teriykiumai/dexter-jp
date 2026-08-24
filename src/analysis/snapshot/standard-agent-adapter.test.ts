@@ -306,12 +306,40 @@ describe('StandardAgentSnapshotCollector', () => {
       benchmark: 'TOPIX',
       dataDate: '2026-08-20',
       alignedPriceCount: 251,
-      windows: [],
+      windows: [{
+        period: 20,
+        startDate: '2026-07-24',
+        endDate: '2026-08-20',
+        observations: 20,
+        correlation: 0.6,
+        beta: 1.1,
+        alphaAnnualized: 0.02,
+        rSquared: 0.36,
+        stockVolatilityAnnualized: 0.25,
+        benchmarkVolatilityAnnualized: 0.18,
+        excessReturn: 0.03,
+        unavailable: [],
+      }],
     });
 
     const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
     expect(snapshot?.advancedTechnical).toEqual(advancedTechnical);
     expect(snapshot?.supplyDemand?.mean4w).toBe(950);
+    expect(snapshot?.schemaVersion).toBe(3);
+    expect(snapshot?.marketCorrelation?.windows).toEqual([{
+      period: 20,
+      startDate: '2026-07-24',
+      endDate: '2026-08-20',
+      observations: 20,
+      correlation: 0.6,
+      beta: 1.1,
+      alphaAnnualized: 0.02,
+      rSquared: 0.36,
+      stockVolatilityAnnualized: 0.25,
+      benchmarkVolatilityAnnualized: 0.18,
+      excessReturn: 0.03,
+      unavailable: [],
+    }]);
     expect(snapshot?.dataDates.advancedTechnical).toBe('2026-08-20');
     expect(snapshot?.provenance.technical).toEqual(expect.arrayContaining([
       expect.objectContaining({ source: 'technical_engine', role: 'calculation' }),

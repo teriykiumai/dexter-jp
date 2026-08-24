@@ -164,6 +164,7 @@ describe('deterministic analysis tools', () => {
     const previousApiKey = process.env.JQUANTS_API_KEY;
     process.env.JQUANTS_API_KEY = 'test-jquants-key';
     let stockHistoryFetches = 0;
+    let topixHistoryFetches = 0;
 
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const href = input instanceof URL
@@ -199,6 +200,7 @@ describe('deterministic analysis tools', () => {
           IssType: '2',
         }));
       } else if (url.pathname.endsWith('/indices/bars/daily/topix')) {
+        topixHistoryFetches += 1;
         data = priceDates.map((date, index) => ({
           Date: date,
           O: 200 + index,
@@ -242,10 +244,17 @@ describe('deterministic analysis tools', () => {
       expect(supplyDemand.mean52w).not.toBeNull();
       expect(supplyDemand.unavailable).toEqual([]);
       expect(correlation.alignedPriceCount).toBe(251);
+      expect(correlation.windows.map(window => window.period)).toEqual([20, 60, 250]);
+      expect(correlation.windows.find((window) => window.period === 20)).toMatchObject({
+        observations: 20,
+        unavailable: [],
+      });
       expect(correlation.windows.find((window) => window.period === 250)).toMatchObject({
         observations: 250,
         unavailable: [],
       });
+      expect(stockHistoryFetches).toBe(3);
+      expect(topixHistoryFetches).toBe(1);
     } finally {
       globalThis.fetch = originalFetch;
       if (previousApiKey === undefined) delete process.env.JQUANTS_API_KEY;

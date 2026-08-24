@@ -186,12 +186,13 @@ Only implement metrics that materially improve interpretation beyond the existin
 
 ### Priority C — Market Correlation Window Expansion
 
-After Technical and Supply/Demand changes are stable, consider adding:
+After Technical and Supply/Demand changes are stable, add:
 
 - 20 trading days
-- 120 trading days
 
 Existing 60-day and 250-day windows remain canonical and must not change semantics.
+The 120-day window is rejected because it does not add enough information between
+the existing 60-day and 250-day horizons.
 
 Future benchmark expansion within Phase 2A is not required. Sector indices remain
 planned Phase 2D work and require a separately approved contract.
@@ -870,16 +871,11 @@ Tests must include:
 
 ### P2-M1 — Correlation Window Extension
 
-Only after higher-priority work.
-
-Add:
+Add the adopted short-horizon window:
 
 ```text
 20
-120
 ```
-
-to the existing window set only if needed.
 
 Keep:
 
@@ -889,6 +885,13 @@ Keep:
 ```
 
 unchanged.
+
+The fixed output order is `20 → 60 → 250`. The 20-day result requires 20 return
+observations from the latest 21 closes selected after the existing stock/TOPIX
+date inner join. It preserves the current sample-statistics, annualization,
+zero-variance, and no-forward-fill contracts and does not trigger another fetch.
+Snapshot V3 stores it through the existing `windows[]` shape; no schema change is
+required. The 120-day window is not implemented.
 
 Tests must ensure:
 

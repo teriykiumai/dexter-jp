@@ -360,6 +360,68 @@ describe('snapshot presentation mapping', () => {
     });
   });
 
+  test('passes through the 20-day correlation window and keeps unavailable distinct from zero', () => {
+    const snapshot: AnalysisSnapshotV3 = {
+      ...baseSnapshot(),
+      marketCorrelation: {
+        benchmark: 'TOPIX',
+        dataDate: '2026-08-21',
+        alignedPriceCount: 21,
+        windows: [{
+          period: 20,
+          startDate: '2026-07-24',
+          endDate: '2026-08-21',
+          observations: 20,
+          correlation: 0.625,
+          beta: 1.1,
+          alphaAnnualized: 0.02,
+          rSquared: 0.390625,
+          stockVolatilityAnnualized: 0.25,
+          benchmarkVolatilityAnnualized: 0.18,
+          excessReturn: 0.03,
+          unavailable: [],
+        }],
+      },
+    };
+
+    expect(mapSnapshotToDashboard(snapshot).correlations).toEqual([{
+      period: 20,
+      observations: { text: '20', available: true },
+      correlation: { text: '0.625', available: true },
+      beta: { text: '1.1', available: true },
+      alpha: { text: '2%', available: true },
+      rSquared: { text: '0.391', available: true },
+      unavailableReasons: [],
+    }]);
+
+    const unavailable: AnalysisSnapshotV3 = {
+      ...snapshot,
+      marketCorrelation: {
+        ...snapshot.marketCorrelation!,
+        alignedPriceCount: 20,
+        windows: [{
+          ...snapshot.marketCorrelation!.windows[0]!,
+          observations: 19,
+          correlation: null,
+          beta: null,
+          alphaAnnualized: null,
+          rSquared: null,
+          stockVolatilityAnnualized: null,
+          benchmarkVolatilityAnnualized: null,
+          excessReturn: null,
+          unavailable: [{ metric: 'correlation', reason: 'insufficient_history' }],
+        }],
+      },
+    };
+    const unavailableWindow = mapSnapshotToDashboard(unavailable).correlations?.[0];
+
+    expect(unavailableWindow?.observations).toEqual({ text: '19', available: true });
+    expect(unavailableWindow?.correlation).toEqual({
+      text: UNAVAILABLE_TEXT,
+      available: false,
+    });
+  });
+
   test('treats V1 Advanced Technical as not collected', () => {
     const view = mapSnapshotToDashboard(v1Snapshot());
 
