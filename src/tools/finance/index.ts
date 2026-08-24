@@ -5,6 +5,11 @@ export { getEarnings } from './earnings.js';
 export { getShareholders } from './shareholders.js';
 export { getStockPrice, isJQuantsAvailable, STOCK_PRICE_DESCRIPTION } from './stock-price.js';
 export { getMarginData, MARGIN_DATA_DESCRIPTION } from './margin-data.js';
+export {
+  getShortSaleReports,
+  SHORT_SALE_REPORT_DESCRIPTION,
+  type ShortSaleReportSourceRow,
+} from './short-sale-report.js';
 export { getTopix, TOPIX_DESCRIPTION } from './topix.js';
 export {
   ANALYZE_FINANCIAL_METRICS_DESCRIPTION,
