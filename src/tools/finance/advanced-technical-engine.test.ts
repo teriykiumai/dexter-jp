@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { calculateRsi } from './advanced-technical-engine.js';
+import { calculateMacd, calculateRsi } from './advanced-technical-engine.js';
 
 const deterministicCloses = [
   100, 102, 101, 104, 103, 105, 106, 104,
@@ -95,5 +95,124 @@ describe('calculateRsi', () => {
 
     expect(calculateRsi(historyWithFutureBars.slice(0, prefix.length))).toEqual(beforeFutureBars);
     expect(calculateRsi(historyWithFutureBars).rsi14).not.toBe(beforeFutureBars.rsi14);
+  });
+});
+
+function steppedMacdCloses(stepCloses: number): number[] {
+  return [
+    ...Array<number>(26).fill(100),
+    ...Array<number>(stepCloses).fill(113),
+  ];
+}
+
+describe('calculateMacd', () => {
+  test('calculates a hand-verifiable MACD 12/26/9 result', () => {
+    const result = calculateMacd(steppedMacdCloses(8));
+
+    expect(result.unavailable).toEqual([]);
+    expect(result.macd?.value).toBeCloseTo(3.6073369779984232, 12);
+    expect(result.macd?.signal).toBeCloseTo(2.4439086812587636, 12);
+    expect(result.macd?.histogram).toBeCloseTo(1.1634282967396596, 12);
+  });
+
+  test('requires exactly 34 closes for the first complete result', () => {
+    expect(calculateMacd(Array<number>(33).fill(100))).toEqual({
+      macd: null,
+      unavailable: [{ metric: 'macd', reason: 'insufficient_history' }],
+    });
+    expect(calculateMacd(Array<number>(34).fill(100)).macd).not.toBeNull();
+  });
+
+  test('returns zero MACD, signal, and histogram for a constant series', () => {
+    expect(calculateMacd(Array<number>(34).fill(100))).toEqual({
+      macd: { value: 0, signal: 0, histogram: 0 },
+      unavailable: [],
+    });
+  });
+
+  test('uses SMA seeds for EMA12 and EMA26', () => {
+    const linearCloses = Array.from({ length: 34 }, (_, index) => index + 1);
+    const result = calculateMacd(linearCloses);
+
+    expect(result.macd?.value).toBeCloseTo(7, 12);
+  });
+
+  test('seeds the first signal from the first nine MACD values', () => {
+    const result = calculateMacd(steppedMacdCloses(8));
+
+    expect(result.macd?.signal).toBeCloseTo(2.4439086812587636, 12);
+  });
+
+  test('recursively updates price and signal EMAs after their seeds', () => {
+    const result = calculateMacd(steppedMacdCloses(9));
+
+    expect(result.macd?.value).toBeCloseTo(3.6126409014935934, 12);
+    expect(result.macd?.signal).toBeCloseTo(2.67765512530573, 12);
+  });
+
+  test('reports missing data without skipping a null inside the recursive sequence', () => {
+    const closes: Array<number | null> = steppedMacdCloses(8);
+    closes[20] = null;
+
+    expect(calculateMacd(closes)).toEqual({
+      macd: null,
+      unavailable: [{ metric: 'macd', reason: 'missing_data' }],
+    });
+  });
+
+  test('reports non-finite and non-positive closes as invalid data', () => {
+    for (const invalidClose of [
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+      0,
+      -1,
+    ]) {
+      const closes = steppedMacdCloses(8);
+      closes[20] = invalidClose;
+      expect(calculateMacd(closes)).toEqual({
+        macd: null,
+        unavailable: [{ metric: 'macd', reason: 'invalid_data' }],
+      });
+    }
+  });
+
+  test('defines histogram as MACD minus signal', () => {
+    const result = calculateMacd(steppedMacdCloses(9));
+
+    if (result.macd === null) throw new Error('Expected MACD to be available.');
+    expect(result.macd.histogram).toBeCloseTo(result.macd.value - result.macd.signal, 12);
+  });
+
+  test('does not mutate the input sequence', () => {
+    const closes = steppedMacdCloses(9);
+    const original = [...closes];
+
+    calculateMacd(closes);
+
+    expect(closes).toEqual(original);
+  });
+
+  test('keeps an as-of prefix result unchanged when future bars exist', () => {
+    const prefix = steppedMacdCloses(8);
+    const beforeFutureBars = calculateMacd(prefix);
+    const historyWithFutureBars = [...prefix, 80, 120];
+
+    expect(calculateMacd(historyWithFutureBars.slice(0, prefix.length))).toEqual(
+      beforeFutureBars,
+    );
+    expect(calculateMacd(historyWithFutureBars).macd).not.toEqual(beforeFutureBars.macd);
+  });
+
+  test('uses the full supplied sequence instead of truncating to the latest 251 closes', () => {
+    const fullHistory = [1_000_000_000_000, ...Array<number>(251).fill(100)];
+    const fullHistoryResult = calculateMacd(fullHistory);
+    const latest251Result = calculateMacd(fullHistory.slice(-251));
+
+    expect(latest251Result).toEqual({
+      macd: { value: 0, signal: 0, histogram: 0 },
+      unavailable: [],
+    });
+    expect(fullHistoryResult.macd).not.toEqual(latest251Result.macd);
   });
 });
