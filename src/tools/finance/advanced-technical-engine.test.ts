@@ -203,4 +203,16 @@ describe('calculateMacd', () => {
     );
     expect(calculateMacd(historyWithFutureBars).macd).not.toEqual(beforeFutureBars.macd);
   });
+
+  test('uses the full supplied sequence instead of truncating to the latest 251 closes', () => {
+    const fullHistory = [1_000_000_000_000, ...Array<number>(251).fill(100)];
+    const fullHistoryResult = calculateMacd(fullHistory);
+    const latest251Result = calculateMacd(fullHistory.slice(-251));
+
+    expect(latest251Result).toEqual({
+      macd: { value: 0, signal: 0, histogram: 0 },
+      unavailable: [],
+    });
+    expect(fullHistoryResult.macd).not.toEqual(latest251Result.macd);
+  });
 });
