@@ -74,3 +74,96 @@ export function calculateRsi(
     unavailable: [],
   };
 }
+
+export const MACD_PERIODS = {
+  fast: 12,
+  slow: 26,
+  signal: 9,
+} as const;
+
+export type MacdUnavailableReason =
+  | 'insufficient_history'
+  | 'missing_data'
+  | 'invalid_data';
+
+export interface UnavailableMacdMetric {
+  metric: 'macd';
+  reason: MacdUnavailableReason;
+}
+
+export interface MacdValues {
+  value: number;
+  signal: number;
+  histogram: number;
+}
+
+export interface MacdResult {
+  macd: MacdValues | null;
+  unavailable: UnavailableMacdMetric[];
+}
+
+function unavailableMacd(reason: MacdUnavailableReason): MacdResult {
+  return {
+    macd: null,
+    unavailable: [{ metric: 'macd', reason }],
+  };
+}
+
+function calculateSmaSeededEmaSeries(
+  values: readonly number[],
+  period: number,
+): number[] {
+  const multiplier = 2 / (period + 1);
+  const seed = values
+    .slice(0, period)
+    .reduce((sum, value) => sum + value, 0) / period;
+  const series = [seed];
+
+  for (let index = period; index < values.length; index += 1) {
+    const previousEma = series[series.length - 1];
+    series.push(values[index] * multiplier + previousEma * (1 - multiplier));
+  }
+
+  return series;
+}
+
+/** Calculate MACD 12/26/9 from the supplied chronological adjusted-close sequence. */
+export function calculateMacd(
+  chronologicalAdjustedCloses: readonly (number | null)[],
+): MacdResult {
+  const minimumHistory = MACD_PERIODS.slow + MACD_PERIODS.signal - 1;
+  if (chronologicalAdjustedCloses.length < minimumHistory) {
+    return unavailableMacd('insufficient_history');
+  }
+  if (chronologicalAdjustedCloses.some((close) => close === null)) {
+    return unavailableMacd('missing_data');
+  }
+  if (!chronologicalAdjustedCloses.every(isPositiveFiniteClose)) {
+    return unavailableMacd('invalid_data');
+  }
+
+  const fastEmaSeries = calculateSmaSeededEmaSeries(
+    chronologicalAdjustedCloses,
+    MACD_PERIODS.fast,
+  );
+  const slowEmaSeries = calculateSmaSeededEmaSeries(
+    chronologicalAdjustedCloses,
+    MACD_PERIODS.slow,
+  );
+  const fastEmaOffset = MACD_PERIODS.slow - MACD_PERIODS.fast;
+  const macdSeries = slowEmaSeries.map((slowEma, index) => (
+    fastEmaSeries[index + fastEmaOffset] - slowEma
+  ));
+  const signalSeries = calculateSmaSeededEmaSeries(macdSeries, MACD_PERIODS.signal);
+  const value = macdSeries[macdSeries.length - 1];
+  const signal = signalSeries[signalSeries.length - 1];
+
+  return {
+    macd: {
+      value,
+      signal,
+      histogram: value - signal,
+    },
+    unavailable: [],
+  };
+}
