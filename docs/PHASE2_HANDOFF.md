@@ -130,6 +130,7 @@ TOPIX
 Current primary windows:
 
 ```text
+20
 60
 250
 ```
@@ -590,8 +591,8 @@ Supply/Demand:
 - Z-score — deferred
 
 Market Correlation:
-- optional 20d
-- optional 120d
+- 20d — adopted; 20 returns from the latest 21 closes after date inner join
+- 120d — rejected
 ```
 
 Fixed Phase 2A indicator contracts:

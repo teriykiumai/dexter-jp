@@ -1,5 +1,5 @@
 export const MARKET_CORRELATION_DEFAULTS = {
-  periods: [60, 250] as const,
+  periods: [20, 60, 250] as const,
   annualizationDays: 245,
 } as const;
 
@@ -272,7 +272,7 @@ function analyzeWindow(
   };
 }
 
-/** Build fixed 60-day and 250-day market statistics against TOPIX. */
+/** Build fixed 20-day, 60-day, and 250-day market statistics against TOPIX. */
 export function analyzeMarketCorrelation(
   stockPrices: readonly MarketPricePoint[],
   topixPrices: readonly MarketPricePoint[],

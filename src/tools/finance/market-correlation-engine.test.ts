@@ -88,7 +88,7 @@ describe('alignMarketPrices', () => {
 });
 
 describe('analyzeMarketCorrelation', () => {
-  test('calculates perfectly correlated 60-day and 250-day statistics', () => {
+  test('calculates hand-verifiable 20-day metrics and preserves 60/250-day statistics', () => {
     const benchmarkReturns = patternedReturns(250);
     const stockReturns = benchmarkReturns.map((value) => 0.0001 + 1.5 * value);
     const result = analyzeMarketCorrelation(
@@ -99,7 +99,7 @@ describe('analyzeMarketCorrelation', () => {
     expect(result.benchmark).toBe('TOPIX');
     expect(result.alignedPriceCount).toBe(251);
     expect(result.dataDate).toBe(isoDate(250));
-    expect(result.windows.map((window) => window.period)).toEqual([60, 250]);
+    expect(result.windows.map((window) => window.period)).toEqual([20, 60, 250]);
 
     for (const window of result.windows) {
       expect(window.observations).toBe(window.period);
@@ -124,13 +124,100 @@ describe('analyzeMarketCorrelation', () => {
     }
   });
 
+  test('requires 20 returns from exactly 21 aligned closes', () => {
+    const insufficientReturns = patternedReturns(19);
+    const insufficient = analyzeMarketCorrelation(
+      pricesFromReturns(insufficientReturns),
+      pricesFromReturns(insufficientReturns, 2_000),
+    ).windows.find((window) => window.period === 20)!;
+
+    expect(insufficient.observations).toBe(19);
+    expect(insufficient.correlation).toBeNull();
+    expect(insufficient.unavailable).toContainEqual({
+      metric: 'correlation',
+      reason: 'insufficient_history',
+    });
+
+    const availableReturns = patternedReturns(20);
+    const available = analyzeMarketCorrelation(
+      pricesFromReturns(availableReturns),
+      pricesFromReturns(availableReturns, 2_000),
+    ).windows.find((window) => window.period === 20)!;
+
+    expect(available.observations).toBe(20);
+    expect(available.correlation).toBeCloseTo(1, 12);
+    expect(available.unavailable).toEqual([]);
+  });
+
+  test('uses the latest 20 return observations after alignment', () => {
+    const benchmarkReturns = patternedReturns(40);
+    const stockReturns = benchmarkReturns.map((value, index) => (
+      index < 20 ? -value : 0.0002 + 2 * value
+    ));
+    const result = analyzeMarketCorrelation(
+      pricesFromReturns(stockReturns),
+      pricesFromReturns(benchmarkReturns, 2_000),
+    );
+    const window = result.windows.find((candidate) => candidate.period === 20)!;
+
+    expect(window.startDate).toBe(isoDate(20));
+    expect(window.endDate).toBe(isoDate(40));
+    expect(window.observations).toBe(20);
+    expect(window.correlation).toBeCloseTo(1, 12);
+    expect(window.beta).toBeCloseTo(2, 12);
+    expect(window.alphaAnnualized).toBeCloseTo(
+      0.0002 * MARKET_CORRELATION_DEFAULTS.annualizationDays,
+      12,
+    );
+  });
+
+  test('keeps 20-day results unchanged when older aligned history is prepended', () => {
+    const benchmarkReturns = patternedReturns(20);
+    const stockReturns = benchmarkReturns.map((value) => 0.0001 + 1.25 * value);
+    const stock = pricesFromReturns(stockReturns);
+    const benchmark = pricesFromReturns(benchmarkReturns, 2_000);
+    const olderStock: MarketPricePoint[] = [
+      { date: '2024-12-30', close: 80 },
+      { date: '2024-12-31', close: 90 },
+    ];
+    const olderBenchmark: MarketPricePoint[] = [
+      { date: '2024-12-30', close: 1_800 },
+      { date: '2024-12-31', close: 1_900 },
+    ];
+
+    const original = analyzeMarketCorrelation(stock, benchmark)
+      .windows.find((window) => window.period === 20);
+    const extended = analyzeMarketCorrelation(
+      [...olderStock, ...stock],
+      [...olderBenchmark, ...benchmark],
+    ).windows.find((window) => window.period === 20);
+
+    expect(extended).toEqual(original);
+  });
+
+  test('selects the 20-day window after date inner join without forward filling', () => {
+    const returns = patternedReturns(21);
+    const stock = pricesFromReturns(returns);
+    const benchmark = pricesFromReturns(returns, 2_000)
+      .filter((point) => point.date !== isoDate(1));
+
+    const result = analyzeMarketCorrelation(stock, benchmark);
+    const window = result.windows.find((candidate) => candidate.period === 20)!;
+
+    expect(result.alignedPriceCount).toBe(21);
+    expect(window.startDate).toBe(isoDate(0));
+    expect(window.endDate).toBe(isoDate(21));
+    expect(window.observations).toBe(20);
+    expect(window.correlation).toBeCloseTo(1, 12);
+  });
+
   test('calculates a perfectly negative relationship', () => {
     const benchmarkReturns = patternedReturns(60);
     const stockReturns = benchmarkReturns.map((value) => 0.0002 - value);
     const window = analyzeMarketCorrelation(
       pricesFromReturns(stockReturns),
       pricesFromReturns(benchmarkReturns, 2_000),
-    ).windows[0];
+    ).windows.find((candidate) => candidate.period === 20)!;
 
     expect(window.correlation).toBeCloseTo(-1, 12);
     expect(window.beta).toBeCloseTo(-1, 12);
@@ -168,11 +255,13 @@ describe('analyzeMarketCorrelation', () => {
       pricesFromReturns(returns, 2_000),
     );
 
-    expect(result.windows[0].observations).toBe(60);
-    expect(result.windows[0].correlation).toBeCloseTo(1);
-    expect(result.windows[0].unavailable).toEqual([]);
-    expect(result.windows[1].correlation).toBeNull();
-    expect(result.windows[1].unavailable).toContainEqual({
+    const window60 = result.windows.find((window) => window.period === 60)!;
+    const window250 = result.windows.find((window) => window.period === 250)!;
+    expect(window60.observations).toBe(60);
+    expect(window60.correlation).toBeCloseTo(1);
+    expect(window60.unavailable).toEqual([]);
+    expect(window250.correlation).toBeNull();
+    expect(window250.unavailable).toContainEqual({
       metric: 'correlation',
       reason: 'insufficient_history',
     });
@@ -184,7 +273,7 @@ describe('analyzeMarketCorrelation', () => {
     const window = analyzeMarketCorrelation(
       pricesFromReturns(stockReturns),
       pricesFromReturns(benchmarkReturns, 2_000),
-    ).windows[0];
+    ).windows.find((candidate) => candidate.period === 20)!;
 
     expect(window.correlation).toBeNull();
     expect(window.beta).toBeNull();
@@ -205,7 +294,7 @@ describe('analyzeMarketCorrelation', () => {
     const window = analyzeMarketCorrelation(
       pricesFromReturns(stockReturns),
       pricesFromReturns(benchmarkReturns, 2_000),
-    ).windows[0];
+    ).windows.find((candidate) => candidate.period === 20)!;
 
     expect(window.correlation).toBeNull();
     expect(window.beta).toBeCloseTo(0, 12);
@@ -219,5 +308,18 @@ describe('analyzeMarketCorrelation', () => {
       metric: 'correlation',
       reason: 'zero_stock_variance',
     });
+  });
+
+  test('does not mutate stock or benchmark inputs', () => {
+    const returns = patternedReturns(250);
+    const stock = pricesFromReturns(returns);
+    const benchmark = pricesFromReturns(returns, 2_000);
+    const stockBefore = structuredClone(stock);
+    const benchmarkBefore = structuredClone(benchmark);
+
+    analyzeMarketCorrelation(stock, benchmark);
+
+    expect(stock).toEqual(stockBefore);
+    expect(benchmark).toEqual(benchmarkBefore);
   });
 });

@@ -87,6 +87,8 @@ Preserve dates and nulls. Do not forward-fill, interpolate, or silently remove m
 Never reproduce or repair the Engine calculations in narrative reasoning. Carry every `unavailable` reason into the report.
 When `mean4w` is available, interpret it as the recent buying-balance baseline alongside
 the current balance and existing 13-week mean; do not derive an unprovided deviation or signal.
+Interpret the 20-day market-correlation window as recent context alongside the existing
+60-day and 250-day windows; do not derive a threshold, regime label, or trading signal.
 
 Pass the complete retrieved histories to the Engines. Do not shorten OHLCV to the
 latest 20 bars before Technical, do not omit any weekly margin observations, and
