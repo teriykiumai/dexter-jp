@@ -83,6 +83,10 @@ export interface DashboardViewModel {
     candidates: StrategyCandidateView[];
     unavailableReasons: string[];
   } | null;
+  advancedTechnical: {
+    metrics: DashboardMetric[];
+    unavailableReasons: string[];
+  } | null;
   dataDates: DashboardMetric[];
   scenarios: AnalysisSnapshot['scenarios'];
   risks: AnalysisSnapshot['risks'];
@@ -124,7 +128,7 @@ const numberFormatter = (maximumFractionDigits: number) => new Intl.NumberFormat
 
 export function formatMetric(
   value: number | null | undefined,
-  unit: MetricUnit | null | undefined,
+  unit: MetricUnit | 'index' | null | undefined,
   options: FormatOptions = {},
 ): DisplayValue {
   if (value === null || value === undefined || !Number.isFinite(value)) {
@@ -199,6 +203,7 @@ const dataDateLabels = {
   valuationFinancial: 'バリュエーション財務',
   peerComparison: 'Peer比較',
   technical: 'テクニカル',
+  advancedTechnical: 'Advanced Technical',
   supplyDemand: '需給',
   marketCorrelation: '市場相関',
   strategy: 'Strategy',
@@ -293,6 +298,12 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
   const supplyUnits = snapshot.units.supplyDemand;
   const correlationUnits = snapshot.units.marketCorrelation;
   const strategyUnits = snapshot.units.strategy;
+  const advancedTechnical = snapshot.schemaVersion === 2
+    ? snapshot.advancedTechnical
+    : null;
+  const advancedUnits = snapshot.schemaVersion === 2
+    ? snapshot.units.advancedTechnical
+    : null;
 
   const bars = (snapshot.priceHistory ?? []).flatMap(bar => (
     bar.open === null || bar.high === null || bar.low === null || bar.close === null
@@ -409,6 +420,51 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
     )),
   } : null;
 
+  const advancedTechnicalView = advancedTechnical && advancedUnits ? {
+    metrics: [
+      { label: 'RSI 14', value: formatMetric(advancedTechnical.rsi14, advancedUnits.rsi14) },
+      {
+        label: 'MACD',
+        value: formatMetric(advancedTechnical.macd?.value, advancedUnits['macd.value']),
+      },
+      {
+        label: 'MACD Signal',
+        value: formatMetric(advancedTechnical.macd?.signal, advancedUnits['macd.signal']),
+      },
+      {
+        label: 'MACD Histogram',
+        value: formatMetric(
+          advancedTechnical.macd?.histogram,
+          advancedUnits['macd.histogram'],
+        ),
+      },
+      {
+        label: 'Bollinger Middle',
+        value: formatMetric(
+          advancedTechnical.bollinger20?.middle,
+          advancedUnits['bollinger20.middle'],
+        ),
+      },
+      {
+        label: 'Bollinger Upper',
+        value: formatMetric(
+          advancedTechnical.bollinger20?.upper,
+          advancedUnits['bollinger20.upper'],
+        ),
+      },
+      {
+        label: 'Bollinger Lower',
+        value: formatMetric(
+          advancedTechnical.bollinger20?.lower,
+          advancedUnits['bollinger20.lower'],
+        ),
+      },
+    ],
+    unavailableReasons: advancedTechnical.unavailable.map(item => (
+      `${item.metric}: ${reasonText(item.reason)}`
+    )),
+  } : null;
+
   const dates = snapshot.dataDates;
   const dateEntries: Array<[keyof typeof dataDateLabels, string | null]> = [
     ['identity', dates.identity],
@@ -422,6 +478,9 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
     ['strategy', dates.strategy],
     ['priceHistory', dates.priceHistory],
   ];
+  if (snapshot.schemaVersion === 2) {
+    dateEntries.push(['advancedTechnical', snapshot.dataDates.advancedTechnical]);
+  }
 
   return {
     header: {
@@ -455,6 +514,7 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
     supplyDemand,
     correlations,
     strategy: strategyView,
+    advancedTechnical: advancedTechnicalView,
     dataDates: dateEntries.map(([key, value]) => ({
       label: dataDateLabels[key],
       value: displayText(value),

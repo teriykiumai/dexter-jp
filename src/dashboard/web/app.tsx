@@ -102,6 +102,21 @@ function Dashboard({ snapshot, onBack }: { snapshot: AnalysisSnapshot; onBack: (
         </p>
       </Card>
 
+      <Card title="Advanced Technical" eyebrow="Latest deterministic values">
+        {view.advancedTechnical ? (
+          <>
+            <MetricGrid metrics={view.advancedTechnical.metrics} />
+            {view.advancedTechnical.unavailableReasons.length
+              ? (
+                  <p className="reason-list">
+                    {view.advancedTechnical.unavailableReasons.join(' / ')}
+                  </p>
+                )
+              : null}
+          </>
+        ) : <div className="empty-state">Advanced Technicalは未収集です。</div>}
+      </Card>
+
       <div className="two-column">
         <Card title="Peer Position" eyebrow="Deterministic comparison">
           {view.peer ? (
