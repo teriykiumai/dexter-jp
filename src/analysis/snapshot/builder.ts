@@ -1,8 +1,8 @@
 import {
   ANALYSIS_SNAPSHOT_SCHEMA_VERSION,
   AnalysisSnapshotInputSchema,
-  AnalysisSnapshotV2Schema,
-  type AnalysisSnapshotV2,
+  AnalysisSnapshotV3Schema,
+  type AnalysisSnapshotV3,
   type AnalysisSnapshotInput,
   type SnapshotProvenance,
   type SnapshotSection,
@@ -76,6 +76,7 @@ const UNITS = {
     marginRatio: 'ratio',
     buyingBalanceWeeklyChange: 'shares',
     sellingBalanceWeeklyChange: 'shares',
+    mean4w: 'shares',
     mean13w: 'shares',
     mean52w: 'shares',
     deviation52w: 'ratio',
@@ -241,14 +242,14 @@ function aggregateUnavailable(input: AnalysisSnapshotInput): SnapshotUnavailable
   return [...unavailable, ...input.additionalUnavailable];
 }
 
-export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): AnalysisSnapshotV2 {
+export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): AnalysisSnapshotV3 {
   const input = AnalysisSnapshotInputSchema.parse(rawInput);
   const fundamentalDate = latestFundamentalDate(input);
   const peerDate = latestPeerDate(input);
   const priceDate = latestPriceDate(input);
   const missing = missingSections(input);
 
-  return AnalysisSnapshotV2Schema.parse({
+  return AnalysisSnapshotV3Schema.parse({
     schemaVersion: ANALYSIS_SNAPSHOT_SCHEMA_VERSION,
     status: missing.length === 0 ? 'complete' : 'partial',
     canonicalTicker: input.identity.canonicalTicker,

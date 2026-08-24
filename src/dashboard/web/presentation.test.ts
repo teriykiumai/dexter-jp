@@ -4,7 +4,7 @@ import {
   buildAnalysisSnapshot,
   buildAnalysisSnapshotLatestItem,
   type AnalysisSnapshot,
-  type AnalysisSnapshotV2,
+  type AnalysisSnapshotV3,
   type AnalysisSnapshotInput,
 } from '../../analysis/snapshot/index.js';
 import {
@@ -19,7 +19,7 @@ import {
   sortWatchlistItems,
 } from './presentation.js';
 
-function baseSnapshot(): AnalysisSnapshotV2 {
+function baseSnapshot(): AnalysisSnapshotV3 {
   const input: AnalysisSnapshotInput = {
     identity: {
       canonicalTicker: '7203',
@@ -144,7 +144,7 @@ function watchlistSnapshot(
   ticker: string,
   generatedAt: string,
   latestDataDate: string,
-): AnalysisSnapshotV2 {
+): AnalysisSnapshotV3 {
   return {
     ...baseSnapshot(),
     canonicalTicker: ticker,
@@ -211,6 +211,7 @@ function watchlistSnapshot(
       marginRatio: 2,
       buyingBalanceWeeklyChange: 100,
       sellingBalanceWeeklyChange: -100,
+      mean4w: 9_500,
       mean13w: 9_000,
       mean52w: 8_000,
       deviation52w: 0.25,
@@ -264,7 +265,7 @@ describe('dashboard presentation helpers', () => {
 
 describe('snapshot presentation mapping', () => {
   test('passes through and formats the seven latest Advanced Technical values', () => {
-    const snapshot: AnalysisSnapshotV2 = {
+    const snapshot: AnalysisSnapshotV3 = {
       ...baseSnapshot(),
       advancedTechnical: {
         dataDate: '2026-08-21',
@@ -296,7 +297,7 @@ describe('snapshot presentation mapping', () => {
   });
 
   test('keeps unavailable Advanced Technical metrics distinct from zero', () => {
-    const snapshot: AnalysisSnapshotV2 = {
+    const snapshot: AnalysisSnapshotV3 = {
       ...baseSnapshot(),
       advancedTechnical: {
         dataDate: '2026-08-21',
@@ -328,6 +329,35 @@ describe('snapshot presentation mapping', () => {
       'rsi14: missing data',
       'macd: insufficient history',
     ]);
+  });
+
+  test('passes through V3 mean4w and keeps unavailable distinct from zero', () => {
+    const availableSnapshot = watchlistSnapshot(
+      '7203',
+      '2026-08-23T01:02:03.000Z',
+      '2026-08-21',
+    );
+    const available = mapSnapshotToDashboard(availableSnapshot);
+
+    expect(available.supplyDemand).toContainEqual({
+      label: '買残4週平均',
+      value: { text: '9,500 株', available: true },
+    });
+
+    const unavailableSnapshot: AnalysisSnapshotV3 = {
+      ...availableSnapshot,
+      supplyDemand: {
+        ...availableSnapshot.supplyDemand!,
+        mean4w: null,
+        unavailable: [{ metric: 'mean4w', reason: 'missing_data' }],
+      },
+    };
+    const unavailable = mapSnapshotToDashboard(unavailableSnapshot);
+
+    expect(unavailable.supplyDemand).toContainEqual({
+      label: '買残4週平均',
+      value: { text: UNAVAILABLE_TEXT, available: false },
+    });
   });
 
   test('treats V1 Advanced Technical as not collected', () => {
@@ -506,7 +536,7 @@ describe('watchlist presentation mapping', () => {
       ),
       referenceDate,
     );
-    const missingSnapshot: AnalysisSnapshotV2 = {
+    const missingSnapshot: AnalysisSnapshotV3 = {
       ...baseSnapshot(),
       canonicalTicker: '130A',
       companyName: '130A株式会社',

@@ -848,11 +848,17 @@ Only after Phase 2A Technical is stable.
 
 Candidates:
 
-- 4-week mean
-- 26-week mean
-- Z-score
+- 4-week mean — adopted as `mean4w`
+- 26-week mean — rejected for overlap with existing 13w/52w horizons
+- Z-score — deferred pending evidence that it improves interpretation beyond
+  `deviation52w` and `percentile52w`
 
 Do not alter current 13w/52w semantics.
+
+`mean4w` uses the latest four weekly `longBalance` observations and reuses the
+existing arithmetic-mean helper. Snapshot V1 and V2 remain immutable; Snapshot V3
+adds the structured `mean4w` field with unit `shares`. Repositories read V1/V2/V3,
+write V3 only, and do not rewrite older snapshots.
 
 Tests must include:
 

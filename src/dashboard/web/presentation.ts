@@ -298,10 +298,10 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
   const supplyUnits = snapshot.units.supplyDemand;
   const correlationUnits = snapshot.units.marketCorrelation;
   const strategyUnits = snapshot.units.strategy;
-  const advancedTechnical = snapshot.schemaVersion === 2
+  const advancedTechnical = snapshot.schemaVersion !== 1
     ? snapshot.advancedTechnical
     : null;
-  const advancedUnits = snapshot.schemaVersion === 2
+  const advancedUnits = snapshot.schemaVersion !== 1
     ? snapshot.units.advancedTechnical
     : null;
 
@@ -366,6 +366,10 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
   const supply = snapshot.supplyDemand;
   const supplyDemand = supply ? [
     { label: '買残', value: formatMetric(supply.buyingBalance, supplyUnits.buyingBalance) },
+    ...(snapshot.schemaVersion === 3 ? [{
+      label: '買残4週平均',
+      value: formatMetric(snapshot.supplyDemand?.mean4w, supplyUnits.mean4w),
+    }] : []),
     { label: '売残', value: formatMetric(supply.sellingBalance, supplyUnits.sellingBalance) },
     { label: '信用倍率', value: formatMetric(supply.marginRatio, supplyUnits.marginRatio) },
     {
@@ -478,7 +482,7 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
     ['strategy', dates.strategy],
     ['priceHistory', dates.priceHistory],
   ];
-  if (snapshot.schemaVersion === 2) {
+  if (snapshot.schemaVersion !== 1) {
     dateEntries.push(['advancedTechnical', snapshot.dataDates.advancedTechnical]);
   }
 

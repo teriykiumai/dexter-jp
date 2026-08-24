@@ -103,6 +103,7 @@ describe('analyzeSupplyDemand', () => {
     expect(result.marginRatio).toBe(5.2);
     expect(result.buyingBalanceWeeklyChange).toBe(100);
     expect(result.sellingBalanceWeeklyChange).toBe(0);
+    expect(result.mean4w).toBe(5_050);
     expect(result.mean13w).toBe(4_600);
     expect(result.mean52w).toBe(2_650);
     expect(result.deviation52w).toBeCloseTo((5_200 - 2_650) / 2_650);
@@ -154,6 +155,7 @@ describe('analyzeSupplyDemand', () => {
       makeVolumeHistory(20),
     );
 
+    expect(result.mean4w).toBe(1_000);
     expect(result.mean13w).toBe(1_000);
     expect(result.mean52w).toBeNull();
     expect(result.deviation52w).toBeNull();
@@ -182,6 +184,62 @@ describe('analyzeSupplyDemand', () => {
       metric: 'sellingBalance',
       reason: 'missing_data',
     });
+  });
+
+  test('requires four observations and calculates a hand-verifiable mean4w', () => {
+    const unavailable = analyzeSupplyDemand(
+      makeMarginHistory(3, index => [100, 200, 300][index]),
+      makeVolumeHistory(20),
+    );
+    const available = analyzeSupplyDemand(
+      makeMarginHistory(4, index => [100, 200, 300, 500][index]),
+      makeVolumeHistory(20),
+    );
+
+    expect(unavailable.mean4w).toBeNull();
+    expect(unavailable.unavailable).toContainEqual({
+      metric: 'mean4w',
+      reason: 'insufficient_history',
+    });
+    expect(available.mean4w).toBe(275);
+  });
+
+  test('uses only the latest four observations for mean4w', () => {
+    const margins = makeMarginHistory(6, index => [null, -1, 100, 200, 300, 500][index]);
+
+    const result = analyzeSupplyDemand(margins, makeVolumeHistory(20));
+
+    expect(result.mean4w).toBe(275);
+    expect(result.unavailable).not.toContainEqual(expect.objectContaining({ metric: 'mean4w' }));
+  });
+
+  test('does not skip missing or invalid observations inside the mean4w window', () => {
+    for (const invalidValue of [null, Number.NaN, Number.POSITIVE_INFINITY, -1]) {
+      const margins = makeMarginHistory(5, index => [1_000, 100, invalidValue, 300, 500][index]);
+
+      const result = analyzeSupplyDemand(margins, makeVolumeHistory(20));
+
+      expect(result.mean4w).toBeNull();
+      expect(result.unavailable).toContainEqual({
+        metric: 'mean4w',
+        reason: 'missing_data',
+      });
+    }
+  });
+
+  test('does not mutate inputs while calculating mean4w or change existing means', () => {
+    const margins = makeMarginHistory(52);
+    const volumes = makeVolumeHistory(20);
+    const marginsBefore = structuredClone(margins);
+    const volumesBefore = structuredClone(volumes);
+
+    const result = analyzeSupplyDemand(margins, volumes);
+
+    expect(result.mean4w).toBe(5_050);
+    expect(result.mean13w).toBe(4_600);
+    expect(result.mean52w).toBe(2_650);
+    expect(margins).toEqual(marginsBefore);
+    expect(volumes).toEqual(volumesBefore);
   });
 
   test('handles a zero 52-week mean without division by zero', () => {

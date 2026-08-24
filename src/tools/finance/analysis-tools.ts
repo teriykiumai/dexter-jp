@@ -164,7 +164,7 @@ export const analyzeTechnicalTool = new DynamicStructuredTool({
 });
 
 export const ANALYZE_SUPPLY_DEMAND_DESCRIPTION = `
-Calculate deterministic Japanese margin supply-demand statistics from chronological weekly margin balances and daily volume. Returns margin ratio, weekly changes, 13/52-week statistics, percentile, digestion days, data dates, and explicit unavailable metrics.
+Calculate deterministic Japanese margin supply-demand statistics from chronological weekly margin balances and daily volume. Returns margin ratio, weekly changes, 4/13/52-week statistics, percentile, digestion days, data dates, and explicit unavailable metrics.
 `.trim();
 
 export const analyzeSupplyDemandTool = new DynamicStructuredTool({

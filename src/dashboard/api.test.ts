@@ -105,7 +105,7 @@ describe('dashboard request handler', () => {
 
     const latestResponse = await handleDashboardRequest(request('/api/analyses/7203'), repository);
     expect(await responseJson(latestResponse)).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       canonicalTicker: '7203',
       generatedAt: latest.generatedAt,
       finalReportMarkdown: '# Analysis',

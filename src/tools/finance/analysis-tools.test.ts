@@ -224,6 +224,7 @@ describe('deterministic analysis tools', () => {
       };
       expect(stockHistoryFetches).toBe(1);
       const supplyDemand = toolData(await analyzeSupplyDemandTool.invoke(source)) as {
+        mean4w: number | null;
         mean52w: number | null;
         unavailable: unknown[];
       };
@@ -237,6 +238,7 @@ describe('deterministic analysis tools', () => {
         dataDate: priceDates[priceDates.length - 1],
         rsi14: 100,
       });
+      expect(supplyDemand.mean4w).not.toBeNull();
       expect(supplyDemand.mean52w).not.toBeNull();
       expect(supplyDemand.unavailable).toEqual([]);
       expect(correlation.alignedPriceCount).toBe(251);
