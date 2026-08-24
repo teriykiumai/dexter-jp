@@ -15,10 +15,10 @@ import {
   PeerComparisonResultSchema,
   PriceHistorySchema,
   StrategyResultSchema,
-  SupplyDemandResultSchema,
+  SupplyDemandResultV3Schema,
   TechnicalResultSchema,
   normalizeCanonicalTicker,
-  type AnalysisSnapshotV2,
+  type AnalysisSnapshotV3,
   type AnalysisSnapshotInput,
   type CompanyIdentity,
   type FundamentalSnapshot,
@@ -252,7 +252,7 @@ export class StandardAgentSnapshotCollector {
     if (event.toolCallId) this.pendingCalls.delete(event.toolCallId);
   }
 
-  finalize(finalReportMarkdown: string, generatedAt = new Date().toISOString()): AnalysisSnapshotV2 | null {
+  finalize(finalReportMarkdown: string, generatedAt = new Date().toISOString()): AnalysisSnapshotV3 | null {
     if (!this.comprehensiveAnalysisObserved || !this.identity || finalReportMarkdown.length === 0) {
       return null;
     }
@@ -423,7 +423,7 @@ export class StandardAgentSnapshotCollector {
         break;
       case 'analyze_supply_demand':
         if (!this.supplyDemand) {
-          this.supplyDemand = SupplyDemandResultSchema.parse(call.validatedResult);
+          this.supplyDemand = SupplyDemandResultV3Schema.parse(call.validatedResult);
           this.supplyDemandMarginUsesDirectJQuants = !Array.isArray(call.validatedArgs.marginHistory);
           this.supplyDemandVolumeUsesDirectJQuants = !Array.isArray(call.validatedArgs.volumeHistory);
         }

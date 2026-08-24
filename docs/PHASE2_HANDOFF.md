@@ -237,13 +237,14 @@ Phase 2A Snapshot evolution contract:
 ```text
 AnalysisSnapshotV1Schema → immutable read compatibility
 AnalysisSnapshotV2Schema → new Advanced Technical fields
+AnalysisSnapshotV3Schema → Supply/Demand mean4w
 ```
 
-- Repository reads valid V1 and V2 snapshots.
-- After V2 is enabled, new saves use V2.
-- Existing V1 JSON is not automatically rewritten.
+- Repository reads valid V1, V2, and V3 snapshots.
+- After V3 is enabled, new saves use V3 only.
+- Existing V1/V2 JSON is not automatically rewritten.
 - Unknown versions remain unsupported.
-- V1 history and Watchlist entries must remain readable.
+- V1/V2 history and Watchlist entries must remain readable.
 - Existing `complete | partial` semantics remain based on Phase 1.5 required sections.
 
 ### Snapshot generation boundary
@@ -584,9 +585,9 @@ After Phase 2A Technical is stable:
 
 ```text
 Supply/Demand:
-- 4w mean
-- 26w mean
-- Z-score
+- 4w mean — adopted as `mean4w`; latest four weekly buying-balance observations
+- 26w mean — rejected
+- Z-score — deferred
 
 Market Correlation:
 - optional 20d

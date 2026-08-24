@@ -117,6 +117,7 @@ function completeInput(): AnalysisSnapshotInput {
       marginRatio: 5,
       buyingBalanceWeeklyChange: 100,
       sellingBalanceWeeklyChange: -100,
+      mean4w: 9_500,
       mean13w: 9_000,
       mean52w: 8_000,
       deviation52w: 0.25,
@@ -166,7 +167,7 @@ describe('buildAnalysisSnapshot', () => {
   test('uses an explicit required-section contract and remains complete for metric-level unavailable states', () => {
     const snapshot = buildAnalysisSnapshot(completeInput());
 
-    expect(snapshot.schemaVersion).toBe(2);
+    expect(snapshot.schemaVersion).toBe(3);
     expect(REQUIRED_ANALYSIS_SNAPSHOT_SECTIONS).toEqual([
       'identity',
       'fundamental',
@@ -212,6 +213,7 @@ describe('buildAnalysisSnapshot', () => {
     expect(snapshot.units.valuation.per).toBe('multiple');
     expect(snapshot.units.peerComparison.percentile).toBe('ratio');
     expect(snapshot.units.supplyDemand.percentile52w).toBe('ratio');
+    expect(snapshot.units.supplyDemand.mean4w).toBe('shares');
     expect(snapshot.units.advancedTechnical).toEqual({
       rsi14: 'index',
       'macd.value': 'JPY',
@@ -242,6 +244,25 @@ describe('buildAnalysisSnapshot', () => {
     expect(snapshot.unavailable).toContainEqual({
       section: 'advancedTechnical',
       metric: 'rsi14',
+      reason: 'missing_data',
+    });
+  });
+
+  test('preserves unavailable mean4w without changing complete status', () => {
+    const input = completeInput();
+    input.supplyDemand = {
+      ...input.supplyDemand!,
+      mean4w: null,
+      unavailable: [{ metric: 'mean4w', reason: 'missing_data' }],
+    };
+
+    const snapshot = buildAnalysisSnapshot(input);
+
+    expect(snapshot.status).toBe('complete');
+    expect(snapshot.supplyDemand?.mean4w).toBeNull();
+    expect(snapshot.unavailable).toContainEqual({
+      section: 'supplyDemand',
+      metric: 'mean4w',
       reason: 'missing_data',
     });
   });

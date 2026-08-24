@@ -1,4 +1,5 @@
 export const SUPPLY_DEMAND_DEFAULTS = {
+  mean4wPeriod: 4,
   mean13wPeriod: 13,
   mean52wPeriod: 52,
   averageVolumePeriod: 20,
@@ -21,6 +22,7 @@ export type SupplyDemandMetric =
   | 'marginRatio'
   | 'buyingBalanceWeeklyChange'
   | 'sellingBalanceWeeklyChange'
+  | 'mean4w'
   | 'mean13w'
   | 'mean52w'
   | 'deviation52w'
@@ -48,6 +50,7 @@ export interface SupplyDemandResult {
   marginRatio: number | null;
   buyingBalanceWeeklyChange: number | null;
   sellingBalanceWeeklyChange: number | null;
+  mean4w: number | null;
   mean13w: number | null;
   mean52w: number | null;
   deviation52w: number | null;
@@ -139,6 +142,7 @@ export function analyzeSupplyDemand(
   const previousLong = longBalances.at(-2) ?? null;
   const previousShort = shortBalances.at(-2) ?? null;
 
+  const mean4w = calculateMean(longBalances, SUPPLY_DEMAND_DEFAULTS.mean4wPeriod);
   const mean13w = calculateMean(longBalances, SUPPLY_DEMAND_DEFAULTS.mean13wPeriod);
   const mean52w = calculateMean(longBalances, SUPPLY_DEMAND_DEFAULTS.mean52wPeriod);
   const latest52w = longBalances.slice(-SUPPLY_DEMAND_DEFAULTS.mean52wPeriod);
@@ -164,6 +168,7 @@ export function analyzeSupplyDemand(
     sellingBalanceWeeklyChange: currentShort !== null && previousShort !== null
       ? currentShort - previousShort
       : null,
+    mean4w,
     mean13w,
     mean52w,
     deviation52w: currentLong !== null && mean52w !== null && mean52w !== 0
@@ -208,6 +213,13 @@ export function analyzeSupplyDemand(
     markUnavailable(
       'sellingBalanceWeeklyChange',
       historyReason(marginHistory.length, 2),
+    );
+  }
+
+  if (mean4w === null) {
+    markUnavailable(
+      'mean4w',
+      historyReason(marginHistory.length, SUPPLY_DEMAND_DEFAULTS.mean4wPeriod),
     );
   }
 

@@ -12,7 +12,8 @@ const utcIsoDateTime = z.string().datetime({ offset: true }).refine(value => val
 });
 
 export const ANALYSIS_SNAPSHOT_V1_SCHEMA_VERSION = 1 as const;
-export const ANALYSIS_SNAPSHOT_SCHEMA_VERSION = 2 as const;
+export const ANALYSIS_SNAPSHOT_V2_SCHEMA_VERSION = 2 as const;
+export const ANALYSIS_SNAPSHOT_SCHEMA_VERSION = 3 as const;
 
 export const CanonicalTickerSchema = z.string().regex(JAPANESE_SECURITIES_CODE_PATTERN, {
   message: 'canonicalTicker must be a valid four-character Japanese securities code.',
@@ -321,6 +322,27 @@ export const SupplyDemandResultSchema = z.object({
 
 export type SnapshotSupplyDemandResult = z.infer<typeof SupplyDemandResultSchema>;
 
+const supplyDemandMetricV3 = z.union([
+  supplyDemandMetric,
+  z.literal('mean4w'),
+]);
+
+export const SupplyDemandResultV3Schema = SupplyDemandResultSchema.extend({
+  mean4w: nullableFiniteNumber,
+  unavailable: z.array(z.object({
+    metric: supplyDemandMetricV3,
+    reason: z.enum([
+      'missing_data',
+      'insufficient_history',
+      'zero_selling_balance',
+      'zero_mean_52w',
+      'zero_average_daily_volume',
+    ]),
+  })),
+});
+
+export type SnapshotSupplyDemandResultV3 = z.infer<typeof SupplyDemandResultV3Schema>;
+
 const peerMetric = z.enum([
   'per',
   'pbr',
@@ -569,7 +591,7 @@ export const AnalysisSnapshotV1Schema = z.object({
 });
 
 export const AnalysisSnapshotV2Schema = AnalysisSnapshotV1Schema.extend({
-  schemaVersion: z.literal(ANALYSIS_SNAPSHOT_SCHEMA_VERSION),
+  schemaVersion: z.literal(ANALYSIS_SNAPSHOT_V2_SCHEMA_VERSION),
   dataDates: SnapshotDataDatesV2Schema,
   provenance: SnapshotProvenanceRecordV2Schema,
   units: SnapshotUnitsV2Schema,
@@ -577,13 +599,20 @@ export const AnalysisSnapshotV2Schema = AnalysisSnapshotV1Schema.extend({
   unavailable: z.array(SnapshotUnavailableV2Schema),
 });
 
+export const AnalysisSnapshotV3Schema = AnalysisSnapshotV2Schema.extend({
+  schemaVersion: z.literal(ANALYSIS_SNAPSHOT_SCHEMA_VERSION),
+  supplyDemand: SupplyDemandResultV3Schema.nullable(),
+});
+
 export const AnalysisSnapshotSchema = z.discriminatedUnion('schemaVersion', [
   AnalysisSnapshotV1Schema,
   AnalysisSnapshotV2Schema,
+  AnalysisSnapshotV3Schema,
 ]);
 
 export type AnalysisSnapshotV1 = z.infer<typeof AnalysisSnapshotV1Schema>;
 export type AnalysisSnapshotV2 = z.infer<typeof AnalysisSnapshotV2Schema>;
+export type AnalysisSnapshotV3 = z.infer<typeof AnalysisSnapshotV3Schema>;
 export type AnalysisSnapshot = z.infer<typeof AnalysisSnapshotSchema>;
 
 export const AnalysisSnapshotInputSchema = z.object({
@@ -595,7 +624,7 @@ export const AnalysisSnapshotInputSchema = z.object({
   peerCandidateMarketCapsComplete: z.boolean().nullable(),
   technical: TechnicalResultSchema.nullable(),
   advancedTechnical: AdvancedTechnicalResultSchema.nullable(),
-  supplyDemand: SupplyDemandResultSchema.nullable(),
+  supplyDemand: SupplyDemandResultV3Schema.nullable(),
   marketCorrelation: MarketCorrelationResultSchema.nullable(),
   strategy: StrategyResultSchema.nullable(),
   priceHistory: PriceHistorySchema.nullable(),

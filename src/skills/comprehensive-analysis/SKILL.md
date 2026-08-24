@@ -85,6 +85,8 @@ Preserve dates and nulls. Do not forward-fill, interpolate, or silently remove m
 6. Supply Strategy `tickSize` or `resistanceLevels` only when a reliable source provided them; otherwise omit them. Without a sourced tick size, report the strictly-above trigger but no exact entry or 2R target.
 
 Never reproduce or repair the Engine calculations in narrative reasoning. Carry every `unavailable` reason into the report.
+When `mean4w` is available, interpret it as the recent buying-balance baseline alongside
+the current balance and existing 13-week mean; do not derive an unprovided deviation or signal.
 
 Pass the complete retrieved histories to the Engines. Do not shorten OHLCV to the
 latest 20 bars before Technical, do not omit any weekly margin observations, and

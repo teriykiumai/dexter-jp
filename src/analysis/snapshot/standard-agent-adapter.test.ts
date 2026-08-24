@@ -290,6 +290,7 @@ describe('StandardAgentSnapshotCollector', () => {
       marginRatio: 2,
       buyingBalanceWeeklyChange: 10,
       sellingBalanceWeeklyChange: -10,
+      mean4w: 950,
       mean13w: 900,
       mean52w: 800,
       deviation52w: 0.25,
@@ -310,6 +311,7 @@ describe('StandardAgentSnapshotCollector', () => {
 
     const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
     expect(snapshot?.advancedTechnical).toEqual(advancedTechnical);
+    expect(snapshot?.supplyDemand?.mean4w).toBe(950);
     expect(snapshot?.dataDates.advancedTechnical).toBe('2026-08-20');
     expect(snapshot?.provenance.technical).toEqual(expect.arrayContaining([
       expect.objectContaining({ source: 'technical_engine', role: 'calculation' }),
