@@ -1037,9 +1037,9 @@ do not replace Phase 2B–2F.
 
 ADX is not required for the first Phase 2 completion unless explicitly approved.
 
-## 19. Recommended Next Codex Task
+## 19. Historical Phase 2A Codex Task
 
-Start a new Codex thread and use:
+The following prompt records the original Phase 2A implementation handoff:
 
 ```text
 dexter-jp Phase 2A Technical ExpansionのP2-T1を実装します。
@@ -1093,3 +1093,269 @@ many indicators
 + duplicated calculations
 + large UI
 ```
+
+## 21. Phase 2B — Short Selling
+
+Phase 2B starts with a docs-only source and contract design step. Do not add a
+source tool, deterministic engine, Snapshot field, collector integration, or
+Dashboard presentation in P2-B0.
+
+### P2-B0 — Source / Contract Design
+
+Phase 2B must keep these concepts separate:
+
+```text
+margin interest / 信用売残
+    weekly margin-trading outstanding balance
+
+short-sale report / 空売り残高報告
+    publicly disclosed reported short positions
+```
+
+The existing `get_margin_data` and `SupplyDemandResult.sellingBalance` remain
+unchanged. They must not be relabeled or reused as institutional short-sale
+reports.
+
+#### Source choice
+
+The first individual-stock source is J-Quants V2:
+
+```text
+GET /v2/markets/short-sale-report
+```
+
+Reuse the existing J-Quants API-key authentication, pagination, securities-code
+resolution, and typed plan/error behavior. Do not build a second J-Quants client.
+
+The official source contract reports positions meeting the public-disclosure
+criteria. An absent row is not evidence that the position is zero or that no
+short seller exists.
+
+Official references:
+
+- <https://jpx-jquants.com/ja/spec/mkt-short-sale>
+- <https://jpx-jquants.com/ja/spec/data-spec>
+
+The sector-level endpoint below is not part of P2-B1 through P2-B4:
+
+```text
+GET /v2/markets/short-ratio
+```
+
+It requires a separate P2-B5 evaluation because it describes a 33-sector context,
+not an individual company's reported position.
+
+#### Fixed report shape
+
+P2-B2 uses a source-report-level array and does not create an issue-level total:
+
+```ts
+interface ReportedShortPosition {
+  disclosedDate: string;
+  calculatedDate: string;
+
+  reporterName: string | null;
+  discretionaryManagerName: string | null;
+  fundName: string | null;
+
+  shortPositionRatio: number;
+  shortPositionShares: number;
+
+  previousReportedDate: string | null;
+  previousReportedRatio: number | null;
+
+  ratioDelta: number | null;
+}
+
+type ReportedShortPositionUnavailableReason =
+  | 'no_public_disclosure_data'
+  | 'invalid_data';
+
+interface ReportedShortPositionResult {
+  dataDate: string | null;
+  reports: readonly ReportedShortPosition[];
+  unavailable: readonly {
+    reason: ReportedShortPositionUnavailableReason;
+  }[];
+}
+```
+
+The final implementation may adapt naming to current project conventions only
+when that reduces the diff without changing these semantics.
+
+`dataDate` is the latest included `disclosedDate`, not the latest `calculatedDate`.
+An empty available report set has `dataDate: null`, an empty `reports` array, and
+the typed `no_public_disclosure_data` reason. Callers must not infer availability
+or zero from array length alone.
+
+J-Quants field mapping is fixed as follows:
+
+| J-Quants field | Typed field |
+| --- | --- |
+| `DiscDate` | `disclosedDate` |
+| `CalcDate` | `calculatedDate` |
+| `SSName` | `reporterName` |
+| `DICName` | `discretionaryManagerName` |
+| `FundName` | `fundName` |
+| `ShrtPosToSO` | `shortPositionRatio` |
+| `ShrtPosShares` | `shortPositionShares` |
+| `PrevRptDate` | `previousReportedDate` |
+| `PrevRptRatio` | `previousReportedRatio` |
+
+An empty source string for an optional identity or previous-date field may map to
+`null`. Every non-empty `SSName`, `DICName`, and `FundName` must otherwise remain
+the exact source string. Do not trim into a canonical identity, normalize case or
+language, fuzzy-match, or merge entities.
+
+Addresses and other analysis-unnecessary identity details are not part of the
+typed result or persisted Snapshot contract.
+
+#### As-of and no-look-ahead contract
+
+The two source dates have different meanings:
+
+```text
+DiscDate = information availability date
+CalcDate = position reference date
+```
+
+For historical analysis, include a report only when:
+
+```text
+disclosedDate <= analysisAsOfDate
+```
+
+Apply this availability boundary before validating or calculating the selected
+as-of result. A report with `CalcDate <= analysisAsOfDate` but a later `DiscDate`
+must not be used. `CalcDate` alone never establishes historical availability.
+
+Preserve both dates in every result. Do not backdate a disclosure to its position
+reference date.
+
+#### Previous-report and calculation contract
+
+Preserve the source-provided `PrevRptDate` and `PrevRptRatio`. The only new
+deterministic calculation in the initial engine is:
+
+```text
+ratioDelta = shortPositionRatio - previousReportedRatio
+```
+
+If `previousReportedRatio` is absent, `ratioDelta` is `null`. Do not search for,
+match, forward-fill, or infer a previous report. In particular, do not use
+`SSName`, `DICName`, or `FundName` to reconstruct report history.
+
+#### No inferred aggregation
+
+The initial result preserves `ReportedShortPosition[]`. It must not:
+
+- sum reports from different reporters or funds
+- add ratios with different `CalcDate` values
+- forward-fill a reporter's older value into a date with no report
+- construct an issue-level total short-position ratio or share count
+- interpret a missing reporter or missing date as zero
+
+Even reports sharing the same `CalcDate` remain separate source reports.
+
+#### Empty and invalid data semantics
+
+An empty source response uses the typed reason:
+
+```text
+no_public_disclosure_data
+```
+
+This means only that no public short-position report was obtained for the request
+and as-of boundary. It must not support any of these claims:
+
+- short position is zero
+- no short sellers exist
+- every short position was covered
+- no position below the public-disclosure threshold exists
+
+Expected source absence and invalid fields use narrow typed states rather than a
+fabricated default. Non-finite or negative ratios/shares are invalid; do not skip,
+repair, or interpolate an invalid report into an available result.
+
+#### Units
+
+```text
+shortPositionRatio     = ratio
+previousReportedRatio  = ratio
+ratioDelta             = ratio
+shortPositionShares    = shares
+```
+
+The deterministic engine must not convert ratios to percent. Presentation may
+format a ratio as a percentage using the declared unit, without recalculating it.
+
+### P2-B1 — J-Quants Source Tool
+
+Add only the narrow `/markets/short-sale-report` source tool. Reuse
+`jquantsGetAll()` and `resolveJQuantsCode()`. Preserve the source dates, report
+fields required by the fixed shape, pagination, and plan-unavailable errors.
+
+Tests must cover endpoint and parameter mapping, API-key use without exposing it,
+pagination, ticker resolution, nullable source fields, empty response, and current
+J-Quants error behavior.
+
+### P2-B2 — Deterministic Reported-position Engine
+
+Add a pure engine that applies the `DiscDate` as-of boundary and calculates only
+the source-provided previous-ratio delta. Keep reports separate and preserve input
+arrays.
+
+Tests must cover:
+
+- hand-verifiable `ratioDelta`
+- missing previous ratio produces `null`
+- a future `DiscDate` is excluded
+- an earlier `CalcDate` does not bypass a future `DiscDate`
+- multiple reporters/funds remain separate
+- reports with different calculation dates are never summed
+- exact identity strings are preserved
+- empty response uses `no_public_disclosure_data`
+- invalid numeric data remains unavailable rather than becoming zero
+- input non-mutation
+
+### P2-B3 — Tool Exposure + Snapshot V4
+
+Expose the deterministic result without changing existing margin-interest or
+Supply/Demand semantics. Snapshot V1, V2, and V3 remain immutable and readable;
+new saves become V4 only after this step is approved and implemented. Do not
+rewrite older snapshots. Preserve report-level dates, typed unavailable reasons,
+provenance, and units. Do not persist source addresses.
+
+### P2-B4 — Dashboard + Comprehensive Analysis
+
+The Dashboard displays Snapshot values only. It may format ratio units as percent
+but must not calculate deltas, aggregate reporters, forward-fill reports, or infer
+a squeeze/signal. Analysis instructions must distinguish public reports from
+total market short interest and carry the disclosure threshold and missing-data
+limitations into narrative interpretation.
+
+### P2-B5 — Sector Short-ratio Evaluation
+
+Evaluate `/markets/short-ratio` separately for actual incremental value, target
+33-sector-code provenance, overlap with Phase 2D, and the risk of presenting a
+sector statistic as a company statistic. It is not automatically implemented.
+
+### Phase 2B Sequence
+
+```text
+P2-B0 Source / Contract Design
+  → P2-B1 J-Quants short-sale-report source tool
+  → P2-B2 deterministic reported-position engine
+  → P2-B3 Tool exposure + Snapshot V4
+  → P2-B4 Dashboard + comprehensive-analysis
+  → P2-B5 sector short-ratio evaluation
+```
+
+P2-B0 is docs-only. Each later step requires a separate, reviewable PR and must not
+be implemented before the preceding contract it depends on is merged.
+
+## 22. Recommended Next Codex Task
+
+After P2-B0 is merged, implement P2-B1 only. Do not add calculations, Snapshot
+fields, collector integration, Dashboard presentation, sector short-ratio, or
+short-selling signals in the source-tool PR.
