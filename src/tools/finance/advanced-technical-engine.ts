@@ -1,3 +1,5 @@
+import type { TechnicalBar } from './technical-engine.js';
+
 export const RSI_PERIOD = 14 as const;
 
 export type RsiUnavailableReason =
@@ -230,5 +232,60 @@ export function calculateBollingerBands(
       lower: middle - bandOffset,
     },
     unavailable: [],
+  };
+}
+
+export const ADVANCED_TECHNICAL_CANONICAL_BARS = 251 as const;
+
+export type AdvancedTechnicalUnavailableReason =
+  | RsiUnavailableReason
+  | MacdUnavailableReason
+  | BollingerUnavailableReason;
+
+export interface UnavailableAdvancedTechnicalMetric {
+  metric: 'rsi14' | 'macd' | 'bollinger20';
+  reason: AdvancedTechnicalUnavailableReason;
+}
+
+export interface AdvancedTechnicalResult {
+  dataDate: string | null;
+  rsi14: number | null;
+  macd: MacdValues | null;
+  bollinger20: BollingerValues | null;
+  unavailable: UnavailableAdvancedTechnicalMetric[];
+}
+
+function assertStrictChronologicalOrder(bars: readonly TechnicalBar[]): void {
+  for (let index = 1; index < bars.length; index += 1) {
+    if (bars[index].date <= bars[index - 1].date) {
+      throw new Error('Advanced technical bars must be in strictly ascending date order.');
+    }
+  }
+}
+
+/** Aggregate advanced indicators from the canonical latest-251-bar sequence. */
+export function analyzeAdvancedTechnical(
+  chronologicalAdjustedBars: readonly TechnicalBar[],
+): AdvancedTechnicalResult {
+  const canonicalBars = chronologicalAdjustedBars.slice(
+    -ADVANCED_TECHNICAL_CANONICAL_BARS,
+  );
+  assertStrictChronologicalOrder(chronologicalAdjustedBars);
+
+  const closes = canonicalBars.map((bar) => bar.close);
+  const rsiResult = calculateRsi(closes);
+  const macdResult = calculateMacd(closes);
+  const bollingerResult = calculateBollingerBands(closes);
+
+  return {
+    dataDate: canonicalBars.at(-1)?.date ?? null,
+    rsi14: rsiResult.rsi14,
+    macd: macdResult.macd,
+    bollinger20: bollingerResult.bollinger20,
+    unavailable: [
+      ...rsiResult.unavailable,
+      ...macdResult.unavailable,
+      ...bollingerResult.unavailable,
+    ],
   };
 }

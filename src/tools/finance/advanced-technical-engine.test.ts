@@ -1,9 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  analyzeAdvancedTechnical,
   calculateBollingerBands,
   calculateMacd,
   calculateRsi,
 } from './advanced-technical-engine.js';
+import type { TechnicalBar } from './technical-engine.js';
 
 const deterministicCloses = [
   100, 102, 101, 104, 103, 105, 106, 104,
@@ -307,5 +309,174 @@ describe('calculateBollingerBands', () => {
     calculateBollingerBands(closes);
 
     expect(closes).toEqual(original);
+  });
+});
+
+function makeAdvancedTechnicalBars(
+  closes: readonly (number | null)[],
+  startIndex = 0,
+): TechnicalBar[] {
+  const firstDate = Date.UTC(2020, 0, 1);
+  const dayInMilliseconds = 24 * 60 * 60 * 1_000;
+
+  return closes.map((close, index) => ({
+    date: new Date(
+      firstDate + (startIndex + index) * dayInMilliseconds,
+    ).toISOString().slice(0, 10),
+    open: close,
+    high: close,
+    low: close,
+    close,
+    volume: 1_000 + index,
+  }));
+}
+
+describe('analyzeAdvancedTechnical', () => {
+  test('aggregates complete RSI, MACD, and Bollinger results with one data date', () => {
+    const closes = Array.from({ length: 251 }, (_, index) => index + 1);
+    const bars = makeAdvancedTechnicalBars(closes);
+    const result = analyzeAdvancedTechnical(bars);
+
+    expect(result.dataDate).toBe(bars.at(-1)?.date ?? null);
+    expect(result.rsi14).toBe(100);
+    expect(result.macd?.value).toBeCloseTo(7, 12);
+    expect(result.macd?.signal).toBeCloseTo(7, 12);
+    expect(result.macd?.histogram).toBeCloseTo(0, 12);
+    expect(result.bollinger20?.middle).toBe(241.5);
+    expect(result.bollinger20?.upper).toBeCloseTo(241.5 + Math.sqrt(133), 12);
+    expect(result.bollinger20?.lower).toBeCloseTo(241.5 - Math.sqrt(133), 12);
+    expect(result.unavailable).toEqual([]);
+  });
+
+  test('uses all available history when fewer than 251 bars are supplied', () => {
+    const closes = [1_000_000_000_000, ...Array<number>(39).fill(100)];
+    const result = analyzeAdvancedTechnical(makeAdvancedTechnicalBars(closes));
+
+    expect(result.rsi14).toBe(calculateRsi(closes).rsi14);
+    expect(result.macd).toEqual(calculateMacd(closes).macd);
+    expect(result.bollinger20).toEqual(calculateBollingerBands(closes).bollinger20);
+    expect(result.unavailable).toEqual([]);
+  });
+
+  test('uses exactly the latest 251 bars and keeps recursive results stable', () => {
+    const olderCloses = Array.from({ length: 37 }, (_, index) => 10_000 - index * 100);
+    const canonicalCloses = Array.from(
+      { length: 251 },
+      (_, index) => 100 + Math.sin(index / 7) * 10 + index / 10,
+    );
+    const olderBars = makeAdvancedTechnicalBars(olderCloses);
+    const canonicalBars = makeAdvancedTechnicalBars(
+      canonicalCloses,
+      olderCloses.length,
+    );
+
+    const withOlderHistory = analyzeAdvancedTechnical([
+      ...olderBars,
+      ...canonicalBars,
+    ]);
+    const canonicalOnly = analyzeAdvancedTechnical(canonicalBars);
+
+    expect(withOlderHistory).toEqual(canonicalOnly);
+    expect(canonicalOnly.rsi14).toBe(calculateRsi(canonicalCloses).rsi14);
+    expect(canonicalOnly.macd).toEqual(calculateMacd(canonicalCloses).macd);
+  });
+
+  test('ignores missing and invalid closes before the latest 251 bars', () => {
+    const olderCloses = [null, Number.NaN, Number.POSITIVE_INFINITY, 0, -1];
+    const canonicalCloses = Array.from({ length: 251 }, (_, index) => 100 + index);
+    const canonicalBars = makeAdvancedTechnicalBars(
+      canonicalCloses,
+      olderCloses.length,
+    );
+    const fullHistory = [
+      ...makeAdvancedTechnicalBars(olderCloses),
+      ...canonicalBars,
+    ];
+
+    expect(analyzeAdvancedTechnical(fullHistory)).toEqual(
+      analyzeAdvancedTechnical(canonicalBars),
+    );
+  });
+
+  test('reports missing data inside the canonical sequence without hiding Bollinger', () => {
+    const closes: Array<number | null> = Array.from(
+      { length: 251 },
+      (_, index) => 100 + index,
+    );
+    closes[0] = null;
+
+    const result = analyzeAdvancedTechnical(makeAdvancedTechnicalBars(closes));
+
+    expect(result.rsi14).toBeNull();
+    expect(result.macd).toBeNull();
+    expect(result.bollinger20).toEqual(
+      calculateBollingerBands(closes.slice(-20)).bollinger20,
+    );
+    expect(result.unavailable).toEqual([
+      { metric: 'rsi14', reason: 'missing_data' },
+      { metric: 'macd', reason: 'missing_data' },
+    ]);
+  });
+
+  test('reports invalid data inside every relevant calculation sequence', () => {
+    const closes = Array.from({ length: 251 }, (_, index) => 100 + index);
+    closes[closes.length - 1] = Number.NaN;
+
+    expect(analyzeAdvancedTechnical(makeAdvancedTechnicalBars(closes))).toMatchObject({
+      rsi14: null,
+      macd: null,
+      bollinger20: null,
+      unavailable: [
+        { metric: 'rsi14', reason: 'invalid_data' },
+        { metric: 'macd', reason: 'invalid_data' },
+        { metric: 'bollinger20', reason: 'invalid_data' },
+      ],
+    });
+  });
+
+  test('preserves available metrics when another metric has insufficient history', () => {
+    const closes = Array.from({ length: 20 }, (_, index) => 100 + index);
+    const result = analyzeAdvancedTechnical(makeAdvancedTechnicalBars(closes));
+
+    expect(result.rsi14).toBe(100);
+    expect(result.macd).toBeNull();
+    expect(result.bollinger20).not.toBeNull();
+    expect(result.unavailable).toEqual([
+      { metric: 'macd', reason: 'insufficient_history' },
+    ]);
+  });
+
+  test('returns typed insufficient-history reasons and no data date for empty input', () => {
+    expect(analyzeAdvancedTechnical([])).toEqual({
+      dataDate: null,
+      rsi14: null,
+      macd: null,
+      bollinger20: null,
+      unavailable: [
+        { metric: 'rsi14', reason: 'insufficient_history' },
+        { metric: 'macd', reason: 'insufficient_history' },
+        { metric: 'bollinger20', reason: 'insufficient_history' },
+      ],
+    });
+  });
+
+  test('does not mutate the supplied bars', () => {
+    const bars = makeAdvancedTechnicalBars(
+      Array.from({ length: 260 }, (_, index) => 100 + index),
+    );
+    const original = bars.map((bar) => ({ ...bar }));
+
+    analyzeAdvancedTechnical(bars);
+
+    expect(bars).toEqual(original);
+  });
+
+  test('rejects bars that are not in strictly chronological order', () => {
+    const bars = makeAdvancedTechnicalBars([100, 101, 102]);
+    bars[2] = { ...bars[2], date: bars[1].date };
+
+    expect(() => analyzeAdvancedTechnical(bars)).toThrow(
+      'Advanced technical bars must be in strictly ascending date order.',
+    );
   });
 });
