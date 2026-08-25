@@ -871,21 +871,32 @@ The initial deterministic and Snapshot section is fixed to the exact source aggr
 `TokyoNagoya`; never claim that an investor category traded the analyzed company.
 
 The source preserves `PubDate`, `StDate`, and `EnDate` separately. `PubDate` is the
-availability boundary, while the other two dates describe the trading period.
-Historical date-only analysis is end-of-day and requires:
+publication date, not the J-Quants API availability date; the other two dates describe
+the trading period. Historical selection uses one date-only eligibility contract:
 
 ```text
-publishedDate <= analysisAsOfDate
+ordinary weekly vintage:
+  eligibleDate = publishedDate
+
+correction vintage published on or after 2023-04-03:
+  eligibleDate = next official business day after publishedDate
+
+eligibleDate <= analysisAsOfDate
 ```
 
-On a publication-date timestamp, wait until the source row is actually available.
 The API normally updates around 18:00 JST on the fourth business day of the following
-week. Do not use period dates to bypass publication lag.
+week, but that time is not guaranteed and does not define intraday eligibility. Live
+analysis uses only rows actually returned by J-Quants. Resolve a correction's next
+business day as the first later J-Quants `/v2/markets/calendar` date with `HolDiv`
+`1` or `2`; pass calendar rows into the pure engine and do not use calendar-day or
+weekdays-only arithmetic. Do not use period dates to bypass publication lag.
 
 For post-2023-04-03 corrections, retain source rows and let the pure engine choose the
-greatest eligible `PubDate` for exact `Section + StDate + EnDate`. A future correction
-must not rewrite a historical as-of result. Pre-2023 correction vintages cannot be
-reconstructed because the source supplies corrected data only.
+greatest eligible `PubDate` for exact `Section + StDate + EnDate`. Keep the old vintage
+on the correction `PubDate`; use the corrected vintage only from the following
+official business day. A future correction must not rewrite a historical as-of result.
+Pre-2023 correction vintages cannot be reconstructed because the source supplies
+corrected data only.
 
 Keep the source hierarchy exact:
 

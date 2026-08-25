@@ -1450,6 +1450,8 @@ Official references:
 
 - <https://jpx-jquants.com/ja/spec/eq-investor-types>
 - <https://jpx-jquants.com/ja/spec/eq-investor-types/section>
+- <https://jpx-jquants.com/ja/spec/mkt-cal>
+- <https://jpx-jquants.com/ja/spec/mkt-cal/holiday-division>
 - <https://jpx-jquants.com/ja/spec/data-update>
 - <https://jpx-jquants.com/ja/spec/data-spec>
 - <https://www.jpx.co.jp/markets/statistics-equities/investor-type/07.html>
@@ -1463,31 +1465,46 @@ are publication-date boundaries. It has no ticker parameter.
 
 The source unit is `thousand_JPY` for every numeric trading-value field. The data is
 weekly and the J-Quants API normally updates around 18:00 JST on the fourth business
-day of the following week. The dates have distinct meanings:
+day of the following week. That time is an operational guideline, not a guaranteed
+availability timestamp. The dates have distinct meanings:
 
 ```text
-PubDate = information publication/availability date
+PubDate = information publication date
 StDate  = trading-period start date
 EnDate  = trading-period end date
 ```
 
-Historical date-only analysis is defined as end-of-day and may use only records with:
+`PubDate` and J-Quants API availability are not interchangeable. Historical as-of
+selection uses one date-only, source-reproducible eligibility contract:
 
 ```text
-publishedDate <= analysisAsOfDate
+ordinary weekly vintage:
+  eligibleDate = publishedDate
+
+correction vintage published on or after 2023-04-03:
+  eligibleDate = next official business day after publishedDate
+
+eligibleDate <= analysisAsOfDate
 ```
 
-If an analysis has timestamp precision on `PubDate`, it must not use the row until
-the source update is actually available; the documented update time is not a delivery
-guarantee. Never use `StDate` or `EnDate` as the availability boundary.
+Resolve the correction `eligibleDate` as the first J-Quants `/v2/markets/calendar`
+`Date` after `publishedDate` whose `HolDiv` is `1` (business day) or `2` (TSE
+half-day session). The pure engine receives the required official calendar rows as
+explicit input; it does not fetch them or approximate the next business day with
+calendar-day or weekdays-only arithmetic. The engine does not infer intraday
+eligibility from the normal 18:00 update guideline. A live query can use only rows
+actually returned by J-Quants. Never use `StDate` or `EnDate` as the eligibility
+boundary.
 
 For corrections published on or after 2023-04-03, J-Quants can return both old and
 corrected records with the same `Section`, `StDate`, and `EnDate` and different
-`PubDate` values. After applying the as-of boundary, select the greatest `PubDate`
-for that exact key. A future correction must not replace the version available at a
-historical as-of date. Corrections published before 2023-04-03 are supplied only in
-corrected form, so the original historical vintage cannot be reconstructed and that
-limitation must be disclosed.
+`PubDate` values. On a correction's `PubDate`, keep the previously eligible vintage;
+the correction becomes eligible on the following official business day. After
+applying that boundary, select the greatest eligible `PubDate` for the exact key. A
+future correction must not replace the version eligible at a historical as-of date.
+Corrections published before 2023-04-03 are supplied only in corrected form, so the
+original historical vintage cannot be reconstructed and that limitation must be
+disclosed.
 
 The dataset is unavailable on Free, available for 5 years on Light, 10 years on
 Standard, and 20 years on Premium. Source storage begins on 2008-01-16. A plan limit
@@ -1621,11 +1638,11 @@ brokerage       = sum(exact source brokerage-breakdown categories)
 Apply the two summary invariants component-wise to `sell`, `buy`, `total`, and
 `balance`.
 
-Apply the publication as-of filter before correction selection and validation. Then
-choose the correction-resolved period with the greatest `periodEndDate`. An invalid
-latest eligible row makes the result `invalid_data`; do not silently fall back to an
-older valid period. Equal-key/equal-publication-date duplicates are invalid rather
-than guessed or merged. Preserve input arrays.
+Apply the date-only eligibility filter before correction selection and validation.
+Then choose the correction-resolved period with the greatest `periodEndDate`. An
+invalid latest eligible row makes the result `invalid_data`; do not silently fall
+back to an older valid period. Equal-key/equal-publication-date duplicates are
+invalid rather than guessed or merged. Preserve input arrays.
 
 An empty response or no eligible row is `no_investor_type_flow_data`. It means only
 that no qualifying market-section record was obtained for the source/as-of boundary.
@@ -1690,7 +1707,10 @@ validator defined above. Tests must cover:
 
 - future `PubDate` exclusion before validation
 - `StDate`/`EnDate` never bypassing a future publication date
-- latest correction as of the analysis date
+- correction `PubDate` date retaining the old vintage
+- corrected vintage becoming eligible on the following official business day
+- official calendar input handling without calendar-day or weekdays-only inference
+- latest eligible correction as of the analysis date
 - future correction not rewriting a historical result
 - latest period selection after correction resolution
 - summary and brokerage-breakdown invariants
