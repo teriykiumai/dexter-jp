@@ -185,6 +185,19 @@ export function formatMetric(
   return { text, available: true };
 }
 
+function formatRatioDeltaAsPoints(value: number | null): DisplayValue {
+  if (value === null || !Number.isFinite(value)) {
+    return { text: UNAVAILABLE_TEXT, available: false };
+  }
+
+  const formatted = new Intl.NumberFormat('ja-JP', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+    signDisplay: 'exceptZero',
+  }).format(value * 100);
+  return { text: `${formatted} pt`, available: true };
+}
+
 export function displayText(value: string | null | undefined): DisplayValue {
   return value
     ? { text: value, available: true }
@@ -527,11 +540,7 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
             reportedShortPositionUnits.previousReportedRatio,
             { ratioAsPercent: true },
           ),
-          ratioDelta: formatMetric(
-            report.ratioDelta,
-            reportedShortPositionUnits.ratioDelta,
-            { ratioAsPercent: true },
-          ),
+          ratioDelta: formatRatioDeltaAsPoints(report.ratioDelta),
         }))
       : [],
     unavailableReasons: reportedShortPositions?.unavailable.map(item => (

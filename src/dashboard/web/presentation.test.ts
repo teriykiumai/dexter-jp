@@ -399,8 +399,8 @@ describe('snapshot presentation mapping', () => {
             shortPositionRatio: 0.006,
             shortPositionShares: 120_000,
             previousCalculatedDate: '2026-08-11',
-            previousReportedRatio: 0.0055,
-            ratioDelta: 0.0123,
+            previousReportedRatio: 0.0054,
+            ratioDelta: 0.0005,
           },
           {
             disclosedDate: '2026-08-21',
@@ -410,6 +410,18 @@ describe('snapshot presentation mapping', () => {
             fundName: null,
             shortPositionRatio: 0.007,
             shortPositionShares: 80_000,
+            previousCalculatedDate: '2026-08-12',
+            previousReportedRatio: 0.005,
+            ratioDelta: -0.001,
+          },
+          {
+            disclosedDate: '2026-08-22',
+            calculatedDate: '2026-08-19',
+            reporterName: 'Reporter C',
+            discretionaryManagerName: null,
+            fundName: null,
+            shortPositionRatio: 0.008,
+            shortPositionShares: 70_000,
             previousCalculatedDate: null,
             previousReportedRatio: null,
             ratioDelta: null,
@@ -426,7 +438,7 @@ describe('snapshot presentation mapping', () => {
     const view = mapSnapshotToDashboard(snapshot);
 
     expect(view.reportedShortPositions.state).toBe('available');
-    expect(view.reportedShortPositions.reports).toHaveLength(2);
+    expect(view.reportedShortPositions.reports).toHaveLength(3);
     expect(view.reportedShortPositions.reports[0]).toEqual({
       disclosedDate: { text: '2026-08-20', available: true },
       calculatedDate: { text: '2026-08-18', available: true },
@@ -436,11 +448,15 @@ describe('snapshot presentation mapping', () => {
       shortPositionRatio: { text: '0.6%', available: true },
       shortPositionShares: { text: '120,000 株', available: true },
       previousCalculatedDate: { text: '2026-08-11', available: true },
-      previousReportedRatio: { text: '0.55%', available: true },
-      ratioDelta: { text: '1.23%', available: true },
+      previousReportedRatio: { text: '0.54%', available: true },
+      ratioDelta: { text: '+0.05 pt', available: true },
     });
     expect(view.reportedShortPositions.reports[1]).toMatchObject({
       calculatedDate: { text: '2026-08-18', available: true },
+      previousReportedRatio: { text: '0.5%', available: true },
+      ratioDelta: { text: '-0.10 pt', available: true },
+    });
+    expect(view.reportedShortPositions.reports[2]).toMatchObject({
       discretionaryManagerName: { text: UNAVAILABLE_TEXT, available: false },
       fundName: { text: UNAVAILABLE_TEXT, available: false },
       previousCalculatedDate: { text: UNAVAILABLE_TEXT, available: false },
