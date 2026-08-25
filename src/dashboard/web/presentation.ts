@@ -77,8 +77,30 @@ export interface ReportedShortPositionsView {
   unavailableReasons: string[];
 }
 
+export interface InvestorTypeCategoryView {
+  category: string;
+  sell: DisplayValue;
+  buy: DisplayValue;
+  total: DisplayValue;
+  balance: DisplayValue;
+}
+
+export interface InvestorTypeFlowsView {
+  state: 'available' | 'unavailable' | 'not_collected';
+  section: DisplayValue;
+  publishedDate: DisplayValue;
+  periodStartDate: DisplayValue;
+  periodEndDate: DisplayValue;
+  summary: InvestorTypeCategoryView[];
+  brokerageBreakdown: InvestorTypeCategoryView[];
+  unavailableReasons: string[];
+}
+
 export const REPORTED_SHORT_POSITION_DISCLOSURE_NOTE =
   'J-Quantsの0.5%以上の公開報告です。未収集・利用不可は、空売り残高0、空売り主体なし、0.5%未満のpositionなし、または買い戻し完了を意味しません。信用売残や市場全体のshort interestとは別データです。';
+
+export const INVESTOR_TYPE_FLOW_CONTEXT_NOTE =
+  'Tokyo/Nagoya市場全体の週次market contextです。個別銘柄の売買フローではありません。公表日と売買期間を区別し、Snapshotに保存されたsource categoryと値をそのまま表示します。';
 
 export interface DashboardViewModel {
   header: {
@@ -110,6 +132,7 @@ export interface DashboardViewModel {
     unavailableReasons: string[];
   } | null;
   reportedShortPositions: ReportedShortPositionsView;
+  investorTypeFlows: InvestorTypeFlowsView;
   dataDates: DashboardMetric[];
   scenarios: AnalysisSnapshot['scenarios'];
   risks: AnalysisSnapshot['risks'];
@@ -151,7 +174,7 @@ const numberFormatter = (maximumFractionDigits: number) => new Intl.NumberFormat
 
 export function formatMetric(
   value: number | null | undefined,
-  unit: MetricUnit | 'index' | null | undefined,
+  unit: MetricUnit | 'index' | 'thousand_JPY' | null | undefined,
   options: FormatOptions = {},
 ): DisplayValue {
   if (value === null || value === undefined || !Number.isFinite(value)) {
@@ -172,6 +195,7 @@ export function formatMetric(
   const text = (() => {
     switch (unit) {
       case 'JPY': return `¥${formatted}`;
+      case 'thousand_JPY': return `${formatted} 千円`;
       case 'shares': return `${formatted} 株`;
       case 'percent': return `${formatted}%`;
       case 'multiple': return `${formatted}x`;
@@ -241,6 +265,7 @@ const dataDateLabels = {
   technical: 'テクニカル',
   advancedTechnical: 'Advanced Technical',
   reportedShortPositions: '公開空売り残高報告',
+  investorTypeFlows: '投資部門別 公表日',
   supplyDemand: '需給',
   marketCorrelation: '市場相関',
   strategy: 'Strategy',
@@ -249,6 +274,20 @@ const dataDateLabels = {
 
 function reasonText(reason: string): string {
   return reason.replaceAll('_', ' ');
+}
+
+function investorTypeCategoryView(
+  category: string,
+  value: { sell: number; buy: number; total: number; balance: number },
+  units: Record<string, MetricUnit | 'index' | 'thousand_JPY'>,
+): InvestorTypeCategoryView {
+  return {
+    category,
+    sell: formatMetric(value.sell, units.sell),
+    buy: formatMetric(value.buy, units.buy),
+    total: formatMetric(value.total, units.total),
+    balance: formatMetric(value.balance, units.balance),
+  };
 }
 
 function isStaleDataDate(
@@ -346,6 +385,12 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
     : null;
   const reportedShortPositionUnits = 'reportedShortPositions' in snapshot.units
     ? snapshot.units.reportedShortPositions
+    : null;
+  const investorTypeFlows = 'investorTypeFlows' in snapshot
+    ? snapshot.investorTypeFlows
+    : null;
+  const investorTypeFlowUnits = 'investorTypeFlows' in snapshot.units
+    ? snapshot.units.investorTypeFlows
     : null;
 
   const bars = (snapshot.priceHistory ?? []).flatMap(bar => (
@@ -548,6 +593,95 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
     )) ?? [],
   };
 
+  const investorPeriod = investorTypeFlows?.period ?? null;
+  const investorTypeFlowsView: InvestorTypeFlowsView = {
+    state: !('investorTypeFlows' in snapshot) || investorTypeFlows === null
+      ? 'not_collected'
+      : investorPeriod === null
+        ? 'unavailable'
+        : 'available',
+    section: displayText(investorTypeFlows?.section),
+    publishedDate: displayText(investorPeriod?.publishedDate),
+    periodStartDate: displayText(investorPeriod?.periodStartDate),
+    periodEndDate: displayText(investorPeriod?.periodEndDate),
+    summary: investorPeriod && investorTypeFlowUnits
+      ? [
+          investorTypeCategoryView(
+            'proprietary',
+            investorPeriod.summary.proprietary,
+            investorTypeFlowUnits,
+          ),
+          investorTypeCategoryView(
+            'brokerage',
+            investorPeriod.summary.brokerage,
+            investorTypeFlowUnits,
+          ),
+          investorTypeCategoryView(
+            'total',
+            investorPeriod.summary.total,
+            investorTypeFlowUnits,
+          ),
+        ]
+      : [],
+    brokerageBreakdown: investorPeriod && investorTypeFlowUnits
+      ? [
+          investorTypeCategoryView(
+            'individuals',
+            investorPeriod.brokerageBreakdown.individuals,
+            investorTypeFlowUnits,
+          ),
+          investorTypeCategoryView(
+            'foreignInvestors',
+            investorPeriod.brokerageBreakdown.foreignInvestors,
+            investorTypeFlowUnits,
+          ),
+          investorTypeCategoryView(
+            'securitiesCompanies',
+            investorPeriod.brokerageBreakdown.securitiesCompanies,
+            investorTypeFlowUnits,
+          ),
+          investorTypeCategoryView(
+            'investmentTrusts',
+            investorPeriod.brokerageBreakdown.investmentTrusts,
+            investorTypeFlowUnits,
+          ),
+          investorTypeCategoryView(
+            'businessCorporations',
+            investorPeriod.brokerageBreakdown.businessCorporations,
+            investorTypeFlowUnits,
+          ),
+          investorTypeCategoryView(
+            'otherCorporations',
+            investorPeriod.brokerageBreakdown.otherCorporations,
+            investorTypeFlowUnits,
+          ),
+          investorTypeCategoryView(
+            'insuranceCompanies',
+            investorPeriod.brokerageBreakdown.insuranceCompanies,
+            investorTypeFlowUnits,
+          ),
+          investorTypeCategoryView(
+            'banks',
+            investorPeriod.brokerageBreakdown.banks,
+            investorTypeFlowUnits,
+          ),
+          investorTypeCategoryView(
+            'trustBanks',
+            investorPeriod.brokerageBreakdown.trustBanks,
+            investorTypeFlowUnits,
+          ),
+          investorTypeCategoryView(
+            'otherFinancialInstitutions',
+            investorPeriod.brokerageBreakdown.otherFinancialInstitutions,
+            investorTypeFlowUnits,
+          ),
+        ]
+      : [],
+    unavailableReasons: investorTypeFlows?.unavailable.map(item => (
+      reasonText(item.reason)
+    )) ?? [],
+  };
+
   const dates = snapshot.dataDates;
   const dateEntries: Array<[keyof typeof dataDateLabels, string | null]> = [
     ['identity', dates.identity],
@@ -569,6 +703,9 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
       'reportedShortPositions',
       snapshot.dataDates.reportedShortPositions,
     ]);
+  }
+  if ('investorTypeFlows' in snapshot.dataDates) {
+    dateEntries.push(['investorTypeFlows', snapshot.dataDates.investorTypeFlows]);
   }
 
   return {
@@ -605,6 +742,7 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
     strategy: strategyView,
     advancedTechnical: advancedTechnicalView,
     reportedShortPositions: reportedShortPositionsView,
+    investorTypeFlows: investorTypeFlowsView,
     dataDates: dateEntries.map(([key, value]) => ({
       label: dataDateLabels[key],
       value: displayText(value),

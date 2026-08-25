@@ -15,6 +15,7 @@ import {
 } from '../../analysis/snapshot/index.js';
 import {
   UNAVAILABLE_TEXT,
+  INVESTOR_TYPE_FLOW_CONTEXT_NOTE,
   REPORTED_SHORT_POSITION_DISCLOSURE_NOTE,
   WATCHLIST_STALE_AFTER_DAYS,
   buildDetailPath,
@@ -342,6 +343,7 @@ describe('dashboard presentation helpers', () => {
     expect(formatMetric(1200, 'shares').text).toBe('1,200 株');
     expect(formatMetric(0.123, 'ratio', { ratioAsPercent: true }).text).toBe('12.3%');
     expect(formatMetric(62.345, 'index').text).toBe('62.35');
+    expect(formatMetric(1_234, 'thousand_JPY').text).toBe('1,234 千円');
   });
 });
 
@@ -534,6 +536,166 @@ describe('snapshot presentation mapping', () => {
       label: '公開空売り残高報告',
       value: { text: '2026-08-20', available: true },
     });
+  });
+
+  test('presents V5 investor-type values with exact source hierarchy, dates, and section', () => {
+    // Deliberately non-derived values prove that the Browser formats stored values only.
+    const stored = { sell: 10, buy: 20, total: 777, balance: -333 };
+    const snapshot: AnalysisSnapshotV5 = {
+      ...v5Snapshot(),
+      investorTypeFlows: {
+        dataDate: '2026-08-20',
+        section: 'TokyoNagoya',
+        period: {
+          publishedDate: '2026-08-20',
+          periodStartDate: '2026-08-10',
+          periodEndDate: '2026-08-14',
+          section: 'TokyoNagoya',
+          summary: {
+            proprietary: stored,
+            brokerage: stored,
+            total: stored,
+          },
+          brokerageBreakdown: {
+            individuals: stored,
+            foreignInvestors: stored,
+            securitiesCompanies: stored,
+            investmentTrusts: stored,
+            businessCorporations: stored,
+            otherCorporations: stored,
+            insuranceCompanies: stored,
+            banks: stored,
+            trustBanks: stored,
+            otherFinancialInstitutions: stored,
+          },
+        },
+        unavailable: [],
+      },
+      dataDates: {
+        ...v5Snapshot().dataDates,
+        investorTypeFlows: '2026-08-20',
+      },
+    };
+
+    const dashboard = mapSnapshotToDashboard(snapshot);
+    const view = dashboard.investorTypeFlows;
+
+    expect(view.state).toBe('available');
+    expect(view.section).toEqual({ text: 'TokyoNagoya', available: true });
+    expect(view.publishedDate).toEqual({ text: '2026-08-20', available: true });
+    expect(view.periodStartDate).toEqual({ text: '2026-08-10', available: true });
+    expect(view.periodEndDate).toEqual({ text: '2026-08-14', available: true });
+    expect(dashboard.dataDates).toContainEqual({
+      label: '投資部門別 公表日',
+      value: { text: '2026-08-20', available: true },
+    });
+    expect(view.summary.map(row => row.category)).toEqual([
+      'proprietary',
+      'brokerage',
+      'total',
+    ]);
+    expect(view.brokerageBreakdown.map(row => row.category)).toEqual([
+      'individuals',
+      'foreignInvestors',
+      'securitiesCompanies',
+      'investmentTrusts',
+      'businessCorporations',
+      'otherCorporations',
+      'insuranceCompanies',
+      'banks',
+      'trustBanks',
+      'otherFinancialInstitutions',
+    ]);
+    expect(view.summary[0]).toEqual({
+      category: 'proprietary',
+      sell: { text: '10 千円', available: true },
+      buy: { text: '20 千円', available: true },
+      total: { text: '777 千円', available: true },
+      balance: { text: '-333 千円', available: true },
+    });
+    expect(INVESTOR_TYPE_FLOW_CONTEXT_NOTE).toContain('市場全体');
+    expect(INVESTOR_TYPE_FLOW_CONTEXT_NOTE).toContain('個別銘柄');
+  });
+
+  test('keeps a valid all-zero investor-type period available', () => {
+    const zero = { sell: 0, buy: 0, total: 0, balance: 0 };
+    const snapshot: AnalysisSnapshotV5 = {
+      ...v5Snapshot(),
+      investorTypeFlows: {
+        dataDate: '2026-08-20',
+        section: 'TokyoNagoya',
+        period: {
+          publishedDate: '2026-08-20',
+          periodStartDate: '2026-08-10',
+          periodEndDate: '2026-08-14',
+          section: 'TokyoNagoya',
+          summary: { proprietary: zero, brokerage: zero, total: zero },
+          brokerageBreakdown: {
+            individuals: zero,
+            foreignInvestors: zero,
+            securitiesCompanies: zero,
+            investmentTrusts: zero,
+            businessCorporations: zero,
+            otherCorporations: zero,
+            insuranceCompanies: zero,
+            banks: zero,
+            trustBanks: zero,
+            otherFinancialInstitutions: zero,
+          },
+        },
+        unavailable: [],
+      },
+    };
+
+    const view = mapSnapshotToDashboard(snapshot).investorTypeFlows;
+
+    expect(view.state).toBe('available');
+    expect(view.summary[0]).toMatchObject({
+      sell: { text: '0 千円', available: true },
+      buy: { text: '0 千円', available: true },
+      total: { text: '0 千円', available: true },
+      balance: { text: '0 千円', available: true },
+    });
+  });
+
+  test('keeps investor-type unavailable reasons distinct from zero', () => {
+    for (const reason of ['no_investor_type_flow_data', 'invalid_data'] as const) {
+      const snapshot: AnalysisSnapshotV5 = {
+        ...v5Snapshot(),
+        investorTypeFlows: {
+          dataDate: null,
+          section: 'TokyoNagoya',
+          period: null,
+          unavailable: [{ reason }],
+        },
+      };
+
+      const view = mapSnapshotToDashboard(snapshot).investorTypeFlows;
+
+      expect(view.state).toBe('unavailable');
+      expect(view.summary).toEqual([]);
+      expect(view.brokerageBreakdown).toEqual([]);
+      expect(view.unavailableReasons).toEqual([reason.replaceAll('_', ' ')]);
+    }
+  });
+
+  test('treats V1-V4 and a null V5 investor-type section as not collected', () => {
+    for (const snapshot of [
+      v1Snapshot(),
+      v2Snapshot(),
+      v3Snapshot(),
+      baseSnapshot(),
+      v5Snapshot(),
+    ]) {
+      const view = mapSnapshotToDashboard(snapshot);
+
+      expect(view.investorTypeFlows.state).toBe('not_collected');
+      expect(view.investorTypeFlows.summary).toEqual([]);
+      expect(view.investorTypeFlows.brokerageBreakdown).toEqual([]);
+      if (snapshot.schemaVersion !== 5) {
+        expect(view.dataDates.map(item => item.label)).not.toContain('投資部門別 公表日');
+      }
+    }
   });
 
   test('keeps typed report absence and invalid data unavailable instead of zero', () => {
