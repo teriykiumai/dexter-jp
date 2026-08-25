@@ -6,6 +6,7 @@ const ANALYSIS_TOOL_NAMES = [
   'analyze_technical',
   'analyze_supply_demand',
   'analyze_reported_short_positions',
+  'analyze_investor_type_flows',
   'analyze_peer_comparison',
   'analyze_market_correlation',
   'analyze_strategy',

@@ -13,6 +13,7 @@ function completeInput(): AnalysisSnapshotInput {
     peerSampleSize: 2,
     cohortSize: 2,
   });
+  const investorValue = { sell: 0, buy: 0, total: 0, balance: 0 };
 
   return {
     identity: {
@@ -142,6 +143,34 @@ function completeInput(): AnalysisSnapshotInput {
       }],
       unavailable: [],
     },
+    investorTypeFlows: {
+      dataDate: '2026-08-20',
+      section: 'TokyoNagoya',
+      period: {
+        publishedDate: '2026-08-20',
+        periodStartDate: '2026-08-10',
+        periodEndDate: '2026-08-14',
+        section: 'TokyoNagoya',
+        summary: {
+          proprietary: investorValue,
+          brokerage: investorValue,
+          total: investorValue,
+        },
+        brokerageBreakdown: {
+          individuals: investorValue,
+          foreignInvestors: investorValue,
+          securitiesCompanies: investorValue,
+          investmentTrusts: investorValue,
+          businessCorporations: investorValue,
+          otherCorporations: investorValue,
+          insuranceCompanies: investorValue,
+          banks: investorValue,
+          trustBanks: investorValue,
+          otherFinancialInstitutions: investorValue,
+        },
+      },
+      unavailable: [],
+    },
     marketCorrelation: {
       benchmark: 'TOPIX',
       dataDate: '2026-08-21',
@@ -170,12 +199,14 @@ function completeInput(): AnalysisSnapshotInput {
     priceSourceUrls: ['https://example.test/prices'],
     peerSourceUrls: ['https://example.test/peers'],
     reportedShortPositionSourceUrls: ['https://example.test/short-positions'],
+    investorTypeFlowSourceUrls: ['https://example.test/investor-types'],
     sourceUsage: {
       valuation: { priceFromJQuants: true, financialsFromEdinetDb: true },
       technical: { priceFromJQuants: true },
       supplyDemand: { marginFromJQuants: true, volumeFromJQuants: true },
       marketCorrelation: { stockFromJQuants: true, benchmarkFromJQuants: true },
       reportedShortPositions: { sourceFromJQuants: true },
+      investorTypeFlows: { sourceFromJQuants: true, calendarFromJQuants: true },
     },
     additionalUnavailable: [],
   };
@@ -185,7 +216,7 @@ describe('buildAnalysisSnapshot', () => {
   test('uses an explicit required-section contract and remains complete for metric-level unavailable states', () => {
     const snapshot = buildAnalysisSnapshot(completeInput());
 
-    expect(snapshot.schemaVersion).toBe(4);
+    expect(snapshot.schemaVersion).toBe(5);
     expect(REQUIRED_ANALYSIS_SNAPSHOT_SECTIONS).toEqual([
       'identity',
       'fundamental',
@@ -231,6 +262,26 @@ describe('buildAnalysisSnapshot', () => {
       }),
       expect.objectContaining({ source: 'jquants', role: 'short_position_data' }),
     ]));
+    expect(snapshot.provenance.investorTypeFlows).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        source: 'investor_type_flow_engine',
+        role: 'calculation',
+        section: 'TokyoNagoya',
+        endpoint: null,
+      }),
+      expect.objectContaining({
+        source: 'jquants',
+        role: 'investor_type_flow_data',
+        section: 'TokyoNagoya',
+        endpoint: '/v2/equities/investor-types',
+      }),
+      expect.objectContaining({
+        source: 'jquants',
+        role: 'market_calendar_data',
+        section: null,
+        endpoint: '/v2/markets/calendar',
+      }),
+    ]));
     expect(snapshot.provenance.marketCorrelation).toEqual(expect.arrayContaining([
       expect.objectContaining({ source: 'jquants', role: 'price_data' }),
       expect.objectContaining({ source: 'jquants', role: 'benchmark_data' }),
@@ -254,10 +305,18 @@ describe('buildAnalysisSnapshot', () => {
       previousReportedRatio: 'ratio',
       ratioDelta: 'ratio',
     });
+    expect(snapshot.units.investorTypeFlows).toEqual({
+      sell: 'thousand_JPY',
+      buy: 'thousand_JPY',
+      total: 'thousand_JPY',
+      balance: 'thousand_JPY',
+    });
     expect(snapshot.dataDates.advancedTechnical).toBe('2026-08-21');
     expect(snapshot.advancedTechnical).toEqual(completeInput().advancedTechnical);
     expect(snapshot.dataDates.reportedShortPositions).toBe('2026-08-20');
     expect(snapshot.reportedShortPositions).toEqual(completeInput().reportedShortPositions);
+    expect(snapshot.dataDates.investorTypeFlows).toBe('2026-08-20');
+    expect(snapshot.investorTypeFlows).toEqual(completeInput().investorTypeFlows);
   });
 
   test('preserves reported-position unavailable reasons without changing complete status', () => {
@@ -275,6 +334,27 @@ describe('buildAnalysisSnapshot', () => {
       expect(snapshot.reportedShortPositions).toEqual(input.reportedShortPositions);
       expect(snapshot.unavailable).toContainEqual({
         section: 'reportedShortPositions',
+        reason,
+      });
+    }
+  });
+
+  test('preserves investor-type unavailable reasons without changing complete status', () => {
+    for (const reason of ['no_investor_type_flow_data', 'invalid_data'] as const) {
+      const input = completeInput();
+      input.investorTypeFlows = {
+        dataDate: null,
+        section: 'TokyoNagoya',
+        period: null,
+        unavailable: [{ reason }],
+      };
+
+      const snapshot = buildAnalysisSnapshot(input);
+
+      expect(snapshot.status).toBe('complete');
+      expect(snapshot.investorTypeFlows).toEqual(input.investorTypeFlows);
+      expect(snapshot.unavailable).toContainEqual({
+        section: 'investorTypeFlows',
         reason,
       });
     }

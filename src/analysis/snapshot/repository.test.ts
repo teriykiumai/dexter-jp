@@ -12,14 +12,44 @@ import {
   AnalysisSnapshotV1Schema,
   AnalysisSnapshotV2Schema,
   AnalysisSnapshotV3Schema,
+  AnalysisSnapshotV4Schema,
   type AnalysisSnapshotInput,
   type AnalysisSnapshotV1,
   type AnalysisSnapshotV2,
   type AnalysisSnapshotV3,
   type AnalysisSnapshotV4,
+  type AnalysisSnapshotV5,
 } from './schema.js';
 
 const temporaryDirectories: string[] = [];
+
+function investorTypeFlowResult() {
+  const zero = { sell: 0, buy: 0, total: 0, balance: 0 };
+  return {
+    dataDate: '2026-08-20',
+    section: 'TokyoNagoya' as const,
+    period: {
+      publishedDate: '2026-08-20',
+      periodStartDate: '2026-08-10',
+      periodEndDate: '2026-08-14',
+      section: 'TokyoNagoya' as const,
+      summary: { proprietary: zero, brokerage: zero, total: zero },
+      brokerageBreakdown: {
+        individuals: zero,
+        foreignInvestors: zero,
+        securitiesCompanies: zero,
+        investmentTrusts: zero,
+        businessCorporations: zero,
+        otherCorporations: zero,
+        insuranceCompanies: zero,
+        banks: zero,
+        trustBanks: zero,
+        otherFinancialInstitutions: zero,
+      },
+    },
+    unavailable: [],
+  };
+}
 
 async function createRepository(): Promise<{ repository: AnalysisSnapshotRepository; root: string }> {
   const root = await mkdtemp(join(tmpdir(), 'dexter-analysis-'));
@@ -30,7 +60,7 @@ async function createRepository(): Promise<{ repository: AnalysisSnapshotReposit
 function partialSnapshot(
   generatedAt = '2026-08-23T01:02:03.000Z',
   canonicalTicker = '7203',
-): AnalysisSnapshotV4 {
+): AnalysisSnapshotV5 {
   const input: AnalysisSnapshotInput = {
     identity: {
       canonicalTicker,
@@ -86,6 +116,7 @@ function partialSnapshot(
       }],
       unavailable: [],
     },
+    investorTypeFlows: investorTypeFlowResult(),
     marketCorrelation: null,
     strategy: null,
     priceHistory: null,
@@ -95,23 +126,52 @@ function partialSnapshot(
     priceSourceUrls: [],
     peerSourceUrls: [],
     reportedShortPositionSourceUrls: ['https://example.test/short-position'],
+    investorTypeFlowSourceUrls: ['https://example.test/investor-types'],
     sourceUsage: {
       valuation: { priceFromJQuants: false, financialsFromEdinetDb: false },
       technical: { priceFromJQuants: false },
       supplyDemand: { marginFromJQuants: false, volumeFromJQuants: false },
       marketCorrelation: { stockFromJQuants: false, benchmarkFromJQuants: false },
       reportedShortPositions: { sourceFromJQuants: true },
+      investorTypeFlows: { sourceFromJQuants: true, calendarFromJQuants: true },
     },
     additionalUnavailable: [],
   };
   return buildAnalysisSnapshot(input);
 }
 
+function v4Snapshot(
+  generatedAt = '2026-08-23T01:02:03.000Z',
+  canonicalTicker = '7203',
+): AnalysisSnapshotV4 {
+  const v5 = partialSnapshot(generatedAt, canonicalTicker);
+  const {
+    investorTypeFlows: _investorTypeFlows,
+    dataDates: v5DataDates,
+    provenance: v5Provenance,
+    units: v5Units,
+    unavailable: v5Unavailable,
+    ...common
+  } = v5;
+  const { investorTypeFlows: _investorDate, ...dataDates } = v5DataDates;
+  const { investorTypeFlows: _investorProvenance, ...provenance } = v5Provenance;
+  const { investorTypeFlows: _investorUnits, ...units } = v5Units;
+
+  return AnalysisSnapshotV4Schema.parse({
+    ...common,
+    schemaVersion: 4,
+    dataDates,
+    provenance,
+    units,
+    unavailable: v5Unavailable.filter(item => item.section !== 'investorTypeFlows'),
+  });
+}
+
 function v3Snapshot(
   generatedAt = '2026-08-23T01:02:03.000Z',
   canonicalTicker = '7203',
 ): AnalysisSnapshotV3 {
-  const v4 = partialSnapshot(generatedAt, canonicalTicker);
+  const v4 = v4Snapshot(generatedAt, canonicalTicker);
   const {
     reportedShortPositions: _reportedShortPositions,
     dataDates: v4DataDates,
@@ -201,7 +261,7 @@ afterEach(async () => {
 });
 
 describe('AnalysisSnapshotRepository', () => {
-  test('saves validated V4 history and latest JSON atomically and loads both', async () => {
+  test('saves validated V5 history and latest JSON atomically and loads both', async () => {
     const { repository, root } = await createRepository();
     const snapshot = partialSnapshot();
 
@@ -216,10 +276,11 @@ describe('AnalysisSnapshotRepository', () => {
     });
     expect(history).toEqual(snapshot);
     expect(latest).toEqual(snapshot);
-    expect(latest.schemaVersion).toBe(4);
-    if (latest.schemaVersion !== 4) throw new Error('Expected Snapshot V4.');
+    expect(latest.schemaVersion).toBe(5);
+    if (latest.schemaVersion !== 5) throw new Error('Expected Snapshot V5.');
     expect(latest.supplyDemand?.mean4w).toBe(950);
     expect(latest.reportedShortPositions?.reports[0]?.ratioDelta).toBe(0.001);
+    expect(latest.investorTypeFlows).toEqual(investorTypeFlowResult());
     expect(filenames.sort()).toEqual([
       '2026-08-23T01-02-03-000Z.json',
       'latest.json',
@@ -290,12 +351,31 @@ describe('AnalysisSnapshotRepository', () => {
     expect(await readFile(latestPath, 'utf8')).toBe(originalJson);
   });
 
-  test('rejects V1, V2, and V3 at the V4-only save boundary', async () => {
+  test('reads existing V4 history and latest JSON without rewriting either file', async () => {
+    const { repository, root } = await createRepository();
+    const snapshot = v4Snapshot();
+    const snapshotId = createSnapshotId(snapshot.generatedAt);
+    const tickerDirectory = join(root, '7203');
+    const historyPath = join(tickerDirectory, `${snapshotId}.json`);
+    const latestPath = join(tickerDirectory, 'latest.json');
+    const originalJson = `${JSON.stringify(snapshot, null, 2)}\n`;
+    await mkdir(tickerDirectory, { recursive: true });
+    await writeFile(historyPath, originalJson, 'utf8');
+    await writeFile(latestPath, originalJson, 'utf8');
+
+    expect(await repository.loadHistory('7203', snapshotId)).toEqual(snapshot);
+    expect(await repository.loadLatest('7203')).toEqual(snapshot);
+    expect(await readFile(historyPath, 'utf8')).toBe(originalJson);
+    expect(await readFile(latestPath, 'utf8')).toBe(originalJson);
+  });
+
+  test('rejects V1, V2, V3, and V4 at the V5-only save boundary', async () => {
     const { repository } = await createRepository();
 
     await expectPersistenceError(repository.save(v1Snapshot()), 'schema_validation_failed');
     await expectPersistenceError(repository.save(v2Snapshot()), 'schema_validation_failed');
     await expectPersistenceError(repository.save(v3Snapshot()), 'schema_validation_failed');
+    await expectPersistenceError(repository.save(v4Snapshot()), 'schema_validation_failed');
   });
 
   test('lists history metadata in descending generatedAt order', async () => {
@@ -378,7 +458,7 @@ describe('AnalysisSnapshotRepository', () => {
     await writeFile(join(tickerDirectory, 'latest.json'), JSON.stringify({ schemaVersion: 1 }), 'utf8');
     await expectPersistenceError(repository.loadLatest('7203'), 'schema_validation_failed');
 
-    await writeFile(join(tickerDirectory, 'latest.json'), JSON.stringify({ schemaVersion: 5 }), 'utf8');
+    await writeFile(join(tickerDirectory, 'latest.json'), JSON.stringify({ schemaVersion: 6 }), 'utf8');
     await expectPersistenceError(repository.loadLatest('7203'), 'unsupported_schema_version');
   });
 
