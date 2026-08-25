@@ -19,6 +19,7 @@ const CORE_TOOL_NAMES = [
   'screen_companies',
   'analyze_technical',
   'analyze_supply_demand',
+  'analyze_reported_short_positions',
   'analyze_peer_comparison',
   'analyze_market_correlation',
   'analyze_strategy',

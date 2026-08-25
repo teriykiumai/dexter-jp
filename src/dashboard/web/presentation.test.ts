@@ -4,7 +4,7 @@ import {
   buildAnalysisSnapshot,
   buildAnalysisSnapshotLatestItem,
   type AnalysisSnapshot,
-  type AnalysisSnapshotV3,
+  type AnalysisSnapshotV4,
   type AnalysisSnapshotInput,
 } from '../../analysis/snapshot/index.js';
 import {
@@ -19,7 +19,7 @@ import {
   sortWatchlistItems,
 } from './presentation.js';
 
-function baseSnapshot(): AnalysisSnapshotV3 {
+function baseSnapshot(): AnalysisSnapshotV4 {
   const input: AnalysisSnapshotInput = {
     identity: {
       canonicalTicker: '7203',
@@ -38,6 +38,7 @@ function baseSnapshot(): AnalysisSnapshotV3 {
     technical: null,
     advancedTechnical: null,
     supplyDemand: null,
+    reportedShortPositions: null,
     marketCorrelation: null,
     strategy: null,
     priceHistory: null,
@@ -46,11 +47,13 @@ function baseSnapshot(): AnalysisSnapshotV3 {
     finalReportMarkdown: '# Analysis\n\nSafe text.',
     priceSourceUrls: [],
     peerSourceUrls: [],
+    reportedShortPositionSourceUrls: [],
     sourceUsage: {
       valuation: { priceFromJQuants: false, financialsFromEdinetDb: false },
       technical: { priceFromJQuants: false },
       supplyDemand: { marginFromJQuants: false, volumeFromJQuants: false },
       marketCorrelation: { stockFromJQuants: false, benchmarkFromJQuants: false },
+      reportedShortPositions: { sourceFromJQuants: false },
     },
     additionalUnavailable: [],
   };
@@ -77,7 +80,9 @@ function v1Snapshot(): AnalysisSnapshot {
     dataDates,
     provenance,
     units,
-    unavailable: v2Unavailable.filter(item => item.section !== 'advancedTechnical'),
+    unavailable: v2Unavailable.filter(item => (
+      item.section !== 'advancedTechnical' && item.section !== 'reportedShortPositions'
+    )),
   });
 }
 
@@ -144,7 +149,7 @@ function watchlistSnapshot(
   ticker: string,
   generatedAt: string,
   latestDataDate: string,
-): AnalysisSnapshotV3 {
+): AnalysisSnapshotV4 {
   return {
     ...baseSnapshot(),
     canonicalTicker: ticker,
@@ -158,6 +163,7 @@ function watchlistSnapshot(
       peerComparison: latestDataDate,
       technical: latestDataDate,
       advancedTechnical: latestDataDate,
+      reportedShortPositions: latestDataDate,
       supplyDemand: latestDataDate,
       marketCorrelation: latestDataDate,
       strategy: latestDataDate,
@@ -265,7 +271,7 @@ describe('dashboard presentation helpers', () => {
 
 describe('snapshot presentation mapping', () => {
   test('passes through and formats the seven latest Advanced Technical values', () => {
-    const snapshot: AnalysisSnapshotV3 = {
+    const snapshot: AnalysisSnapshotV4 = {
       ...baseSnapshot(),
       advancedTechnical: {
         dataDate: '2026-08-21',
@@ -297,7 +303,7 @@ describe('snapshot presentation mapping', () => {
   });
 
   test('keeps unavailable Advanced Technical metrics distinct from zero', () => {
-    const snapshot: AnalysisSnapshotV3 = {
+    const snapshot: AnalysisSnapshotV4 = {
       ...baseSnapshot(),
       advancedTechnical: {
         dataDate: '2026-08-21',
@@ -344,7 +350,7 @@ describe('snapshot presentation mapping', () => {
       value: { text: '9,500 株', available: true },
     });
 
-    const unavailableSnapshot: AnalysisSnapshotV3 = {
+    const unavailableSnapshot: AnalysisSnapshotV4 = {
       ...availableSnapshot,
       supplyDemand: {
         ...availableSnapshot.supplyDemand!,
@@ -361,7 +367,7 @@ describe('snapshot presentation mapping', () => {
   });
 
   test('passes through the 20-day correlation window and keeps unavailable distinct from zero', () => {
-    const snapshot: AnalysisSnapshotV3 = {
+    const snapshot: AnalysisSnapshotV4 = {
       ...baseSnapshot(),
       marketCorrelation: {
         benchmark: 'TOPIX',
@@ -394,7 +400,7 @@ describe('snapshot presentation mapping', () => {
       unavailableReasons: [],
     }]);
 
-    const unavailable: AnalysisSnapshotV3 = {
+    const unavailable: AnalysisSnapshotV4 = {
       ...snapshot,
       marketCorrelation: {
         ...snapshot.marketCorrelation!,
@@ -598,7 +604,7 @@ describe('watchlist presentation mapping', () => {
       ),
       referenceDate,
     );
-    const missingSnapshot: AnalysisSnapshotV3 = {
+    const missingSnapshot: AnalysisSnapshotV4 = {
       ...baseSnapshot(),
       canonicalTicker: '130A',
       companyName: '130A株式会社',
@@ -609,6 +615,7 @@ describe('watchlist presentation mapping', () => {
         peerComparison: null,
         technical: null,
         advancedTechnical: null,
+        reportedShortPositions: null,
         supplyDemand: null,
         marketCorrelation: null,
         strategy: null,

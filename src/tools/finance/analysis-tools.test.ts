@@ -3,6 +3,7 @@ import {
   analyzeFinancialMetrics,
   analyzeMarketCorrelation,
   analyzePeerComparison,
+  analyzeReportedShortPositions,
   analyzeStrategy,
   analyzeSupplyDemand,
   analyzeTechnical,
@@ -13,6 +14,7 @@ import {
   analyzeFinancialMetricsTool,
   analyzeMarketCorrelationTool,
   analyzePeerComparisonTool,
+  analyzeReportedShortPositionsTool,
   analyzeStrategyTool,
   analyzeSupplyDemandTool,
   analyzeTechnicalTool,
@@ -38,6 +40,7 @@ describe('deterministic analysis tools', () => {
       'analyze_financial_metrics',
       'analyze_technical',
       'analyze_supply_demand',
+      'analyze_reported_short_positions',
       'analyze_peer_comparison',
       'analyze_market_correlation',
       'analyze_strategy',
@@ -105,6 +108,118 @@ describe('deterministic analysis tools', () => {
       volumeHistory,
     }));
     expect(actual).toEqual(analyzeSupplyDemand(marginHistory, volumeHistory));
+  });
+
+  test('delegates supplied report rows without fetching and preserves report-level results', async () => {
+    const sourceReports = [{
+      disclosedDate: '2026-08-20',
+      calculatedDate: '2026-08-18',
+      code: '72030',
+      reporterName: 'Reporter Exact',
+      discretionaryManagerName: null,
+      fundName: 'Fund Exact',
+      shortPositionRatio: 0.006,
+      shortPositionShares: 120_000,
+      previousCalculatedDate: '2026-08-11',
+      previousReportedRatio: 0.0055,
+    }];
+    const originalFetch = globalThis.fetch;
+    let fetches = 0;
+    globalThis.fetch = (async () => {
+      fetches += 1;
+      throw new Error('Unexpected fetch');
+    }) as unknown as typeof fetch;
+
+    try {
+      const actual = toolData(await analyzeReportedShortPositionsTool.invoke({
+        ticker: '7203',
+        analysisAsOfDate: '2026-08-20',
+        sourceReports,
+      }));
+
+      expect(actual).toEqual(analyzeReportedShortPositions(sourceReports, '2026-08-20'));
+      expect(fetches).toBe(0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('fetches short-sale reports once in direct ticker mode', async () => {
+    const originalFetch = globalThis.fetch;
+    const previousApiKey = process.env.JQUANTS_API_KEY;
+    process.env.JQUANTS_API_KEY = 'test-jquants-key';
+    let fetches = 0;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      fetches += 1;
+      const href = input instanceof URL
+        ? input.href
+        : typeof input === 'string'
+          ? input
+          : input.url;
+      const url = new URL(href);
+      expect(url.pathname).toEndWith('/markets/short-sale-report');
+      expect(url.searchParams.get('disc_date_to')).toBe('2026-08-20');
+      return new Response(JSON.stringify({ data: [{
+        DiscDate: '2026-08-20',
+        CalcDate: '2026-08-18',
+        Code: '72030',
+        SSName: 'Reporter Exact',
+        DICName: null,
+        FundName: null,
+        ShrtPosToSO: 0.006,
+        ShrtPosShares: 120_000,
+        PrevRptDate: '2026-08-11',
+        PrevRptRatio: 0.005,
+      }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    try {
+      const actual = toolData(await analyzeReportedShortPositionsTool.invoke({
+        ticker: '7203',
+        analysisAsOfDate: '2026-08-20',
+      })) as { reports: unknown[]; unavailable: unknown[] };
+      expect(actual.reports).toHaveLength(1);
+      expect(actual.unavailable).toEqual([]);
+      expect(fetches).toBe(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (previousApiKey === undefined) delete process.env.JQUANTS_API_KEY;
+      else process.env.JQUANTS_API_KEY = previousApiKey;
+    }
+  });
+
+  test('maps an empty direct response to typed unavailable data, not zero', async () => {
+    const originalFetch = globalThis.fetch;
+    const previousApiKey = process.env.JQUANTS_API_KEY;
+    process.env.JQUANTS_API_KEY = 'test-jquants-key';
+    let fetches = 0;
+    globalThis.fetch = (async () => {
+      fetches += 1;
+      return new Response(JSON.stringify({ data: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+
+    try {
+      const actual = toolData(await analyzeReportedShortPositionsTool.invoke({
+        ticker: '7203',
+        analysisAsOfDate: '2026-08-20',
+      }));
+      expect(actual).toEqual({
+        dataDate: null,
+        reports: [],
+        unavailable: [{ reason: 'no_public_disclosure_data' }],
+      });
+      expect(fetches).toBe(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (previousApiKey === undefined) delete process.env.JQUANTS_API_KEY;
+      else process.env.JQUANTS_API_KEY = previousApiKey;
+    }
   });
 
   test('delegates sourced company cohorts to the Peer Comparison Engine', async () => {

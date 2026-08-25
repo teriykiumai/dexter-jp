@@ -15,17 +15,26 @@ export {
   ANALYZE_FINANCIAL_METRICS_DESCRIPTION,
   ANALYZE_MARKET_CORRELATION_DESCRIPTION,
   ANALYZE_PEER_COMPARISON_DESCRIPTION,
+  ANALYZE_REPORTED_SHORT_POSITIONS_DESCRIPTION,
   ANALYZE_STRATEGY_DESCRIPTION,
   ANALYZE_SUPPLY_DEMAND_DESCRIPTION,
   ANALYZE_TECHNICAL_DESCRIPTION,
   analyzeFinancialMetricsTool,
   analyzeMarketCorrelationTool,
   analyzePeerComparisonTool,
+  analyzeReportedShortPositionsTool,
   analyzeStrategyTool,
   analyzeSupplyDemandTool,
   analyzeTechnicalTool,
   deterministicAnalysisTools,
 } from './analysis-tools.js';
+export {
+  analyzeReportedShortPositions,
+  type ReportedShortPosition,
+  type ReportedShortPositionResult,
+  type ReportedShortPositionUnavailableReason,
+  type UnavailableReportedShortPosition,
+} from './reported-short-position-engine.js';
 export {
   analyzeFinancialMetrics,
   type FinancialMetric,

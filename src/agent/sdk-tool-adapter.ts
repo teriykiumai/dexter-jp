@@ -28,6 +28,7 @@ import {
   getTopix,
   analyzeTechnicalTool,
   analyzeSupplyDemandTool,
+  analyzeReportedShortPositionsTool,
   analyzePeerComparisonTool,
   analyzeMarketCorrelationTool,
   analyzeStrategyTool,
@@ -129,6 +130,7 @@ export function buildDexterSdkTools(): ReturnType<typeof adaptLangChainTool>[] {
     // Pure deterministic engines — calculate from sourced structured inputs.
     analyzeTechnicalTool,
     analyzeSupplyDemandTool,
+    analyzeReportedShortPositionsTool,
     analyzePeerComparisonTool,
     analyzeMarketCorrelationTool,
     analyzeStrategyTool,

@@ -13,7 +13,8 @@ const utcIsoDateTime = z.string().datetime({ offset: true }).refine(value => val
 
 export const ANALYSIS_SNAPSHOT_V1_SCHEMA_VERSION = 1 as const;
 export const ANALYSIS_SNAPSHOT_V2_SCHEMA_VERSION = 2 as const;
-export const ANALYSIS_SNAPSHOT_SCHEMA_VERSION = 3 as const;
+export const ANALYSIS_SNAPSHOT_V3_SCHEMA_VERSION = 3 as const;
+export const ANALYSIS_SNAPSHOT_SCHEMA_VERSION = 4 as const;
 
 export const CanonicalTickerSchema = z.string().regex(JAPANESE_SECURITIES_CODE_PATTERN, {
   message: 'canonicalTicker must be a valid four-character Japanese securities code.',
@@ -59,6 +60,11 @@ export type SnapshotSection = z.infer<typeof SnapshotSectionSchema>;
 export const SnapshotSectionV2Schema = z.union([
   SnapshotSectionSchema,
   z.literal('advancedTechnical'),
+]);
+
+export const SnapshotSectionV4Schema = z.union([
+  SnapshotSectionV2Schema,
+  z.literal('reportedShortPositions'),
 ]);
 
 export const SnapshotProvenanceSchema = z.object({
@@ -109,6 +115,19 @@ export const SnapshotProvenanceRecordV2Schema = z.object({
   advancedTechnical: z.array(SnapshotProvenanceSchema),
 });
 
+export const ReportedShortPositionProvenanceSchema = SnapshotProvenanceSchema.extend({
+  source: z.enum(['jquants', 'reported_short_position_engine']),
+  role: z.enum(['short_position_data', 'calculation']),
+});
+
+export type ReportedShortPositionProvenance = z.infer<
+  typeof ReportedShortPositionProvenanceSchema
+>;
+
+export const SnapshotProvenanceRecordV4Schema = SnapshotProvenanceRecordV2Schema.extend({
+  reportedShortPositions: z.array(ReportedShortPositionProvenanceSchema),
+});
+
 const unitMap = z.record(z.string().min(1), MetricUnitSchema);
 
 export const SnapshotUnitsSchema = z.object({
@@ -136,6 +155,10 @@ export const SnapshotUnitsV2Schema = z.object({
   priceHistory: unitMap,
 });
 
+export const SnapshotUnitsV4Schema = SnapshotUnitsV2Schema.extend({
+  reportedShortPositions: unitMap,
+});
+
 export const SnapshotUnavailableSchema = z.object({
   section: SnapshotSectionSchema,
   metric: z.string().min(1).optional(),
@@ -152,8 +175,17 @@ export const SnapshotUnavailableV2Schema = z.object({
   detail: z.string().min(1).optional(),
 });
 
-export type SnapshotUnavailable = z.infer<typeof SnapshotUnavailableV2Schema>;
-export type SnapshotUnavailableV2 = SnapshotUnavailable;
+export type SnapshotUnavailableV2 = z.infer<typeof SnapshotUnavailableV2Schema>;
+
+export const SnapshotUnavailableV4Schema = z.object({
+  section: SnapshotSectionV4Schema,
+  metric: z.string().min(1).optional(),
+  reason: z.string().min(1),
+  detail: z.string().min(1).optional(),
+});
+
+export type SnapshotUnavailableV4 = z.infer<typeof SnapshotUnavailableV4Schema>;
+export type SnapshotUnavailable = SnapshotUnavailableV4;
 
 export const CompanyIdentitySchema = z.object({
   canonicalTicker: CanonicalTickerSchema,
@@ -342,6 +374,34 @@ export const SupplyDemandResultV3Schema = SupplyDemandResultSchema.extend({
 });
 
 export type SnapshotSupplyDemandResultV3 = z.infer<typeof SupplyDemandResultV3Schema>;
+
+const reportedShortPositionUnavailableReason = z.enum([
+  'no_public_disclosure_data',
+  'invalid_data',
+]);
+
+export const ReportedShortPositionResultSchema = z.object({
+  dataDate: nullableDate,
+  reports: z.array(z.object({
+    disclosedDate: z.string().min(1),
+    calculatedDate: z.string().min(1),
+    reporterName: z.string().nullable(),
+    discretionaryManagerName: z.string().nullable(),
+    fundName: z.string().nullable(),
+    shortPositionRatio: finiteNumber.nonnegative(),
+    shortPositionShares: finiteNumber.nonnegative(),
+    previousCalculatedDate: nullableDate,
+    previousReportedRatio: finiteNumber.nonnegative().nullable(),
+    ratioDelta: nullableFiniteNumber,
+  })),
+  unavailable: z.array(z.object({
+    reason: reportedShortPositionUnavailableReason,
+  })),
+});
+
+export type SnapshotReportedShortPositionResult = z.infer<
+  typeof ReportedShortPositionResultSchema
+>;
 
 const peerMetric = z.enum([
   'per',
@@ -567,6 +627,10 @@ export const SnapshotDataDatesV2Schema = SnapshotDataDatesSchema.extend({
   advancedTechnical: nullableDate,
 });
 
+export const SnapshotDataDatesV4Schema = SnapshotDataDatesV2Schema.extend({
+  reportedShortPositions: nullableDate,
+});
+
 export const AnalysisSnapshotV1Schema = z.object({
   schemaVersion: z.literal(ANALYSIS_SNAPSHOT_V1_SCHEMA_VERSION),
   status: z.enum(['complete', 'partial']),
@@ -600,19 +664,30 @@ export const AnalysisSnapshotV2Schema = AnalysisSnapshotV1Schema.extend({
 });
 
 export const AnalysisSnapshotV3Schema = AnalysisSnapshotV2Schema.extend({
-  schemaVersion: z.literal(ANALYSIS_SNAPSHOT_SCHEMA_VERSION),
+  schemaVersion: z.literal(ANALYSIS_SNAPSHOT_V3_SCHEMA_VERSION),
   supplyDemand: SupplyDemandResultV3Schema.nullable(),
+});
+
+export const AnalysisSnapshotV4Schema = AnalysisSnapshotV3Schema.extend({
+  schemaVersion: z.literal(ANALYSIS_SNAPSHOT_SCHEMA_VERSION),
+  dataDates: SnapshotDataDatesV4Schema,
+  provenance: SnapshotProvenanceRecordV4Schema,
+  units: SnapshotUnitsV4Schema,
+  reportedShortPositions: ReportedShortPositionResultSchema.nullable(),
+  unavailable: z.array(SnapshotUnavailableV4Schema),
 });
 
 export const AnalysisSnapshotSchema = z.discriminatedUnion('schemaVersion', [
   AnalysisSnapshotV1Schema,
   AnalysisSnapshotV2Schema,
   AnalysisSnapshotV3Schema,
+  AnalysisSnapshotV4Schema,
 ]);
 
 export type AnalysisSnapshotV1 = z.infer<typeof AnalysisSnapshotV1Schema>;
 export type AnalysisSnapshotV2 = z.infer<typeof AnalysisSnapshotV2Schema>;
 export type AnalysisSnapshotV3 = z.infer<typeof AnalysisSnapshotV3Schema>;
+export type AnalysisSnapshotV4 = z.infer<typeof AnalysisSnapshotV4Schema>;
 export type AnalysisSnapshot = z.infer<typeof AnalysisSnapshotSchema>;
 
 export const AnalysisSnapshotInputSchema = z.object({
@@ -625,6 +700,7 @@ export const AnalysisSnapshotInputSchema = z.object({
   technical: TechnicalResultSchema.nullable(),
   advancedTechnical: AdvancedTechnicalResultSchema.nullable(),
   supplyDemand: SupplyDemandResultV3Schema.nullable(),
+  reportedShortPositions: ReportedShortPositionResultSchema.nullable(),
   marketCorrelation: MarketCorrelationResultSchema.nullable(),
   strategy: StrategyResultSchema.nullable(),
   priceHistory: PriceHistorySchema.nullable(),
@@ -633,6 +709,7 @@ export const AnalysisSnapshotInputSchema = z.object({
   finalReportMarkdown: z.string().min(1),
   priceSourceUrls: z.array(z.string().min(1)),
   peerSourceUrls: z.array(z.string().min(1)),
+  reportedShortPositionSourceUrls: z.array(z.string().min(1)),
   sourceUsage: z.object({
     valuation: z.object({
       priceFromJQuants: z.boolean(),
@@ -649,8 +726,11 @@ export const AnalysisSnapshotInputSchema = z.object({
       stockFromJQuants: z.boolean(),
       benchmarkFromJQuants: z.boolean(),
     }),
+    reportedShortPositions: z.object({
+      sourceFromJQuants: z.boolean(),
+    }),
   }),
-  additionalUnavailable: z.array(SnapshotUnavailableV2Schema),
+  additionalUnavailable: z.array(SnapshotUnavailableV4Schema),
 });
 
 export type AnalysisSnapshotInput = z.infer<typeof AnalysisSnapshotInputSchema>;
