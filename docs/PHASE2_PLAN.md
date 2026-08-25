@@ -1351,10 +1351,11 @@ issuer-level `ReportedShortPosition[]`, or relabeled as weekly margin interest.
 
 The source can add sector-wide short-selling-flow context: it can help distinguish a
 broad sector move from an issuer-specific public report. That context has limited
-standalone value for the current individual-stock analysis, however. A single daily
-sector value has no supplied historical baseline, contains credit-margin short sales
-as part of the sector total, and cannot support a company-level claim. Meaningful use
-would require comparison with historical sector observations and preferably the
+standalone value for the current individual-stock analysis, however. A standalone
+daily sector observation provides no contextual baseline unless historical sector
+observations are deliberately retrieved and analyzed. It also contains credit-margin
+short sales as part of the sector total and cannot support a company-level claim.
+Meaningful use would require comparison with those historical observations and the
 corresponding sector index, which overlaps the unimplemented Phase 2D Sector Indices
 tranche. Adding a persisted result now would also require Snapshot V5.
 
