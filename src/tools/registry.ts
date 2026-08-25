@@ -16,10 +16,12 @@ import {
   createReadFilings,
   createScreenCompanies,
   getMarginData,
+  getShortSaleReports,
   getStockPrice,
   getTopix,
   isJQuantsAvailable,
   MARGIN_DATA_DESCRIPTION,
+  SHORT_SALE_REPORT_DESCRIPTION,
   STOCK_PRICE_DESCRIPTION,
   TOPIX_DESCRIPTION,
 } from './finance/index.js';
@@ -240,6 +242,13 @@ export function getToolRegistry(model: string): RegisteredTool[] {
         tool: getMarginData,
         description: MARGIN_DATA_DESCRIPTION,
         compactDescription: 'Weekly Japanese stock margin trading balances from J-Quants (Standard plan or higher).',
+        concurrencySafe: true,
+      },
+      {
+        name: 'get_short_sale_reports',
+        tool: getShortSaleReports,
+        description: SHORT_SALE_REPORT_DESCRIPTION,
+        compactDescription: 'Public Japanese stock short-position reports from J-Quants (Standard plan or higher).',
         concurrencySafe: true,
       },
       {
