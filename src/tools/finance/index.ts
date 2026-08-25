@@ -31,6 +31,7 @@ export {
 export { getTopix, TOPIX_DESCRIPTION } from './topix.js';
 export {
   ANALYZE_FINANCIAL_METRICS_DESCRIPTION,
+  ANALYZE_INVESTOR_TYPE_FLOWS_DESCRIPTION,
   ANALYZE_MARKET_CORRELATION_DESCRIPTION,
   ANALYZE_PEER_COMPARISON_DESCRIPTION,
   ANALYZE_REPORTED_SHORT_POSITIONS_DESCRIPTION,
@@ -38,6 +39,7 @@ export {
   ANALYZE_SUPPLY_DEMAND_DESCRIPTION,
   ANALYZE_TECHNICAL_DESCRIPTION,
   analyzeFinancialMetricsTool,
+  analyzeInvestorTypeFlowsTool,
   analyzeMarketCorrelationTool,
   analyzePeerComparisonTool,
   analyzeReportedShortPositionsTool,

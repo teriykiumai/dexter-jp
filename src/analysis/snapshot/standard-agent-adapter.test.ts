@@ -325,7 +325,7 @@ describe('StandardAgentSnapshotCollector', () => {
     const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
     expect(snapshot?.advancedTechnical).toEqual(advancedTechnical);
     expect(snapshot?.supplyDemand?.mean4w).toBe(950);
-    expect(snapshot?.schemaVersion).toBe(4);
+    expect(snapshot?.schemaVersion).toBe(5);
     expect(snapshot?.marketCorrelation?.windows).toEqual([{
       period: 20,
       startDate: '2026-07-24',
@@ -356,7 +356,7 @@ describe('StandardAgentSnapshotCollector', () => {
     expect(JSON.stringify(snapshot)).not.toContain('2025-08-01');
   });
 
-  test('collects only structured reported-position analysis into Snapshot V4', () => {
+  test('collects only structured reported-position analysis into Snapshot V5', () => {
     const collector = new StandardAgentSnapshotCollector();
     invokeSkill(collector);
     lockToyota(collector);
@@ -384,7 +384,7 @@ describe('StandardAgentSnapshotCollector', () => {
 
     const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
 
-    expect(snapshot?.schemaVersion).toBe(4);
+    expect(snapshot?.schemaVersion).toBe(5);
     expect(snapshot?.status).toBe('partial');
     expect(snapshot?.reportedShortPositions?.reports[0]).toEqual({
       disclosedDate: '2026-08-20',
@@ -434,6 +434,120 @@ describe('StandardAgentSnapshotCollector', () => {
       section: 'reportedShortPositions',
       reason: 'no_public_disclosure_data',
     });
+  });
+
+  test('collects only structured investor-type analysis with dates and provenance into Snapshot V5', () => {
+    const collector = new StandardAgentSnapshotCollector();
+    invokeSkill(collector);
+    lockToyota(collector);
+    start(collector, 'analyze_investor_type_flows', 'investor-1', {
+      ticker: '7203',
+      analysisAsOfDate: '2026-08-21',
+    });
+    const zeroValue = { sell: 0, buy: 0, total: 0, balance: 0 };
+    const period = {
+      publishedDate: '2026-08-20',
+      periodStartDate: '2026-08-10',
+      periodEndDate: '2026-08-14',
+      section: 'TokyoNagoya' as const,
+      summary: {
+        proprietary: zeroValue,
+        brokerage: zeroValue,
+        total: zeroValue,
+      },
+      brokerageBreakdown: {
+        individuals: zeroValue,
+        foreignInvestors: zeroValue,
+        securitiesCompanies: zeroValue,
+        investmentTrusts: zeroValue,
+        businessCorporations: zeroValue,
+        otherCorporations: zeroValue,
+        insuranceCompanies: zeroValue,
+        banks: zeroValue,
+        trustBanks: zeroValue,
+        otherFinancialInstitutions: zeroValue,
+      },
+    };
+    end(collector, 'analyze_investor_type_flows', 'investor-1', {
+      dataDate: '2026-08-20',
+      section: 'TokyoNagoya',
+      period,
+      unavailable: [],
+      rawSourceRows: 'must-not-survive',
+    });
+
+    const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
+
+    expect(snapshot?.schemaVersion).toBe(5);
+    expect(snapshot?.investorTypeFlows).toEqual({
+      dataDate: '2026-08-20',
+      section: 'TokyoNagoya',
+      period,
+      unavailable: [],
+    });
+    expect(snapshot?.dataDates.investorTypeFlows).toBe('2026-08-20');
+    expect(snapshot?.units.investorTypeFlows).toEqual({
+      sell: 'thousand_JPY',
+      buy: 'thousand_JPY',
+      total: 'thousand_JPY',
+      balance: 'thousand_JPY',
+    });
+    expect(snapshot?.provenance.investorTypeFlows).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        source: 'investor_type_flow_engine',
+        role: 'calculation',
+        section: 'TokyoNagoya',
+        endpoint: null,
+      }),
+      expect.objectContaining({
+        source: 'jquants',
+        role: 'investor_type_flow_data',
+        section: 'TokyoNagoya',
+        endpoint: '/v2/equities/investor-types',
+      }),
+      expect.objectContaining({
+        source: 'jquants',
+        role: 'market_calendar_data',
+        section: null,
+        endpoint: '/v2/markets/calendar',
+      }),
+    ]));
+    expect(JSON.stringify(snapshot)).not.toContain('must-not-survive');
+  });
+
+  test('preserves unavailable investor-type data instead of converting it to zero', () => {
+    const collector = new StandardAgentSnapshotCollector();
+    invokeSkill(collector);
+    lockToyota(collector);
+    start(collector, 'analyze_investor_type_flows', 'investor-empty', {
+      ticker: '7203',
+      analysisAsOfDate: '2026-08-21',
+      sourcePeriods: [{ marker: 'source-arg-must-not-survive' }],
+      officialCalendar: [],
+    });
+    end(collector, 'analyze_investor_type_flows', 'investor-empty', {
+      dataDate: null,
+      section: 'TokyoNagoya',
+      period: null,
+      unavailable: [{ reason: 'no_investor_type_flow_data' }],
+    });
+
+    const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
+
+    expect(snapshot?.investorTypeFlows).toEqual({
+      dataDate: null,
+      section: 'TokyoNagoya',
+      period: null,
+      unavailable: [{ reason: 'no_investor_type_flow_data' }],
+    });
+    expect(snapshot?.unavailable).toContainEqual({
+      section: 'investorTypeFlows',
+      reason: 'no_investor_type_flow_data',
+    });
+    expect(snapshot?.provenance.investorTypeFlows).toEqual([
+      expect.objectContaining({ source: 'investor_type_flow_engine' }),
+    ]);
+    expect(JSON.stringify(snapshot)).not.toContain('source-arg-must-not-survive');
   });
 
   test('does not reconstruct an absent Advanced Technical companion from Markdown', () => {

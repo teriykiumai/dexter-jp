@@ -3,12 +3,14 @@ import {
   AnalysisSnapshotV1Schema,
   AnalysisSnapshotV2Schema,
   AnalysisSnapshotV3Schema,
+  AnalysisSnapshotV4Schema,
   buildAnalysisSnapshot,
   buildAnalysisSnapshotLatestItem,
   type AnalysisSnapshot,
   type AnalysisSnapshotV2,
   type AnalysisSnapshotV3,
   type AnalysisSnapshotV4,
+  type AnalysisSnapshotV5,
   type AnalysisSnapshotInput,
 } from '../../analysis/snapshot/index.js';
 import {
@@ -24,7 +26,7 @@ import {
   sortWatchlistItems,
 } from './presentation.js';
 
-function baseSnapshot(): AnalysisSnapshotV4 {
+function v5Snapshot(): AnalysisSnapshotV5 {
   const input: AnalysisSnapshotInput = {
     identity: {
       canonicalTicker: '7203',
@@ -44,6 +46,7 @@ function baseSnapshot(): AnalysisSnapshotV4 {
     advancedTechnical: null,
     supplyDemand: null,
     reportedShortPositions: null,
+    investorTypeFlows: null,
     marketCorrelation: null,
     strategy: null,
     priceHistory: null,
@@ -53,16 +56,42 @@ function baseSnapshot(): AnalysisSnapshotV4 {
     priceSourceUrls: [],
     peerSourceUrls: [],
     reportedShortPositionSourceUrls: [],
+    investorTypeFlowSourceUrls: [],
     sourceUsage: {
       valuation: { priceFromJQuants: false, financialsFromEdinetDb: false },
       technical: { priceFromJQuants: false },
       supplyDemand: { marginFromJQuants: false, volumeFromJQuants: false },
       marketCorrelation: { stockFromJQuants: false, benchmarkFromJQuants: false },
       reportedShortPositions: { sourceFromJQuants: false },
+      investorTypeFlows: { sourceFromJQuants: false, calendarFromJQuants: false },
     },
     additionalUnavailable: [],
   };
   return buildAnalysisSnapshot(input);
+}
+
+function baseSnapshot(): AnalysisSnapshotV4 {
+  const v5 = v5Snapshot();
+  const {
+    investorTypeFlows: _investorTypeFlows,
+    dataDates: v5DataDates,
+    provenance: v5Provenance,
+    units: v5Units,
+    unavailable: v5Unavailable,
+    ...common
+  } = v5;
+  const { investorTypeFlows: _investorDate, ...dataDates } = v5DataDates;
+  const { investorTypeFlows: _investorProvenance, ...provenance } = v5Provenance;
+  const { investorTypeFlows: _investorUnits, ...units } = v5Units;
+
+  return AnalysisSnapshotV4Schema.parse({
+    ...common,
+    schemaVersion: 4,
+    dataDates,
+    provenance,
+    units,
+    unavailable: v5Unavailable.filter(item => item.section !== 'investorTypeFlows'),
+  });
 }
 
 function v3Snapshot(): AnalysisSnapshotV3 {
@@ -462,6 +491,44 @@ describe('snapshot presentation mapping', () => {
       previousCalculatedDate: { text: UNAVAILABLE_TEXT, available: false },
       previousReportedRatio: { text: UNAVAILABLE_TEXT, available: false },
       ratioDelta: { text: UNAVAILABLE_TEXT, available: false },
+    });
+    expect(view.dataDates).toContainEqual({
+      label: '公開空売り残高報告',
+      value: { text: '2026-08-20', available: true },
+    });
+  });
+
+  test('preserves the existing reported-position presentation for Snapshot V5', () => {
+    const snapshot: AnalysisSnapshotV5 = {
+      ...v5Snapshot(),
+      reportedShortPositions: {
+        dataDate: '2026-08-20',
+        reports: [{
+          disclosedDate: '2026-08-20',
+          calculatedDate: '2026-08-18',
+          reporterName: 'Reporter Exact',
+          discretionaryManagerName: null,
+          fundName: null,
+          shortPositionRatio: 0.006,
+          shortPositionShares: 120_000,
+          previousCalculatedDate: null,
+          previousReportedRatio: null,
+          ratioDelta: null,
+        }],
+        unavailable: [],
+      },
+      dataDates: {
+        ...v5Snapshot().dataDates,
+        reportedShortPositions: '2026-08-20',
+      },
+    };
+
+    const view = mapSnapshotToDashboard(snapshot);
+
+    expect(view.reportedShortPositions.state).toBe('available');
+    expect(view.reportedShortPositions.reports[0]?.shortPositionRatio).toEqual({
+      text: '0.6%',
+      available: true,
     });
     expect(view.dataDates).toContainEqual({
       label: '公開空売り残高報告',

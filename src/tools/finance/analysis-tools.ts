@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { formatToolResult } from '../types.js';
 import { analyzeAdvancedTechnical } from './advanced-technical-engine.js';
 import { analyzeFinancialMetrics } from './financial-metrics-engine.js';
+import { analyzeInvestorTypeFlows } from './investor-type-flow-engine.js';
 import { analyzeMarketCorrelation } from './market-correlation-engine.js';
 import { analyzePeerComparison } from './peer-comparison-engine.js';
 import { analyzeReportedShortPositions } from './reported-short-position-engine.js';
@@ -10,6 +11,8 @@ import { analyzeStrategy } from './strategy-engine.js';
 import { analyzeSupplyDemand } from './supply-demand-engine.js';
 import { analyzeTechnical } from './technical-engine.js';
 import { getMarginData } from './margin-data.js';
+import { getInvestorTypeFlows } from './investor-type-flows.js';
+import { jquantsGetAll } from './jquants-client.js';
 import { getShortSaleReports } from './short-sale-report.js';
 import { getStockPrice } from './stock-price.js';
 import { getTopix } from './topix.js';
@@ -43,6 +46,56 @@ const shortSaleReportSourceRowSchema = z.object({
   previousCalculatedDate: z.string().nullable(),
   previousReportedRatio: nullableNumber,
 });
+
+const investorTypeTradingValueSchema = z.object({
+  sell: z.number(),
+  buy: z.number(),
+  total: z.number(),
+  balance: z.number(),
+});
+
+const investorTypeFlowSourceRowSchema = z.object({
+  publishedDate: z.string(),
+  periodStartDate: z.string(),
+  periodEndDate: z.string(),
+  section: z.enum([
+    'TSE1st',
+    'TSE2nd',
+    'TSEMothers',
+    'TSEJASDAQ',
+    'TSEPrime',
+    'TSEStandard',
+    'TSEGrowth',
+    'TokyoNagoya',
+  ]),
+  summary: z.object({
+    proprietary: investorTypeTradingValueSchema,
+    brokerage: investorTypeTradingValueSchema,
+    total: investorTypeTradingValueSchema,
+  }),
+  brokerageBreakdown: z.object({
+    individuals: investorTypeTradingValueSchema,
+    foreignInvestors: investorTypeTradingValueSchema,
+    securitiesCompanies: investorTypeTradingValueSchema,
+    investmentTrusts: investorTypeTradingValueSchema,
+    businessCorporations: investorTypeTradingValueSchema,
+    otherCorporations: investorTypeTradingValueSchema,
+    insuranceCompanies: investorTypeTradingValueSchema,
+    banks: investorTypeTradingValueSchema,
+    trustBanks: investorTypeTradingValueSchema,
+    otherFinancialInstitutions: investorTypeTradingValueSchema,
+  }),
+});
+
+const investorTypeCalendarDaySchema = z.object({
+  date: z.string(),
+  holidayDivision: z.string(),
+});
+
+interface JQuantsCalendarRow extends Record<string, unknown> {
+  Date: string;
+  HolDiv: string;
+}
 
 const volumeHistoryPointSchema = z.object({
   date: z.string(),
@@ -136,6 +189,41 @@ function parseShortSaleReports(result: unknown): z.infer<
       ? error
       : 'get_short_sale_reports did not return source reports.',
   );
+}
+
+function parseInvestorTypeFlows(result: unknown): z.infer<
+  typeof investorTypeFlowSourceRowSchema
+>[] {
+  const parsed = JSON.parse(
+    typeof result === 'string' ? result : JSON.stringify(result),
+  ) as { data?: unknown };
+  if (Array.isArray(parsed.data)) {
+    return z.array(investorTypeFlowSourceRowSchema).parse(parsed.data);
+  }
+  if (
+    parsed.data
+    && typeof parsed.data === 'object'
+    && (parsed.data as { reason?: unknown }).reason === 'no_investor_type_flow_data'
+  ) {
+    return [];
+  }
+  const error = parsed.data && typeof parsed.data === 'object'
+    ? (parsed.data as { error?: unknown }).error
+    : undefined;
+  throw new Error(
+    typeof error === 'string'
+      ? error
+      : 'get_investor_type_flows did not return source periods.',
+  );
+}
+
+async function fetchInvestorTypeCalendar(from: string | undefined) {
+  if (!from) return [];
+  const rows = await jquantsGetAll<JQuantsCalendarRow>('/markets/calendar', { from });
+  return rows.map((row) => ({
+    date: row.Date,
+    holidayDivision: row.HolDiv,
+  }));
 }
 
 function requireTickerRange(
@@ -281,6 +369,48 @@ export const analyzeReportedShortPositionsTool = new DynamicStructuredTool({
   },
 });
 
+export const ANALYZE_INVESTOR_TYPE_FLOWS_DESCRIPTION = `
+Select and validate the latest correction-resolved Tokyo/Nagoya weekly investor-type trading-value period at an explicit as-of date. Uses official J-Quants calendar rows for correction availability. Values remain source-provided in thousand JPY; no category aggregation, ratio, rank, threshold, issuer attribution, forward fill, or signal is added.
+`.trim();
+
+export const analyzeInvestorTypeFlowsTool = new DynamicStructuredTool({
+  name: 'analyze_investor_type_flows',
+  description: ANALYZE_INVESTOR_TYPE_FLOWS_DESCRIPTION,
+  schema: z.object({
+    ticker: z.string().optional().describe(
+      'Verified target ticker used only to attribute this market-context result to the active analysis.',
+    ),
+    analysisAsOfDate: z.string().describe(
+      'Date-only availability boundary for publication and correction-vintage selection.',
+    ),
+    sourcePeriods: z.array(investorTypeFlowSourceRowSchema).optional().describe(
+      'Optional source rows from get_investor_type_flows. Preserve every category and source value.',
+    ),
+    officialCalendar: z.array(investorTypeCalendarDaySchema).optional().describe(
+      'Optional official J-Quants calendar rows mapped to date and holidayDivision.',
+    ),
+  }),
+  func: async ({ analysisAsOfDate, sourcePeriods, officialCalendar }) => {
+    if (!sourcePeriods) {
+      sourcePeriods = parseInvestorTypeFlows(await getInvestorTypeFlows.invoke({
+        section: 'TokyoNagoya',
+        to: analysisAsOfDate,
+      }));
+    }
+    if (!officialCalendar) {
+      const earliestPublication = sourcePeriods
+        .map((period) => period.publishedDate)
+        .sort()
+        .at(0);
+      officialCalendar = await fetchInvestorTypeCalendar(earliestPublication);
+    }
+    return formatToolResult(
+      analyzeInvestorTypeFlows(sourcePeriods, officialCalendar, analysisAsOfDate),
+      [],
+    );
+  },
+});
+
 export const ANALYZE_PEER_COMPARISON_DESCRIPTION = `
 Select same-sector peers and calculate deterministic median, rank, and directional percentile for available valuation, profitability, growth, and dividend metrics. The target and candidates must contain sourced values; preserve missing values instead of estimating them.
 `.trim();
@@ -395,6 +525,7 @@ export const deterministicAnalysisTools = [
   analyzeTechnicalTool,
   analyzeSupplyDemandTool,
   analyzeReportedShortPositionsTool,
+  analyzeInvestorTypeFlowsTool,
   analyzePeerComparisonTool,
   analyzeMarketCorrelationTool,
   analyzeStrategyTool,

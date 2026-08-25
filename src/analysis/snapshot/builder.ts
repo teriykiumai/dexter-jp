@@ -1,13 +1,14 @@
 import {
   ANALYSIS_SNAPSHOT_SCHEMA_VERSION,
   AnalysisSnapshotInputSchema,
-  AnalysisSnapshotV4Schema,
-  type AnalysisSnapshotV4,
+  AnalysisSnapshotV5Schema,
+  type AnalysisSnapshotV5,
   type AnalysisSnapshotInput,
+  type InvestorTypeFlowProvenance,
   type ReportedShortPositionProvenance,
   type SnapshotProvenance,
   type SnapshotSection,
-  type SnapshotUnavailableV4,
+  type SnapshotUnavailableV5,
 } from './schema.js';
 
 export const REQUIRED_ANALYSIS_SNAPSHOT_SECTIONS = [
@@ -91,6 +92,12 @@ const UNITS = {
     previousReportedRatio: 'ratio',
     ratioDelta: 'ratio',
   },
+  investorTypeFlows: {
+    sell: 'thousand_JPY',
+    buy: 'thousand_JPY',
+    total: 'thousand_JPY',
+    balance: 'thousand_JPY',
+  },
   marketCorrelation: {
     alignedPriceCount: 'count',
     observations: 'count',
@@ -135,6 +142,17 @@ function reportedShortPositionProvenance(
   sourceUrls: string[] = [],
 ): ReportedShortPositionProvenance[] {
   return [{ source, role, asOfDate, sourceUrls }];
+}
+
+function investorTypeFlowProvenance(
+  source: InvestorTypeFlowProvenance['source'],
+  role: InvestorTypeFlowProvenance['role'],
+  asOfDate: string | null,
+  section: InvestorTypeFlowProvenance['section'],
+  endpoint: InvestorTypeFlowProvenance['endpoint'],
+  sourceUrls: string[] = [],
+): InvestorTypeFlowProvenance[] {
+  return [{ source, role, asOfDate, section, endpoint, sourceUrls }];
 }
 
 function latestFundamentalDate(input: AnalysisSnapshotInput): string | null {
@@ -206,8 +224,8 @@ function peerComparisonState(input: AnalysisSnapshotInput) {
   };
 }
 
-function aggregateUnavailable(input: AnalysisSnapshotInput): SnapshotUnavailableV4[] {
-  const unavailable: SnapshotUnavailableV4[] = missingSections(input).map(section => ({
+function aggregateUnavailable(input: AnalysisSnapshotInput): SnapshotUnavailableV5[] {
+  const unavailable: SnapshotUnavailableV5[] = missingSections(input).map(section => ({
     section,
     reason: 'missing_required_section',
   }));
@@ -239,6 +257,13 @@ function aggregateUnavailable(input: AnalysisSnapshotInput): SnapshotUnavailable
       unavailable.push({ section: 'reportedShortPositions', reason: item.reason });
     }
   }
+  if (input.investorTypeFlows === null) {
+    unavailable.push({ section: 'investorTypeFlows', reason: 'not_collected' });
+  } else {
+    for (const item of input.investorTypeFlows.unavailable) {
+      unavailable.push({ section: 'investorTypeFlows', reason: item.reason });
+    }
+  }
   for (const item of input.peerComparison?.unavailable ?? []) {
     unavailable.push({ section: 'peerComparison', metric: item.metric, reason: item.reason });
   }
@@ -265,14 +290,14 @@ function aggregateUnavailable(input: AnalysisSnapshotInput): SnapshotUnavailable
   return [...unavailable, ...input.additionalUnavailable];
 }
 
-export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): AnalysisSnapshotV4 {
+export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): AnalysisSnapshotV5 {
   const input = AnalysisSnapshotInputSchema.parse(rawInput);
   const fundamentalDate = latestFundamentalDate(input);
   const peerDate = latestPeerDate(input);
   const priceDate = latestPriceDate(input);
   const missing = missingSections(input);
 
-  return AnalysisSnapshotV4Schema.parse({
+  return AnalysisSnapshotV5Schema.parse({
     schemaVersion: ANALYSIS_SNAPSHOT_SCHEMA_VERSION,
     status: missing.length === 0 ? 'complete' : 'partial',
     canonicalTicker: input.identity.canonicalTicker,
@@ -289,6 +314,7 @@ export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): Analysis
       technical: input.technical?.dataDate ?? null,
       advancedTechnical: input.advancedTechnical?.dataDate ?? null,
       reportedShortPositions: input.reportedShortPositions?.dataDate ?? null,
+      investorTypeFlows: input.investorTypeFlows?.dataDate ?? null,
       supplyDemand: input.supplyDemand?.dataDate ?? null,
       marketCorrelation: input.marketCorrelation?.dataDate ?? null,
       strategy: input.strategy?.dataDate ?? null,
@@ -381,6 +407,36 @@ export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): Analysis
               : []),
           ]
         : [],
+      investorTypeFlows: input.investorTypeFlows
+        ? [
+            ...investorTypeFlowProvenance(
+              'investor_type_flow_engine',
+              'calculation',
+              input.investorTypeFlows.dataDate,
+              'TokyoNagoya',
+              null,
+            ),
+            ...(input.sourceUsage.investorTypeFlows.sourceFromJQuants
+              ? investorTypeFlowProvenance(
+                  'jquants',
+                  'investor_type_flow_data',
+                  input.investorTypeFlows.dataDate,
+                  'TokyoNagoya',
+                  '/v2/equities/investor-types',
+                  input.investorTypeFlowSourceUrls,
+                )
+              : []),
+            ...(input.sourceUsage.investorTypeFlows.calendarFromJQuants
+              ? investorTypeFlowProvenance(
+                  'jquants',
+                  'market_calendar_data',
+                  null,
+                  null,
+                  '/v2/markets/calendar',
+                )
+              : []),
+          ]
+        : [],
       marketCorrelation: input.marketCorrelation
         ? [
             ...provenance('market_correlation_engine', 'calculation', input.marketCorrelation.dataDate),
@@ -409,6 +465,7 @@ export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): Analysis
     advancedTechnical: input.advancedTechnical,
     supplyDemand: input.supplyDemand,
     reportedShortPositions: input.reportedShortPositions,
+    investorTypeFlows: input.investorTypeFlows,
     marketCorrelation: input.marketCorrelation,
     strategy: input.strategy,
     priceHistory: input.priceHistory,

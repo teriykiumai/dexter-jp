@@ -1,6 +1,7 @@
 import { StructuredToolInterface } from '@langchain/core/tools';
 import {
   ANALYZE_FINANCIAL_METRICS_DESCRIPTION,
+  ANALYZE_INVESTOR_TYPE_FLOWS_DESCRIPTION,
   ANALYZE_MARKET_CORRELATION_DESCRIPTION,
   ANALYZE_PEER_COMPARISON_DESCRIPTION,
   ANALYZE_REPORTED_SHORT_POSITIONS_DESCRIPTION,
@@ -8,6 +9,7 @@ import {
   ANALYZE_SUPPLY_DEMAND_DESCRIPTION,
   ANALYZE_TECHNICAL_DESCRIPTION,
   analyzeFinancialMetricsTool,
+  analyzeInvestorTypeFlowsTool,
   analyzeMarketCorrelationTool,
   analyzePeerComparisonTool,
   analyzeReportedShortPositionsTool,
@@ -137,6 +139,13 @@ export function getToolRegistry(model: string): RegisteredTool[] {
       tool: analyzeReportedShortPositionsTool,
       description: ANALYZE_REPORTED_SHORT_POSITIONS_DESCRIPTION,
       compactDescription: 'Deterministic disclosure-date filtering and source-provided ratio deltas for public short-position reports.',
+      concurrencySafe: true,
+    },
+    {
+      name: 'analyze_investor_type_flows',
+      tool: analyzeInvestorTypeFlowsTool,
+      description: ANALYZE_INVESTOR_TYPE_FLOWS_DESCRIPTION,
+      compactDescription: 'Deterministic as-of-safe Tokyo/Nagoya investor-type flow selection and validation.',
       concurrencySafe: true,
     },
     {

@@ -341,10 +341,10 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
   const advancedUnits = snapshot.schemaVersion !== 1
     ? snapshot.units.advancedTechnical
     : null;
-  const reportedShortPositions = snapshot.schemaVersion === 4
+  const reportedShortPositions = 'reportedShortPositions' in snapshot
     ? snapshot.reportedShortPositions
     : null;
-  const reportedShortPositionUnits = snapshot.schemaVersion === 4
+  const reportedShortPositionUnits = 'reportedShortPositions' in snapshot.units
     ? snapshot.units.reportedShortPositions
     : null;
 
@@ -513,7 +513,7 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
   } : null;
 
   const reportedShortPositionsView: ReportedShortPositionsView = {
-    state: snapshot.schemaVersion !== 4 || reportedShortPositions === null
+    state: !('reportedShortPositions' in snapshot) || reportedShortPositions === null
       ? 'not_collected'
       : reportedShortPositions.reports.length > 0
         ? 'available'
@@ -564,7 +564,7 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
   if (snapshot.schemaVersion !== 1) {
     dateEntries.push(['advancedTechnical', snapshot.dataDates.advancedTechnical]);
   }
-  if (snapshot.schemaVersion === 4) {
+  if ('reportedShortPositions' in snapshot.dataDates) {
     dateEntries.push([
       'reportedShortPositions',
       snapshot.dataDates.reportedShortPositions,

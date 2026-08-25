@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   analyzeFinancialMetrics,
+  analyzeInvestorTypeFlows,
   analyzeMarketCorrelation,
   analyzePeerComparison,
   analyzeReportedShortPositions,
@@ -12,6 +13,7 @@ import {
 import { analyzeAdvancedTechnical } from './advanced-technical-engine.js';
 import {
   analyzeFinancialMetricsTool,
+  analyzeInvestorTypeFlowsTool,
   analyzeMarketCorrelationTool,
   analyzePeerComparisonTool,
   analyzeReportedShortPositionsTool,
@@ -33,6 +35,49 @@ function dates(count: number): string[] {
   });
 }
 
+function investorTypeSourcePeriod() {
+  const zero = { sell: 0, buy: 0, total: 0, balance: 0 };
+  return {
+    publishedDate: '2026-08-20',
+    periodStartDate: '2026-08-10',
+    periodEndDate: '2026-08-14',
+    section: 'TokyoNagoya' as const,
+    summary: { proprietary: zero, brokerage: zero, total: zero },
+    brokerageBreakdown: {
+      individuals: zero,
+      foreignInvestors: zero,
+      securitiesCompanies: zero,
+      investmentTrusts: zero,
+      businessCorporations: zero,
+      otherCorporations: zero,
+      insuranceCompanies: zero,
+      banks: zero,
+      trustBanks: zero,
+      otherFinancialInstitutions: zero,
+    },
+  };
+}
+
+function rawInvestorTypeRow() {
+  return {
+    PubDate: '2026-08-20', StDate: '2026-08-10', EnDate: '2026-08-14',
+    Section: 'TokyoNagoya',
+    PropSell: 0, PropBuy: 0, PropTot: 0, PropBal: 0,
+    BrkSell: 0, BrkBuy: 0, BrkTot: 0, BrkBal: 0,
+    TotSell: 0, TotBuy: 0, TotTot: 0, TotBal: 0,
+    IndSell: 0, IndBuy: 0, IndTot: 0, IndBal: 0,
+    FrgnSell: 0, FrgnBuy: 0, FrgnTot: 0, FrgnBal: 0,
+    SecCoSell: 0, SecCoBuy: 0, SecCoTot: 0, SecCoBal: 0,
+    InvTrSell: 0, InvTrBuy: 0, InvTrTot: 0, InvTrBal: 0,
+    BusCoSell: 0, BusCoBuy: 0, BusCoTot: 0, BusCoBal: 0,
+    OthCoSell: 0, OthCoBuy: 0, OthCoTot: 0, OthCoBal: 0,
+    InsCoSell: 0, InsCoBuy: 0, InsCoTot: 0, InsCoBal: 0,
+    BankSell: 0, BankBuy: 0, BankTot: 0, BankBal: 0,
+    TrstBnkSell: 0, TrstBnkBuy: 0, TrstBnkTot: 0, TrstBnkBal: 0,
+    OthFinSell: 0, OthFinBuy: 0, OthFinTot: 0, OthFinBal: 0,
+  };
+}
+
 describe('deterministic analysis tools', () => {
   test('have stable unique names', () => {
     const names = deterministicAnalysisTools.map((tool) => tool.name);
@@ -41,6 +86,7 @@ describe('deterministic analysis tools', () => {
       'analyze_technical',
       'analyze_supply_demand',
       'analyze_reported_short_positions',
+      'analyze_investor_type_flows',
       'analyze_peer_comparison',
       'analyze_market_correlation',
       'analyze_strategy',
@@ -215,6 +261,124 @@ describe('deterministic analysis tools', () => {
         unavailable: [{ reason: 'no_public_disclosure_data' }],
       });
       expect(fetches).toBe(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (previousApiKey === undefined) delete process.env.JQUANTS_API_KEY;
+      else process.env.JQUANTS_API_KEY = previousApiKey;
+    }
+  });
+
+  test('delegates supplied investor-type rows and calendar without fetching', async () => {
+    const sourcePeriods = [investorTypeSourcePeriod()];
+    const officialCalendar = [{ date: '2026-08-21', holidayDivision: '1' }];
+    const originalFetch = globalThis.fetch;
+    let fetches = 0;
+    globalThis.fetch = (async () => {
+      fetches += 1;
+      throw new Error('Unexpected fetch');
+    }) as unknown as typeof fetch;
+
+    try {
+      const actual = toolData(await analyzeInvestorTypeFlowsTool.invoke({
+        ticker: '7203',
+        analysisAsOfDate: '2026-08-20',
+        sourcePeriods,
+        officialCalendar,
+      }));
+
+      expect(actual).toEqual(analyzeInvestorTypeFlows(
+        sourcePeriods,
+        officialCalendar,
+        '2026-08-20',
+      ));
+      expect(fetches).toBe(0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('fetches investor-type rows and official calendar once each in direct mode', async () => {
+    const originalFetch = globalThis.fetch;
+    const previousApiKey = process.env.JQUANTS_API_KEY;
+    process.env.JQUANTS_API_KEY = 'test-jquants-key';
+    const requestedUrls: URL[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const href = input instanceof URL
+        ? input.href
+        : typeof input === 'string'
+          ? input
+          : input.url;
+      const url = new URL(href);
+      requestedUrls.push(url);
+      if (url.pathname.endsWith('/equities/investor-types')) {
+        return new Response(JSON.stringify({ data: [rawInvestorTypeRow()] }));
+      }
+      if (url.pathname.endsWith('/markets/calendar')) {
+        return new Response(JSON.stringify({
+          data: [{ Date: '2026-08-21', HolDiv: '1' }],
+        }));
+      }
+      throw new Error(`Unexpected test URL: ${url.pathname}`);
+    }) as typeof fetch;
+
+    try {
+      const actual = toolData(await analyzeInvestorTypeFlowsTool.invoke({
+        ticker: '7203',
+        analysisAsOfDate: '2026-08-20',
+      })) as { dataDate: string | null; period: unknown; unavailable: unknown[] };
+
+      expect(actual).toMatchObject({
+        dataDate: '2026-08-20',
+        section: 'TokyoNagoya',
+        period: investorTypeSourcePeriod(),
+        unavailable: [],
+      });
+      expect(requestedUrls).toHaveLength(2);
+      expect(requestedUrls[0].pathname).toEndWith('/equities/investor-types');
+      expect(requestedUrls[0].searchParams.get('section')).toBe('TokyoNagoya');
+      expect(requestedUrls[0].searchParams.get('to')).toBe('2026-08-20');
+      expect(requestedUrls[1].pathname).toEndWith('/markets/calendar');
+      expect(requestedUrls[1].searchParams.get('from')).toBe('2026-08-20');
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (previousApiKey === undefined) delete process.env.JQUANTS_API_KEY;
+      else process.env.JQUANTS_API_KEY = previousApiKey;
+    }
+  });
+
+  test('does not fetch a calendar after an empty direct investor-type response', async () => {
+    const originalFetch = globalThis.fetch;
+    const previousApiKey = process.env.JQUANTS_API_KEY;
+    process.env.JQUANTS_API_KEY = 'test-jquants-key';
+    const requestedUrls: URL[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const href = input instanceof URL
+        ? input.href
+        : typeof input === 'string'
+          ? input
+          : input.url;
+      const url = new URL(href);
+      requestedUrls.push(url);
+      if (url.pathname.endsWith('/equities/investor-types')) {
+        return new Response(JSON.stringify({ data: [] }));
+      }
+      throw new Error(`Unexpected test URL: ${url.pathname}`);
+    }) as typeof fetch;
+
+    try {
+      const actual = toolData(await analyzeInvestorTypeFlowsTool.invoke({
+        ticker: '7203',
+        analysisAsOfDate: '2026-08-20',
+      }));
+
+      expect(actual).toEqual({
+        dataDate: null,
+        section: 'TokyoNagoya',
+        period: null,
+        unavailable: [{ reason: 'no_investor_type_flow_data' }],
+      });
+      expect(requestedUrls).toHaveLength(1);
+      expect(requestedUrls[0].pathname).toEndWith('/equities/investor-types');
     } finally {
       globalThis.fetch = originalFetch;
       if (previousApiKey === undefined) delete process.env.JQUANTS_API_KEY;
