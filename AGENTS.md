@@ -313,6 +313,15 @@ For each Step:
 
 ### Git branch and pull request workflow
 
+Pull request review follows `docs/REVIEW_POLICY.md`, the Single Source of Truth
+for review roles and the Merge Gate. When acting as the Implementer:
+
+- follow the Implementer responsibilities defined in that policy;
+- run the required tests and validation before marking a pull request Ready for review;
+- address review findings on the same pull request and rerun relevant validation;
+- obtain an independent Reviewer's Merge Gate determination before merge;
+- do not assign the Reviewer role to a specific human, AI system, product, or agent by default.
+
 For each implementation Step:
 
 1. Confirm that the previous Step is merged, then update local `main` from `origin/main` with a fast-forward-only pull.
