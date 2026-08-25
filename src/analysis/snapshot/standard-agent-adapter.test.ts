@@ -325,7 +325,7 @@ describe('StandardAgentSnapshotCollector', () => {
     const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
     expect(snapshot?.advancedTechnical).toEqual(advancedTechnical);
     expect(snapshot?.supplyDemand?.mean4w).toBe(950);
-    expect(snapshot?.schemaVersion).toBe(3);
+    expect(snapshot?.schemaVersion).toBe(4);
     expect(snapshot?.marketCorrelation?.windows).toEqual([{
       period: 20,
       startDate: '2026-07-24',
@@ -354,6 +354,86 @@ describe('StandardAgentSnapshotCollector', () => {
       expect.objectContaining({ source: 'jquants', role: 'benchmark_data' }),
     ]));
     expect(JSON.stringify(snapshot)).not.toContain('2025-08-01');
+  });
+
+  test('collects only structured reported-position analysis into Snapshot V4', () => {
+    const collector = new StandardAgentSnapshotCollector();
+    invokeSkill(collector);
+    lockToyota(collector);
+    start(collector, 'analyze_reported_short_positions', 'short-1', {
+      ticker: '7203',
+      analysisAsOfDate: '2026-08-20',
+    });
+    end(collector, 'analyze_reported_short_positions', 'short-1', {
+      dataDate: '2026-08-20',
+      reports: [{
+        disclosedDate: '2026-08-20',
+        calculatedDate: '2026-08-18',
+        reporterName: 'Reporter Exact',
+        discretionaryManagerName: null,
+        fundName: 'Fund Exact',
+        shortPositionRatio: 0.006,
+        shortPositionShares: 120_000,
+        previousCalculatedDate: '2026-08-11',
+        previousReportedRatio: 0.005,
+        ratioDelta: 0.001,
+        address: 'must-not-survive',
+      }],
+      unavailable: [],
+    });
+
+    const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
+
+    expect(snapshot?.schemaVersion).toBe(4);
+    expect(snapshot?.status).toBe('partial');
+    expect(snapshot?.reportedShortPositions?.reports[0]).toEqual({
+      disclosedDate: '2026-08-20',
+      calculatedDate: '2026-08-18',
+      reporterName: 'Reporter Exact',
+      discretionaryManagerName: null,
+      fundName: 'Fund Exact',
+      shortPositionRatio: 0.006,
+      shortPositionShares: 120_000,
+      previousCalculatedDate: '2026-08-11',
+      previousReportedRatio: 0.005,
+      ratioDelta: 0.001,
+    });
+    expect(snapshot?.dataDates.reportedShortPositions).toBe('2026-08-20');
+    expect(snapshot?.provenance.reportedShortPositions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        source: 'reported_short_position_engine',
+        role: 'calculation',
+      }),
+      expect.objectContaining({ source: 'jquants', role: 'short_position_data' }),
+    ]));
+    expect(JSON.stringify(snapshot)).not.toContain('must-not-survive');
+  });
+
+  test('preserves no-public-disclosure as unavailable rather than zero', () => {
+    const collector = new StandardAgentSnapshotCollector();
+    invokeSkill(collector);
+    lockToyota(collector);
+    start(collector, 'analyze_reported_short_positions', 'short-empty', {
+      ticker: '7203',
+      analysisAsOfDate: '2026-08-20',
+    });
+    end(collector, 'analyze_reported_short_positions', 'short-empty', {
+      dataDate: null,
+      reports: [],
+      unavailable: [{ reason: 'no_public_disclosure_data' }],
+    });
+
+    const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
+
+    expect(snapshot?.reportedShortPositions).toEqual({
+      dataDate: null,
+      reports: [],
+      unavailable: [{ reason: 'no_public_disclosure_data' }],
+    });
+    expect(snapshot?.unavailable).toContainEqual({
+      section: 'reportedShortPositions',
+      reason: 'no_public_disclosure_data',
+    });
   });
 
   test('does not reconstruct an absent Advanced Technical companion from Markdown', () => {

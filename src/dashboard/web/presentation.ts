@@ -366,9 +366,9 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
   const supply = snapshot.supplyDemand;
   const supplyDemand = supply ? [
     { label: '買残', value: formatMetric(supply.buyingBalance, supplyUnits.buyingBalance) },
-    ...(snapshot.schemaVersion === 3 ? [{
+    ...('mean4w' in supply ? [{
       label: '買残4週平均',
-      value: formatMetric(snapshot.supplyDemand?.mean4w, supplyUnits.mean4w),
+      value: formatMetric(supply.mean4w, supplyUnits.mean4w),
     }] : []),
     { label: '売残', value: formatMetric(supply.sellingBalance, supplyUnits.sellingBalance) },
     { label: '信用倍率', value: formatMetric(supply.marginRatio, supplyUnits.marginRatio) },

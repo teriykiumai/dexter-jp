@@ -126,6 +126,22 @@ function completeInput(): AnalysisSnapshotInput {
       digestionDays: 0.0005,
       unavailable: [],
     },
+    reportedShortPositions: {
+      dataDate: '2026-08-20',
+      reports: [{
+        disclosedDate: '2026-08-20',
+        calculatedDate: '2026-08-18',
+        reporterName: 'Reporter Exact',
+        discretionaryManagerName: null,
+        fundName: 'Fund Exact',
+        shortPositionRatio: 0.006,
+        shortPositionShares: 120_000,
+        previousCalculatedDate: '2026-08-11',
+        previousReportedRatio: 0.0055,
+        ratioDelta: 0.0005,
+      }],
+      unavailable: [],
+    },
     marketCorrelation: {
       benchmark: 'TOPIX',
       dataDate: '2026-08-21',
@@ -153,11 +169,13 @@ function completeInput(): AnalysisSnapshotInput {
     finalReportMarkdown: '# Analysis',
     priceSourceUrls: ['https://example.test/prices'],
     peerSourceUrls: ['https://example.test/peers'],
+    reportedShortPositionSourceUrls: ['https://example.test/short-positions'],
     sourceUsage: {
       valuation: { priceFromJQuants: true, financialsFromEdinetDb: true },
       technical: { priceFromJQuants: true },
       supplyDemand: { marginFromJQuants: true, volumeFromJQuants: true },
       marketCorrelation: { stockFromJQuants: true, benchmarkFromJQuants: true },
+      reportedShortPositions: { sourceFromJQuants: true },
     },
     additionalUnavailable: [],
   };
@@ -167,7 +185,7 @@ describe('buildAnalysisSnapshot', () => {
   test('uses an explicit required-section contract and remains complete for metric-level unavailable states', () => {
     const snapshot = buildAnalysisSnapshot(completeInput());
 
-    expect(snapshot.schemaVersion).toBe(3);
+    expect(snapshot.schemaVersion).toBe(4);
     expect(REQUIRED_ANALYSIS_SNAPSHOT_SECTIONS).toEqual([
       'identity',
       'fundamental',
@@ -206,6 +224,13 @@ describe('buildAnalysisSnapshot', () => {
       expect.objectContaining({ source: 'jquants', role: 'margin_data' }),
       expect.objectContaining({ source: 'jquants', role: 'price_data' }),
     ]));
+    expect(snapshot.provenance.reportedShortPositions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        source: 'reported_short_position_engine',
+        role: 'calculation',
+      }),
+      expect.objectContaining({ source: 'jquants', role: 'short_position_data' }),
+    ]));
     expect(snapshot.provenance.marketCorrelation).toEqual(expect.arrayContaining([
       expect.objectContaining({ source: 'jquants', role: 'price_data' }),
       expect.objectContaining({ source: 'jquants', role: 'benchmark_data' }),
@@ -223,8 +248,36 @@ describe('buildAnalysisSnapshot', () => {
       'bollinger20.upper': 'JPY',
       'bollinger20.lower': 'JPY',
     });
+    expect(snapshot.units.reportedShortPositions).toEqual({
+      shortPositionRatio: 'ratio',
+      shortPositionShares: 'shares',
+      previousReportedRatio: 'ratio',
+      ratioDelta: 'ratio',
+    });
     expect(snapshot.dataDates.advancedTechnical).toBe('2026-08-21');
     expect(snapshot.advancedTechnical).toEqual(completeInput().advancedTechnical);
+    expect(snapshot.dataDates.reportedShortPositions).toBe('2026-08-20');
+    expect(snapshot.reportedShortPositions).toEqual(completeInput().reportedShortPositions);
+  });
+
+  test('preserves reported-position unavailable reasons without changing complete status', () => {
+    for (const reason of ['no_public_disclosure_data', 'invalid_data'] as const) {
+      const input = completeInput();
+      input.reportedShortPositions = {
+        dataDate: null,
+        reports: [],
+        unavailable: [{ reason }],
+      };
+
+      const snapshot = buildAnalysisSnapshot(input);
+
+      expect(snapshot.status).toBe('complete');
+      expect(snapshot.reportedShortPositions).toEqual(input.reportedShortPositions);
+      expect(snapshot.unavailable).toContainEqual({
+        section: 'reportedShortPositions',
+        reason,
+      });
+    }
   });
 
   test('preserves advanced metric unavailable reasons without changing complete status', () => {

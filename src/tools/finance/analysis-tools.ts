@@ -5,10 +5,12 @@ import { analyzeAdvancedTechnical } from './advanced-technical-engine.js';
 import { analyzeFinancialMetrics } from './financial-metrics-engine.js';
 import { analyzeMarketCorrelation } from './market-correlation-engine.js';
 import { analyzePeerComparison } from './peer-comparison-engine.js';
+import { analyzeReportedShortPositions } from './reported-short-position-engine.js';
 import { analyzeStrategy } from './strategy-engine.js';
 import { analyzeSupplyDemand } from './supply-demand-engine.js';
 import { analyzeTechnical } from './technical-engine.js';
 import { getMarginData } from './margin-data.js';
+import { getShortSaleReports } from './short-sale-report.js';
 import { getStockPrice } from './stock-price.js';
 import { getTopix } from './topix.js';
 
@@ -27,6 +29,19 @@ const marginHistoryPointSchema = z.object({
   date: z.string(),
   longBalance: nullableNumber,
   shortBalance: nullableNumber,
+});
+
+const shortSaleReportSourceRowSchema = z.object({
+  disclosedDate: z.string(),
+  calculatedDate: z.string(),
+  code: z.string(),
+  reporterName: z.string().nullable(),
+  discretionaryManagerName: z.string().nullable(),
+  fundName: z.string().nullable(),
+  shortPositionRatio: nullableNumber,
+  shortPositionShares: nullableNumber,
+  previousCalculatedDate: z.string().nullable(),
+  previousReportedRatio: nullableNumber,
 });
 
 const volumeHistoryPointSchema = z.object({
@@ -95,6 +110,32 @@ function parseToolArray<T>(result: unknown, toolName: string): T[] {
     );
   }
   return parsed.data as T[];
+}
+
+function parseShortSaleReports(result: unknown): z.infer<
+  typeof shortSaleReportSourceRowSchema
+>[] {
+  const parsed = JSON.parse(
+    typeof result === 'string' ? result : JSON.stringify(result),
+  ) as { data?: unknown };
+  if (Array.isArray(parsed.data)) {
+    return z.array(shortSaleReportSourceRowSchema).parse(parsed.data);
+  }
+  if (
+    parsed.data
+    && typeof parsed.data === 'object'
+    && (parsed.data as { reason?: unknown }).reason === 'no_public_disclosure_data'
+  ) {
+    return [];
+  }
+  const error = parsed.data && typeof parsed.data === 'object'
+    ? (parsed.data as { error?: unknown }).error
+    : undefined;
+  throw new Error(
+    typeof error === 'string'
+      ? error
+      : 'get_short_sale_reports did not return source reports.',
+  );
 }
 
 function requireTickerRange(
@@ -200,6 +241,43 @@ export const analyzeSupplyDemandTool = new DynamicStructuredTool({
       throw new Error('analyze_supply_demand could not resolve complete histories.');
     }
     return formatToolResult(analyzeSupplyDemand(marginHistory, volumeHistory), []);
+  },
+});
+
+export const ANALYZE_REPORTED_SHORT_POSITIONS_DESCRIPTION = `
+Apply the disclosure-date as-of boundary and calculate source-provided previous-ratio deltas for public short-position reports. Reports remain separate by reporter and fund; no issue-level total, identity matching, forward fill, or signal is inferred. J-Quants publishes these reports at the 0.5% threshold, and no_public_disclosure_data does not mean a zero short position.
+`.trim();
+
+export const analyzeReportedShortPositionsTool = new DynamicStructuredTool({
+  name: 'analyze_reported_short_positions',
+  description: ANALYZE_REPORTED_SHORT_POSITIONS_DESCRIPTION,
+  schema: z.object({
+    ticker: z.string().optional().describe(
+      'Ticker to fetch directly, or to attribute supplied source reports to the active analysis.',
+    ),
+    analysisAsOfDate: z.string().describe(
+      'Analysis availability boundary. Only reports disclosed on or before this date are used.',
+    ),
+    sourceReports: z.array(shortSaleReportSourceRowSchema).optional().describe(
+      'Source-level rows from get_short_sale_reports. Preserve report identity strings and nulls.',
+    ),
+  }),
+  func: async ({ ticker, analysisAsOfDate, sourceReports }) => {
+    if (!sourceReports) {
+      if (!ticker) {
+        throw new Error(
+          'analyze_reported_short_positions requires sourceReports or ticker.',
+        );
+      }
+      sourceReports = parseShortSaleReports(await getShortSaleReports.invoke({
+        ticker,
+        disclosedTo: analysisAsOfDate,
+      }));
+    }
+    return formatToolResult(
+      analyzeReportedShortPositions(sourceReports, analysisAsOfDate),
+      [],
+    );
   },
 });
 
@@ -316,6 +394,7 @@ export const deterministicAnalysisTools = [
   analyzeFinancialMetricsTool,
   analyzeTechnicalTool,
   analyzeSupplyDemandTool,
+  analyzeReportedShortPositionsTool,
   analyzePeerComparisonTool,
   analyzeMarketCorrelationTool,
   analyzeStrategyTool,

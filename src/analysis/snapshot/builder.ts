@@ -1,12 +1,13 @@
 import {
   ANALYSIS_SNAPSHOT_SCHEMA_VERSION,
   AnalysisSnapshotInputSchema,
-  AnalysisSnapshotV3Schema,
-  type AnalysisSnapshotV3,
+  AnalysisSnapshotV4Schema,
+  type AnalysisSnapshotV4,
   type AnalysisSnapshotInput,
+  type ReportedShortPositionProvenance,
   type SnapshotProvenance,
   type SnapshotSection,
-  type SnapshotUnavailableV2,
+  type SnapshotUnavailableV4,
 } from './schema.js';
 
 export const REQUIRED_ANALYSIS_SNAPSHOT_SECTIONS = [
@@ -84,6 +85,12 @@ const UNITS = {
     averageDailyVolume20: 'shares',
     digestionDays: 'days',
   },
+  reportedShortPositions: {
+    shortPositionRatio: 'ratio',
+    shortPositionShares: 'shares',
+    previousReportedRatio: 'ratio',
+    ratioDelta: 'ratio',
+  },
   marketCorrelation: {
     alignedPriceCount: 'count',
     observations: 'count',
@@ -118,6 +125,15 @@ function provenance(
   asOfDate: string | null,
   sourceUrls: string[] = [],
 ): SnapshotProvenance[] {
+  return [{ source, role, asOfDate, sourceUrls }];
+}
+
+function reportedShortPositionProvenance(
+  source: ReportedShortPositionProvenance['source'],
+  role: ReportedShortPositionProvenance['role'],
+  asOfDate: string | null,
+  sourceUrls: string[] = [],
+): ReportedShortPositionProvenance[] {
   return [{ source, role, asOfDate, sourceUrls }];
 }
 
@@ -190,8 +206,8 @@ function peerComparisonState(input: AnalysisSnapshotInput) {
   };
 }
 
-function aggregateUnavailable(input: AnalysisSnapshotInput): SnapshotUnavailableV2[] {
-  const unavailable: SnapshotUnavailableV2[] = missingSections(input).map(section => ({
+function aggregateUnavailable(input: AnalysisSnapshotInput): SnapshotUnavailableV4[] {
+  const unavailable: SnapshotUnavailableV4[] = missingSections(input).map(section => ({
     section,
     reason: 'missing_required_section',
   }));
@@ -215,6 +231,13 @@ function aggregateUnavailable(input: AnalysisSnapshotInput): SnapshotUnavailable
   }
   for (const item of input.supplyDemand?.unavailable ?? []) {
     unavailable.push({ section: 'supplyDemand', metric: item.metric, reason: item.reason });
+  }
+  if (input.reportedShortPositions === null) {
+    unavailable.push({ section: 'reportedShortPositions', reason: 'not_collected' });
+  } else {
+    for (const item of input.reportedShortPositions.unavailable) {
+      unavailable.push({ section: 'reportedShortPositions', reason: item.reason });
+    }
   }
   for (const item of input.peerComparison?.unavailable ?? []) {
     unavailable.push({ section: 'peerComparison', metric: item.metric, reason: item.reason });
@@ -242,14 +265,14 @@ function aggregateUnavailable(input: AnalysisSnapshotInput): SnapshotUnavailable
   return [...unavailable, ...input.additionalUnavailable];
 }
 
-export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): AnalysisSnapshotV3 {
+export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): AnalysisSnapshotV4 {
   const input = AnalysisSnapshotInputSchema.parse(rawInput);
   const fundamentalDate = latestFundamentalDate(input);
   const peerDate = latestPeerDate(input);
   const priceDate = latestPriceDate(input);
   const missing = missingSections(input);
 
-  return AnalysisSnapshotV3Schema.parse({
+  return AnalysisSnapshotV4Schema.parse({
     schemaVersion: ANALYSIS_SNAPSHOT_SCHEMA_VERSION,
     status: missing.length === 0 ? 'complete' : 'partial',
     canonicalTicker: input.identity.canonicalTicker,
@@ -265,6 +288,7 @@ export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): Analysis
       peerComparison: peerDate,
       technical: input.technical?.dataDate ?? null,
       advancedTechnical: input.advancedTechnical?.dataDate ?? null,
+      reportedShortPositions: input.reportedShortPositions?.dataDate ?? null,
       supplyDemand: input.supplyDemand?.dataDate ?? null,
       marketCorrelation: input.marketCorrelation?.dataDate ?? null,
       strategy: input.strategy?.dataDate ?? null,
@@ -340,6 +364,23 @@ export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): Analysis
               : []),
           ]
         : [],
+      reportedShortPositions: input.reportedShortPositions
+        ? [
+            ...reportedShortPositionProvenance(
+              'reported_short_position_engine',
+              'calculation',
+              input.reportedShortPositions.dataDate,
+            ),
+            ...(input.sourceUsage.reportedShortPositions.sourceFromJQuants
+              ? reportedShortPositionProvenance(
+                  'jquants',
+                  'short_position_data',
+                  input.reportedShortPositions.dataDate,
+                  input.reportedShortPositionSourceUrls,
+                )
+              : []),
+          ]
+        : [],
       marketCorrelation: input.marketCorrelation
         ? [
             ...provenance('market_correlation_engine', 'calculation', input.marketCorrelation.dataDate),
@@ -367,6 +408,7 @@ export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): Analysis
     technical: input.technical,
     advancedTechnical: input.advancedTechnical,
     supplyDemand: input.supplyDemand,
+    reportedShortPositions: input.reportedShortPositions,
     marketCorrelation: input.marketCorrelation,
     strategy: input.strategy,
     priceHistory: input.priceHistory,
