@@ -1411,8 +1411,339 @@ P2-B0 Source / Contract Design
 P2-B0 is docs-only. Each later step requires a separate, reviewable PR and must not
 be implemented before the preceding contract it depends on is merged.
 
-## 22. Recommended Next Codex Task
+## 22. Phase 2C — Investor Type Flows
 
-After P2-B0 is merged, implement P2-B1 only. Do not add calculations, Snapshot
-fields, collector integration, Dashboard presentation, sector short-ratio, or
-short-selling signals in the source-tool PR.
+Phase 2C begins with this docs-only source and contract design. Do not add a source
+tool, deterministic engine, Snapshot field, collector integration, Dashboard
+presentation, or skill instruction in P2-C0.
+
+### P2-C0 — Source / Contract Design
+
+#### Source choice and analytical boundary
+
+The primary official source is J-Quants V2:
+
+```text
+GET /v2/equities/investor-types
+```
+
+It provides weekly stock trading **value** by market section and investor type. It
+does not accept a securities code and does not identify which investor type bought
+or sold a specific issuer or sector. Despite the `/equities/` path, every result is
+market context, not issuer evidence.
+
+The initial analysis section is fixed to the source-provided `TokyoNagoya` aggregate.
+Do not infer an issuer flow from its listing market, fetch every section to create an
+ad hoc market total, or merge legacy and current sections. Other exact source
+sections remain available to the narrow source tool but are deferred from the
+initial deterministic result and Snapshot:
+
+```text
+TSE1st | TSE2nd | TSEMothers | TSEJASDAQ
+TSEPrime | TSEStandard | TSEGrowth | TokyoNagoya
+```
+
+The combined section's coverage changes with the exchange regimes documented by
+JPX. Do not describe its long history as a composition-constant series.
+
+Official references:
+
+- <https://jpx-jquants.com/ja/spec/eq-investor-types>
+- <https://jpx-jquants.com/ja/spec/eq-investor-types/section>
+- <https://jpx-jquants.com/ja/spec/data-update>
+- <https://jpx-jquants.com/ja/spec/data-spec>
+- <https://www.jpx.co.jp/markets/statistics-equities/investor-type/07.html>
+
+Reuse `jquantsGetAll()` for API-key authentication, pagination, typed plan/error
+behavior, and response-shape handling. Do not build another J-Quants client. The
+source-tool query uses exact `section`, `from`, and `to` parameters; `from` and `to`
+are publication-date boundaries. It has no ticker parameter.
+
+#### Frequency, dates, availability, and corrections
+
+The source unit is `thousand_JPY` for every numeric trading-value field. The data is
+weekly and the J-Quants API normally updates around 18:00 JST on the fourth business
+day of the following week. The dates have distinct meanings:
+
+```text
+PubDate = information publication/availability date
+StDate  = trading-period start date
+EnDate  = trading-period end date
+```
+
+Historical date-only analysis is defined as end-of-day and may use only records with:
+
+```text
+publishedDate <= analysisAsOfDate
+```
+
+If an analysis has timestamp precision on `PubDate`, it must not use the row until
+the source update is actually available; the documented update time is not a delivery
+guarantee. Never use `StDate` or `EnDate` as the availability boundary.
+
+For corrections published on or after 2023-04-03, J-Quants can return both old and
+corrected records with the same `Section`, `StDate`, and `EnDate` and different
+`PubDate` values. After applying the as-of boundary, select the greatest `PubDate`
+for that exact key. A future correction must not replace the version available at a
+historical as-of date. Corrections published before 2023-04-03 are supplied only in
+corrected form, so the original historical vintage cannot be reconstructed and that
+limitation must be disclosed.
+
+The dataset is unavailable on Free, available for 5 years on Light, 10 years on
+Standard, and 20 years on Premium. Source storage begins on 2008-01-16. A plan limit
+is a typed source error, not an empty successful result.
+
+#### Exact source hierarchy and categories
+
+Each source category provides four required source values:
+
+```ts
+interface InvestorTypeTradingValue {
+  sell: number;
+  buy: number;
+  total: number;
+  balance: number;
+}
+```
+
+All four values remain in `thousand_JPY`. `total` and `balance` are source-provided;
+they are not replaced by LLM or presentation calculations.
+
+The summary hierarchy is fixed:
+
+| Prefix | Typed category | Exact meaning |
+| --- | --- | --- |
+| `Prop` | `proprietary` | surveyed trading participants' own-account trading |
+| `Brk` | `brokerage` | client-order trading handled by surveyed participants |
+| `Tot` | `total` | source total of proprietary and brokerage trading |
+
+The following prefixes are the source-provided brokerage breakdown. Keep every
+category separate and in this order:
+
+| Prefix | Typed category | JPX source category |
+| --- | --- | --- |
+| `Ind` | `individuals` | 個人 |
+| `Frgn` | `foreignInvestors` | 海外投資家; defined principally by non-resident status, including the documented foreign securities-company branch case |
+| `SecCo` | `securitiesCompanies` | 証券会社; eligible other-company client orders, not a surveyed participant's proprietary trading |
+| `InvTr` | `investmentTrusts` | 投資信託委託会社 and asset-management companies under the source definition |
+| `BusCo` | `businessCorporations` | 事業法人, including holding companies under the source definition |
+| `OthCo` | `otherCorporations` | その他法人等 |
+| `InsCo` | `insuranceCompanies` | 生保・損保 |
+| `Bank` | `banks` | 都銀・地銀等; domestic ordinary banks |
+| `TrstBnk` | `trustBanks` | 信託銀行 |
+| `OthFin` | `otherFinancialInstitutions` | その他金融機関 |
+
+Suffix mapping is fixed:
+
+```text
+Sell → sell
+Buy  → buy
+Tot  → total
+Bal  → balance
+```
+
+Do not create a new `institutions`, `domestic`, `retail`, or `smart money` category.
+Do not treat the summary categories and brokerage breakdown as independent additive
+peers. In particular, `proprietary` is not the same as `securitiesCompanies`, and the
+source `individuals` value must not be split into cash and margin trading because the
+V2 endpoint does not provide that split.
+
+#### Fixed typed result
+
+```ts
+type InvestorTypeSection =
+  | 'TSE1st'
+  | 'TSE2nd'
+  | 'TSEMothers'
+  | 'TSEJASDAQ'
+  | 'TSEPrime'
+  | 'TSEStandard'
+  | 'TSEGrowth'
+  | 'TokyoNagoya';
+
+interface InvestorTypeFlowPeriod {
+  publishedDate: string;
+  periodStartDate: string;
+  periodEndDate: string;
+  section: InvestorTypeSection;
+  summary: {
+    proprietary: InvestorTypeTradingValue;
+    brokerage: InvestorTypeTradingValue;
+    total: InvestorTypeTradingValue;
+  };
+  brokerageBreakdown: {
+    individuals: InvestorTypeTradingValue;
+    foreignInvestors: InvestorTypeTradingValue;
+    securitiesCompanies: InvestorTypeTradingValue;
+    investmentTrusts: InvestorTypeTradingValue;
+    businessCorporations: InvestorTypeTradingValue;
+    otherCorporations: InvestorTypeTradingValue;
+    insuranceCompanies: InvestorTypeTradingValue;
+    banks: InvestorTypeTradingValue;
+    trustBanks: InvestorTypeTradingValue;
+    otherFinancialInstitutions: InvestorTypeTradingValue;
+  };
+}
+
+type InvestorTypeFlowUnavailableReason =
+  | 'no_investor_type_flow_data'
+  | 'invalid_data';
+
+interface InvestorTypeFlowResult {
+  dataDate: string | null;
+  section: 'TokyoNagoya';
+  period: InvestorTypeFlowPeriod | null;
+  unavailable: readonly {
+    reason: InvestorTypeFlowUnavailableReason;
+  }[];
+}
+```
+
+`dataDate` is the selected `publishedDate`. The result contains only the latest
+correction-resolved `TokyoNagoya` period available at the as-of boundary. It retains
+the period start/end dates and does not relabel the value as an issuer data date.
+
+#### Deterministic engine contract
+
+The initial pure engine performs selection and validation only. It does not add a
+new flow metric. For the selected row, require finite source values, nonnegative
+`sell`, `buy`, and `total`, and a signed finite `balance`. Validate without replacing
+the source values:
+
+```text
+category.total   = category.sell + category.buy
+category.balance = category.buy - category.sell
+
+summary.total = summary.proprietary + summary.brokerage
+brokerage       = sum(exact source brokerage-breakdown categories)
+```
+
+Apply the two summary invariants component-wise to `sell`, `buy`, `total`, and
+`balance`.
+
+Apply the publication as-of filter before correction selection and validation. Then
+choose the correction-resolved period with the greatest `periodEndDate`. An invalid
+latest eligible row makes the result `invalid_data`; do not silently fall back to an
+older valid period. Equal-key/equal-publication-date duplicates are invalid rather
+than guessed or merged. Preserve input arrays.
+
+An empty response or no eligible row is `no_investor_type_flow_data`. It means only
+that no qualifying market-section record was obtained for the source/as-of boundary.
+It does not mean zero buying, selling, or balance. Do not forward-fill a missing week.
+
+Rolling sums, moving averages, net-flow ratios, shares of market turnover, category
+ranks, and cross-section comparisons are deferred. If later adopted, they must be
+separate deterministic contracts with unit and denominator tests; the LLM and
+Dashboard must not calculate them.
+
+#### Provenance and integration boundary
+
+The result provenance must preserve:
+
+- `source = jquants`
+- endpoint `/v2/equities/investor-types`
+- exact `section = TokyoNagoya`
+- `publishedDate`, `periodStartDate`, and `periodEndDate`
+- `source unit = thousand_JPY`
+- engine calculation/validation provenance separately from source provenance
+
+Do not persist API keys, pagination keys, or raw tool arguments.
+
+Snapshot integration is adopted because the same structured market-context result
+must be shared by CLI/LLM, persistence, API, and Dashboard. P2-C3 adds the minimum
+Snapshot V5; V1-V4 remain immutable and readable, new saves become V5, older JSON is
+not rewritten, and unknown versions remain rejected. Investor-type availability is
+optional market context and must not change existing `complete | partial` semantics.
+
+The Dashboard may format `thousand_JPY` and display the source hierarchy, but must
+not recalculate balances/totals, aggregate categories, rank investors, or attribute
+the market row to the issuer. Comprehensive analysis may interpret the latest weekly
+market context while explicitly stating the section and all three dates. It must not
+claim that any category bought or sold the analyzed company.
+
+#### Relationship to existing data
+
+- Supply/Demand is issuer-level weekly margin outstanding balance in shares.
+- Reported short positions are issuer/report-level disclosed outstanding positions.
+- Sector short ratio is a deferred daily sector selling-flow source.
+- Investor Type Flows is weekly market-section trading value in thousand JPY.
+
+These sources answer different questions. Do not add, net, normalize, or reconcile
+them with one another. They may be interpreted side by side only with their scope,
+frequency, dates, and units visible.
+
+### P2-C1 — J-Quants Investor-type Source Tool
+
+Add only the narrow `/equities/investor-types` source tool. Reuse `jquantsGetAll()`;
+preserve every official category, source value, section, and date. Do not deduplicate
+corrections or calculate metrics in the source tool.
+
+Tests must cover endpoint/parameter mapping, API-key use without disclosure,
+pagination, exact section/category mapping, signed balances, publication-date range,
+correction rows remaining separate, empty response, invalid response, the documented
+Light-or-higher requirement, and existing typed plan-unavailable behavior.
+
+### P2-C2 — Deterministic Investor-type Engine
+
+Add the pure correction-aware, as-of-safe latest-period selector and integrity
+validator defined above. Tests must cover:
+
+- future `PubDate` exclusion before validation
+- `StDate`/`EnDate` never bypassing a future publication date
+- latest correction as of the analysis date
+- future correction not rewriting a historical result
+- latest period selection after correction resolution
+- summary and brokerage-breakdown invariants
+- signed negative/zero/positive balances
+- invalid numeric/invariant data without fallback
+- empty/unavailable distinct from zero
+- exact category and section preservation
+- input non-mutation and no forward fill
+
+### P2-C3 — Tool Exposure + Snapshot V5
+
+Expose a structured `analyze_investor_type_flows` result. Direct source mode uses the
+fixed `TokyoNagoya` section and explicit `analysisAsOfDate`; explicit source rows are
+allowed for deterministic tests. Avoid duplicate J-Quants retrieval and keep the
+source tool independently callable.
+
+Add Snapshot V5 with the result, three dates, provenance, `thousand_JPY` units, and
+typed unavailable reasons. Test V1-V4 reads, V5 write/read, no legacy rewrite,
+unknown-version rejection, structured collector capture, optional-section status
+compatibility, and direct-mode fetch count.
+
+### P2-C4 — Dashboard + Comprehensive Analysis
+
+Display Snapshot V5 values only, preserving summary versus brokerage-breakdown
+hierarchy and unavailable states. Add the structured analysis tool to comprehensive
+analysis with explicit market-context and publication-lag language. Tests must show
+that the Browser and LLM instructions do not calculate, reclassify, attribute the
+flow to an issuer, create a threshold, or produce a Buy/Sell signal.
+
+### Phase 2C Sequence
+
+```text
+P2-C0 Source / Contract Design
+  → P2-C1 J-Quants investor-type source tool
+  → P2-C2 deterministic correction/as-of engine
+  → P2-C3 Tool exposure + Snapshot V5
+  → P2-C4 Dashboard + comprehensive-analysis
+```
+
+Each step is a separate reviewable PR and must not implement a later step early.
+
+#### Deferred / rejected from initial Phase 2C
+
+- issuer-level or sector-level attribution — rejected; absent from the source
+- category merging/reclassification and `smart money` labels — rejected
+- ratios, rolling/cumulative flows, Z-scores, ranks, thresholds, and signals — deferred
+- cash/margin splits for individuals or proprietary trading — deferred; absent from this V2 endpoint
+- share-volume data, ETF, REIT, regional foreign-investor, monthly, and annual datasets — deferred
+- cross-market summation or artificial continuity across market restructurings — rejected
+- Buy/Sell, crowding, risk-on/off, or regime classifications — rejected
+
+## 23. Recommended Next Codex Task
+
+After P2-C0 is merged, implement P2-C1 only. Do not add correction resolution,
+deterministic metrics, Snapshot V5, collector integration, Dashboard presentation,
+or comprehensive-analysis changes in the source-tool PR.
