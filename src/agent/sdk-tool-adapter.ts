@@ -22,6 +22,7 @@ import {
   getEarnings,
   getShareholders,
   getTextBlocks,
+  getInvestorTypeFlows,
   getMarginData,
   getShortSaleReports,
   getStockPrice,
@@ -138,7 +139,13 @@ export function buildDexterSdkTools(): ReturnType<typeof adaptLangChainTool>[] {
 
   // Optional raw tools gated by env.
   if (isJQuantsAvailable()) {
-    rawTools.push(getStockPrice, getMarginData, getShortSaleReports, getTopix);
+    rawTools.push(
+      getStockPrice,
+      getMarginData,
+      getInvestorTypeFlows,
+      getShortSaleReports,
+      getTopix,
+    );
   }
   const webSearch = buildWebSearchToolForSdk();
   if (webSearch) {
