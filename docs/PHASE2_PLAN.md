@@ -194,8 +194,8 @@ Existing 60-day and 250-day windows remain canonical and must not change semanti
 The 120-day window is rejected because it does not add enough information between
 the existing 60-day and 250-day horizons.
 
-Future benchmark expansion within Phase 2A is not required. Sector indices remain
-planned Phase 2D work and require a separately approved contract.
+Future benchmark expansion within Phase 2A is not required. Sector indices are
+handled only under the separately approved Phase 2D contract in Section 23.
 
 ## 6. Phase 2A Non-Goals
 
@@ -1340,7 +1340,7 @@ limitations into narrative interpretation.
 
 ### P2-B5 — Sector Short-ratio Evaluation
 
-Decision: **DEFER**.
+Decision after P2-D0 re-evaluation: **IMPLEMENT LATER**.
 
 `GET /v2/markets/short-ratio` returns daily 33-sector selling-turnover components
 in JPY: non-short selling, short selling with price restrictions, and short selling
@@ -1355,9 +1355,11 @@ standalone value for the current individual-stock analysis, however. A standalon
 daily sector observation provides no contextual baseline unless historical sector
 observations are deliberately retrieved and analyzed. It also contains credit-margin
 short sales as part of the sector total and cannot support a company-level claim.
-Meaningful use would require comparison with those historical observations and the
-corresponding sector index, which overlaps the unimplemented Phase 2D Sector Indices
-tranche. Adding a persisted result now would also require Snapshot V5.
+Meaningful use requires comparison with those historical observations and the
+corresponding sector index. Phase 2D now fixes that shared sector context, but the
+short-ratio source remains a separately approved follow-up after the core sector
+benchmark is presented. Persisting it would require a later Snapshot version and must
+not be bundled into the sector-index integration.
 
 The current runtime has no authoritative ticker-to-`S33` resolution path. A future
 re-evaluation must source the security's 33-sector code from J-Quants equity master
@@ -1393,9 +1395,9 @@ thresholds, squeeze labels, Buy/Sell signals, cross-sector aggregation, or infer
 issuer values.
 
 No source tool, deterministic engine, Snapshot field, Dashboard component, or
-comprehensive-analysis instruction is added by P2-B5. Reconsider the source only
-after Phase 2D establishes a concrete sector-context consumer and the publication
-availability boundary is fixed.
+comprehensive-analysis instruction is added by P2-B5. Implement it only after Phase
+2D establishes the concrete sector-context consumer, using the shared S33 resolver
+and availability boundary fixed by P2-D0.
 
 ### Phase 2B Sequence
 
@@ -1762,8 +1764,277 @@ Each step is a separate reviewable PR and must not implement a later step early.
 - cross-market summation or artificial continuity across market restructurings — rejected
 - Buy/Sell, crowding, risk-on/off, or regime classifications — rejected
 
-## 23. Recommended Next Codex Task
+## 23. Phase 2D — Sector Indices
 
-After P2-C0 is merged, implement P2-C1 only. Do not add correction resolution,
-deterministic metrics, Snapshot V5, collector integration, Dashboard presentation,
-or comprehensive-analysis changes in the source-tool PR.
+Phase 2D adds an as-of-safe Tokyo Stock Exchange 33-sector price-index benchmark
+for issuer analysis. It reuses the existing market-correlation calculation contract;
+it does not create sector ranks, scores, signals, or issuer-level sector flows.
+
+### P2-D0 — Source / Contract Design
+
+P2-D0 fixes the following contract from the official J-Quants/JPX specifications.
+It is documentation only; no source, Engine, tool, Snapshot, Dashboard, or
+comprehensive-analysis code changes belong in this step.
+
+#### Official sources
+
+Use three J-Quants V2 sources with the existing API-key, pagination, plan-error, and
+invalid-response handling:
+
+| Purpose | Endpoint | Initial parameters | Required fields |
+| --- | --- | --- | --- |
+| issuer classification | `GET /v2/equities/master` | exact normalized `code`, exact classification `date` | `Date`, `Code`, `S33`, `S33Nm` |
+| sector index history | `GET /v2/indices/bars/daily` | exact sector-index `code`, `from`, `to`, `pagination_key` when returned | `Date`, `Code`, `O`, `H`, `L`, `C` |
+| business-day boundary | `GET /v2/markets/calendar` | the required date range | `Date`, `HolDiv` |
+
+The index source is daily. `O`, `H`, and `L` may be `null` for close-only indices;
+the initial benchmark calculation uses only finite positive `C`. The values are
+official index points, not equity prices, and have no equity adjustment-factor
+semantics or adjusted/unadjusted response flag. Do not rebase or manually adjust them.
+Equity-master `Date` is the classification's applicability date, not an API
+publication timestamp.
+
+Use the regular price-return TSE 33-sector indices, not the Premium total-return
+series. These indices expose `O/H/L/C` and have official storage from 2008-05-07.
+The explicit authoritative mapping is:
+
+| S33 | Sector index | S33 | Sector index | S33 | Sector index |
+| --- | --- | --- | --- | --- | --- |
+| `0050` | `0040` | `1050` | `0041` | `2050` | `0042` |
+| `3050` | `0043` | `3100` | `0044` | `3150` | `0045` |
+| `3200` | `0046` | `3250` | `0047` | `3300` | `0048` |
+| `3350` | `0049` | `3400` | `004A` | `3450` | `004B` |
+| `3500` | `004C` | `3550` | `004D` | `3600` | `004E` |
+| `3650` | `004F` | `3700` | `0050` | `3750` | `0051` |
+| `3800` | `0052` | `4050` | `0053` | `5050` | `0054` |
+| `5100` | `0055` | `5150` | `0056` | `5200` | `0057` |
+| `5250` | `0058` | `6050` | `0059` | `6100` | `005A` |
+| `7050` | `005B` | `7100` | `005C` | `7150` | `005D` |
+| `7200` | `005E` | `8050` | `005F` | `9050` | `0060` |
+
+`S33 = 9999` (`Other`) has no corresponding TSE 33-sector price index and is
+`unsupported_sector`; do not guess a benchmark. Do not derive this mapping from
+names or arithmetic. Preserve the exact source `S33Nm` as the sector name.
+
+`/indices/bars/daily` and `/equities/master` support pagination through
+`pagination_key`; use the existing `jquantsGetAll()` loop. General index data is not
+available on Free or Light and is available for 10 years on Standard and 20 years
+on Premium. Equity master history is 2/5/10/20 years on Free/Light/Standard/Premium.
+Both sources store data from 2008-05-07, subject to the subscription history limit.
+An empty response means only that no qualifying official row was obtained. It is not
+a zero index value or proof that an issuer has no sector.
+
+J-Quants normally updates equity master around 17:30 JST, with a possible 8:00 JST
+refresh, and general index OHLC around 16:30 JST. These are approximate,
+non-guaranteed times. Live analysis may use only rows actually returned by the API.
+An index `Date` is the trading/observation date; there is no separate guaranteed
+publication timestamp in this endpoint. J-Quants corrections overwrite stored rows
+and do not expose historical vintages.
+
+Official specification references:
+
+- `https://jpx-jquants.com/ja/spec/eq-master`
+- `https://jpx-jquants.com/ja/spec/eq-master/sector33code`
+- `https://jpx-jquants.com/ja/spec/idx-bars-daily`
+- `https://jpx-jquants.com/ja/spec/idx-bars-daily/indexcodes`
+- `https://jpx-jquants.com/ja/spec/mkt-cal`
+- `https://jpx-jquants.com/ja/data-spec`
+- `https://jpx-jquants.com/ja/data-update`
+- `https://www.jpx.co.jp/markets/indices/line-up/`
+
+#### Ticker to S33 resolution
+
+Reuse the existing JPX-code normalization contract. Do not fuzzy-match EDINET
+industry text, company names, or sector names.
+
+For an explicit date-only `analysisAsOfDate`:
+
+1. From official calendar rows, select the latest `Date <= analysisAsOfDate` whose
+   `HolDiv` is `1` or `2`; this is `classificationDate`.
+2. Query equity master with the normalized code and that exact date. This avoids the
+   endpoint's documented behavior of returning the next business day's information
+   when a non-trading date is supplied.
+3. Require an exact code match and `row.Date = classificationDate`. Reject a future,
+   conflicting, malformed, or missing row instead of using current classification.
+4. Preserve the source `S33` and `S33Nm`, then map `S33` to the explicit index code
+   above.
+
+Do not accept the endpoint's 2008-05-07 fallback row for an earlier requested date.
+At a historical date, a later sector change must not alter the selected classification.
+A delisted issuer may resolve while it was listed; an empty post-delisting response is
+unavailable rather than evidence of its former classification. Persist the resolved
+classification date and benchmark identity in the eventual structured result so a
+saved analysis is not re-resolved against current master data.
+
+The source does not expose correction vintages. A future source correction may change
+a fresh rerun for the same historical date; reproducing overwritten vintages requires
+a separately designed local archive and is deferred. This limitation must be reported,
+not hidden by applying current classification unconditionally.
+
+The same resolver is the authoritative `S33` boundary for a later sector short-ratio
+integration. It must not be duplicated or replaced with name matching.
+
+#### Sector benchmark calculation
+
+Treat TOPIX and the selected sector price index as separate benchmark identities over
+the same deterministic calculation semantics. Preserve the existing TOPIX public
+contract and all existing 20/60/250-window results.
+
+The initial sector comparison reuses:
+
+- stock adjusted closes and official sector-index closes in strict chronological order
+- date inner join before window selection
+- exactly 20, 60, and 250 return observations, requiring 21, 61, and 251 aligned closes
+- daily log returns
+- sample variance/covariance with divisor `n - 1`
+- annualization factor 245
+- correlation, beta, `alphaAnnualized`, `rSquared`, stock/benchmark annualized
+  volatility, and excess return
+- existing insufficient-history and zero-variance semantics
+
+Filter stock, benchmark, master, and calendar rows to their applicable
+`Date <= analysisAsOfDate` before validation, alignment, and latest-window selection.
+Never forward-fill either series. Missing or non-trading dates participate only
+through the existing date inner join; do not create zero returns. The official price
+index is used because stock adjusted closes are a price-return series; total-return
+sector indices are deferred rather than mixing dividend semantics.
+
+Avoid a duplicate calculation Engine. P2-D2 may extract the narrow benchmark-agnostic
+calculation core already inside the market-correlation Engine, while retaining
+`analyzeMarketCorrelation()` as an unchanged TOPIX wrapper and adding a separate
+sector wrapper. Do not turn it into an arbitrary benchmark framework.
+
+#### Historical and availability boundary
+
+- `analysisAsOfDate` is the inclusive date-only boundary for both classification and
+  price rows. It represents end-of-day eligibility; intraday live analysis still uses
+  only rows actually returned at call time.
+- `classificationDate` is resolved independently as the latest official business day
+  on or before the boundary; current classification is never a historical default.
+- Same-day index data is eligible only if J-Quants actually returns it. The approximate
+  update time does not authorize fabrication or an intraday availability claim.
+- Future rows are excluded before validation. Missing trading dates and non-trading
+  days are not filled.
+- Historical constituent changes inside the official sector index are already part of
+  that official index series; Dexter JP does not reconstruct index membership.
+- A persisted result keeps its resolved identity and values. Reconstructing overwritten
+  J-Quants correction vintages remains explicitly unsupported without a local archive.
+
+#### Minimum result contract
+
+The exact TypeScript placement may follow current conventions, but the structured
+boundary must preserve at least:
+
+```ts
+type SectorBenchmarkUnavailableReason =
+  | 'sector_classification_unavailable'
+  | 'unsupported_sector'
+  | 'no_sector_index_data'
+  | 'invalid_data';
+
+interface SectorBenchmarkIdentity {
+  type: 'TSE33_SECTOR_PRICE_INDEX';
+  sectorCode: string;
+  sectorName: string;
+  indexCode: string;
+  classificationDate: string;
+}
+
+interface SectorBenchmarkResult {
+  analysisAsOfDate: string;
+  benchmark: SectorBenchmarkIdentity | null;
+  dataDate: string | null;
+  alignedPriceCount: number;
+  windows: readonly MarketCorrelationWindowResult[];
+  unavailable: readonly { reason: SectorBenchmarkUnavailableReason }[];
+  provenance: {
+    classification: {
+      source: 'jquants';
+      endpoint: '/v2/equities/master';
+    };
+    index: {
+      source: 'jquants';
+      endpoint: '/v2/indices/bars/daily';
+    };
+    calculation: { source: 'market_correlation_engine' };
+  };
+  units: {
+    indexLevel: 'index_points';
+    observations: 'count';
+    correlation: 'ratio';
+    beta: 'ratio';
+    alphaAnnualized: 'ratio';
+    rSquared: 'ratio';
+    stockVolatilityAnnualized: 'ratio';
+    benchmarkVolatilityAnnualized: 'ratio';
+    excessReturn: 'ratio';
+  };
+}
+```
+
+Metric-level unavailability continues to use the existing market-correlation window
+reasons. Source authentication, transport, plan, and invalid-response failures remain
+the existing typed J-Quants errors; do not relabel a plan error as market data zero.
+`dataDate` is the latest aligned close date used by the result. No Snapshot version is
+created in P2-D0.
+
+#### P2-B5 re-evaluation
+
+Decision: **IMPLEMENT LATER**, in a separate step after the core sector benchmark is
+presented. The sector index supplies price behavior while `/v2/markets/short-ratio`
+supplies daily sector selling-turnover components in JPY, so it can add distinct
+sector-flow context once an authoritative sector identity is already visible.
+
+The later step must reuse the same as-of-safe `S33` resolver and apply
+`Date <= analysisAsOfDate` to rows actually returned by J-Quants. Its approximately
+16:30 update is not guaranteed. Do not combine the flow with the price index into a
+score, attribute it to the issuer, aggregate it with issuer reported positions or
+margin balances, or add thresholds, squeeze labels, or Buy/Sell signals.
+
+#### Phase 2D sequence
+
+```text
+P2-D0 Source / Contract Design
+  → P2-D1 J-Quants sector master/index source
+  → P2-D2 deterministic sector benchmark integration
+  → P2-D3 Tool exposure + Snapshot V6
+  → P2-D4 Dashboard + comprehensive-analysis
+  → P2-D5 sector short-ratio integration (IMPLEMENT LATER; separate approval)
+```
+
+P2-D1 adds only the calendar-backed S33 resolver, explicit mapping, and sector-index
+source. Tests cover endpoint/parameter mapping, pagination, exact 33-sector mapping,
+holiday/as-of selection, sector changes, delisting/empty responses, the pre-storage
+fallback rejection, plan errors, and source non-mutation.
+
+P2-D2 reuses the market-correlation calculation core without changing TOPIX results.
+Tests cover 20/60/250 boundaries, exact latest aligned windows, future exclusion,
+inner join/no forward fill, non-trading and invalid rows, zero variance, input
+non-mutation, stable results when older history is prepended, and exact TOPIX
+regression.
+
+P2-D3 exposes one structured result without duplicate price/master fetches and adds
+the minimum Snapshot V6. V1-V5 remain immutable/readable, new saves become V6, old
+files are not rewritten, unknown versions remain rejected, and optional sector data
+does not change existing complete/partial semantics.
+
+P2-D4 displays Snapshot values and updates comprehensive analysis to interpret sector
+context without Browser/LLM calculation, issuer attribution, ranks, scores, signals,
+or silent claims from unavailable data. P2-D5 remains a separately approved follow-up.
+
+#### Deferred / rejected from initial Phase 2D
+
+- total-return sector indices and dividend-relative attribution — deferred
+- a local archive for overwritten J-Quants classification/index vintages — deferred
+- arbitrary-index benchmark framework and duplicate sector calculation Engine — rejected
+- current-classification backfill, EDINET text matching, and fuzzy identity merge — rejected
+- sector rotation, ranking, momentum, composite/crowding/risk-on-off scores — rejected
+- Buy/Sell, Entry/Stop/Target, threshold, and squeeze classifications — rejected
+- LLM or Browser numerical calculation — rejected
+- Snapshot V6, tools, runtime, and presentation changes in P2-D0 — deferred to their steps
+
+## 24. Recommended Next Codex Task
+
+After P2-D0 is merged, implement P2-D1 only. Do not add the deterministic comparison,
+Snapshot V6, collector integration, Dashboard presentation, comprehensive-analysis
+changes, or sector short-ratio in the source PR.
