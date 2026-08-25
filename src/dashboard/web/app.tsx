@@ -7,6 +7,7 @@ import type {
 import { LIGHTWEIGHT_CHARTS_NOTICE, PriceChart } from './chart.js';
 import {
   UNAVAILABLE_TEXT,
+  INVESTOR_TYPE_FLOW_CONTEXT_NOTE,
   REPORTED_SHORT_POSITION_DISCLOSURE_NOTE,
   WATCHLIST_STALE_AFTER_DAYS,
   buildDetailPath,
@@ -16,6 +17,7 @@ import {
   sortWatchlistItems,
   type DashboardMetric,
   type DisplayValue,
+  type InvestorTypeCategoryView,
   type WatchlistItemView,
   type WatchlistSortKey,
 } from './presentation.js';
@@ -52,6 +54,29 @@ function MetricGrid({ metrics }: { metrics: DashboardMetric[] }) {
         </div>
       ))}
     </dl>
+  );
+}
+
+function InvestorTypeTable({ rows }: { rows: InvestorTypeCategoryView[] }) {
+  return (
+    <div className="table-scroll">
+      <table className="investor-type-table">
+        <thead>
+          <tr><th>Source category</th><th>Sell</th><th>Buy</th><th>Total</th><th>Balance</th></tr>
+        </thead>
+        <tbody>
+          {rows.map(row => (
+            <tr key={row.category}>
+              <th>{row.category}</th>
+              <td><Value value={row.sell} /></td>
+              <td><Value value={row.buy} /></td>
+              <td><Value value={row.total} /></td>
+              <td><Value value={row.balance} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -200,6 +225,36 @@ function Dashboard({ snapshot, onBack }: { snapshot: AnalysisSnapshot; onBack: (
             {view.reportedShortPositions.state === 'not_collected'
               ? '公開空売り残高報告は未収集です。'
               : `公開空売り残高報告は利用できません。${view.reportedShortPositions.unavailableReasons.join(' / ')}`}
+          </div>
+        )}
+      </Card>
+
+      <Card title="Investor Type Flows" eyebrow="Tokyo/Nagoya weekly market context">
+        <p className="disclosure-note">{INVESTOR_TYPE_FLOW_CONTEXT_NOTE}</p>
+        {view.investorTypeFlows.state === 'available' ? (
+          <>
+            <div className="investor-flow-meta">
+              <MetricGrid metrics={[
+                { label: 'Section', value: view.investorTypeFlows.section },
+                { label: 'Published', value: view.investorTypeFlows.publishedDate },
+                { label: 'Period start', value: view.investorTypeFlows.periodStartDate },
+                { label: 'Period end', value: view.investorTypeFlows.periodEndDate },
+              ]} />
+            </div>
+            <section className="investor-flow-group">
+              <h3>Summary</h3>
+              <InvestorTypeTable rows={view.investorTypeFlows.summary} />
+            </section>
+            <section className="investor-flow-group">
+              <h3>Brokerage breakdown</h3>
+              <InvestorTypeTable rows={view.investorTypeFlows.brokerageBreakdown} />
+            </section>
+          </>
+        ) : (
+          <div className="empty-state">
+            {view.investorTypeFlows.state === 'not_collected'
+              ? '投資部門別データは未収集です。'
+              : `投資部門別データは利用できません。${view.investorTypeFlows.unavailableReasons.join(' / ')}`}
           </div>
         )}
       </Card>

@@ -49,6 +49,7 @@ describe('comprehensive analysis skill', () => {
       'analyze_technical',
       'analyze_supply_demand',
       'analyze_reported_short_positions',
+      'analyze_investor_type_flows',
       'analyze_peer_comparison',
       'analyze_market_correlation',
       'analyze_strategy',
@@ -65,6 +66,7 @@ describe('comprehensive analysis skill', () => {
       '# Technical',
       '# Supply & Demand',
       '# Reported Short Positions',
+      '# Investor Type Flows',
       '# Market Correlation',
       '# Entry / Stop / Target',
       '# Bull / Base / Bear',
@@ -89,6 +91,22 @@ describe('comprehensive analysis skill', () => {
     expect(skill?.instructions).toContain('support an investment claim');
     expect(skill?.instructions).toContain('disclosedDate');
     expect(skill?.instructions).toContain('calculatedDate');
+    expect(skill?.instructions).toContain('TokyoNagoya');
+    expect(skill?.instructions).toContain('market-section context');
+    expect(skill?.instructions).toContain('evidence that an investor category');
+    expect(skill?.instructions).toContain('publication lag');
+    expect(skill?.instructions).toContain('publishedDate');
+    expect(skill?.instructions).toContain('periodStartDate');
+    expect(skill?.instructions).toContain('periodEndDate');
+    expect(skill?.instructions).toContain('correction/as-of-processed');
+    expect(skill?.instructions).toContain('reclassify, merge, or aggregate categories');
+    expect(skill?.instructions).toContain('recalculate or repair source');
+    expect(skill?.instructions).toContain('Supply/Demand or reported short');
+    expect(skill?.instructions).toContain('Do not forward-fill');
+    expect(skill?.instructions).toContain('Do not derive a threshold, rank, crowding score');
+    expect(skill?.instructions).toContain('risk-on/off');
+    expect(skill?.instructions).toContain('Buy/Sell signal');
+    expect(skill?.instructions).toContain('make no investment claim');
 
     const invoked = await skillTool.invoke({
       skill: 'comprehensive-analysis',
