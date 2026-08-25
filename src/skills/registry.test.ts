@@ -48,6 +48,7 @@ describe('comprehensive analysis skill', () => {
       'analyze_financial_metrics',
       'analyze_technical',
       'analyze_supply_demand',
+      'analyze_reported_short_positions',
       'analyze_peer_comparison',
       'analyze_market_correlation',
       'analyze_strategy',
@@ -63,6 +64,7 @@ describe('comprehensive analysis skill', () => {
       '# Peer Comparison',
       '# Technical',
       '# Supply & Demand',
+      '# Reported Short Positions',
       '# Market Correlation',
       '# Entry / Stop / Target',
       '# Bull / Base / Bear',
@@ -74,6 +76,19 @@ describe('comprehensive analysis skill', () => {
 
     expect(skill?.instructions).toContain('may not create prices');
     expect(skill?.instructions).toContain('Missing-data audit');
+    expect(skill?.instructions).toContain('0.5% or more');
+    expect(skill?.instructions).toContain('neither total market short interest');
+    expect(skill?.instructions).toContain('margin-interest selling');
+    expect(skill?.instructions).toContain('balance');
+    expect(skill?.instructions).toContain('Do not aggregate');
+    expect(skill?.instructions).toContain('no qualifying public');
+    expect(skill?.instructions).toContain('report was obtained');
+    expect(skill?.instructions).toContain('Do not derive a short-squeeze threshold');
+    expect(skill?.instructions).toContain('Buy/Sell signal');
+    expect(skill?.instructions).toContain('Missing or unavailable report data');
+    expect(skill?.instructions).toContain('support an investment claim');
+    expect(skill?.instructions).toContain('disclosedDate');
+    expect(skill?.instructions).toContain('calculatedDate');
 
     const invoked = await skillTool.invoke({
       skill: 'comprehensive-analysis',

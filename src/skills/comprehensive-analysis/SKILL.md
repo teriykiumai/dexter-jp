@@ -2,9 +2,10 @@
 name: comprehensive-analysis
 description: >
   Performs a complete Japanese listed-company analysis across company identity,
-  fundamentals, valuation, peers, technicals, margin supply-demand, TOPIX
-  correlation, deterministic Entry/Stop/Target, Bull/Base/Bear scenarios, and
-  risks. Use for broad requests such as "7203を分析して", "この銘柄を総合分析",
+  fundamentals, valuation, peers, technicals, margin supply-demand, public
+  short-position reports, TOPIX correlation, deterministic Entry/Stop/Target,
+  Bull/Base/Bear scenarios, and risks. Use for broad requests such as
+  "7203を分析して", "この銘柄を総合分析",
   "full analysis", or "investment analysis" rather than a single metric.
 ---
 
@@ -16,7 +17,7 @@ Run the complete MVP workflow for one company. Reuse retrieved datasets between 
 
 - Standard Agent: call `get_financials` once with a complete request for company identity, six-year financial history, latest valuation/quality ratios, and recent earnings. Use `company_screener` for the same-sector candidate set.
 - Claude Agent SDK: use the available leaf tools `get_company_info`, `get_financial_statements`, `get_key_ratios`, and `get_earnings`; use `screen_companies` for the candidate set.
-- Both modes: use `read_filings`, `get_stock_price`, `get_margin_data`, `get_topix`, and the six `analyze_*` tools when available.
+- Both modes: use `read_filings`, `get_stock_price`, `get_margin_data`, `get_topix`, and the seven `analyze_*` tools when available.
 
 Never call a tool name that is absent from the current tool list.
 
@@ -29,6 +30,7 @@ Never call a tool name that is absent from the current tool list.
 - [ ] Stock, margin, and TOPIX histories
 - [ ] Technical analysis
 - [ ] Supply and demand analysis
+- [ ] Public short-position reports
 - [ ] Market correlation analysis
 - [ ] Strategy candidates
 - [ ] Bull / Base / Bear and risks
@@ -80,15 +82,29 @@ Preserve dates and nulls. Do not forward-fill, interpolate, or silently remove m
 1. Pass the verified target `ticker`, latest adjusted close, and chronological annual financial rows to `analyze_financial_metrics`.
 2. Pass adjusted OHLCV to `analyze_technical`; use its existing Technical fields and its structured `advancedTechnical` companion from the same call.
 3. Pass margin balances and stock volume to `analyze_supply_demand`.
-4. Pass stock and TOPIX closes to `analyze_market_correlation`.
-5. Pass the verified target `ticker` plus `dataDate`, `latestSwingHigh`, `latestSwingLow`, and `atr14` from the Technical result to `analyze_strategy`.
-6. Supply Strategy `tickSize` or `resistanceLevels` only when a reliable source provided them; otherwise omit them. Without a sourced tick size, report the strictly-above trigger but no exact entry or 2R target.
+4. Call `analyze_reported_short_positions` with the verified target `ticker` and an explicit `analysisAsOfDate`. For historical analysis, use the simulated as-of date. Otherwise use the current analysis date. Treat `disclosedDate` as the information-availability date and `calculatedDate` only as the position reference date.
+5. Pass stock and TOPIX closes to `analyze_market_correlation`.
+6. Pass the verified target `ticker` plus `dataDate`, `latestSwingHigh`, `latestSwingLow`, and `atr14` from the Technical result to `analyze_strategy`.
+7. Supply Strategy `tickSize` or `resistanceLevels` only when a reliable source provided them; otherwise omit them. Without a sourced tick size, report the strictly-above trigger but no exact entry or 2R target.
 
 Never reproduce or repair the Engine calculations in narrative reasoning. Carry every `unavailable` reason into the report.
 When `mean4w` is available, interpret it as the recent buying-balance baseline alongside
 the current balance and existing 13-week mean; do not derive an unprovided deviation or signal.
 Interpret the 20-day market-correlation window as recent context alongside the existing
 60-day and 250-day windows; do not derive a threshold, regime label, or trading signal.
+
+Interpret only the structured `analyze_reported_short_positions` result. J-Quants
+short-sale-report covers public reports for short-position ratios of 0.5% or more;
+it is neither total market short interest nor the weekly margin-interest selling
+balance. Keep every reporter/fund report separate, including reports with the same
+`calculatedDate`. Do not aggregate, normalize, merge, forward-fill, or locate a
+previous report. Use only the Engine-provided `ratioDelta`; do not calculate or
+repair it in prose. `no_public_disclosure_data` means only that no qualifying public
+report was obtained, not that short positions or short sellers are absent, positions
+below 0.5% are absent, or covering is complete. Carry `invalid_data` and null previous
+values as unavailable. Do not derive a short-squeeze threshold, score, classification,
+or Buy/Sell signal from these reports. Missing or unavailable report data must not
+support an investment claim.
 
 Pass the complete retrieved histories to the Engines. Do not shorten OHLCV to the
 latest 20 bars before Technical, do not omit any weekly margin observations, and
@@ -101,6 +117,8 @@ For comprehensive analysis, prefer the direct ticker mode supported by
 pass the company ticker plus the same `from` and `to` dates used for retrieval.
 This reuses the existing J-Quants tools inside each deterministic analysis tool
 and avoids re-serializing or accidentally shortening large histories.
+Use the same direct ticker boundary for `analyze_reported_short_positions`, with the
+explicit `analysisAsOfDate`; do not substitute `calculatedDate` for that boundary.
 
 ## 6. Build conditional scenarios
 
@@ -133,6 +151,7 @@ Use these headings exactly and in this order:
 # Peer Comparison
 # Technical
 # Supply & Demand
+# Reported Short Positions
 # Market Correlation
 # Entry / Stop / Target
 # Bull / Base / Bear
@@ -140,4 +159,4 @@ Use these headings exactly and in this order:
 # Conclusion
 ```
 
-Under `Data Dates`, list the basis date for company financials, earnings, stock prices, margin data, TOPIX, and each Engine result when available. Within the report, separate Fact, Interpretation, and Risk. The conclusion must summarize the evidence and limitations without inventing a recommendation or price.
+Under `Data Dates`, list the basis date for company financials, earnings, stock prices, margin data, public short-position reports, TOPIX, and each Engine result when available. For public short-position reports, label `disclosedDate` as the information-availability date and do not present `calculatedDate` as the disclosure date. Within the report, separate Fact, Interpretation, and Risk. The conclusion must summarize the evidence and limitations without inventing a recommendation or price.
