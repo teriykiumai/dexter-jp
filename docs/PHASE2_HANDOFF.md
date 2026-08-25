@@ -538,7 +538,7 @@ Phase 2F — Shikori / Volume Profile / POC / VAH / VAL
 
 Each Phase 2B–2F tranche requires its own detailed plan. Phase 2A is complete;
 Phase 2B implementation through P2-B4 is complete and P2-B5 is deferred after
-evaluation. A later tranche must begin with its own detailed plan.
+evaluation. Phase 2C Investor Type Flows now begins with its docs-only P2-C0 design.
 
 The Phase 2A sequence below is retained as implemented historical context.
 
@@ -862,3 +862,75 @@ classification, thresholds, or inferred aggregation.
 See `docs/PHASE2_PLAN.md` for the full source mapping, result shape, step boundaries,
 and test requirements. P2-B0 changes documentation only; runtime, Snapshot, and
 Dashboard remain unchanged until their separately approved steps.
+
+## 22. Active Phase 2C Handoff
+
+Phase 2C uses J-Quants V2 `GET /v2/equities/investor-types`. It is weekly
+market-section trading-value context in `thousand_JPY`, not issuer or sector flow.
+The initial deterministic and Snapshot section is fixed to the exact source aggregate
+`TokyoNagoya`; never claim that an investor category traded the analyzed company.
+
+The source preserves `PubDate`, `StDate`, and `EnDate` separately. `PubDate` is the
+publication date, not the J-Quants API availability date; the other two dates describe
+the trading period. Historical selection uses one date-only eligibility contract:
+
+```text
+ordinary weekly vintage:
+  eligibleDate = publishedDate
+
+correction vintage published on or after 2023-04-03:
+  eligibleDate = next official business day after publishedDate
+
+eligibleDate <= analysisAsOfDate
+```
+
+The API normally updates around 18:00 JST on the fourth business day of the following
+week, but that time is not guaranteed and does not define intraday eligibility. Live
+analysis uses only rows actually returned by J-Quants. Resolve a correction's next
+business day as the first later J-Quants `/v2/markets/calendar` date with `HolDiv`
+`1` or `2`; pass calendar rows into the pure engine and do not use calendar-day or
+weekdays-only arithmetic. Do not use period dates to bypass publication lag.
+
+For post-2023-04-03 corrections, retain source rows and let the pure engine choose the
+greatest eligible `PubDate` for exact `Section + StDate + EnDate`. Keep the old vintage
+on the correction `PubDate`; use the corrected vintage only from the following
+official business day. A future correction must not rewrite a historical as-of result.
+Pre-2023 correction vintages cannot be reconstructed because the source supplies
+corrected data only.
+
+Keep the source hierarchy exact:
+
+```text
+summary: proprietary | brokerage | total
+brokerage breakdown:
+  individuals | foreignInvestors | securitiesCompanies | investmentTrusts
+  businessCorporations | otherCorporations | insuranceCompanies | banks
+  trustBanks | otherFinancialInstitutions
+```
+
+Every category preserves source `sell`, `buy`, `total`, and signed `balance` in
+`thousand_JPY`. The engine validates source arithmetic and hierarchy but does not
+replace source-provided totals/balances or add a new metric. Empty/no eligible data is
+`no_investor_type_flow_data`; invalid fields or relationships are `invalid_data`.
+Unavailable is never zero, and missing weeks are not forward-filled.
+
+The source is unavailable on Free and available for 5/10/20 years on Light/Standard/
+Premium; storage begins 2008-01-16. Plan restrictions remain typed source errors.
+
+Snapshot integration is adopted in P2-C3 as V5, with V1-V4 immutable/readable and
+existing complete/partial semantics unchanged. Dashboard and comprehensive analysis
+remain presentation/interpretation layers and must not calculate, merge categories,
+attribute market flows to an issuer, or add thresholds and Buy/Sell signals.
+
+The fixed sequence is:
+
+```text
+P2-C0 Source / Contract Design
+  → P2-C1 J-Quants investor-type source tool
+  → P2-C2 deterministic correction/as-of engine
+  → P2-C3 Tool exposure + Snapshot V5
+  → P2-C4 Dashboard + comprehensive-analysis
+```
+
+P2-C0 is documentation only. See `docs/PHASE2_PLAN.md` for exact category meanings,
+typed shape, invariants, provenance, deferred scope, and per-step tests.
