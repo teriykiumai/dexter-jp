@@ -7,6 +7,7 @@ import type {
 import { LIGHTWEIGHT_CHARTS_NOTICE, PriceChart } from './chart.js';
 import {
   UNAVAILABLE_TEXT,
+  REPORTED_SHORT_POSITION_DISCLOSURE_NOTE,
   WATCHLIST_STALE_AFTER_DAYS,
   buildDetailPath,
   mapSnapshotToDashboard,
@@ -156,6 +157,52 @@ function Dashboard({ snapshot, onBack }: { snapshot: AnalysisSnapshot; onBack: (
             : <div className="empty-state">需給データは利用できません。</div>}
         </Card>
       </div>
+
+      <Card title="Public Short Position Reports" eyebrow="J-Quants disclosure ≥ 0.5%">
+        <p className="disclosure-note">{REPORTED_SHORT_POSITION_DISCLOSURE_NOTE}</p>
+        {view.reportedShortPositions.reports.length > 0 ? (
+          <div className="table-scroll">
+            <table className="short-position-table">
+              <thead>
+                <tr>
+                  <th>Disclosed</th>
+                  <th>Calculated</th>
+                  <th>Reporter</th>
+                  <th>Discretionary manager</th>
+                  <th>Fund</th>
+                  <th>Ratio</th>
+                  <th>Shares</th>
+                  <th>Previous calculated</th>
+                  <th>Previous ratio</th>
+                  <th>Ratio delta</th>
+                </tr>
+              </thead>
+              <tbody>
+                {view.reportedShortPositions.reports.map((report, index) => (
+                  <tr key={`${report.disclosedDate.text}-${report.calculatedDate.text}-${index}`}>
+                    <td><Value value={report.disclosedDate} /></td>
+                    <td><Value value={report.calculatedDate} /></td>
+                    <td><Value value={report.reporterName} /></td>
+                    <td><Value value={report.discretionaryManagerName} /></td>
+                    <td><Value value={report.fundName} /></td>
+                    <td><Value value={report.shortPositionRatio} /></td>
+                    <td><Value value={report.shortPositionShares} /></td>
+                    <td><Value value={report.previousCalculatedDate} /></td>
+                    <td><Value value={report.previousReportedRatio} /></td>
+                    <td><Value value={report.ratioDelta} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="empty-state">
+            {view.reportedShortPositions.state === 'not_collected'
+              ? '公開空売り残高報告は未収集です。'
+              : `公開空売り残高報告は利用できません。${view.reportedShortPositions.unavailableReasons.join(' / ')}`}
+          </div>
+        )}
+      </Card>
 
       <div className="two-column">
         <Card title="Market Correlation" eyebrow="TOPIX benchmark">

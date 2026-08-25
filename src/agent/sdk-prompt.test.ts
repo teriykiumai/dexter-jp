@@ -11,6 +11,9 @@ describe('SDK comprehensive analysis prompt', () => {
     expect(prompt).toContain('The SDK Skill tool is intentionally disabled');
     expect(prompt).toContain('get_company_info');
     expect(prompt).toContain('analyze_strategy');
+    expect(prompt).toContain('analyze_reported_short_positions');
+    expect(prompt).toContain('0.5% or more');
+    expect(prompt).toContain('neither total market short interest');
     expect(prompt).toContain('# Data Dates');
     expect(prompt).toContain('# Bull / Base / Bear');
     expect(prompt).toContain('may not create prices');

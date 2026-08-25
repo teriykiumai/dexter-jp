@@ -1,14 +1,19 @@
 import { describe, expect, test } from 'bun:test';
 import {
   AnalysisSnapshotV1Schema,
+  AnalysisSnapshotV2Schema,
+  AnalysisSnapshotV3Schema,
   buildAnalysisSnapshot,
   buildAnalysisSnapshotLatestItem,
   type AnalysisSnapshot,
+  type AnalysisSnapshotV2,
+  type AnalysisSnapshotV3,
   type AnalysisSnapshotV4,
   type AnalysisSnapshotInput,
 } from '../../analysis/snapshot/index.js';
 import {
   UNAVAILABLE_TEXT,
+  REPORTED_SHORT_POSITION_DISCLOSURE_NOTE,
   WATCHLIST_STALE_AFTER_DAYS,
   buildDetailPath,
   displayText,
@@ -60,8 +65,50 @@ function baseSnapshot(): AnalysisSnapshotV4 {
   return buildAnalysisSnapshot(input);
 }
 
+function v3Snapshot(): AnalysisSnapshotV3 {
+  const v4 = baseSnapshot();
+  const {
+    reportedShortPositions: _reportedShortPositions,
+    dataDates: v4DataDates,
+    provenance: v4Provenance,
+    units: v4Units,
+    unavailable: v4Unavailable,
+    ...common
+  } = v4;
+  const { reportedShortPositions: _reportedDate, ...dataDates } = v4DataDates;
+  const { reportedShortPositions: _reportedProvenance, ...provenance } = v4Provenance;
+  const { reportedShortPositions: _reportedUnits, ...units } = v4Units;
+
+  return AnalysisSnapshotV3Schema.parse({
+    ...common,
+    schemaVersion: 3,
+    dataDates,
+    provenance,
+    units,
+    unavailable: v4Unavailable.filter(item => item.section !== 'reportedShortPositions'),
+  });
+}
+
+function v2Snapshot(): AnalysisSnapshotV2 {
+  const v3 = v3Snapshot();
+  const { mean4w: _mean4w, unavailable, ...supplyDemand } = v3.supplyDemand ?? {};
+  const { mean4w: _mean4wUnit, ...supplyDemandUnits } = v3.units.supplyDemand;
+
+  return AnalysisSnapshotV2Schema.parse({
+    ...v3,
+    schemaVersion: 2,
+    supplyDemand: v3.supplyDemand
+      ? {
+          ...supplyDemand,
+          unavailable: unavailable?.filter(item => item.metric !== 'mean4w'),
+        }
+      : null,
+    units: { ...v3.units, supplyDemand: supplyDemandUnits },
+  });
+}
+
 function v1Snapshot(): AnalysisSnapshot {
-  const v2 = baseSnapshot();
+  const v2 = v2Snapshot();
   const {
     advancedTechnical: _advancedTechnical,
     dataDates: v2DataDates,
@@ -81,7 +128,7 @@ function v1Snapshot(): AnalysisSnapshot {
     provenance,
     units,
     unavailable: v2Unavailable.filter(item => (
-      item.section !== 'advancedTechnical' && item.section !== 'reportedShortPositions'
+      item.section !== 'advancedTechnical'
     )),
   });
 }
@@ -335,6 +382,128 @@ describe('snapshot presentation mapping', () => {
       'rsi14: missing data',
       'macd: insufficient history',
     ]);
+  });
+
+  test('passes through V4 report rows and formats stored ratios without aggregation or delta calculation', () => {
+    const snapshot: AnalysisSnapshotV4 = {
+      ...baseSnapshot(),
+      reportedShortPositions: {
+        dataDate: '2026-08-20',
+        reports: [
+          {
+            disclosedDate: '2026-08-20',
+            calculatedDate: '2026-08-18',
+            reporterName: ' Reporter A ',
+            discretionaryManagerName: 'Manager A',
+            fundName: 'Fund A',
+            shortPositionRatio: 0.006,
+            shortPositionShares: 120_000,
+            previousCalculatedDate: '2026-08-11',
+            previousReportedRatio: 0.0054,
+            ratioDelta: 0.0005,
+          },
+          {
+            disclosedDate: '2026-08-21',
+            calculatedDate: '2026-08-18',
+            reporterName: 'Reporter B',
+            discretionaryManagerName: null,
+            fundName: null,
+            shortPositionRatio: 0.007,
+            shortPositionShares: 80_000,
+            previousCalculatedDate: '2026-08-12',
+            previousReportedRatio: 0.005,
+            ratioDelta: -0.001,
+          },
+          {
+            disclosedDate: '2026-08-22',
+            calculatedDate: '2026-08-19',
+            reporterName: 'Reporter C',
+            discretionaryManagerName: null,
+            fundName: null,
+            shortPositionRatio: 0.008,
+            shortPositionShares: 70_000,
+            previousCalculatedDate: null,
+            previousReportedRatio: null,
+            ratioDelta: null,
+          },
+        ],
+        unavailable: [],
+      },
+      dataDates: {
+        ...baseSnapshot().dataDates,
+        reportedShortPositions: '2026-08-20',
+      },
+    };
+
+    const view = mapSnapshotToDashboard(snapshot);
+
+    expect(view.reportedShortPositions.state).toBe('available');
+    expect(view.reportedShortPositions.reports).toHaveLength(3);
+    expect(view.reportedShortPositions.reports[0]).toEqual({
+      disclosedDate: { text: '2026-08-20', available: true },
+      calculatedDate: { text: '2026-08-18', available: true },
+      reporterName: { text: ' Reporter A ', available: true },
+      discretionaryManagerName: { text: 'Manager A', available: true },
+      fundName: { text: 'Fund A', available: true },
+      shortPositionRatio: { text: '0.6%', available: true },
+      shortPositionShares: { text: '120,000 株', available: true },
+      previousCalculatedDate: { text: '2026-08-11', available: true },
+      previousReportedRatio: { text: '0.54%', available: true },
+      ratioDelta: { text: '+0.05 pt', available: true },
+    });
+    expect(view.reportedShortPositions.reports[1]).toMatchObject({
+      calculatedDate: { text: '2026-08-18', available: true },
+      previousReportedRatio: { text: '0.5%', available: true },
+      ratioDelta: { text: '-0.10 pt', available: true },
+    });
+    expect(view.reportedShortPositions.reports[2]).toMatchObject({
+      discretionaryManagerName: { text: UNAVAILABLE_TEXT, available: false },
+      fundName: { text: UNAVAILABLE_TEXT, available: false },
+      previousCalculatedDate: { text: UNAVAILABLE_TEXT, available: false },
+      previousReportedRatio: { text: UNAVAILABLE_TEXT, available: false },
+      ratioDelta: { text: UNAVAILABLE_TEXT, available: false },
+    });
+    expect(view.dataDates).toContainEqual({
+      label: '公開空売り残高報告',
+      value: { text: '2026-08-20', available: true },
+    });
+  });
+
+  test('keeps typed report absence and invalid data unavailable instead of zero', () => {
+    for (const reason of ['no_public_disclosure_data', 'invalid_data'] as const) {
+      const snapshot: AnalysisSnapshotV4 = {
+        ...baseSnapshot(),
+        reportedShortPositions: {
+          dataDate: null,
+          reports: [],
+          unavailable: [{ reason }],
+        },
+      };
+
+      const view = mapSnapshotToDashboard(snapshot).reportedShortPositions;
+
+      expect(view.state).toBe('unavailable');
+      expect(view.reports).toEqual([]);
+      expect(view.unavailableReasons).toEqual([reason.replaceAll('_', ' ')]);
+    }
+    expect(REPORTED_SHORT_POSITION_DISCLOSURE_NOTE).toContain('0.5%以上');
+    expect(REPORTED_SHORT_POSITION_DISCLOSURE_NOTE).toContain('空売り残高0');
+    expect(REPORTED_SHORT_POSITION_DISCLOSURE_NOTE).toContain('信用売残');
+    expect(REPORTED_SHORT_POSITION_DISCLOSURE_NOTE).toContain('市場全体のshort interest');
+  });
+
+  test('treats V1, V2, V3, and a null V4 report section as not collected', () => {
+    for (const snapshot of [v1Snapshot(), v2Snapshot(), v3Snapshot(), baseSnapshot()]) {
+      const view = mapSnapshotToDashboard(snapshot);
+      expect(view.reportedShortPositions).toEqual({
+        state: 'not_collected',
+        reports: [],
+        unavailableReasons: [],
+      });
+      if (snapshot.schemaVersion !== 4) {
+        expect(view.dataDates.map(item => item.label)).not.toContain('公開空売り残高報告');
+      }
+    }
   });
 
   test('passes through V3 mean4w and keeps unavailable distinct from zero', () => {

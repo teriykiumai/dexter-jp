@@ -58,6 +58,28 @@ export interface StrategyCandidateView {
   rewardRisk: DisplayValue;
 }
 
+export interface ReportedShortPositionReportView {
+  disclosedDate: DisplayValue;
+  calculatedDate: DisplayValue;
+  reporterName: DisplayValue;
+  discretionaryManagerName: DisplayValue;
+  fundName: DisplayValue;
+  shortPositionRatio: DisplayValue;
+  shortPositionShares: DisplayValue;
+  previousCalculatedDate: DisplayValue;
+  previousReportedRatio: DisplayValue;
+  ratioDelta: DisplayValue;
+}
+
+export interface ReportedShortPositionsView {
+  state: 'available' | 'unavailable' | 'not_collected';
+  reports: ReportedShortPositionReportView[];
+  unavailableReasons: string[];
+}
+
+export const REPORTED_SHORT_POSITION_DISCLOSURE_NOTE =
+  'J-Quantsの0.5%以上の公開報告です。未収集・利用不可は、空売り残高0、空売り主体なし、0.5%未満のpositionなし、または買い戻し完了を意味しません。信用売残や市場全体のshort interestとは別データです。';
+
 export interface DashboardViewModel {
   header: {
     ticker: string;
@@ -87,6 +109,7 @@ export interface DashboardViewModel {
     metrics: DashboardMetric[];
     unavailableReasons: string[];
   } | null;
+  reportedShortPositions: ReportedShortPositionsView;
   dataDates: DashboardMetric[];
   scenarios: AnalysisSnapshot['scenarios'];
   risks: AnalysisSnapshot['risks'];
@@ -162,6 +185,19 @@ export function formatMetric(
   return { text, available: true };
 }
 
+function formatRatioDeltaAsPoints(value: number | null): DisplayValue {
+  if (value === null || !Number.isFinite(value)) {
+    return { text: UNAVAILABLE_TEXT, available: false };
+  }
+
+  const formatted = new Intl.NumberFormat('ja-JP', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+    signDisplay: 'exceptZero',
+  }).format(value * 100);
+  return { text: `${formatted} pt`, available: true };
+}
+
 export function displayText(value: string | null | undefined): DisplayValue {
   return value
     ? { text: value, available: true }
@@ -204,6 +240,7 @@ const dataDateLabels = {
   peerComparison: 'Peer比較',
   technical: 'テクニカル',
   advancedTechnical: 'Advanced Technical',
+  reportedShortPositions: '公開空売り残高報告',
   supplyDemand: '需給',
   marketCorrelation: '市場相関',
   strategy: 'Strategy',
@@ -303,6 +340,12 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
     : null;
   const advancedUnits = snapshot.schemaVersion !== 1
     ? snapshot.units.advancedTechnical
+    : null;
+  const reportedShortPositions = snapshot.schemaVersion === 4
+    ? snapshot.reportedShortPositions
+    : null;
+  const reportedShortPositionUnits = snapshot.schemaVersion === 4
+    ? snapshot.units.reportedShortPositions
     : null;
 
   const bars = (snapshot.priceHistory ?? []).flatMap(bar => (
@@ -469,6 +512,42 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
     )),
   } : null;
 
+  const reportedShortPositionsView: ReportedShortPositionsView = {
+    state: snapshot.schemaVersion !== 4 || reportedShortPositions === null
+      ? 'not_collected'
+      : reportedShortPositions.reports.length > 0
+        ? 'available'
+        : 'unavailable',
+    reports: reportedShortPositions && reportedShortPositionUnits
+      ? reportedShortPositions.reports.map(report => ({
+          disclosedDate: displayText(report.disclosedDate),
+          calculatedDate: displayText(report.calculatedDate),
+          reporterName: displayText(report.reporterName),
+          discretionaryManagerName: displayText(report.discretionaryManagerName),
+          fundName: displayText(report.fundName),
+          shortPositionRatio: formatMetric(
+            report.shortPositionRatio,
+            reportedShortPositionUnits.shortPositionRatio,
+            { ratioAsPercent: true },
+          ),
+          shortPositionShares: formatMetric(
+            report.shortPositionShares,
+            reportedShortPositionUnits.shortPositionShares,
+          ),
+          previousCalculatedDate: displayText(report.previousCalculatedDate),
+          previousReportedRatio: formatMetric(
+            report.previousReportedRatio,
+            reportedShortPositionUnits.previousReportedRatio,
+            { ratioAsPercent: true },
+          ),
+          ratioDelta: formatRatioDeltaAsPoints(report.ratioDelta),
+        }))
+      : [],
+    unavailableReasons: reportedShortPositions?.unavailable.map(item => (
+      reasonText(item.reason)
+    )) ?? [],
+  };
+
   const dates = snapshot.dataDates;
   const dateEntries: Array<[keyof typeof dataDateLabels, string | null]> = [
     ['identity', dates.identity],
@@ -484,6 +563,12 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
   ];
   if (snapshot.schemaVersion !== 1) {
     dateEntries.push(['advancedTechnical', snapshot.dataDates.advancedTechnical]);
+  }
+  if (snapshot.schemaVersion === 4) {
+    dateEntries.push([
+      'reportedShortPositions',
+      snapshot.dataDates.reportedShortPositions,
+    ]);
   }
 
   return {
@@ -519,6 +604,7 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
     correlations,
     strategy: strategyView,
     advancedTechnical: advancedTechnicalView,
+    reportedShortPositions: reportedShortPositionsView,
     dataDates: dateEntries.map(([key, value]) => ({
       label: dataDateLabels[key],
       value: displayText(value),

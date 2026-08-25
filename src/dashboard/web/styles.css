@@ -102,6 +102,14 @@ button { color: inherit; }
 .priority-line > span:nth-child(2) { margin-left: auto; color: var(--accent); font-family: "SFMono-Regular", Consolas, monospace; }
 .priority-line small { flex-basis: 100%; color: var(--faint); text-align: right; }
 .table-scroll { overflow-x: auto; }
+.disclosure-note { margin: 0 0 18px; color: var(--muted); font-size: 11px; line-height: 1.7; }
+.short-position-table th, .short-position-table td { min-width: 118px; }
+.short-position-table th:nth-child(3), .short-position-table td:nth-child(3),
+.short-position-table th:nth-child(4), .short-position-table td:nth-child(4),
+.short-position-table th:nth-child(5), .short-position-table td:nth-child(5) {
+  min-width: 180px;
+  text-align: left;
+}
 table { width: 100%; border-collapse: collapse; white-space: nowrap; }
 th, td { padding: 11px 12px; border-bottom: 1px solid #202b36; color: #b9c4cf; font: 500 12px/1.3 "SFMono-Regular", Consolas, monospace; text-align: right; }
 thead th { color: var(--faint); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
