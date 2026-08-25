@@ -1340,9 +1340,61 @@ limitations into narrative interpretation.
 
 ### P2-B5 — Sector Short-ratio Evaluation
 
-Evaluate `/markets/short-ratio` separately for actual incremental value, target
-33-sector-code provenance, overlap with Phase 2D, and the risk of presenting a
-sector statistic as a company statistic. It is not automatically implemented.
+Decision: **DEFER**.
+
+`GET /v2/markets/short-ratio` returns daily 33-sector selling-turnover components
+in JPY: non-short selling, short selling with price restrictions, and short selling
+without price restrictions. Despite the endpoint name, it is a sector-level trading
+flow source, not an issuer position source and not an outstanding-balance source.
+It must never be presented as an individual company's short position, combined with
+issuer-level `ReportedShortPosition[]`, or relabeled as weekly margin interest.
+
+The source can add sector-wide short-selling-flow context: it can help distinguish a
+broad sector move from an issuer-specific public report. That context has limited
+standalone value for the current individual-stock analysis, however. A single daily
+sector value has no supplied historical baseline, contains credit-margin short sales
+as part of the sector total, and cannot support a company-level claim. Meaningful use
+would require comparison with historical sector observations and preferably the
+corresponding sector index, which overlaps the unimplemented Phase 2D Sector Indices
+tranche. Adding a persisted result now would also require Snapshot V5.
+
+The current runtime has no authoritative ticker-to-`S33` resolution path. A future
+re-evaluation must source the security's 33-sector code from J-Quants equity master
+data at the applicable as-of boundary. Do not derive it by fuzzy-matching the EDINET
+sector name or by treating a current classification as historical fact.
+
+The endpoint requires Standard plan or higher. The current plan table provides up to
+10 years on Standard and all available source history on Premium.
+`Date` is the trading/aggregation date, not proof that the row was already available
+at every point during that date. Historical use must select only rows known to have
+been published by the analysis as-of boundary, must not forward-fill a non-trading or
+missing date, and must not use a future sector classification. The official endpoint
+notes that non-trading dates return empty data and that no data exists for the
+2020-10-01 exchange outage; neither case is a zero observation.
+
+Source amounts use `JPY`. If revisited, any displayed ratio would require a narrow
+deterministic calculation from the three source values:
+
+```text
+totalSellingValue = nonShortSellingValue
+                  + restrictedShortSellingValue
+                  + unrestrictedShortSellingValue
+
+shortSellingRatio = (restrictedShortSellingValue
+                   + unrestrictedShortSellingValue)
+                  / totalSellingValue
+```
+
+A zero denominator, invalid source value, unresolved sector, or empty response must
+remain typed unavailable. An empty response means only that no sector row was
+obtained for the requested source boundary; it is not zero short selling. Do not add
+thresholds, squeeze labels, Buy/Sell signals, cross-sector aggregation, or inferred
+issuer values.
+
+No source tool, deterministic engine, Snapshot field, Dashboard component, or
+comprehensive-analysis instruction is added by P2-B5. Reconsider the source only
+after Phase 2D establishes a concrete sector-context consumer and the publication
+availability boundary is fixed.
 
 ### Phase 2B Sequence
 

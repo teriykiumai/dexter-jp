@@ -536,8 +536,9 @@ Phase 2E — Advanced Dividend Analysis
 Phase 2F — Shikori / Volume Profile / POC / VAH / VAL
 ```
 
-Each Phase 2B–2F tranche requires its own detailed plan. Phase 2A is complete on
-current `main`; Phase 2B Short Selling is the active tranche.
+Each Phase 2B–2F tranche requires its own detailed plan. Phase 2A is complete;
+Phase 2B implementation through P2-B4 is complete and P2-B5 is deferred after
+evaluation. A later tranche must begin with its own detailed plan.
 
 The Phase 2A sequence below is retained as implemented historical context.
 
@@ -791,6 +792,20 @@ GET /v2/markets/short-sale-report
 It publishes reports for short-position ratios of 0.5% or more.
 
 The 33-sector `/markets/short-ratio` endpoint is deferred to P2-B5 evaluation.
+
+P2-B5 has now been evaluated with decision **DEFER**. The endpoint supplies daily
+33-sector selling-turnover components in JPY, not issuer-level short positions or
+outstanding balances. It can provide sector-wide short-selling-flow context, but a
+standalone daily value does not justify Snapshot V5 or a new Dashboard section before
+Phase 2D supplies a concrete sector-index/history consumer.
+
+Future re-evaluation must resolve `S33` from authoritative J-Quants equity-master
+data at the analysis as-of boundary, preserve the distinction between trading date
+and information availability, and treat empty/non-trading responses as unavailable
+rather than zero. Any sector short-selling ratio must be calculated deterministically
+from the three source turnover values. Never attribute the sector result to the
+issuer, combine it with `ReportedShortPosition[]` or margin interest, or derive a
+threshold, squeeze classification, or Buy/Sell signal.
 
 ### No-look-ahead
 
