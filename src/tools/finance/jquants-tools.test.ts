@@ -30,6 +30,12 @@ afterEach(() => {
 });
 
 describe('J-Quants finance tools', () => {
+  test('preserves short-sale source semantics in the tool description', () => {
+    expect(getShortSaleReports.description).toContain('0.5%');
+    expect(getShortSaleReports.description).toContain('does not mean that the short position is zero');
+    expect(getShortSaleReports.description).toContain('get_margin_data');
+  });
+
   test('maps 7203 adjusted OHLCV data', async () => {
     process.env.JQUANTS_API_KEY = 'test-key';
     let requestedUrl = '';

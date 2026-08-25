@@ -65,7 +65,7 @@ function nullableSourceString(value: string | null): string | null {
 
 export const getShortSaleReports = new DynamicStructuredTool({
   name: 'get_short_sale_reports',
-  description: 'Fetch source-level public short-position reports for a Japanese equity from J-Quants.',
+  description: SHORT_SALE_REPORT_DESCRIPTION,
   schema: ShortSaleReportInputSchema,
   func: async (input) => {
     const code = await resolveJQuantsCode(input.ticker);
