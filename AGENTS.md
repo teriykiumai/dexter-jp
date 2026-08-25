@@ -1,350 +1,174 @@
-# Repository Guidelines
+# Repository Operating Guide
 
-- Repo: https://github.com/edinetdb/dexter-jp
-- Dexter JP is a CLI-based AI agent for deep financial research on Japanese listed companies, built with TypeScript, pi-tui, and LangChain. Powered by EDINET DB API.
-- This fork extends Dexter JP for a personal, local-only Japanese stock analysis system.
+## Repository and stack
 
-## Project Structure
+- Repository: `teriykiumai/dexter-jp`; upstream: `edinetdb/dexter-jp`.
+- Dexter JP is a Japanese-stock research agent; product scope is defined in
+  `docs/SPEC.md`.
+- Runtime and package manager: Bun.
+- Language: TypeScript ESM in strict mode; React is used by the CLI and local Dashboard.
+- Main code is under `src/`; finance tools are under `src/tools/finance/`, canonical
+  analysis artifacts under `src/analysis/`, Dashboard code under `src/dashboard/`,
+  and built-in skills under `src/skills/`.
+- Local settings and analysis artifacts live under `.dexter/`; credentials belong in
+  `.env` or the existing interactive configuration path and must remain untracked.
 
-- Source code: `src/`
-  - Agent core: `src/agent/` (agent loop, prompts, scratchpad, token counting, types)
-  - CLI interface: `src/cli.ts` (pi-tui), entry point: `src/index.tsx`
-  - Components: `src/components/` (pi-tui UI components)
-  - Controllers: `src/controllers/` (agent runner, model selection, input history)
-  - Model/LLM: `src/model/llm.ts` (multi-provider LLM abstraction)
-  - Tools: `src/tools/` (financial search, web search, browser, skill tool)
-  - Finance tools: `src/tools/finance/` (financials, text-blocks, earnings, shareholders, key-ratios, screening)
-  - Search tools: `src/tools/search/` (Exa, Perplexity, Tavily, LangSearch fallback chain)
-  - Browser: `src/tools/browser/` (Playwright-based web scraping)
-  - Skills: `src/skills/` (SKILL.md-based extensible workflows, e.g. DCF valuation)
-  - Utils: `src/utils/` (env, config, caching, token estimation, markdown tables)
-  - Evals: `src/evals/` (LangSmith evaluation runner with Ink UI)
-- Config: `.dexter/settings.json` (persisted model/provider selection)
-- Environment: `.env` (API keys; see `env.example`)
-- Project docs:
-  - `docs/SPEC.md`
-  - `docs/MVP_IMPLEMENTATION_PLAN.md`
-  - `docs/USER_SETUP.md`
+## Source of Truth
 
-## Build, Test, and Development Commands
+- `AGENTS.md` — repository operating, safety, validation, and Git/PR rules.
+- `docs/SPEC.md` — product scope and invariants, including deterministic calculation,
+  missing-data, no-look-ahead, AI responsibility, and local-use constraints.
+- `docs/MVP_IMPLEMENTATION_PLAN.md` — completed MVP step contracts and baseline.
+- `docs/VISUALIZATION_MVP_PLAN.md` — inherited Phase 1.5 Snapshot, persistence,
+  local API, and Dashboard contracts.
+- The applicable `docs/*_PLAN.md` — the requested phase/step contract, formulas,
+  sequence, source rules, schema evolution, and phase-specific non-goals. Phase 2
+  work uses `docs/PHASE2_PLAN.md`.
+- `docs/REVIEW_POLICY.md` — Implementer/Reviewer responsibilities, severity,
+  re-review, and the Merge Gate.
+- `docs/*_HANDOFF.md` — non-normative context recovery only. A handoff never overrides
+  a source plan, merged code, or tests.
+- `Usage.md` and `docs/USER_SETUP.md` — current user operation and environment setup.
 
-- Runtime: Bun (primary). Use `bun` for all commands.
-- Install deps: `bun install`
+Use repository documents by authority and subject, not merely by recency:
+
+1. `AGENTS.md` controls repository operations and safety.
+2. `docs/SPEC.md` controls product scope and invariant behavior.
+3. The applicable plan controls only its requested phase/step and must preserve
+   inherited contracts unless it explicitly defines an approved versioned change.
+4. Merged code and tests define the current implemented baseline.
+5. Handoff documents summarize context and are never normative.
+
+If an applicable plan appears to conflict with `AGENTS.md`, `docs/SPEC.md`, or an
+inherited merged/tested contract without an explicit migration, do not silently pick
+one. Stop, identify the conflict with evidence, and request direction.
+
+At the start of a task:
+
+1. Read `AGENTS.md` and `docs/SPEC.md`.
+2. Read the requested scope in the applicable plan and any predecessor plan whose
+   contract it inherits.
+3. Use the relevant handoff only to recover context.
+4. Read `docs/REVIEW_POLICY.md` for PR work.
+5. Inspect the current implementation and relevant tests before proposing changes.
+6. Before major edits, state the minimal approach and affected scope.
+
+## Commands
+
+- Install: `bun install`
 - Run: `bun run start` or `bun run src/index.tsx`
-- Dev (watch mode): `bun run dev`
+- Develop: `bun run dev`
+- Test: `bun test`
 - Type-check: `bun run typecheck`
-- Tests: `bun test`
-- Evals: `bun run src/evals/run.ts` (full) or `bun run src/evals/run.ts --sample 10` (sampled)
+- Evals: `bun run src/evals/run.ts` or `bun run src/evals/run.ts --sample 10`
+- Dashboard: `bun run dashboard`
 
-## Coding Style & Conventions
+Use Bun for repository commands unless an applicable plan explicitly requires
+otherwise.
 
-- Language: TypeScript (ESM, strict mode). JSX via React (Ink for CLI rendering).
-- Prefer strict typing; avoid `any`.
-- Keep files concise; extract helpers rather than duplicating code.
-- Add brief comments for tricky or non-obvious logic.
-- Do not add logging unless explicitly asked.
-- Do not create additional README or documentation files unless explicitly asked.
-- Prefer small, reviewable changes.
-- Do not refactor unrelated code.
-- Preserve existing behavior unless the requested task requires a change.
+## Scope and implementation discipline
 
-## LLM Providers
+- Implement only the requested scope from the applicable project plan. Do not
+  opportunistically implement a later step or future phase.
+- Reuse the existing implementation before adding code. Inspect utilities, engines,
+  clients, registries, types, and tests before creating an abstraction.
+- Keep diffs minimal and reviewable. Do not mix unrelated refactors, cleanup,
+  formatting, documentation, or behavioral changes into the task.
+- Preserve existing behavior unless the requested contract explicitly changes it.
+- Keep upstream updates practical: avoid broad rewrites of upstream files, prefer
+  existing extension points and additive modules, and do not create a parallel
+  architecture without a demonstrated need.
+- Do not create new README or documentation files, add logging, or perform unrelated
+  cleanup unless explicitly requested.
 
-- Supported: OpenAI (default), Anthropic, Google, xAI (Grok), Moonshot, DeepSeek, OpenRouter, Ollama (local), Claude Agent SDK.
-- Default model: `gpt-5.6-terra`.
-- Provider detection is prefix-based (`claude-` -> Anthropic, `gemini-` -> Google, etc.).
-- Fast models for lightweight tasks: see provider `fastModel` values in `src/providers.ts`.
-- Users switch providers/models via `/model` command in the CLI.
-- LLM task profiles are provider-neutral orchestration intent: `deep_analysis`, `balanced`, and `fast_structured`.
-- An omitted task profile must preserve the selected model and legacy provider behavior without adding reasoning parameters.
-- Resolve a task profile once at the LLM boundary. `fastModel` selection belongs only to the central runtime resolver; call sites must not route to it manually.
-- Standard Agent streaming and blocking fallback must share the same immutable resolved runtime for each model turn.
+Product calculation, data-integrity, historical-analysis, AI-output, Entry/Stop/
+Target, and deployment invariants are defined in `docs/SPEC.md`. Formula-, source-,
+Snapshot-, and presentation-specific rules belong to the applicable plan; do not
+duplicate or weaken them in implementation.
 
-## Tools
+## TypeScript and error handling
 
-- `get_financials`: meta-tool for all financial data queries (financials, metrics, earnings, analysis). Routes to sub-tools internally.
-- `read_filings`: reads text from annual securities reports (有価証券報告書) and shareholder data.
-- `company_screener`: screens ~3,800 Japanese listed companies by 100+ financial metrics.
-- `web_search`: general web search with a configurable fallback chain across available Exa, Perplexity, Tavily, and LangSearch keys.
-- `browser`: Playwright-based web scraping for reading pages the agent discovers.
-- `skill`: invokes SKILL.md-defined workflows (e.g. DCF valuation).
-- Tool registry: `src/tools/registry.ts`. Tools are conditionally included based on env vars.
+- Use TypeScript ESM and strict typing; avoid `any`.
+- Keep files concise and extract helpers only when that reduces real duplication.
+- Prefer pure functions for deterministic non-I/O logic.
+- Add brief comments for non-obvious decisions, not narration of straightforward code.
+- Prefer explicit, useful errors. Do not swallow failures, fabricate successful
+  defaults, or mask parsing/source failures as valid financial results.
+- For EDINET DB, J-Quants, or another external API, inspect existing clients and
+  authentication first, reuse existing authentication/error conventions, and verify
+  the current official specification. Never guess endpoint fields, availability, or
+  plan behavior.
 
-## Financial Data Source
+## Dependencies and runtimes
 
-- **EDINET DB API** (edinetdb.jp): Structured financial data from ~3,800 Japanese listed companies
-- Data sourced from EDINET annual securities reports (有価証券報告書) and TDNet earnings disclosures (決算短信)
-- Coverage: up to 6 fiscal years, 100+ screening metrics, full report text, AI analysis
-- Note: Stock price data is NOT available from EDINET DB; complement with J-Quants or other supported providers.
+- Do not add dependencies by default. Prefer the TypeScript/JavaScript standard
+  library and already-installed packages.
+- Add a dependency only when the requested scope genuinely requires it; explain the
+  need and wait for any required authorization before changing package files.
+- Do not introduce Python, another runtime, a framework, or infrastructure merely for
+  convenience when Bun/TypeScript and the current architecture suffice.
 
-## Skills
+## Secrets and local data
 
-- Skills live as `SKILL.md` files with YAML frontmatter (`name`, `description`) and markdown body (instructions).
-- Built-in skills: `src/skills/dcf/SKILL.md` (adapted for Japanese market: JGB rates, JPY, TSE PBR context).
-- Discovery: `src/skills/registry.ts` scans for SKILL.md files at startup.
+- Never commit or expose `.env`, real API keys, tokens, credentials, or secret-bearing
+  local configuration.
+- Never include secrets in logs, errors, Snapshot data, HTTP responses, Browser
+  bundles, fixtures, PR text, or test output.
+- Preserve existing gitignore, local-only storage, path-containment, identity, and
+  secret-filtering protections when working near them.
 
-## Environment Variables
+## Tests and validation
 
-- LLM keys: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `XAI_API_KEY`, `MOONSHOT_API_KEY`, `DEEPSEEK_API_KEY`, `OPENROUTER_API_KEY`
-- Ollama: `OLLAMA_BASE_URL` (default `http://127.0.0.1:11434`)
-- Finance: `EDINETDB_API_KEY`
-- J-Quants: `JQUANTS_API_KEY`
-- Search: `EXASEARCH_API_KEY` (preferred), `TAVILY_API_KEY` (fallback)
-- Tracing: `LANGSMITH_API_KEY`, `LANGSMITH_ENDPOINT`, `LANGSMITH_PROJECT`, `LANGSMITH_TRACING`
-- Never commit `.env` files or real API keys.
-
-## Version & Release
-
-- Version format: SemVer.
-- Do not push or publish without user confirmation.
-
-## Testing
-
-- Framework: Bun's built-in test runner (primary), Jest config exists for legacy compatibility.
-- Tests colocated as `*.test.ts`.
-- Run `bun test` before pushing when you touch logic.
-- Add tests for non-trivial financial and statistical calculations.
-- At minimum, cover:
-  - normal case
-  - insufficient history
-  - missing data where applicable
-  - zero denominator where applicable
-  - relevant boundary cases
-- If a baseline test already fails before the current change, report it clearly instead of hiding it.
-
-## Security
-
-- API keys stored in `.env` (gitignored). Users can also enter keys interactively via the CLI.
-- Config stored in `.dexter/settings.json` (gitignored).
-- Never commit or expose real API keys, tokens, or credentials.
-- Do not expose API keys in logs or error messages.
-
-# Project Development Rules
-
-This repository extends `edinetdb/dexter-jp` for a personal, local-only Japanese stock analysis system.
-
-These rules apply to all implementation work unless a task explicitly says otherwise.
-
-## 1. Core principle
-
-> Reuse before build.
-
-Inspect the existing implementation before writing new code.
-
-Do not reimplement functionality that already exists in Dexter JP.
-
-## 2. Scope discipline
-
-- Implement only the requested Step from `docs/MVP_IMPLEMENTATION_PLAN.md`.
-- Do not opportunistically implement future Steps.
-- Do not refactor unrelated code.
-- Keep diffs minimal.
-- Prefer small, reviewable changes.
-- Preserve existing behavior unless the requested Step requires a change.
-
-## 3. Upstream compatibility
-
-The project should remain easy to update from:
+- Use Bun's test runner and colocated `*.test.ts` files unless the existing area has a
+  different established convention.
+- Add meaningful tests for changed behavior. Non-trivial deterministic financial or
+  statistical calculations require unit tests covering the applicable normal,
+  insufficient/missing, zero-denominator, invalid, and boundary cases.
+- Reuse existing regression tests and avoid tests that only inflate coverage or lock
+  incidental implementation details.
+- Run the relevant focused tests while working. Before publishing a PR, run the
+  task-required validation; unless a narrower task says otherwise, this includes:
 
 ```text
-edinetdb/dexter-jp
+bun test
+bun run typecheck
+git diff --check
 ```
 
-Therefore:
+- Never claim a command passed if it was not run. Report unavailable validation and
+  its risk.
+- If a baseline test already fails, report it clearly. Do not hide it, rewrite the
+  test, or attribute it to the current change without evidence.
+- Before committing, inspect the complete diff and stage only in-scope files.
 
-- Avoid large rewrites of upstream files.
-- Prefer additive modules where appropriate.
-- Reuse existing registries, tools, types, and conventions.
-- Do not introduce a parallel architecture without a clear need.
+## Git, pull requests, and review
 
-## 4. Dependencies
+- Follow `docs/REVIEW_POLICY.md`; do not restate or redefine its severity levels or
+  Merge Gate here.
+- As Implementer, complete required validation before marking a PR Ready for review,
+  address findings on the same PR, rerun relevant validation, and respect an
+  independent Reviewer's Merge Gate decision. Do not fix the Reviewer role to a
+  particular human, AI system, product, or agent.
+- Before a dependent step, confirm the preceding PR is merged and update local `main`
+  from `origin/main` with a fast-forward-only pull.
+- Delete a previous local step branch only after confirming it is merged. Never delete
+  a remote branch without explicit user authorization.
+- Create a dedicated branch from updated `main`. For implementation steps, use
+  `feat/<short-scope>-step<number>` unless the task specifies another name.
+- Use a Conventional Commit-style title and keep one clear purpose per PR.
+- Obtain explicit user authorization before pushing, publishing or creating a PR,
+  marking it Ready, releasing, or merging. Never merge a PR yourself without that
+  authorization.
+- Create Draft PRs against `main`, confirm CI runs the required tests/typecheck, and
+  disclose any failure or missing check. Releases use SemVer.
+- After the user merges, fast-forward local `main`; only then remove the merged local
+  branch.
 
-- Do not add new dependencies by default.
-- Prefer TypeScript / JavaScript standard capabilities.
-- Reuse already-installed dependencies when suitable.
-- If a new dependency is genuinely necessary, explain why before adding it.
-- Do not introduce Python or a second runtime for the MVP unless explicitly requested.
+## Completion and report
 
-## 5. Financial calculations
+A task is complete only when the requested behavior or document change exists, the
+appropriate tests and validation pass or baseline failures are disclosed, the diff
+is minimal, and no future scope was implemented.
 
-> Code calculates, AI interprets.
-
-Core financial and statistical calculations must be implemented as deterministic code.
-
-Examples:
-
-- CAGR
-- moving averages
-- ATR
-- RSI / MACD
-- swing detection
-- percentile / Z-score
-- correlation / beta / alpha / R²
-- peer statistics
-- margin statistics
-- risk / reward
-
-Do not rely on an LLM to perform these calculations.
-
-Prefer pure functions for non-I/O calculation logic.
-
-## 6. Data integrity
-
-- Never guess missing financial data.
-- Never silently fabricate or infer API fields.
-- Never silently fill missing market dates.
-- Handle division by zero explicitly.
-- Handle insufficient history explicitly.
-- Preserve source dates / data dates where available.
-- Missing data should produce a clear missing / unavailable state.
-
-## 7. APIs
-
-Do not guess API specifications.
-
-For EDINET DB or J-Quants:
-
-- Inspect existing repository implementation first.
-- Verify current API specifications before adding endpoints if needed.
-- Preserve existing authentication conventions where possible.
-- Return understandable errors for unavailable endpoints or plan restrictions.
-- Do not expose API keys in logs or errors.
-
-## 8. Historical analysis
-
-Prevent look-ahead bias.
-
-For historical or backtest logic:
-
-- Use only data available as of the simulated date.
-- Do not use future filings, future prices, or future revisions.
-- Do not forward-fill information across dates unless explicitly justified.
-
-## 9. AI output rules
-
-The AI may:
-
-- plan research
-- select tools
-- interpret calculated values
-- compare results
-- explain risks
-- synthesize Bull / Base / Bear scenarios
-
-The AI must not:
-
-- invent unavailable data
-- invent Entry / Stop / Target prices
-- substitute narrative reasoning for deterministic calculations
-- hide important data gaps
-
-Entry / Stop / Target values must come from deterministic rules or sourced facts.
-
-## 10. Tests
-
-Add tests for non-trivial calculation logic.
-
-At minimum test:
-
-- normal case
-- insufficient data
-- missing data where applicable
-- zero denominator where applicable
-- relevant boundary cases
-
-Do not add meaningless tests only to increase coverage.
-
-Before finishing a Step:
-
-- run relevant unit tests
-- run typecheck
-- run existing tests appropriate to the change
-
-If a baseline test was already failing before the change, report it clearly instead of hiding it.
-
-## 11. Error handling
-
-Prefer explicit and useful errors.
-
-Do not:
-
-- swallow errors silently
-- return fabricated defaults that look valid
-- mask parser failures as successful financial results
-
-## 12. Project usage constraints
-
-This project is:
-
-- personal-use only
-- local-execution only
-- single-user
-
-MVP does not require:
-
-- public web deployment
-- multi-user auth
-- billing
-- cloud infrastructure
-- external public APIs
-- Docker
-- database servers
-
-Do not build infrastructure for these non-goals.
-
-## 13. Codex workflow
-
-For each Step:
-
-1. Read this file.
-2. Read `docs/SPEC.md`.
-3. Read the requested Step in `docs/MVP_IMPLEMENTATION_PLAN.md`.
-4. Inspect relevant existing code.
-5. Before major edits, state the minimal implementation approach.
-6. Implement only the Step.
-7. Add / update tests.
-8. Run validation.
-9. Review the diff for unnecessary changes.
-10. Report:
-   - changed files
-   - tests run
-   - results
-   - remaining issues
-
-### Git branch and pull request workflow
-
-Pull request review follows `docs/REVIEW_POLICY.md`, the Single Source of Truth
-for review roles and the Merge Gate. When acting as the Implementer:
-
-- follow the Implementer responsibilities defined in that policy;
-- run the required tests and validation before marking a pull request Ready for review;
-- address review findings on the same pull request and rerun relevant validation;
-- obtain an independent Reviewer's Merge Gate determination before merge;
-- do not assign the Reviewer role to a specific human, AI system, product, or agent by default.
-
-For each implementation Step:
-
-1. Confirm that the previous Step is merged, then update local `main` from `origin/main` with a fast-forward-only pull.
-2. Delete the previous Step's local branch only after confirming that it is merged into `main`.
-3. Create a new branch from the updated `main` using `feat/<short-scope>-step<number>`.
-4. Before committing, inspect the diff and stage only the files that belong to the current Step.
-5. Run the required tests and typecheck before publishing the branch.
-6. Commit, push, and create a draft pull request to `main` only after explicit user authorization for each publishing action.
-7. Use a Conventional Commit-style title that summarizes the Step, for example `feat: add deterministic supply-demand analysis engine`.
-8. Confirm that the pull request CI runs both typecheck and tests. Do not merge the pull request without user approval.
-9. After the user merges the pull request, update local `main` with a fast-forward-only pull and delete the merged local Step branch.
-
-Do not delete remote branches unless the user explicitly requests it.
-
-## 14. Completion standard
-
-A Step is not complete merely because code was written.
-
-It is complete when:
-
-- requested behavior exists
-- tests cover the non-trivial logic
-- typecheck passes, or baseline failures are documented
-- unrelated behavior is unchanged
-- the diff is minimal
-- out-of-scope work was not added
+Report the changed files, validation commands and results, and any remaining issue or
+risk.
