@@ -14,6 +14,16 @@ export {
   type InvestorTypeTradingValue,
 } from './investor-type-flows.js';
 export {
+  analyzeInvestorTypeFlows,
+  CORRECTION_AVAILABILITY_START_DATE,
+  INVESTOR_TYPE_FLOW_SECTION,
+  type InvestorTypeCalendarDay,
+  type InvestorTypeFlowPeriod,
+  type InvestorTypeFlowResult,
+  type InvestorTypeFlowUnavailableReason,
+  type UnavailableInvestorTypeFlow,
+} from './investor-type-flow-engine.js';
+export {
   getShortSaleReports,
   SHORT_SALE_REPORT_DESCRIPTION,
   type ShortSaleReportSourceRow,
