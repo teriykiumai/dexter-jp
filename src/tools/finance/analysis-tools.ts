@@ -579,6 +579,13 @@ export const analyzeSectorBenchmarkTool = new DynamicStructuredTool({
       throw new Error('sectorSource analysisAsOfDate must match analysisAsOfDate.');
     }
 
+    if (sectorSource && 'reason' in sectorSource) {
+      return formatToolResult(
+        analyzeSectorBenchmark(stockPrices ?? [], sectorSource),
+        [],
+      );
+    }
+
     if (sectorSource && 'classification' in sectorSource) {
       const issuerCode = toJQuantsSecuritiesCode(ticker);
       if (sectorSource.classification.issuerCode !== issuerCode) {

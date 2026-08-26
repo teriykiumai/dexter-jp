@@ -451,6 +451,38 @@ describe('deterministic analysis tools', () => {
     expect(actual).toEqual(analyzeSectorBenchmark(stockPrices, sectorSource));
   });
 
+  test('short-circuits supplied sector source unavailability without fetching stock', async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCount = 0;
+    globalThis.fetch = (async () => {
+      fetchCount += 1;
+      throw new Error('Unexpected fetch');
+    }) as unknown as typeof fetch;
+
+    try {
+      for (const reason of [
+        'sector_classification_unavailable',
+        'unsupported_sector',
+        'no_sector_index_data',
+      ] as const) {
+        const sectorSource = {
+          analysisAsOfDate: '2026-08-20',
+          reason,
+        };
+        const actual = toolData(await analyzeSectorBenchmarkTool.invoke({
+          ticker: '7203',
+          analysisAsOfDate: sectorSource.analysisAsOfDate,
+          sectorSource,
+        }));
+
+        expect(actual).toEqual(analyzeSectorBenchmark([], sectorSource));
+      }
+      expect(fetchCount).toBe(0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('rejects supplied sector source data for a different issuer', async () => {
     const stockPrices = dates(21).map((date, index) => ({ date, close: 100 + index }));
     const analysisAsOfDate = dates(21).at(-1)!;
