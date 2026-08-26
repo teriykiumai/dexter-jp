@@ -972,7 +972,10 @@ beta, annualized alpha, R-squared, volatility, excess-return, insufficient-histo
 and zero-variance contracts. Filter all source rows to `Date <= analysisAsOfDate`
 before validation/alignment and never forward-fill. Preserve the existing TOPIX public
 result and exact values; use a narrow shared calculation core rather than a duplicate
-Engine or an arbitrary benchmark framework.
+Engine or an arbitrary benchmark framework. Fix benchmark identity to the single S33
+resolved at `analysisAsOfDate` and use its one sector index across every 20/60/250
+lookback window. A sector change inside a lookback does not trigger index stitching
+and does not imply that the issuer belonged to the as-of sector for the whole window.
 
 The eventual structured result preserves `analysisAsOfDate`, sector code/name,
 index code, `classificationDate`, data date, existing metric windows, typed top-level

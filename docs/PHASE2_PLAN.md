@@ -1880,6 +1880,15 @@ Treat TOPIX and the selected sector price index as separate benchmark identities
 the same deterministic calculation semantics. Preserve the existing TOPIX public
 contract and all existing 20/60/250-window results.
 
+Resolve the sector benchmark identity once from the issuer's `S33` at
+`analysisAsOfDate`, and fix that one sector price index for the full 20-, 60-, and
+250-return lookback windows. This is a historical comparison with the sector selected
+at the analysis as-of boundary; it does not claim that the issuer belonged to that
+sector throughout every lookback window. If the issuer changed sectors during a
+window, do not stitch multiple sector indices or switch benchmark identity inside the
+calculation. The existing rule against applying current classification to an earlier
+historical `analysisAsOfDate` remains unchanged.
+
 The initial sector comparison reuses:
 
 - stock adjusted closes and official sector-index closes in strict chronological order
@@ -2010,8 +2019,9 @@ fallback rejection, plan errors, and source non-mutation.
 P2-D2 reuses the market-correlation calculation core without changing TOPIX results.
 Tests cover 20/60/250 boundaries, exact latest aligned windows, future exclusion,
 inner join/no forward fill, non-trading and invalid rows, zero variance, input
-non-mutation, stable results when older history is prepended, and exact TOPIX
-regression.
+non-mutation, stable results when older history is prepended, a sector change inside
+the lookback still using the single as-of sector index for every window without
+stitching, and exact TOPIX regression.
 
 P2-D3 exposes one structured result without duplicate price/master fetches and adds
 the minimum Snapshot V6. V1-V5 remain immutable/readable, new saves become V6, old
