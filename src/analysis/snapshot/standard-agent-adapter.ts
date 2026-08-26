@@ -16,15 +16,16 @@ import {
   PeerComparisonResultSchema,
   PriceHistorySchema,
   ReportedShortPositionResultSchema,
+  SectorBenchmarkResultSchema,
   StrategyResultSchema,
   SupplyDemandResultV3Schema,
   TechnicalResultSchema,
   normalizeCanonicalTicker,
-  type AnalysisSnapshotV5,
+  type AnalysisSnapshotV6,
   type AnalysisSnapshotInput,
   type CompanyIdentity,
   type FundamentalSnapshot,
-  type SnapshotUnavailableV5,
+  type SnapshotUnavailableV6,
 } from './schema.js';
 
 const trackedToolNames = [
@@ -39,6 +40,7 @@ const trackedToolNames = [
   'analyze_investor_type_flows',
   'analyze_peer_comparison',
   'analyze_market_correlation',
+  'analyze_sector_benchmark',
   'analyze_strategy',
 ] as const;
 
@@ -71,6 +73,10 @@ const startArgsSchemas: Record<TrackedToolName, z.ZodType<Record<string, unknown
     candidates: z.array(peerCompanyMarketCapArgsSchema),
   }).passthrough(),
   analyze_market_correlation: tickerArgsSchema,
+  analyze_sector_benchmark: z.object({
+    ticker: z.string().min(1),
+    analysisAsOfDate: z.string().min(1),
+  }).passthrough(),
   analyze_strategy: tickerArgsSchema,
 };
 
@@ -191,6 +197,7 @@ export class StandardAgentSnapshotCollector {
   private reportedShortPositions: AnalysisSnapshotInput['reportedShortPositions'] = null;
   private investorTypeFlows: AnalysisSnapshotInput['investorTypeFlows'] = null;
   private marketCorrelation: AnalysisSnapshotInput['marketCorrelation'] = null;
+  private sectorBenchmark: AnalysisSnapshotInput['sectorBenchmark'] = null;
   private strategy: AnalysisSnapshotInput['strategy'] = null;
   private priceHistory: AnalysisSnapshotInput['priceHistory'] = null;
   private priceSourceUrls: string[] = [];
@@ -205,7 +212,8 @@ export class StandardAgentSnapshotCollector {
   private investorTypeCalendarUsesDirectJQuants = false;
   private correlationStockUsesDirectJQuants = false;
   private correlationBenchmarkUsesDirectJQuants = false;
-  private readonly additionalUnavailable: SnapshotUnavailableV5[] = [];
+  private sectorBenchmarkStockUsesDirectJQuants = false;
+  private readonly additionalUnavailable: SnapshotUnavailableV6[] = [];
 
   get canonicalTicker(): string | null {
     return this.identity?.canonicalTicker ?? null;
@@ -271,7 +279,7 @@ export class StandardAgentSnapshotCollector {
     if (event.toolCallId) this.pendingCalls.delete(event.toolCallId);
   }
 
-  finalize(finalReportMarkdown: string, generatedAt = new Date().toISOString()): AnalysisSnapshotV5 | null {
+  finalize(finalReportMarkdown: string, generatedAt = new Date().toISOString()): AnalysisSnapshotV6 | null {
     if (!this.comprehensiveAnalysisObserved || !this.identity || finalReportMarkdown.length === 0) {
       return null;
     }
@@ -289,6 +297,7 @@ export class StandardAgentSnapshotCollector {
       reportedShortPositions: this.reportedShortPositions,
       investorTypeFlows: this.investorTypeFlows,
       marketCorrelation: this.marketCorrelation,
+      sectorBenchmark: this.sectorBenchmark,
       strategy: this.strategy,
       priceHistory: this.priceHistory,
       scenarios: null,
@@ -320,6 +329,10 @@ export class StandardAgentSnapshotCollector {
         investorTypeFlows: {
           sourceFromJQuants: this.investorTypeFlowsUseDirectJQuants,
           calendarFromJQuants: this.investorTypeCalendarUsesDirectJQuants,
+        },
+        sectorBenchmark: {
+          stockFromJQuants: this.sectorBenchmarkStockUsesDirectJQuants
+            || this.priceHistory !== null,
         },
       },
       additionalUnavailable: this.additionalUnavailable,
@@ -520,6 +533,14 @@ export class StandardAgentSnapshotCollector {
           this.correlationBenchmarkUsesDirectJQuants = !Array.isArray(call.validatedArgs.topixPrices);
         }
         break;
+      case 'analyze_sector_benchmark':
+        if (!this.sectorBenchmark) {
+          this.sectorBenchmark = SectorBenchmarkResultSchema.parse(call.validatedResult);
+          this.sectorBenchmarkStockUsesDirectJQuants = !Array.isArray(
+            call.validatedArgs.stockPrices,
+          );
+        }
+        break;
       case 'analyze_strategy':
         this.strategy ??= StrategyResultSchema.parse(call.validatedResult);
         break;
@@ -530,7 +551,7 @@ export class StandardAgentSnapshotCollector {
     }
   }
 
-  private sectionForTool(tool: TrackedToolName): SnapshotUnavailableV5['section'] {
+  private sectionForTool(tool: TrackedToolName): SnapshotUnavailableV6['section'] {
     switch (tool) {
       case 'get_financials': return 'identity';
       case 'company_screener': return 'peerComparison';
@@ -542,6 +563,7 @@ export class StandardAgentSnapshotCollector {
       case 'analyze_reported_short_positions': return 'reportedShortPositions';
       case 'analyze_investor_type_flows': return 'investorTypeFlows';
       case 'analyze_market_correlation': return 'marketCorrelation';
+      case 'analyze_sector_benchmark': return 'sectorBenchmark';
       case 'analyze_strategy': return 'strategy';
       case 'skill': return 'scenarios';
     }

@@ -13,6 +13,7 @@ describe('SDK comprehensive analysis prompt', () => {
     expect(prompt).toContain('analyze_strategy');
     expect(prompt).toContain('analyze_reported_short_positions');
     expect(prompt).toContain('analyze_investor_type_flows');
+    expect(prompt).toContain('analyze_sector_benchmark');
     expect(prompt).toContain('0.5% or more');
     expect(prompt).toContain('neither total market short interest');
     expect(prompt).toContain('TokyoNagoya');

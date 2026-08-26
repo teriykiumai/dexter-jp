@@ -1,5 +1,6 @@
 import { DynamicStructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
+import { toJQuantsSecuritiesCode } from '../../utils/japanese-securities-code.js';
 import { formatToolResult } from '../types.js';
 import { analyzeAdvancedTechnical } from './advanced-technical-engine.js';
 import { analyzeFinancialMetrics } from './financial-metrics-engine.js';
@@ -7,6 +8,10 @@ import { analyzeInvestorTypeFlows } from './investor-type-flow-engine.js';
 import { analyzeMarketCorrelation } from './market-correlation-engine.js';
 import { analyzePeerComparison } from './peer-comparison-engine.js';
 import { analyzeReportedShortPositions } from './reported-short-position-engine.js';
+import {
+  analyzeSectorBenchmark,
+  type SectorBenchmarkInput,
+} from './sector-benchmark-engine.js';
 import { analyzeStrategy } from './strategy-engine.js';
 import { analyzeSupplyDemand } from './supply-demand-engine.js';
 import { analyzeTechnical } from './technical-engine.js';
@@ -14,6 +19,12 @@ import { getMarginData } from './margin-data.js';
 import { getInvestorTypeFlows } from './investor-type-flows.js';
 import { jquantsGetAll } from './jquants-client.js';
 import { getShortSaleReports } from './short-sale-report.js';
+import {
+  getSectorIndex,
+  SECTOR_INDEX_CODE_BY_S33,
+  type Sector33Code,
+  type SectorIndexCode,
+} from './sector-index.js';
 import { getStockPrice } from './stock-price.js';
 import { getTopix } from './topix.js';
 
@@ -126,6 +137,46 @@ const marketPricePointSchema = z.object({
   close: nullableNumber,
 });
 
+const sectorIndexCodes = new Set<string>(Object.values(SECTOR_INDEX_CODE_BY_S33));
+const sector33CodeSchema = z.custom<Sector33Code>((value) => (
+  typeof value === 'string' && Object.hasOwn(SECTOR_INDEX_CODE_BY_S33, value)
+));
+const sectorIndexCodeSchema = z.custom<SectorIndexCode>((value) => (
+  typeof value === 'string' && sectorIndexCodes.has(value)
+));
+const sectorIndexUnavailableReasonSchema = z.enum([
+  'sector_classification_unavailable',
+  'unsupported_sector',
+  'no_sector_index_data',
+]);
+const sectorIndexPriceSourceRowSchema = z.object({
+  date: z.string(),
+  indexCode: sectorIndexCodeSchema,
+  open: nullableNumber,
+  high: nullableNumber,
+  low: nullableNumber,
+  close: nullableNumber,
+});
+const sectorIndexSourceResultSchema = z.object({
+  analysisAsOfDate: z.string(),
+  classification: z.object({
+    issuerCode: z.string(),
+    classificationDate: z.string(),
+    sectorCode: sector33CodeSchema,
+    sectorName: z.string(),
+    indexCode: sectorIndexCodeSchema,
+  }),
+  prices: z.array(sectorIndexPriceSourceRowSchema),
+});
+const unavailableSectorBenchmarkInputSchema = z.object({
+  analysisAsOfDate: z.string(),
+  reason: sectorIndexUnavailableReasonSchema,
+});
+const sectorBenchmarkInputSchema = z.union([
+  sectorIndexSourceResultSchema,
+  unavailableSectorBenchmarkInputSchema,
+]);
+
 const strategyTechnicalInputSchema = z.object({
   dataDate: z.string().nullable(),
   latestSwingHigh: nullableNumber,
@@ -214,6 +265,35 @@ function parseInvestorTypeFlows(result: unknown): z.infer<
     typeof error === 'string'
       ? error
       : 'get_investor_type_flows did not return source periods.',
+  );
+}
+
+function parseSectorIndexSource(
+  result: unknown,
+  analysisAsOfDate: string,
+): SectorBenchmarkInput {
+  const parsed = JSON.parse(
+    typeof result === 'string' ? result : JSON.stringify(result),
+  ) as { data?: unknown };
+  const available = sectorIndexSourceResultSchema.safeParse(parsed.data);
+  if (available.success) return available.data;
+
+  const unavailableReason = sectorIndexUnavailableReasonSchema.safeParse(
+    parsed.data && typeof parsed.data === 'object'
+      ? (parsed.data as { reason?: unknown }).reason
+      : undefined,
+  );
+  if (unavailableReason.success) {
+    return { analysisAsOfDate, reason: unavailableReason.data };
+  }
+
+  const error = parsed.data && typeof parsed.data === 'object'
+    ? (parsed.data as { error?: unknown }).error
+    : undefined;
+  throw new Error(
+    typeof error === 'string'
+      ? error
+      : 'get_sector_index did not return a sector-index source result.',
   );
 }
 
@@ -470,6 +550,77 @@ export const analyzeMarketCorrelationTool = new DynamicStructuredTool({
   },
 });
 
+export const ANALYZE_SECTOR_BENCHMARK_DESCRIPTION = `
+Calculate deterministic 20-day, 60-day, and 250-day stock-versus-TSE-33-sector return statistics. The benchmark is the single official sector resolved at analysisAsOfDate; dates are inner-joined without forward fill and sector indices are never stitched across a classification change.
+`.trim();
+
+export const analyzeSectorBenchmarkTool = new DynamicStructuredTool({
+  name: 'analyze_sector_benchmark',
+  description: ANALYZE_SECTOR_BENCHMARK_DESCRIPTION,
+  schema: z.object({
+    ticker: z.string().describe(
+      'Verified target ticker used to resolve or attribute the as-of sector benchmark.',
+    ),
+    analysisAsOfDate: z.string().describe(
+      'Inclusive date-only boundary for classification and price observations.',
+    ),
+    from: z.string().optional().describe(
+      'History start date required when adjusted stock closes must be fetched directly.',
+    ),
+    stockPrices: z.array(marketPricePointSchema).optional().describe(
+      'Optional chronological adjusted stock closes from get_stock_price.',
+    ),
+    sectorSource: sectorBenchmarkInputSchema.optional().describe(
+      'Optional structured output from get_sector_index, including a typed unavailable state.',
+    ),
+  }),
+  func: async ({ ticker, analysisAsOfDate, from, stockPrices, sectorSource }) => {
+    if (sectorSource && sectorSource.analysisAsOfDate !== analysisAsOfDate) {
+      throw new Error('sectorSource analysisAsOfDate must match analysisAsOfDate.');
+    }
+
+    if (sectorSource && 'classification' in sectorSource) {
+      const issuerCode = toJQuantsSecuritiesCode(ticker);
+      if (sectorSource.classification.issuerCode !== issuerCode) {
+        throw new Error('sectorSource issuerCode must match ticker.');
+      }
+    }
+
+    const stockFrom = from;
+    const fetchMissingStockHistory = () => {
+      if (!stockFrom) {
+        throw new Error(
+          'analyze_sector_benchmark requires stockPrices or ticker history from.',
+        );
+      }
+      return fetchStockHistory(ticker, stockFrom, analysisAsOfDate);
+    };
+
+    const sectorFrom = from ?? stockPrices?.at(0)?.date;
+    if (!stockPrices && !sectorSource) {
+      const [fetchedStock, fetchedSector] = await Promise.all([
+        fetchMissingStockHistory(),
+        getSectorIndex.invoke({ ticker, analysisAsOfDate, from: sectorFrom }),
+      ]);
+      stockPrices = fetchedStock.map(({ date, close }) => ({ date, close }));
+      sectorSource = parseSectorIndexSource(fetchedSector, analysisAsOfDate);
+    } else if (!stockPrices) {
+      const fetchedStock = await fetchMissingStockHistory();
+      stockPrices = fetchedStock.map(({ date, close }) => ({ date, close }));
+    } else if (!sectorSource) {
+      sectorSource = parseSectorIndexSource(
+        await getSectorIndex.invoke({ ticker, analysisAsOfDate, from: sectorFrom }),
+        analysisAsOfDate,
+      );
+    }
+
+    if (!stockPrices || !sectorSource) {
+      throw new Error('analyze_sector_benchmark could not resolve complete inputs.');
+    }
+    return formatToolResult(analyzeSectorBenchmark(stockPrices, sectorSource), []);
+  },
+});
+
 export const ANALYZE_STRATEGY_DESCRIPTION = `
 Generate deterministic long Entry, Stop, Target, risk, reward, and reward/risk candidates from analyze_technical output. Tick size and resistance levels are optional sourced inputs only; never infer them when unavailable. Without a sourced tick size, return only the strictly-above trigger and do not claim an exact entry or 2R target.
 `.trim();
@@ -528,5 +679,6 @@ export const deterministicAnalysisTools = [
   analyzeInvestorTypeFlowsTool,
   analyzePeerComparisonTool,
   analyzeMarketCorrelationTool,
+  analyzeSectorBenchmarkTool,
   analyzeStrategyTool,
 ] as const;

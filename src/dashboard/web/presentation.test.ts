@@ -4,6 +4,7 @@ import {
   AnalysisSnapshotV2Schema,
   AnalysisSnapshotV3Schema,
   AnalysisSnapshotV4Schema,
+  AnalysisSnapshotV5Schema,
   buildAnalysisSnapshot,
   buildAnalysisSnapshotLatestItem,
   type AnalysisSnapshot,
@@ -11,6 +12,7 @@ import {
   type AnalysisSnapshotV3,
   type AnalysisSnapshotV4,
   type AnalysisSnapshotV5,
+  type AnalysisSnapshotV6,
   type AnalysisSnapshotInput,
 } from '../../analysis/snapshot/index.js';
 import {
@@ -27,7 +29,7 @@ import {
   sortWatchlistItems,
 } from './presentation.js';
 
-function v5Snapshot(): AnalysisSnapshotV5 {
+function v6Snapshot(): AnalysisSnapshotV6 {
   const input: AnalysisSnapshotInput = {
     identity: {
       canonicalTicker: '7203',
@@ -49,6 +51,7 @@ function v5Snapshot(): AnalysisSnapshotV5 {
     reportedShortPositions: null,
     investorTypeFlows: null,
     marketCorrelation: null,
+    sectorBenchmark: null,
     strategy: null,
     priceHistory: null,
     scenarios: null,
@@ -65,10 +68,35 @@ function v5Snapshot(): AnalysisSnapshotV5 {
       marketCorrelation: { stockFromJQuants: false, benchmarkFromJQuants: false },
       reportedShortPositions: { sourceFromJQuants: false },
       investorTypeFlows: { sourceFromJQuants: false, calendarFromJQuants: false },
+      sectorBenchmark: { stockFromJQuants: false },
     },
     additionalUnavailable: [],
   };
   return buildAnalysisSnapshot(input);
+}
+
+function v5Snapshot(): AnalysisSnapshotV5 {
+  const v6 = v6Snapshot();
+  const {
+    sectorBenchmark: _sectorBenchmark,
+    dataDates: v6DataDates,
+    provenance: v6Provenance,
+    units: v6Units,
+    unavailable: v6Unavailable,
+    ...common
+  } = v6;
+  const { sectorBenchmark: _sectorDate, ...dataDates } = v6DataDates;
+  const { sectorBenchmark: _sectorProvenance, ...provenance } = v6Provenance;
+  const { sectorBenchmark: _sectorUnits, ...units } = v6Units;
+
+  return AnalysisSnapshotV5Schema.parse({
+    ...common,
+    schemaVersion: 5,
+    dataDates,
+    provenance,
+    units,
+    unavailable: v6Unavailable.filter(item => item.section !== 'sectorBenchmark'),
+  });
 }
 
 function baseSnapshot(): AnalysisSnapshotV4 {
