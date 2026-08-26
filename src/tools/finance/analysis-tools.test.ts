@@ -6,6 +6,7 @@ import {
   analyzePeerComparison,
   analyzeReportedShortPositions,
   analyzeSectorBenchmark,
+  analyzeSectorShortRatio,
   analyzeStrategy,
   analyzeSupplyDemand,
   analyzeTechnical,
@@ -19,6 +20,7 @@ import {
   analyzePeerComparisonTool,
   analyzeReportedShortPositionsTool,
   analyzeSectorBenchmarkTool,
+  analyzeSectorShortRatioTool,
   analyzeStrategyTool,
   analyzeSupplyDemandTool,
   analyzeTechnicalTool,
@@ -92,6 +94,7 @@ describe('deterministic analysis tools', () => {
       'analyze_peer_comparison',
       'analyze_market_correlation',
       'analyze_sector_benchmark',
+      'analyze_sector_short_ratio',
       'analyze_strategy',
     ]);
     expect(new Set(names).size).toBe(names.length);
@@ -591,6 +594,92 @@ describe('deterministic analysis tools', () => {
         master: 1,
         sectorIndex: 1,
       });
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (previousApiKey === undefined) delete process.env.JQUANTS_API_KEY;
+      else process.env.JQUANTS_API_KEY = previousApiKey;
+    }
+  });
+
+  test('delegates supplied sector short-ratio rows to the deterministic engine without fetching', async () => {
+    const sectorSource = {
+      analysisAsOfDate: '2026-08-20',
+      classification: {
+        classificationDate: '2026-08-20',
+        sectorCode: '3700' as const,
+        sectorName: '輸送用機器',
+      },
+      rows: [{
+        date: '2026-08-20',
+        sectorCode: '3700' as const,
+        nonShortSellingValue: 100,
+        restrictedShortSellingValue: 20,
+        unrestrictedShortSellingValue: 30,
+      }],
+      provenance: {
+        classification: {
+          source: 'jquants' as const,
+          endpoint: '/v2/equities/master' as const,
+        },
+        flow: {
+          source: 'jquants' as const,
+          endpoint: '/v2/markets/short-ratio' as const,
+        },
+      },
+    };
+    let fetchCount = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      fetchCount += 1;
+      throw new Error('Unexpected fetch');
+    }) as unknown as typeof fetch;
+    try {
+      const actual = toolData(await analyzeSectorShortRatioTool.invoke({
+        ticker: '7203',
+        analysisAsOfDate: sectorSource.analysisAsOfDate,
+        sectorSource,
+      }));
+
+      expect(actual).toEqual(analyzeSectorShortRatio(sectorSource));
+      expect(fetchCount).toBe(0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('reuses supplied sector identity and fetches only short-ratio history', async () => {
+    const originalFetch = globalThis.fetch;
+    const previousApiKey = process.env.JQUANTS_API_KEY;
+    process.env.JQUANTS_API_KEY = 'test-jquants-key';
+    const paths: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const href = input instanceof URL
+        ? input.href
+        : typeof input === 'string'
+          ? input
+          : input.url;
+      const url = new URL(href);
+      paths.push(url.pathname);
+      return new Response(JSON.stringify({ data: [{
+        Date: '2026-08-20', S33: '3700', SellExShortVa: 100,
+        ShrtWithResVa: 20, ShrtNoResVa: 30,
+      }] }));
+    }) as typeof fetch;
+
+    try {
+      const actual = toolData(await analyzeSectorShortRatioTool.invoke({
+        ticker: '7203',
+        analysisAsOfDate: '2026-08-20',
+        from: '2026-01-01',
+        classification: {
+          classificationDate: '2026-08-20',
+          sectorCode: '3700',
+          sectorName: '輸送用機器',
+        },
+      })) as { observations: Array<{ shortSellingRatio: number }> };
+
+      expect(paths).toEqual(['/v2/markets/short-ratio']);
+      expect(actual.observations[0]?.shortSellingRatio).toBe(1 / 3);
     } finally {
       globalThis.fetch = originalFetch;
       if (previousApiKey === undefined) delete process.env.JQUANTS_API_KEY;

@@ -16,7 +16,8 @@ export const ANALYSIS_SNAPSHOT_V2_SCHEMA_VERSION = 2 as const;
 export const ANALYSIS_SNAPSHOT_V3_SCHEMA_VERSION = 3 as const;
 export const ANALYSIS_SNAPSHOT_V4_SCHEMA_VERSION = 4 as const;
 export const ANALYSIS_SNAPSHOT_V5_SCHEMA_VERSION = 5 as const;
-export const ANALYSIS_SNAPSHOT_SCHEMA_VERSION = 6 as const;
+export const ANALYSIS_SNAPSHOT_V6_SCHEMA_VERSION = 6 as const;
+export const ANALYSIS_SNAPSHOT_SCHEMA_VERSION = 7 as const;
 
 export const CanonicalTickerSchema = z.string().regex(JAPANESE_SECURITIES_CODE_PATTERN, {
   message: 'canonicalTicker must be a valid four-character Japanese securities code.',
@@ -87,6 +88,11 @@ export const SnapshotSectionV5Schema = z.union([
 export const SnapshotSectionV6Schema = z.union([
   SnapshotSectionV5Schema,
   z.literal('sectorBenchmark'),
+]);
+
+export const SnapshotSectionV7Schema = z.union([
+  SnapshotSectionV6Schema,
+  z.literal('sectorShortRatio'),
 ]);
 
 export const SnapshotProvenanceSchema = z.object({
@@ -172,6 +178,23 @@ export const SnapshotProvenanceRecordV6Schema = SnapshotProvenanceRecordV5Schema
   sectorBenchmark: z.array(SnapshotProvenanceSchema),
 });
 
+export const SectorShortRatioProvenanceSchema = SnapshotProvenanceSchema.extend({
+  source: z.enum(['jquants', 'sector_short_ratio_engine']),
+  role: z.enum(['sector_classification_data', 'sector_short_ratio_data', 'calculation']),
+  endpoint: z.enum([
+    '/v2/equities/master',
+    '/v2/markets/short-ratio',
+  ]).nullable(),
+});
+
+export type SectorShortRatioProvenance = z.infer<
+  typeof SectorShortRatioProvenanceSchema
+>;
+
+export const SnapshotProvenanceRecordV7Schema = SnapshotProvenanceRecordV6Schema.extend({
+  sectorShortRatio: z.array(SectorShortRatioProvenanceSchema),
+});
+
 const unitMap = z.record(z.string().min(1), MetricUnitSchema);
 
 export const SnapshotUnitsSchema = z.object({
@@ -213,6 +236,10 @@ const unitMapV6 = z.record(z.string().min(1), MetricUnitV6Schema);
 
 export const SnapshotUnitsV6Schema = SnapshotUnitsV5Schema.extend({
   sectorBenchmark: unitMapV6,
+});
+
+export const SnapshotUnitsV7Schema = SnapshotUnitsV6Schema.extend({
+  sectorShortRatio: unitMapV6,
 });
 
 export const SnapshotUnavailableSchema = z.object({
@@ -259,7 +286,16 @@ export const SnapshotUnavailableV6Schema = z.object({
 });
 
 export type SnapshotUnavailableV6 = z.infer<typeof SnapshotUnavailableV6Schema>;
-export type SnapshotUnavailable = SnapshotUnavailableV6;
+
+export const SnapshotUnavailableV7Schema = z.object({
+  section: SnapshotSectionV7Schema,
+  metric: z.string().min(1).optional(),
+  reason: z.string().min(1),
+  detail: z.string().min(1).optional(),
+});
+
+export type SnapshotUnavailableV7 = z.infer<typeof SnapshotUnavailableV7Schema>;
+export type SnapshotUnavailable = SnapshotUnavailableV7;
 
 export const CompanyIdentitySchema = z.object({
   canonicalTicker: CanonicalTickerSchema,
@@ -687,6 +723,65 @@ export type SnapshotSectorBenchmarkResult = z.infer<
   typeof SectorBenchmarkResultSchema
 >;
 
+const sectorShortRatioClassificationSchema = z.object({
+  classificationDate: z.string().min(1),
+  sectorCode: z.string().min(1),
+  sectorName: z.string().min(1),
+});
+
+const sectorShortRatioSourceProvenanceSchema = z.object({
+  source: z.literal('jquants'),
+  endpoint: z.literal('/v2/equities/master'),
+}).nullable();
+
+export const SectorShortRatioResultSchema = z.object({
+  analysisAsOfDate: z.string().min(1),
+  sector: sectorShortRatioClassificationSchema.nullable(),
+  dataDate: nullableDate,
+  observations: z.array(z.object({
+    date: z.string().min(1),
+    nonShortSellingValue: nullableFiniteNumber,
+    restrictedShortSellingValue: nullableFiniteNumber,
+    unrestrictedShortSellingValue: nullableFiniteNumber,
+    shortSellingValue: nullableFiniteNumber,
+    totalSellingValue: nullableFiniteNumber,
+    shortSellingRatio: nullableFiniteNumber,
+    unavailable: z.array(z.object({
+      reason: z.enum(['missing_data', 'invalid_data', 'zero_total_selling_value']),
+    })),
+  })),
+  unavailable: z.array(z.object({
+    reason: z.enum([
+      'sector_classification_unavailable',
+      'unsupported_sector',
+      'no_sector_short_ratio_data',
+      'invalid_data',
+    ]),
+  })),
+  provenance: z.object({
+    classification: sectorShortRatioSourceProvenanceSchema,
+    flow: z.object({
+      source: z.literal('jquants'),
+      endpoint: z.literal('/v2/markets/short-ratio'),
+    }).nullable(),
+    calculation: z.object({
+      source: z.literal('sector_short_ratio_engine'),
+    }),
+  }),
+  units: z.object({
+    nonShortSellingValue: z.literal('JPY'),
+    restrictedShortSellingValue: z.literal('JPY'),
+    unrestrictedShortSellingValue: z.literal('JPY'),
+    shortSellingValue: z.literal('JPY'),
+    totalSellingValue: z.literal('JPY'),
+    shortSellingRatio: z.literal('ratio'),
+  }),
+});
+
+export type SnapshotSectorShortRatioResult = z.infer<
+  typeof SectorShortRatioResultSchema
+>;
+
 const strategyEntrySchema = z.object({
   triggerPrice: finiteNumber,
   price: nullableFiniteNumber,
@@ -807,6 +902,10 @@ export const SnapshotDataDatesV6Schema = SnapshotDataDatesV5Schema.extend({
   sectorBenchmark: nullableDate,
 });
 
+export const SnapshotDataDatesV7Schema = SnapshotDataDatesV6Schema.extend({
+  sectorShortRatio: nullableDate,
+});
+
 export const AnalysisSnapshotV1Schema = z.object({
   schemaVersion: z.literal(ANALYSIS_SNAPSHOT_V1_SCHEMA_VERSION),
   status: z.enum(['complete', 'partial']),
@@ -863,12 +962,21 @@ export const AnalysisSnapshotV5Schema = AnalysisSnapshotV4Schema.extend({
 });
 
 export const AnalysisSnapshotV6Schema = AnalysisSnapshotV5Schema.extend({
-  schemaVersion: z.literal(ANALYSIS_SNAPSHOT_SCHEMA_VERSION),
+  schemaVersion: z.literal(ANALYSIS_SNAPSHOT_V6_SCHEMA_VERSION),
   dataDates: SnapshotDataDatesV6Schema,
   provenance: SnapshotProvenanceRecordV6Schema,
   units: SnapshotUnitsV6Schema,
   sectorBenchmark: SectorBenchmarkResultSchema.nullable(),
   unavailable: z.array(SnapshotUnavailableV6Schema),
+});
+
+export const AnalysisSnapshotV7Schema = AnalysisSnapshotV6Schema.extend({
+  schemaVersion: z.literal(ANALYSIS_SNAPSHOT_SCHEMA_VERSION),
+  dataDates: SnapshotDataDatesV7Schema,
+  provenance: SnapshotProvenanceRecordV7Schema,
+  units: SnapshotUnitsV7Schema,
+  sectorShortRatio: SectorShortRatioResultSchema.nullable(),
+  unavailable: z.array(SnapshotUnavailableV7Schema),
 });
 
 export const AnalysisSnapshotSchema = z.discriminatedUnion('schemaVersion', [
@@ -878,6 +986,7 @@ export const AnalysisSnapshotSchema = z.discriminatedUnion('schemaVersion', [
   AnalysisSnapshotV4Schema,
   AnalysisSnapshotV5Schema,
   AnalysisSnapshotV6Schema,
+  AnalysisSnapshotV7Schema,
 ]);
 
 export type AnalysisSnapshotV1 = z.infer<typeof AnalysisSnapshotV1Schema>;
@@ -886,6 +995,7 @@ export type AnalysisSnapshotV3 = z.infer<typeof AnalysisSnapshotV3Schema>;
 export type AnalysisSnapshotV4 = z.infer<typeof AnalysisSnapshotV4Schema>;
 export type AnalysisSnapshotV5 = z.infer<typeof AnalysisSnapshotV5Schema>;
 export type AnalysisSnapshotV6 = z.infer<typeof AnalysisSnapshotV6Schema>;
+export type AnalysisSnapshotV7 = z.infer<typeof AnalysisSnapshotV7Schema>;
 export type AnalysisSnapshot = z.infer<typeof AnalysisSnapshotSchema>;
 
 export const AnalysisSnapshotInputSchema = z.object({
@@ -902,6 +1012,7 @@ export const AnalysisSnapshotInputSchema = z.object({
   investorTypeFlows: InvestorTypeFlowResultSchema.nullable(),
   marketCorrelation: MarketCorrelationResultSchema.nullable(),
   sectorBenchmark: SectorBenchmarkResultSchema.nullable(),
+  sectorShortRatio: SectorShortRatioResultSchema.nullable(),
   strategy: StrategyResultSchema.nullable(),
   priceHistory: PriceHistorySchema.nullable(),
   scenarios: ScenariosSchema.nullable(),
@@ -938,7 +1049,7 @@ export const AnalysisSnapshotInputSchema = z.object({
       stockFromJQuants: z.boolean(),
     }),
   }),
-  additionalUnavailable: z.array(SnapshotUnavailableV6Schema),
+  additionalUnavailable: z.array(SnapshotUnavailableV7Schema),
 });
 
 export type AnalysisSnapshotInput = z.infer<typeof AnalysisSnapshotInputSchema>;

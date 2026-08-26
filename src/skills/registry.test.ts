@@ -53,6 +53,7 @@ describe('comprehensive analysis skill', () => {
       'analyze_peer_comparison',
       'analyze_market_correlation',
       'analyze_sector_benchmark',
+      'analyze_sector_short_ratio',
       'analyze_strategy',
     ]) {
       expect(skill?.instructions).toContain(toolName);
@@ -70,6 +71,7 @@ describe('comprehensive analysis skill', () => {
       '# Investor Type Flows',
       '# Market Correlation',
       '# Sector Benchmark',
+      '# Sector Short-selling Flow',
       '# Entry / Stop / Target',
       '# Bull / Base / Bear',
       '# Risks',
@@ -119,6 +121,16 @@ describe('comprehensive analysis skill', () => {
     expect(skill?.instructions).toContain('do not recalculate or repair');
     expect(skill?.instructions).toContain('Do not derive a sector rank');
     expect(skill?.instructions).toContain('no sector-based investment claim');
+    expect(skill?.instructions).toContain('daily');
+    expect(skill?.instructions).toContain('selling-turnover context');
+    expect(skill?.instructions).toContain("not the analyzed issuer's short position");
+    expect(skill?.instructions).toContain('use only the Engine-provided');
+    expect(skill?.instructions).toContain('do not recalculate or repair them in the LLM');
+    expect(skill?.instructions).toContain('Do not forward-fill');
+    expect(skill?.instructions).toContain('aggregate sectors or dates');
+    expect(skill?.instructions).toContain('squeeze/crowding label');
+    expect(skill?.instructions).toContain('combine this result');
+    expect(skill?.instructions).toContain('make no sector-flow investment claim');
 
     const invoked = await skillTool.invoke({
       skill: 'comprehensive-analysis',

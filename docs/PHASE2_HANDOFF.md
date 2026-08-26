@@ -791,22 +791,19 @@ GET /v2/markets/short-sale-report
 
 It publishes reports for short-position ratios of 0.5% or more.
 
-The 33-sector `/markets/short-ratio` endpoint was deferred to P2-B5 evaluation.
+The 33-sector `/markets/short-ratio` endpoint was initially deferred to P2-B5
+evaluation and approved for implementation as P2-D5 after the Phase 2D sector
+context was established. It supplies daily 33-sector selling-turnover components in
+JPY, not issuer-level short positions or outstanding balances.
 
-P2-B5 was initially deferred and is now **IMPLEMENT LATER** after P2-D0 re-evaluation.
-The endpoint supplies daily
-33-sector selling-turnover components in JPY, not issuer-level short positions or
-outstanding balances. It can provide sector-wide short-selling-flow context, but a
-standalone daily value does not justify a new Snapshot field or Dashboard section
-before Phase 2D supplies the concrete sector-index/history consumer.
-
-Future re-evaluation must resolve `S33` from authoritative J-Quants equity-master
-data at the analysis as-of boundary, preserve the distinction between trading date
-and information availability, and treat empty/non-trading responses as unavailable
-rather than zero. Any sector short-selling ratio must be calculated deterministically
-from the three source turnover values. Never attribute the sector result to the
-issuer, combine it with `ReportedShortPosition[]` or margin interest, or derive a
-threshold, squeeze classification, or Buy/Sell signal.
+P2-D5 resolves `S33` through the authoritative as-of-safe J-Quants equity-master
+boundary, reuses an already resolved identity where available, and treats empty or
+non-trading responses as unavailable rather than zero. Its deterministic Engine
+calculates only daily short-selling value, total-selling value, and their ratio from
+the three source turnover fields. Never attribute the sector result to the issuer,
+combine it with `ReportedShortPosition[]`, margin interest, the sector benchmark, or
+another flow source, or derive a mean, rank, threshold, squeeze/crowding
+classification, score, or Buy/Sell signal.
 
 ### No-look-ahead
 
@@ -977,17 +974,19 @@ resolved at `analysisAsOfDate` and use its one sector index across every 20/60/2
 lookback window. A sector change inside a lookback does not trigger index stitching
 and does not imply that the issuer belonged to the as-of sector for the whole window.
 
-The eventual structured result preserves `analysisAsOfDate`, sector code/name,
+The sector-benchmark structured result preserves `analysisAsOfDate`, sector code/name,
 index code, `classificationDate`, data date, existing metric windows, typed top-level
-unavailability, provenance, and units. P2-D0 does not change Snapshot. Later P2-D3 may
-add the minimum Snapshot V6 while retaining immutable/readable V1-V5 and existing
-complete/partial semantics.
+unavailability, provenance, and units. P2-D3 added Snapshot V6 while retaining
+immutable/readable V1-V5 and existing complete/partial semantics.
 
-P2-B5 is now **IMPLEMENT LATER**, after core sector presentation, because daily sector
-short-selling turnover can add flow context distinct from sector price behavior. It
-must reuse the same S33 resolver and availability boundary in a separate approved step.
-Never combine it with the sector index into a score, attribute it to the issuer, merge
-it with reported short positions or margin balances, or add thresholds/signals.
+P2-D5 adds daily sector short-selling-turnover context distinct from sector price
+behavior. It reuses the same S33 resolver and availability boundary, preserves the
+three nullable JPY source components, and calculates only daily short-selling value,
+total-selling value, and their ratio. Snapshot V7 is the writer while V1-V6 remain
+readable and immutable. Dashboard and comprehensive analysis pass through the
+structured values without issuer attribution, historical aggregation, Browser/LLM
+calculation, cross-source combination, threshold, squeeze/crowding label, score, or
+signal.
 
 The fixed sequence is:
 
@@ -997,7 +996,7 @@ P2-D0 Source / Contract Design
   → P2-D2 deterministic sector benchmark integration
   → P2-D3 Tool exposure + Snapshot V6
   → P2-D4 Dashboard + comprehensive-analysis
-  → P2-D5 sector short-ratio integration (separate approval)
+  → P2-D5 sector short-ratio integration
 ```
 
 P2-D0 is documentation only. See `docs/PHASE2_PLAN.md` for official references,

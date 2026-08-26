@@ -14,6 +14,7 @@ describe('SDK comprehensive analysis prompt', () => {
     expect(prompt).toContain('analyze_reported_short_positions');
     expect(prompt).toContain('analyze_investor_type_flows');
     expect(prompt).toContain('analyze_sector_benchmark');
+    expect(prompt).toContain('analyze_sector_short_ratio');
     expect(prompt).toContain('0.5% or more');
     expect(prompt).toContain('neither total market short interest');
     expect(prompt).toContain('TokyoNagoya');
@@ -27,8 +28,13 @@ describe('SDK comprehensive analysis prompt', () => {
     expect(prompt).toContain('stitch multiple');
     expect(prompt).toContain('sector indices');
     expect(prompt).toContain('no sector-based investment claim');
+    expect(prompt).toContain('selling-turnover context');
+    expect(prompt).toContain("not the analyzed issuer's short position");
+    expect(prompt).toContain('aggregate sectors or dates');
+    expect(prompt).toContain('make no sector-flow investment claim');
     expect(prompt).toContain('# Data Dates');
     expect(prompt).toContain('# Sector Benchmark');
+    expect(prompt).toContain('# Sector Short-selling Flow');
     expect(prompt).toContain('# Bull / Base / Bear');
     expect(prompt).toContain('may not create prices');
   });

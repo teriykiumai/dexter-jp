@@ -53,6 +53,11 @@ export type SectorIndexSourceUnavailableReason =
   | 'unsupported_sector'
   | 'no_sector_index_data';
 
+export type SectorClassificationUnavailableReason = Exclude<
+  SectorIndexSourceUnavailableReason,
+  'no_sector_index_data'
+>;
+
 export interface SectorCalendarDay {
   date: string;
   holidayDivision: string;
@@ -65,6 +70,17 @@ export interface SectorClassificationSource {
   sectorName: string;
   indexCode: SectorIndexCode;
 }
+
+export type SectorClassificationResolution =
+  | {
+      analysisAsOfDate: string;
+      classification: SectorClassificationSource;
+    }
+  | {
+      analysisAsOfDate: string;
+      reason: SectorClassificationUnavailableReason;
+      error: string;
+    };
 
 export interface SectorIndexPriceSourceRow {
   date: string;
@@ -107,7 +123,7 @@ const INPUT_DATE_PATTERN = /^(?:\d{8}|\d{4}-\d{2}-\d{2})$/;
 const BUSINESS_HOLIDAY_DIVISIONS = new Set(['1', '2']);
 const HOLIDAY_DIVISIONS = new Set(['0', '1', '2', '3']);
 
-function normalizeInputDate(value: string, fieldName: string): string {
+export function normalizeSectorSourceDate(value: string, fieldName: string): string {
   if (!INPUT_DATE_PATTERN.test(value)) {
     throw new Error(`${fieldName} must be a valid YYYY-MM-DD or YYYYMMDD date.`);
   }
@@ -297,58 +313,77 @@ function unavailable(reason: SectorIndexSourceUnavailableReason, error: string):
   return formatToolResult({ error, reason }, []);
 }
 
+/** Resolve one issuer's authoritative as-of S33 classification without fetching index data. */
+export async function resolveSectorClassification(
+  ticker: string,
+  analysisAsOfDateInput: string,
+): Promise<SectorClassificationResolution> {
+  const analysisAsOfDate = normalizeSectorSourceDate(
+    analysisAsOfDateInput,
+    'analysisAsOfDate',
+  );
+  if (analysisAsOfDate < SECTOR_INDEX_SOURCE_START_DATE) {
+    return {
+      analysisAsOfDate,
+      reason: 'sector_classification_unavailable',
+      error: `Sector classification is unavailable before ${SECTOR_INDEX_SOURCE_START_DATE}.`,
+    };
+  }
+
+  const issuerCode = await resolveJQuantsCode(ticker);
+  const classificationDate = await fetchClassificationDate(analysisAsOfDate);
+  if (!classificationDate) {
+    return {
+      analysisAsOfDate,
+      reason: 'sector_classification_unavailable',
+      error: `No official classification business date found on or before ${analysisAsOfDate}.`,
+    };
+  }
+
+  const masterRows = await jquantsGetAll<Record<string, unknown>>('/equities/master', {
+    code: issuerCode,
+    date: classificationDate,
+  });
+  const classification = mapClassification(
+    masterRows,
+    issuerCode,
+    classificationDate,
+  );
+  if (classification === null) {
+    return {
+      analysisAsOfDate,
+      reason: 'sector_classification_unavailable',
+      error: `No exact as-of sector classification found for ${ticker}.`,
+    };
+  }
+  if (classification === 'unsupported') {
+    return {
+      analysisAsOfDate,
+      reason: 'unsupported_sector',
+      error: `The as-of S33 classification for ${ticker} has no TSE 33-sector index.`,
+    };
+  }
+  return { analysisAsOfDate, classification };
+}
+
 export const getSectorIndex = new DynamicStructuredTool({
   name: 'get_sector_index',
   description: SECTOR_INDEX_DESCRIPTION,
   schema: SectorIndexInputSchema,
   func: async (input) => {
-    const analysisAsOfDate = normalizeInputDate(
+    const analysisAsOfDate = normalizeSectorSourceDate(
       input.analysisAsOfDate,
       'analysisAsOfDate',
     );
     const from = input.from === undefined
       ? undefined
-      : normalizeInputDate(input.from, 'from');
-    if (analysisAsOfDate < SECTOR_INDEX_SOURCE_START_DATE) {
-      return unavailable(
-        'sector_classification_unavailable',
-        `Sector classification is unavailable before ${SECTOR_INDEX_SOURCE_START_DATE}.`,
-      );
-    }
+      : normalizeSectorSourceDate(input.from, 'from');
     if (from !== undefined && from > analysisAsOfDate) {
       throw new Error('from must be on or before analysisAsOfDate.');
     }
-
-    const issuerCode = await resolveJQuantsCode(input.ticker);
-    const classificationDate = await fetchClassificationDate(analysisAsOfDate);
-    if (!classificationDate) {
-      return unavailable(
-        'sector_classification_unavailable',
-        `No official classification business date found on or before ${analysisAsOfDate}.`,
-      );
-    }
-
-    const masterRows = await jquantsGetAll<Record<string, unknown>>('/equities/master', {
-      code: issuerCode,
-      date: classificationDate,
-    });
-    const classification = mapClassification(
-      masterRows,
-      issuerCode,
-      classificationDate,
-    );
-    if (classification === null) {
-      return unavailable(
-        'sector_classification_unavailable',
-        `No exact as-of sector classification found for ${input.ticker}.`,
-      );
-    }
-    if (classification === 'unsupported') {
-      return unavailable(
-        'unsupported_sector',
-        `The as-of S33 classification for ${input.ticker} has no TSE 33-sector index.`,
-      );
-    }
+    const resolution = await resolveSectorClassification(input.ticker, analysisAsOfDate);
+    if ('reason' in resolution) return unavailable(resolution.reason, resolution.error);
+    const { classification } = resolution;
 
     const indexRows = await jquantsGetAll<Record<string, unknown>>('/indices/bars/daily', {
       code: classification.indexCode,

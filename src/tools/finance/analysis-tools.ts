@@ -12,6 +12,7 @@ import {
   analyzeSectorBenchmark,
   type SectorBenchmarkInput,
 } from './sector-benchmark-engine.js';
+import { analyzeSectorShortRatio } from './sector-short-ratio-engine.js';
 import { analyzeStrategy } from './strategy-engine.js';
 import { analyzeSupplyDemand } from './supply-demand-engine.js';
 import { analyzeTechnical } from './technical-engine.js';
@@ -25,6 +26,10 @@ import {
   type Sector33Code,
   type SectorIndexCode,
 } from './sector-index.js';
+import {
+  fetchSectorShortRatioSource,
+  type SectorShortRatioSource,
+} from './sector-short-ratio.js';
 import { getStockPrice } from './stock-price.js';
 import { getTopix } from './topix.js';
 
@@ -175,6 +180,51 @@ const unavailableSectorBenchmarkInputSchema = z.object({
 const sectorBenchmarkInputSchema = z.union([
   sectorIndexSourceResultSchema,
   unavailableSectorBenchmarkInputSchema,
+]);
+
+const sectorShortRatioClassificationSchema = z.object({
+  classificationDate: z.string(),
+  sectorCode: sector33CodeSchema,
+  sectorName: z.string(),
+});
+const sectorShortRatioSourceRowSchema = z.object({
+  date: z.string(),
+  sectorCode: sector33CodeSchema,
+  nonShortSellingValue: nullableNumber,
+  restrictedShortSellingValue: nullableNumber,
+  unrestrictedShortSellingValue: nullableNumber,
+});
+const sectorShortRatioProvenanceSchema = z.object({
+  classification: z.object({
+    source: z.literal('jquants'),
+    endpoint: z.literal('/v2/equities/master'),
+  }).nullable(),
+  flow: z.object({
+    source: z.literal('jquants'),
+    endpoint: z.literal('/v2/markets/short-ratio'),
+  }).nullable(),
+});
+const sectorShortRatioSourceSchema = z.union([
+  z.object({
+    analysisAsOfDate: z.string(),
+    classification: sectorShortRatioClassificationSchema,
+    rows: z.array(sectorShortRatioSourceRowSchema),
+    provenance: sectorShortRatioProvenanceSchema.extend({
+      classification: sectorShortRatioProvenanceSchema.shape.classification.unwrap(),
+      flow: sectorShortRatioProvenanceSchema.shape.flow.unwrap(),
+    }),
+  }),
+  z.object({
+    analysisAsOfDate: z.string(),
+    classification: sectorShortRatioClassificationSchema.nullable(),
+    reason: z.enum([
+      'sector_classification_unavailable',
+      'unsupported_sector',
+      'no_sector_short_ratio_data',
+    ]),
+    error: z.string(),
+    provenance: sectorShortRatioProvenanceSchema,
+  }),
 ]);
 
 const strategyTechnicalInputSchema = z.object({
@@ -628,6 +678,52 @@ export const analyzeSectorBenchmarkTool = new DynamicStructuredTool({
   },
 });
 
+export const ANALYZE_SECTOR_SHORT_RATIO_DESCRIPTION = `
+Calculate the daily TSE 33-sector short-selling turnover total and ratio from the three official J-Quants JPY source values. This is sector-wide flow context, not an issuer position. Source observations remain separate with no forward fill, aggregation across sectors, baseline statistic, threshold, squeeze label, score, or signal.
+`.trim();
+
+export const analyzeSectorShortRatioTool = new DynamicStructuredTool({
+  name: 'analyze_sector_short_ratio',
+  description: ANALYZE_SECTOR_SHORT_RATIO_DESCRIPTION,
+  schema: z.object({
+    ticker: z.string().describe(
+      'Verified target ticker used only to resolve or attribute the as-of sector context.',
+    ),
+    analysisAsOfDate: z.string().describe(
+      'Inclusive date-only end-of-day eligibility boundary.',
+    ),
+    from: z.string().optional().describe(
+      'History start date required when source rows must be fetched directly.',
+    ),
+    classification: sectorShortRatioClassificationSchema.optional().describe(
+      'Optional authoritative identity from get_sector_index or analyze_sector_benchmark.',
+    ),
+    sectorSource: sectorShortRatioSourceSchema.optional().describe(
+      'Optional structured output from get_sector_short_ratio, including typed unavailable state.',
+    ),
+  }),
+  func: async ({ ticker, analysisAsOfDate, from, classification, sectorSource }) => {
+    if (sectorSource && sectorSource.analysisAsOfDate !== analysisAsOfDate) {
+      throw new Error('sectorSource analysisAsOfDate must match analysisAsOfDate.');
+    }
+    if (!sectorSource) {
+      if (!from) {
+        throw new Error('analyze_sector_short_ratio requires sectorSource or history from.');
+      }
+      sectorSource = await fetchSectorShortRatioSource({
+        ticker,
+        analysisAsOfDate,
+        from,
+        classification,
+      });
+    }
+    return formatToolResult(
+      analyzeSectorShortRatio(sectorSource as SectorShortRatioSource),
+      [],
+    );
+  },
+});
+
 export const ANALYZE_STRATEGY_DESCRIPTION = `
 Generate deterministic long Entry, Stop, Target, risk, reward, and reward/risk candidates from analyze_technical output. Tick size and resistance levels are optional sourced inputs only; never infer them when unavailable. Without a sourced tick size, return only the strictly-above trigger and do not claim an exact entry or 2R target.
 `.trim();
@@ -687,5 +783,6 @@ export const deterministicAnalysisTools = [
   analyzePeerComparisonTool,
   analyzeMarketCorrelationTool,
   analyzeSectorBenchmarkTool,
+  analyzeSectorShortRatioTool,
   analyzeStrategyTool,
 ] as const;
