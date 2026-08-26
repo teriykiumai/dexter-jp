@@ -63,6 +63,12 @@ export interface MarketCorrelationResult {
   windows: MarketCorrelationWindowResult[];
 }
 
+export interface MarketCorrelationCalculation {
+  dataDate: string | null;
+  alignedPriceCount: number;
+  windows: MarketCorrelationWindowResult[];
+}
+
 function isFiniteNumber(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
@@ -272,18 +278,28 @@ function analyzeWindow(
   };
 }
 
-/** Build fixed 20-day, 60-day, and 250-day market statistics against TOPIX. */
-export function analyzeMarketCorrelation(
+/** Calculate fixed 20-day, 60-day, and 250-day statistics for one benchmark. */
+export function calculateMarketCorrelation(
   stockPrices: readonly MarketPricePoint[],
-  topixPrices: readonly MarketPricePoint[],
-): MarketCorrelationResult {
-  const alignedPrices = alignMarketPrices(stockPrices, topixPrices);
+  benchmarkPrices: readonly MarketPricePoint[],
+): MarketCorrelationCalculation {
+  const alignedPrices = alignMarketPrices(stockPrices, benchmarkPrices);
   return {
-    benchmark: 'TOPIX',
     dataDate: alignedPrices.at(-1)?.date ?? null,
     alignedPriceCount: alignedPrices.length,
     windows: MARKET_CORRELATION_DEFAULTS.periods.map((period) => (
       analyzeWindow(alignedPrices, period)
     )),
+  };
+}
+
+/** Build fixed 20-day, 60-day, and 250-day market statistics against TOPIX. */
+export function analyzeMarketCorrelation(
+  stockPrices: readonly MarketPricePoint[],
+  topixPrices: readonly MarketPricePoint[],
+): MarketCorrelationResult {
+  return {
+    benchmark: 'TOPIX',
+    ...calculateMarketCorrelation(stockPrices, topixPrices),
   };
 }

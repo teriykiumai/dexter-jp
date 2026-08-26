@@ -132,6 +132,15 @@ export {
   type UnavailableMarketCorrelationMetric,
 } from './market-correlation-engine.js';
 export {
+  analyzeSectorBenchmark,
+  type SectorBenchmarkIdentity,
+  type SectorBenchmarkInput,
+  type SectorBenchmarkResult,
+  type SectorBenchmarkUnavailableReason,
+  type UnavailableSectorBenchmark,
+  type UnavailableSectorBenchmarkInput,
+} from './sector-benchmark-engine.js';
+export {
   analyzeStrategy,
   type ExecutableStrategyEntry,
   nextTickAbove,
