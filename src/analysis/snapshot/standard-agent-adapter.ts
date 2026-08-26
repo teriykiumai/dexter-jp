@@ -212,6 +212,7 @@ export class StandardAgentSnapshotCollector {
   private investorTypeCalendarUsesDirectJQuants = false;
   private correlationStockUsesDirectJQuants = false;
   private correlationBenchmarkUsesDirectJQuants = false;
+  private sectorBenchmarkStockDataUsed = false;
   private sectorBenchmarkStockUsesDirectJQuants = false;
   private readonly additionalUnavailable: SnapshotUnavailableV6[] = [];
 
@@ -331,8 +332,8 @@ export class StandardAgentSnapshotCollector {
           calendarFromJQuants: this.investorTypeCalendarUsesDirectJQuants,
         },
         sectorBenchmark: {
-          stockFromJQuants: this.sectorBenchmarkStockUsesDirectJQuants
-            || this.priceHistory !== null,
+          stockFromJQuants: this.sectorBenchmarkStockDataUsed
+            && (this.sectorBenchmarkStockUsesDirectJQuants || this.priceHistory !== null),
         },
       },
       additionalUnavailable: this.additionalUnavailable,
@@ -535,8 +536,15 @@ export class StandardAgentSnapshotCollector {
         break;
       case 'analyze_sector_benchmark':
         if (!this.sectorBenchmark) {
-          this.sectorBenchmark = SectorBenchmarkResultSchema.parse(call.validatedResult);
-          this.sectorBenchmarkStockUsesDirectJQuants = !Array.isArray(
+          const result = SectorBenchmarkResultSchema.parse(call.validatedResult);
+          const stockDataUsed = !result.unavailable.some(({ reason }) => (
+            reason === 'sector_classification_unavailable'
+            || reason === 'unsupported_sector'
+            || reason === 'no_sector_index_data'
+          ));
+          this.sectorBenchmark = result;
+          this.sectorBenchmarkStockDataUsed = stockDataUsed;
+          this.sectorBenchmarkStockUsesDirectJQuants = stockDataUsed && !Array.isArray(
             call.validatedArgs.stockPrices,
           );
         }

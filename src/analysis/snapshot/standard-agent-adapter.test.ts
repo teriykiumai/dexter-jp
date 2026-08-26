@@ -505,6 +505,54 @@ describe('StandardAgentSnapshotCollector', () => {
     });
   });
 
+  test('does not claim stock price provenance for a source-level unavailable sector result', () => {
+    for (const withExistingPriceHistory of [false, true]) {
+      const collector = new StandardAgentSnapshotCollector();
+      invokeSkill(collector);
+      lockToyota(collector);
+      if (withExistingPriceHistory) {
+        start(collector, 'get_stock_price', 'price-before-sector', {
+          ticker: '7203',
+          from: '2026-08-20',
+        });
+        end(collector, 'get_stock_price', 'price-before-sector', [{
+          date: '2026-08-20',
+          open: 3_000,
+          high: 3_050,
+          low: 2_990,
+          close: 3_040,
+          volume: 10_000,
+        }]);
+      }
+      start(collector, 'analyze_sector_benchmark', 'sector-no-source', {
+        ticker: '7203',
+        analysisAsOfDate: '2026-08-20',
+        sectorSource: {
+          analysisAsOfDate: '2026-08-20',
+          reason: 'sector_classification_unavailable',
+        },
+      });
+      end(collector, 'analyze_sector_benchmark', 'sector-no-source', {
+        ...sectorBenchmarkResult(),
+        benchmark: null,
+        dataDate: null,
+        alignedPriceCount: 0,
+        windows: [],
+        unavailable: [{ reason: 'sector_classification_unavailable' }],
+      });
+
+      const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
+
+      expect(snapshot?.sectorBenchmark?.unavailable).toEqual([
+        { reason: 'sector_classification_unavailable' },
+      ]);
+      expect(snapshot?.provenance.sectorBenchmark.some(item => (
+        item.source === 'jquants' && item.role === 'price_data'
+      ))).toBe(false);
+      expect(snapshot?.priceHistory !== null).toBe(withExistingPriceHistory);
+    }
+  });
+
   test('preserves no-public-disclosure as unavailable rather than zero', () => {
     const collector = new StandardAgentSnapshotCollector();
     invokeSkill(collector);
