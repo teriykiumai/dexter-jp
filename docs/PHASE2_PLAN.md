@@ -2005,14 +2005,17 @@ margin balances, or add thresholds, squeeze labels, or Buy/Sell signals.
 The source tool calls `GET /v2/markets/short-ratio` with the authoritative as-of S33,
 `from`, and `to = analysisAsOfDate`, following existing pagination. It preserves one
 daily row per returned `Date` and the official fields `SellExShortVa`,
-`ShrtWithResVa`, and `ShrtNoResVa` as nullable JPY values. It reuses a previously
-resolved classification only through the trusted `sectorIdentity` envelope emitted
-by `get_sector_index`; otherwise it uses the same as-of-safe P2-D1 resolver. The
+`ShrtWithResVa`, and `ShrtNoResVa` as nullable JPY values. It accepts a previously
+resolved classification only as the structured `sectorIdentity` envelope emitted by
+`get_sector_index`; the same as-of-safe P2-D1 resolver still verifies it. The
 envelope preserves source `analysisAsOfDate`, normalized `issuerCode`,
 `classificationDate`, sector code/name, index code, and J-Quants equity-master
-provenance. A bare classification is never trusted. Before a reused identity or
-sector-source result is accepted, its issuer code must match the normalized target
-ticker and its source as-of boundary must match the requested `analysisAsOfDate`.
+provenance. A bare classification is never accepted, and literal provenance fields
+are not authentication. Before an envelope is used, the source re-resolves the
+normalized target ticker and requested `analysisAsOfDate` through the P2-D1 resolver
+and requires exact `issuerCode`, `classificationDate`, sector code/name, and index-code
+agreement. A supplied sector-source result must also match the target issuer and source
+as-of boundary.
 It excludes future rows, never forward-fills a missing/non-trading
 date, rejects conflicting S33 or duplicate dates, and keeps an empty response as
 `no_sector_short_ratio_data`, not zero. J-Quants plan/authentication/transport errors
@@ -2051,9 +2054,9 @@ The Snapshot collector independently verifies the Engine result `issuerCode` aga
 the run's locked ticker. A mismatch is rejected and cannot persist either the sector
 result or J-Quants classification provenance.
 
-Tests fix endpoint/field/parameter mapping, pagination, trusted identity reuse,
-issuer/as-of rejection before source fetch, as-of/future exclusion, missing and empty
-semantics, deterministic formulas, zero
+Tests fix endpoint/field/parameter mapping, pagination, authoritative identity
+reverification, same-issuer wrong-S33 rejection before the flow fetch, issuer/as-of
+rejection, as-of/future exclusion, missing and empty semantics, deterministic formulas, zero
 denominator and invalid values, ordering/non-mutation, structured tool/collector
 pass-through, V1-V6 read compatibility and V7 write, Dashboard unavailable-versus-
 zero presentation, and comprehensive-analysis non-attribution/non-calculation rules.

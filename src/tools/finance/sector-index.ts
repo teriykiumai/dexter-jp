@@ -120,7 +120,7 @@ Fetches an issuer's as-of TSE 33-sector classification and the corresponding dai
 
 **Requires:** JQUANTS_API_KEY and a J-Quants Standard plan or higher for general index data.
 
-The classification is resolved from the official trading calendar and equity master at analysisAsOfDate. The result includes a trusted sectorIdentity envelope binding issuerCode, analysisAsOfDate, classification, and source provenance for reuse by other sector tools. The returned history uses that one as-of sector index only; it does not claim that the issuer belonged to the sector throughout the history and does not stitch indices after sector changes. Values are source-provided index points and no correlation or other financial metric is calculated. Empty data is unavailable, not zero.
+The classification is resolved from the official trading calendar and equity master at analysisAsOfDate. The result includes a structured sectorIdentity envelope carrying issuerCode, analysisAsOfDate, classification, and source provenance for other sector tools; consumers must reverify its authoritative binding rather than treating literal provenance fields as proof. The returned history uses that one as-of sector index only; it does not claim that the issuer belonged to the sector throughout the history and does not stitch indices after sector changes. Values are source-provided index points and no correlation or other financial metric is calculated. Empty data is unavailable, not zero.
 `.trim();
 
 const SectorIndexInputSchema = z.object({
@@ -157,6 +157,7 @@ export function normalizeSectorSourceDate(value: string, fieldName: string): str
   return normalized;
 }
 
+/** Validate envelope structure only; authoritative issuer/S33 binding requires resolver verification. */
 export function validateSectorClassificationEnvelope(
   envelope: SectorClassificationEnvelope,
   analysisAsOfDateInput: string,

@@ -797,11 +797,13 @@ context was established. It supplies daily 33-sector selling-turnover components
 JPY, not issuer-level short positions or outstanding balances.
 
 P2-D5 resolves `S33` through the authoritative as-of-safe J-Quants equity-master
-boundary and reuses an identity only through the trusted `sectorIdentity` envelope
-returned by `get_sector_index`. The envelope binds source `analysisAsOfDate`, normalized
-`issuerCode`, classification fields, index code, and equity-master provenance; a bare
-classification is not trusted. Both reused identities and supplied sector-source
-results must match the requested as-of boundary and normalized target ticker. Empty or
+boundary and accepts an identity only through the structured `sectorIdentity` envelope
+returned by `get_sector_index`. The envelope carries source `analysisAsOfDate`, normalized
+`issuerCode`, classification fields, index code, and equity-master provenance, but
+literal provenance is not proof. The source re-resolves the target/as-of classification
+and requires every authoritative identity field to match before use; a bare
+classification is not accepted. Supplied sector-source results must also match the
+requested as-of boundary and normalized target ticker. Empty or
 non-trading responses remain unavailable rather than zero. Its deterministic Engine
 calculates only daily short-selling value, total-selling value, and their ratio from
 the three source turnover fields. Never attribute the sector result to the issuer,

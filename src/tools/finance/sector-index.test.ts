@@ -92,7 +92,8 @@ describe('getSectorIndex', () => {
   test('preserves source-only and as-of benchmark semantics in the tool description', () => {
     expect(getSectorIndex.description).toContain('Standard plan or higher');
     expect(getSectorIndex.description).toContain('one as-of sector index only');
-    expect(getSectorIndex.description).toContain('trusted sectorIdentity envelope');
+    expect(getSectorIndex.description).toContain('structured sectorIdentity envelope');
+    expect(getSectorIndex.description).toContain('reverify');
     expect(getSectorIndex.description).toContain('issuerCode');
     expect(getSectorIndex.description).toContain('does not stitch');
     expect(getSectorIndex.description).toContain('no correlation');

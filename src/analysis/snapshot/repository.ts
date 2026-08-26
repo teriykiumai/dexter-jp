@@ -90,6 +90,7 @@ function latestSourceDataDate(snapshot: AnalysisSnapshot): string | null {
     ...('reportedShortPositions' in dates ? [dates.reportedShortPositions] : []),
     ...('investorTypeFlows' in dates ? [dates.investorTypeFlows] : []),
     ...('sectorBenchmark' in dates ? [dates.sectorBenchmark] : []),
+    ...('sectorShortRatio' in dates ? [dates.sectorShortRatio] : []),
   ].filter((date): date is string => date !== null).sort().at(-1) ?? null;
 }
 

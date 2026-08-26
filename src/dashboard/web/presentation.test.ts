@@ -1412,6 +1412,62 @@ describe('watchlist presentation mapping', () => {
     expect(stale.stale).toBeTrue();
   });
 
+  test('uses the newest V7 sector short-ratio date for Watchlist freshness', () => {
+    const base = v7Snapshot();
+    const snapshot: AnalysisSnapshotV7 = {
+      ...base,
+      dataDates: {
+        ...base.dataDates,
+        sectorShortRatio: '2026-08-22',
+      },
+      sectorShortRatio: {
+        analysisAsOfDate: '2026-08-22',
+        issuerCode: '72030',
+        sector: {
+          classificationDate: '2026-08-21',
+          sectorCode: '3700',
+          sectorName: '輸送用機器',
+        },
+        dataDate: '2026-08-22',
+        observations: [{
+          date: '2026-08-22',
+          nonShortSellingValue: 100,
+          restrictedShortSellingValue: 20,
+          unrestrictedShortSellingValue: 30,
+          shortSellingValue: 50,
+          totalSellingValue: 150,
+          shortSellingRatio: 1 / 3,
+          unavailable: [],
+        }],
+        unavailable: [],
+        provenance: {
+          classification: { source: 'jquants', endpoint: '/v2/equities/master' },
+          flow: { source: 'jquants', endpoint: '/v2/markets/short-ratio' },
+          calculation: { source: 'sector_short_ratio_engine' },
+        },
+        units: {
+          nonShortSellingValue: 'JPY',
+          restrictedShortSellingValue: 'JPY',
+          unrestrictedShortSellingValue: 'JPY',
+          shortSellingValue: 'JPY',
+          totalSellingValue: 'JPY',
+          shortSellingRatio: 'ratio',
+        },
+      },
+      unavailable: base.unavailable.filter(item => item.section !== 'sectorShortRatio'),
+    };
+
+    const latest = buildAnalysisSnapshotLatestItem(snapshot);
+    const view = mapLatestAnalysisToWatchlistItem(
+      latest,
+      new Date('2026-08-29T18:30:00.000Z'),
+    );
+
+    expect(latest.latestSourceDataDate).toBe('2026-08-22');
+    expect(view.latestDataDateRaw).toBe('2026-08-22');
+    expect(view.stale).toBeFalse();
+  });
+
   test('sorts by generatedAt or latest source data date with missing dates last', () => {
     const referenceDate = new Date('2026-08-23T00:00:00.000Z');
     const newestGenerated = mapLatestAnalysisToWatchlistItem(

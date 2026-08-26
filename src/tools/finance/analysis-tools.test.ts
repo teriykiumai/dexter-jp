@@ -601,7 +601,7 @@ describe('deterministic analysis tools', () => {
     }
   });
 
-  test('delegates supplied sector short-ratio rows to the deterministic engine without fetching', async () => {
+  test('reverifies supplied sector short-ratio rows before deterministic analysis', async () => {
     const sectorSource = {
       analysisAsOfDate: '2026-08-20',
       issuerCode: '72030',
@@ -628,27 +628,6 @@ describe('deterministic analysis tools', () => {
         },
       },
     };
-    let fetchCount = 0;
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async () => {
-      fetchCount += 1;
-      throw new Error('Unexpected fetch');
-    }) as unknown as typeof fetch;
-    try {
-      const actual = toolData(await analyzeSectorShortRatioTool.invoke({
-        ticker: '7203',
-        analysisAsOfDate: sectorSource.analysisAsOfDate,
-        sectorSource,
-      }));
-
-      expect(actual).toEqual(analyzeSectorShortRatio(sectorSource));
-      expect(fetchCount).toBe(0);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  test('reuses supplied sector identity and fetches only short-ratio history', async () => {
     const originalFetch = globalThis.fetch;
     const previousApiKey = process.env.JQUANTS_API_KEY;
     process.env.JQUANTS_API_KEY = 'test-jquants-key';
@@ -661,6 +640,57 @@ describe('deterministic analysis tools', () => {
           : input.url;
       const url = new URL(href);
       paths.push(url.pathname);
+      if (url.pathname.endsWith('/markets/calendar')) {
+        return new Response(JSON.stringify({
+          data: [{ Date: '2026-08-20', HolDiv: '1' }],
+        }));
+      }
+      if (url.pathname.endsWith('/equities/master')) {
+        return new Response(JSON.stringify({ data: [{
+          Date: '2026-08-20', Code: '72030', S33: '3700', S33Nm: '輸送用機器',
+        }] }));
+      }
+      throw new Error('Supplied flow rows must not be fetched again.');
+    }) as typeof fetch;
+    try {
+      const actual = toolData(await analyzeSectorShortRatioTool.invoke({
+        ticker: '7203',
+        analysisAsOfDate: sectorSource.analysisAsOfDate,
+        sectorSource,
+      }));
+
+      expect(actual).toEqual(analyzeSectorShortRatio(sectorSource));
+      expect(paths).toEqual(['/v2/markets/calendar', '/v2/equities/master']);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (previousApiKey === undefined) delete process.env.JQUANTS_API_KEY;
+      else process.env.JQUANTS_API_KEY = previousApiKey;
+    }
+  });
+
+  test('reverifies supplied sector identity before fetching short-ratio history', async () => {
+    const originalFetch = globalThis.fetch;
+    const previousApiKey = process.env.JQUANTS_API_KEY;
+    process.env.JQUANTS_API_KEY = 'test-jquants-key';
+    const paths: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const href = input instanceof URL
+        ? input.href
+        : typeof input === 'string'
+          ? input
+          : input.url;
+      const url = new URL(href);
+      paths.push(url.pathname);
+      if (url.pathname.endsWith('/markets/calendar')) {
+        return new Response(JSON.stringify({
+          data: [{ Date: '2026-08-20', HolDiv: '1' }],
+        }));
+      }
+      if (url.pathname.endsWith('/equities/master')) {
+        return new Response(JSON.stringify({ data: [{
+          Date: '2026-08-20', Code: '72030', S33: '3700', S33Nm: '輸送用機器',
+        }] }));
+      }
       return new Response(JSON.stringify({ data: [{
         Date: '2026-08-20', S33: '3700', SellExShortVa: 100,
         ShrtWithResVa: 20, ShrtNoResVa: 30,
@@ -683,7 +713,11 @@ describe('deterministic analysis tools', () => {
         },
       })) as { observations: Array<{ shortSellingRatio: number }> };
 
-      expect(paths).toEqual(['/v2/markets/short-ratio']);
+      expect(paths).toEqual([
+        '/v2/markets/calendar',
+        '/v2/equities/master',
+        '/v2/markets/short-ratio',
+      ]);
       expect(actual.observations[0]?.shortSellingRatio).toBe(1 / 3);
     } finally {
       globalThis.fetch = originalFetch;
@@ -754,6 +788,86 @@ describe('deterministic analysis tools', () => {
       expect(fetchCount).toBe(0);
     } finally {
       globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('rejects a fabricated same-issuer sector identity before short-ratio fetch', async () => {
+    const originalFetch = globalThis.fetch;
+    const previousApiKey = process.env.JQUANTS_API_KEY;
+    process.env.JQUANTS_API_KEY = 'test-jquants-key';
+    const paths: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const href = input instanceof URL
+        ? input.href
+        : typeof input === 'string'
+          ? input
+          : input.url;
+      const url = new URL(href);
+      paths.push(url.pathname);
+      if (url.pathname.endsWith('/markets/calendar')) {
+        return new Response(JSON.stringify({
+          data: [{ Date: '2026-08-20', HolDiv: '1' }],
+        }));
+      }
+      if (url.pathname.endsWith('/equities/master')) {
+        return new Response(JSON.stringify({ data: [{
+          Date: '2026-08-20', Code: '72030', S33: '3700', S33Nm: '輸送用機器',
+        }] }));
+      }
+      throw new Error('Short-ratio data must not be fetched for a mismatched identity.');
+    }) as typeof fetch;
+
+    try {
+      await expect(analyzeSectorShortRatioTool.invoke({
+        ticker: '7203',
+        analysisAsOfDate: '2026-08-20',
+        from: '2026-01-01',
+        sectorIdentity: {
+          analysisAsOfDate: '2026-08-20',
+          issuerCode: '72030',
+          classificationDate: '2026-08-20',
+          sectorCode: '3650',
+          sectorName: '電気機器',
+          indexCode: '004F',
+          provenance: { source: 'jquants', endpoint: '/v2/equities/master' },
+        },
+      })).rejects.toThrow(
+        'sectorIdentity must match the authoritative issuer sector classification.',
+      );
+      expect(paths).toEqual(['/v2/markets/calendar', '/v2/equities/master']);
+
+      paths.length = 0;
+      await expect(analyzeSectorShortRatioTool.invoke({
+        ticker: '7203',
+        analysisAsOfDate: '2026-08-20',
+        sectorSource: {
+          analysisAsOfDate: '2026-08-20',
+          issuerCode: '72030',
+          classification: {
+            classificationDate: '2026-08-20',
+            sectorCode: '3650',
+            sectorName: '電気機器',
+          },
+          rows: [],
+          reason: 'no_sector_short_ratio_data',
+          error: 'No source rows.',
+          provenance: {
+            classification: {
+              source: 'jquants', endpoint: '/v2/equities/master',
+            },
+            flow: {
+              source: 'jquants', endpoint: '/v2/markets/short-ratio',
+            },
+          },
+        },
+      })).rejects.toThrow(
+        'sectorSource must match the authoritative issuer sector classification.',
+      );
+      expect(paths).toEqual(['/v2/markets/calendar', '/v2/equities/master']);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (previousApiKey === undefined) delete process.env.JQUANTS_API_KEY;
+      else process.env.JQUANTS_API_KEY = previousApiKey;
     }
   });
 

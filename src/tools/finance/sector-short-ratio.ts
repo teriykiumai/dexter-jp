@@ -86,7 +86,7 @@ Fetches daily TSE 33-sector selling-turnover components from J-Quants for one au
 
 **Requires:** JQUANTS_API_KEY and a J-Quants Standard plan or higher.
 
-This is sector-wide trading-flow data, not an issuer short position or outstanding balance. Source JPY values remain separate and are not combined with public short-position reports or margin balances. An existing classification may be reused only through the trusted sectorIdentity envelope returned by get_sector_index; a bare classification is not accepted. Empty/non-trading responses are unavailable, not zero. No ratio, threshold, squeeze label, score, or signal is calculated by this source tool.
+This is sector-wide trading-flow data, not an issuer short position or outstanding balance. Source JPY values remain separate and are not combined with public short-position reports or margin balances. An existing classification may be supplied only through the structured sectorIdentity envelope returned by get_sector_index; its issuer-to-S33 binding is re-resolved from the official equity master before use, and a bare classification is not accepted. Empty/non-trading responses are unavailable, not zero. No ratio, threshold, squeeze label, score, or signal is calculated by this source tool.
 `.trim();
 
 const sectorCodes = new Set<string>(Object.keys(SECTOR_INDEX_CODE_BY_S33));
@@ -119,7 +119,7 @@ const SectorShortRatioInputSchema = z.object({
   ),
   from: z.string().describe('History start date (YYYY-MM-DD or YYYYMMDD).'),
   sectorIdentity: sectorIdentitySchema.optional().describe(
-    'Optional trusted sectorIdentity envelope returned by get_sector_index.',
+    'Optional structured sectorIdentity envelope returned by get_sector_index and reverified against the official resolver.',
   ),
 });
 
@@ -190,7 +190,7 @@ function mapRows(
   return rows;
 }
 
-/** Fetch source rows while allowing a previously resolved S33 identity to be reused. */
+/** Fetch source rows after re-resolving any supplied S33 identity against official data. */
 export async function fetchSectorShortRatioSource(
   input: FetchSectorShortRatioInput,
 ): Promise<SectorShortRatioSource> {
@@ -201,47 +201,52 @@ export async function fetchSectorShortRatioSource(
   const from = normalizeSectorSourceDate(input.from, 'from');
   if (from > analysisAsOfDate) throw new Error('from must be on or before analysisAsOfDate.');
 
-  let issuerCode: string;
-  let classification: SectorShortRatioClassification;
-  if (input.sectorIdentity) {
-    const sectorIdentity = validateSectorClassificationEnvelope(
+  const suppliedIdentity = input.sectorIdentity
+    ? validateSectorClassificationEnvelope(
       input.sectorIdentity,
       analysisAsOfDate,
-    );
-    if (input.ticker) {
-      const inputIssuerCode = await resolveJQuantsCode(input.ticker);
-      if (inputIssuerCode !== sectorIdentity.issuerCode) {
-        throw new Error('sectorIdentity issuerCode must match ticker.');
-      }
-    }
-    issuerCode = sectorIdentity.issuerCode;
-    classification = {
-      classificationDate: sectorIdentity.classificationDate,
-      sectorCode: sectorIdentity.sectorCode,
-      sectorName: sectorIdentity.sectorName,
-    };
-  } else {
-    if (!input.ticker) {
-      throw new Error('get_sector_short_ratio requires ticker or sectorIdentity.');
-    }
-    const resolution = await resolveSectorClassification(input.ticker, analysisAsOfDate);
-    issuerCode = resolution.issuerCode;
-    if ('reason' in resolution) {
-      return {
-        analysisAsOfDate,
-        issuerCode,
-        classification: null,
-        reason: resolution.reason,
-        error: resolution.error,
-        provenance: { classification: null, flow: null },
-      };
-    }
-    classification = {
-      classificationDate: resolution.classification.classificationDate,
-      sectorCode: resolution.classification.sectorCode,
-      sectorName: resolution.classification.sectorName,
+    )
+    : undefined;
+  const resolutionTarget = input.ticker ?? suppliedIdentity?.issuerCode;
+  if (!resolutionTarget) {
+    throw new Error('get_sector_short_ratio requires ticker or sectorIdentity.');
+  }
+
+  const issuerCode = await resolveJQuantsCode(resolutionTarget);
+  if (suppliedIdentity && issuerCode !== suppliedIdentity.issuerCode) {
+    throw new Error('sectorIdentity issuerCode must match ticker.');
+  }
+
+  const resolution = await resolveSectorClassification(issuerCode, analysisAsOfDate);
+  if ('reason' in resolution) {
+    return {
+      analysisAsOfDate,
+      issuerCode,
+      classification: null,
+      reason: resolution.reason,
+      error: resolution.error,
+      provenance: { classification: null, flow: null },
     };
   }
+  if (suppliedIdentity) {
+    const authoritative = resolution.sectorIdentity;
+    const matchesAuthoritative = (
+      suppliedIdentity.analysisAsOfDate === authoritative.analysisAsOfDate
+      && suppliedIdentity.issuerCode === authoritative.issuerCode
+      && suppliedIdentity.classificationDate === authoritative.classificationDate
+      && suppliedIdentity.sectorCode === authoritative.sectorCode
+      && suppliedIdentity.sectorName === authoritative.sectorName
+      && suppliedIdentity.indexCode === authoritative.indexCode
+    );
+    if (!matchesAuthoritative) {
+      throw new Error('sectorIdentity must match the authoritative issuer sector classification.');
+    }
+  }
+  const classification: SectorShortRatioClassification = {
+    classificationDate: resolution.classification.classificationDate,
+    sectorCode: resolution.classification.sectorCode,
+    sectorName: resolution.classification.sectorName,
+  };
 
   const sourceRows = await jquantsGetAll<Record<string, unknown>>(
     '/markets/short-ratio',
