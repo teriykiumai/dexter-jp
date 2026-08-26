@@ -1018,10 +1018,21 @@ existing deterministic dividend yield. Its core official source is J-Quants V2
 `NxFDivAnn`, and their source-provided payout ratios. Keep actual and forecast values
 separate and map current/next fields to `CurFYEn`/`NxtFYEn` exactly.
 
-The initial boundary is date-only end-of-day Japan time. Require `DiscDate <=
-analysisAsOfDate`, order eligible same-day rows by disclosure time/number, exclude
-future disclosures before selection, and never back-apply the current forecast. A
-blank selected value is unavailable, not zero and not permission to forward-fill.
+Keep publication and API availability separate. `DiscDate`/`DiscTime` and
+`PubDate`/`PubTime` are disclosure/notification facts, not J-Quants delivery
+timestamps. The initial date-only `analysisAsOfDate` claims source availability by
+Japan-time end of day. For both financial-summary and dividend-event rows, set
+`sourceEligibleDate` to the first later official `/v2/markets/calendar` business day
+(`HolDiv = 1` or `2`) and require `sourceEligibleDate <= analysisAsOfDate`. A row is
+not eligible on its disclosure/notification date. Do not infer availability from
+approximate update clocks, calendar days, or weekdays. A live run uses only returned
+rows and still applies this conservative boundary; insufficient calendar coverage is
+typed unavailable.
+
+Order eligible same-source-date rows by disclosure/notification time and source
+number, exclude future disclosures before selection, and never back-apply the current
+forecast. A blank selected value is unavailable, not zero and not permission to
+forward-fill.
 J-Quants payout ratios are stored as ratios (`0.321` means 32.1%), while dividend
 amounts are `JPY_per_share`. Preserve source values; do not reimplement payout ratio
 or the existing dividend-yield formula. Amounts remain on their disclosed per-share
@@ -1029,11 +1040,18 @@ basis; no initial growth comparison or retroactive split adjustment is performed
 
 The optional Premium enrichment is `GET /v2/fins/dividend`. It keeps report-level
 notification identity and replays `StatCode` new/correction/deletion through
-`CARefNo` only for `PubDate <= analysisAsOfDate`. Explicit commemorative/special
-component amounts start 2022-06-06. Missing component detail is unavailable, not zero.
+`CARefNo` only after the notification's `sourceEligibleDate` is within the analysis
+boundary. Explicit commemorative/special component amounts start 2022-06-06. Missing
+component detail is unavailable, not zero.
 Keep dividend events separate; do not aggregate them into an annual amount or merge
 them with the financial-summary annual value. A Premium plan restriction is a typed
 event-enrichment reason and does not erase an available core result.
+
+Preserve event-date meanings exactly: `IFTerm` is the record-date year/month,
+`RecDate` is the record date, and `ActRecDate` is the rights record date. `dataDate` is
+the latest eligible publication/notification date consumed by fiscal selection or
+event replay, including an applied correction or deletion even when no final event
+row remains. It is not `sourceEligibleDate` or a fiscal, record, ex, or payment date.
 
 The implemented candidate set is intentionally narrow: actual/forecast annual DPS,
 source payout ratio, and optional event-level special/commemorative classification.

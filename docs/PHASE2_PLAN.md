@@ -2158,7 +2158,8 @@ The optional event-detail source is J-Quants V2
 [`GET /v2/fins/dividend`](https://jpx-jquants.com/ja/spec/fin-dividend). It preserves
 notification date/time (`PubDate`, `PubTime`), unique/reference identity (`RefNo`,
 `CARefNo`), update status (`StatCode`), interim/fiscal-year-end and forecast/decision
-codes, per-share amount, record/ex/right-confirmation/payment dates, and
+codes, per-share amount, record-date year/month (`IFTerm`), record date (`RecDate`),
+rights record date (`ActRecDate`), ex date, payment date, and
 `CommSpecCode`, `CommDivRate`, and `SpecDivRate`. It is Premium-only, TSE-listed-issue
 only, and stored from 2013-02-20. The explicit commemorative/special component amounts
 exist only from 2022-06-06. It updates daily at approximately hourly intervals from
@@ -2166,6 +2167,12 @@ exist only from 2022-06-06. It updates daily at approximately hourly intervals f
 an explicit `event_source_plan_unavailable` enrichment reason and does not invalidate
 an otherwise available financial-summary result. Other source failures are not
 swallowed.
+
+Historical source eligibility also uses J-Quants V2
+[`GET /v2/markets/calendar`](https://jpx-jquants.com/ja/spec/mkt-cal) with the merged
+`HolDiv = 1` or `2` business-day convention. Calendar access remains subject to the
+official plan/history range, including Free's delayed historical window. A missing or
+plan-unavailable calendar is explicit and is not replaced with weekday arithmetic.
 
 The official J-Quants
 [`data-period`](https://jpx-jquants.com/ja/spec/data-spec),
@@ -2181,16 +2188,57 @@ initial Phase 2E result.
 
 #### As-of and no-look-ahead contract
 
-The initial public boundary is date-only. `analysisAsOfDate` means the end of that date
-in Japan time; intraday historical analysis is not claimed.
+Publication/notification time and J-Quants API availability are separate facts:
 
-- financial-summary rows require `DiscDate <= analysisAsOfDate`
-- dividend-event rows require `PubDate <= analysisAsOfDate`
+```text
+financial summary publication:  DiscDate + DiscTime
+dividend event notification:     PubDate + PubTime
+historical source eligibility:   sourceEligibleDate
+```
+
+The initial boundary is date-only and source-oriented. `analysisAsOfDate`
+means "obtainable from the configured J-Quants source by the end of that date in Japan
+time", not merely "publicly disclosed by that date". Intraday historical availability
+is not claimed.
+
+J-Quants does not expose first-available timestamps or historical delivery vintages,
+and its update clocks are approximate. To avoid inferring delivery from those clocks,
+use one conservative plan-independent rule for historical replay:
+
+```text
+/v2/fins/summary:
+  sourceEligibleDate = next official business day after DiscDate
+
+/v2/fins/dividend:
+  sourceEligibleDate = next official business day after PubDate
+
+eligible only when sourceEligibleDate <= analysisAsOfDate
+```
+
+Resolve `sourceEligibleDate` as the first later J-Quants `/v2/markets/calendar` row
+whose `HolDiv` is `1` (business day) or `2` (TSE half-day session). The pure resolver
+receives official calendar rows explicitly and never substitutes calendar-day,
+weekdays-only, locale-holiday, or approximate-clock arithmetic. If a potentially
+eligible row lacks sufficient calendar coverage, return
+`availability_calendar_unavailable`; do not assume same-day or next-day availability.
+
+This boundary deliberately delays even Premium rows that may actually arrive on the
+publication date so that historical output does not vary by configured plan. It is a
+conservative deterministic eligibility convention, not evidence of the row's exact
+first delivery time. Exact delivery-time reconstruction is impossible without a
+locally retained first-observed archive, which is outside this phase. Persisted
+Snapshots remain the evidence of what a particular run actually observed.
+
+- `DiscDate`/`DiscTime` and `PubDate`/`PubTime` remain the issuer/source publication or
+  notification facts; neither pair is renamed to API availability
 - `DiscTime`/`PubTime` and then `DiscNo`/`RefNo` provide deterministic ordering within
-  an eligible date; period-end, record, ex, board, and payment dates are never used as
+  a source date; period-end, record, ex, board, and payment dates are never used as
   availability dates
-- live analysis may use only rows actually returned by J-Quants; an approximate update
-  schedule never makes an absent row eligible
+- a row on its `DiscDate`/`PubDate` is not yet source-eligible; it becomes eligible only
+  on the fixed following official business day
+- live analysis may use only rows actually returned by J-Quants and must still apply
+  the conservative `sourceEligibleDate` filter; an approximate schedule never makes
+  an absent or same-day row eligible
 - future disclosures, forecasts, corrections, and deletions are excluded before
   validation and selection
 - the current company forecast is never back-applied to an earlier historical as-of
@@ -2202,10 +2250,12 @@ fiscal-year end and actual/forecast kind. `DivAnn` and `FDivAnn` target `CurFYEn
 year. A blank value in the selected disclosure stays unavailable; do not recover it by
 forward-filling another period or by asking the LLM to infer it.
 
-For dividend events, replay eligible notifications in `PubDate`, `PubTime`, `RefNo`
+For dividend events, resolve source eligibility first, then replay eligible
+notifications in `PubDate`, `PubTime`, `RefNo`
 order. `StatCode = 1` creates the state identified by its `CARefNo`; `2` replaces that
-state; `3` removes it. A correction or deletion notified after the as-of boundary
-must not change the earlier result. Do not match events by company/fund text or
+state; `3` removes it. A correction or deletion whose `sourceEligibleDate` is after
+the as-of boundary must not change the earlier result. Do not match events by
+company/fund text or
 heuristics when the source supplies reference identity.
 
 J-Quants generally applies data corrections by overwriting source data and does not
@@ -2229,9 +2279,10 @@ source correction never rewrites an existing Snapshot.
 - a non-finite payout ratio is `invalid_data`; a finite source ratio is preserved
   without recalculation or capping, and negative/profit-distorted ratios must not be
   presented as a sustainability claim
-- no eligible core row is `no_dividend_disclosure_data`
+- no eligible core row is `no_eligible_dividend_disclosure_data`
 - a selected row with no usable requested field is `missing_data`
-- no eligible event row is `no_dividend_event_data`, distinct from a zero amount
+- no eligible event row is `no_eligible_dividend_event_data`, distinct from a zero
+  amount
 - missing pre-2022 component detail is `component_breakdown_unavailable`, not ordinary
   dividend of zero
 
@@ -2300,9 +2351,10 @@ must preserve at least:
 
 ```ts
 type AdvancedDividendUnavailableReason =
-  | 'no_dividend_disclosure_data'
-  | 'no_dividend_event_data'
+  | 'no_eligible_dividend_disclosure_data'
+  | 'no_eligible_dividend_event_data'
   | 'event_source_plan_unavailable'
+  | 'availability_calendar_unavailable'
   | 'component_breakdown_unavailable'
   | 'missing_data'
   | 'invalid_data';
@@ -2312,6 +2364,7 @@ interface DividendFiscalObservation {
   fiscalYearEndDate: string;
   disclosedDate: string;
   disclosedTime: string | null;
+  sourceEligibleDate: string;
   disclosureNumber: string;
   sourceField: 'DivAnn' | 'FDivAnn' | 'NxFDivAnn';
   payoutRatioSourceField:
@@ -2325,16 +2378,18 @@ interface DividendFiscalObservation {
 interface DividendEvent {
   notifiedDate: string;
   notifiedTime: string | null;
+  sourceEligibleDate: string;
   referenceNumber: string;
   corporateActionReferenceNumber: string;
   kind: 'interim' | 'fiscal_year_end';
   decision: 'decided' | 'forecast';
-  term: string;
+  recordDateYearMonth: string;
   dividendPerShare: number | null;
   ordinaryDividendPerShare: number | null;
   commemorativeDividendPerShare: number | null;
   specialDividendPerShare: number | null;
   recordDate: string | null;
+  rightsRecordDate: string | null;
   exDate: string | null;
   paymentDate: string | null;
 }
@@ -2353,6 +2408,7 @@ interface AdvancedDividendResult {
   provenance: {
     financialSummary: { source: 'jquants'; endpoint: '/v2/fins/summary' };
     dividendEvents: { source: 'jquants'; endpoint: '/v2/fins/dividend' } | null;
+    availabilityCalendar: { source: 'jquants'; endpoint: '/v2/markets/calendar' };
     calculation: { source: 'advanced_dividend_engine' };
   };
   units: {
@@ -2367,9 +2423,14 @@ Actual and forecast observations stay distinct. `events = null` plus a typed eve
 reason means unavailable/not collected; it never means no special dividend or zero
 dividend. The result must retain only source/report identity required for analysis and
 must not copy issuer addresses or unrelated disclosure metadata.
-`issuerCode` is the normalized five-digit JPX code. `dataDate` is the greatest eligible
-disclosure/notification date actually represented in the result, never a fiscal,
-record, ex, or payment date.
+`issuerCode` is the normalized five-digit JPX code. `recordDateYearMonth`,
+`recordDate`, and `rightsRecordDate` map `IFTerm`, `RecDate`, and `ActRecDate`
+respectively and must not be conflated. `dataDate` is the greatest eligible source
+publication/notification date consumed by fiscal selection or event replay. It
+includes an applied correction or deletion notification even when replay removes the
+affected event from the final `events` array. It is never a source-eligibility,
+fiscal, record, ex, or payment date. Keep `sourceEligibleDate` explicit so publication
+and J-Quants eligibility cannot be conflated downstream.
 
 No Snapshot schema is changed in P2-E0.
 
@@ -2385,21 +2446,29 @@ P2-E0 Source / Contract Design
 ```
 
 P2-E1 adds only `/v2/fins/summary` mapping, pagination, ticker normalization, raw
-source validation, and typed empty/plan/source errors. Tests fix endpoint/parameters,
-field and ratio-unit mapping, pagination, plan/history boundaries, zero-versus-empty,
-invalid values, ordering, and input non-mutation.
+source validation, and the narrow pure official-calendar eligibility resolver reused
+by P2-E2/P2-E3. It reuses the merged J-Quants calendar row convention without changing
+the Phase 2C Engine. Tests fix endpoint/parameters, field and ratio-unit mapping,
+pagination, plan/history/calendar boundaries, zero-versus-empty, invalid values,
+ordering, input non-mutation, and a disclosure on date D being ineligible on D but
+eligible on the following official business day.
 
 P2-E2 adds the pure as-of selector and result core. Tests fix current/next fiscal-year
 mapping, actual/forecast separation, latest eligible disclosure, same-day ordering,
-future exclusion, blank latest field without forward fill, valid zero, missing/invalid
-reasons, issuer identity/data-date provenance, stable historical results when future
-rows are appended, and non-mutation.
+source-date versus source-eligibility preservation, future exclusion, blank latest
+field without forward fill, insufficient official-calendar coverage, valid zero,
+missing/invalid reasons, issuer identity/data-date provenance, stable historical
+results when future rows are appended, and non-mutation.
 
 P2-E3 adds the independently optional Premium `/v2/fins/dividend` source and pure
 event replay. Tests fix mapping, pagination, TSE/plan limitations, new/correction/
 deletion replay, future-event exclusion, special/commemorative component availability,
 ordinary-component formula, pre-2022 unavailable semantics, empty versus zero, no
-annual aggregation, and non-mutation.
+annual aggregation, input non-mutation, and a notification on date D remaining
+ineligible on D before becoming eligible on the following official business day. It
+also fixes distinct `IFTerm`/`RecDate`/`ActRecDate` mapping and a new-then-deletion
+case whose final event array is empty while `dataDate` remains the deletion
+notification date.
 
 P2-E4 exposes one structured result and adds the minimum Snapshot V8. V1-V7 schemas
 remain immutable/readable, new saves become V8, existing files are not rewritten,
