@@ -25,6 +25,7 @@ import {
   getInvestorTypeFlows,
   getMarginData,
   getShortSaleReports,
+  getSectorIndex,
   getStockPrice,
   getTopix,
   analyzeTechnicalTool,
@@ -146,6 +147,7 @@ export function buildDexterSdkTools(): ReturnType<typeof adaptLangChainTool>[] {
       getMarginData,
       getInvestorTypeFlows,
       getShortSaleReports,
+      getSectorIndex,
       getTopix,
     );
   }

@@ -38,6 +38,7 @@ const READ_ONLY_TOOLS = [
   'get_margin_data',
   'get_investor_type_flows',
   'get_short_sale_reports',
+  'get_sector_index',
   'get_topix',
   'read_filings',
   'company_screener',
@@ -67,13 +68,13 @@ export const SUBAGENT_TYPES: Record<string, SubagentTypeConfig> = {
   research: {
     whenToUse: 'Gather and synthesize external information on a single topic.',
     systemPrompt: `${WORKER_PREAMBLE}\n\nYou are a research worker. Gather information from the web, news, and filings, cross-check sources, and synthesize a clear, sourced summary of what you found.`,
-    tools: ['web_search', 'x_search', 'web_fetch', 'read_filings', 'get_stock_price', 'get_margin_data', 'get_investor_type_flows', 'get_short_sale_reports', 'get_topix'],
+    tools: ['web_search', 'x_search', 'web_fetch', 'read_filings', 'get_stock_price', 'get_margin_data', 'get_investor_type_flows', 'get_short_sale_reports', 'get_sector_index', 'get_topix'],
     maxIterations: 8,
   },
   analysis: {
     whenToUse: 'Quantitative financial analysis on specific companies.',
     systemPrompt: `${WORKER_PREAMBLE}\n\nYou are a financial analysis worker. Pull the relevant financials, metrics, and market data, then deliver a focused quantitative analysis with the numbers that support it.`,
-    tools: ['get_financials', 'get_stock_price', 'get_margin_data', 'get_investor_type_flows', 'get_short_sale_reports', 'get_topix', 'company_screener', 'read_filings'],
+    tools: ['get_financials', 'get_stock_price', 'get_margin_data', 'get_investor_type_flows', 'get_short_sale_reports', 'get_sector_index', 'get_topix', 'company_screener', 'read_filings'],
     maxIterations: 8,
   },
 };
