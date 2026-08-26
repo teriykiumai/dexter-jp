@@ -2105,8 +2105,328 @@ sector short-selling-flow context under the contract above.
 - LLM or Browser numerical calculation — rejected
 - Snapshot V6, tools, runtime, and presentation changes in P2-D0 — deferred to their steps
 
-## 24. Recommended Next Codex Task
+## 24. Phase 2E — Advanced Dividend Analysis
 
-Phase 2D P2-D0 through P2-D5 are implemented as separate reviewable steps. Preserve
-their merged source, deterministic Engine, Snapshot V6/V7, presentation, and
-comprehensive-analysis contracts in later work.
+### P2-E0 — Source / Contract Design
+
+P2-E0 is documentation only. It fixes the minimum source, availability, result, and
+step contracts before any source tool, Engine, Snapshot, Dashboard, or skill change.
+The objective is to add forward-looking dividend amount and sustainability context
+without duplicating the current dividend-yield calculation or treating every cash
+distribution as recurring ordinary dividend.
+
+#### Existing capability and boundary
+
+The merged baseline already provides:
+
+- EDINET DB annual/quarterly financial history, including a sourced
+  `dividendPerShare` value for up to six fiscal years
+- `analyze_financial_metrics`, which deterministically calculates the current
+  `dividendYieldPercent = dividendPerShare / currentPrice * 100`
+- the current dividend yield in the canonical Snapshot valuation section and peer
+  comparison
+- EDINET DB screening by source-provided `dividend-yield` and `payout-ratio`
+- comprehensive-analysis instructions that prohibit LLM calculation of dividend
+  yield and payout ratio
+
+The current result does not distinguish actual from company-forecast annual dividend,
+does not preserve a disclosure/as-of vintage for that distinction, and does not carry
+an annual payout-ratio series or explicit special/commemorative-dividend events.
+Phase 2E adds only those missing structured facts. It does not replace or recalculate
+the existing valuation dividend yield.
+
+#### Official sources
+
+The core source is J-Quants V2
+[`GET /v2/fins/summary`](https://jpx-jquants.com/ja/spec/fin-summary). It provides
+`DiscDate`, `DiscTime`, `DiscNo`, fiscal-period dates, actual annual dividend per share
+(`DivAnn`), company forecast annual dividend per share (`FDivAnn`), next-fiscal-year
+forecast annual dividend per share (`NxFDivAnn`), and their source-provided payout
+ratios (`PayoutRatioAnn`, `FPayoutRatioAnn`, `NxFPayoutRatioAnn`). The endpoint is
+queried by normalized five-digit JPX code and follows the existing J-Quants pagination
+contract.
+
+Financial summary data is disclosure-driven and daily. Premium API data is updated as
+disclosures arrive; other plans are updated daily, approximately at 18:00 for速報 and
+24:30 for確報. These times are not guarantees and must not be used as synthetic
+availability timestamps. Storage begins 2008-07-07. The current plan limits are Free:
+the two-year range excluding the latest twelve weeks, Light: five years, Standard:
+ten years, and Premium: twenty years. Plan/authentication/transport failures remain
+typed J-Quants errors and are never converted to zero dividend.
+
+The optional event-detail source is J-Quants V2
+[`GET /v2/fins/dividend`](https://jpx-jquants.com/ja/spec/fin-dividend). It preserves
+notification date/time (`PubDate`, `PubTime`), unique/reference identity (`RefNo`,
+`CARefNo`), update status (`StatCode`), interim/fiscal-year-end and forecast/decision
+codes, per-share amount, record/ex/right-confirmation/payment dates, and
+`CommSpecCode`, `CommDivRate`, and `SpecDivRate`. It is Premium-only, TSE-listed-issue
+only, and stored from 2013-02-20. The explicit commemorative/special component amounts
+exist only from 2022-06-06. It updates daily at approximately hourly intervals from
+12:00 through 19:00; the schedule is not guaranteed. An unavailable Premium plan is
+an explicit `event_source_plan_unavailable` enrichment reason and does not invalidate
+an otherwise available financial-summary result. Other source failures are not
+swallowed.
+
+The official J-Quants
+[`data-period`](https://jpx-jquants.com/ja/spec/data-spec),
+[`update-timing`](https://jpx-jquants.com/ja/spec/data-update), and
+[`correction`](https://jpx-jquants.com/ja/spec/fix-data-info) rules are part of this
+contract. Empty responses mean only that no eligible record was returned. They do not
+mean a zero dividend, no dividend policy, or no shareholder return.
+
+TDnet/EDINET filings are authoritative candidates for payout-policy narrative and
+share-repurchase disclosures, but those are document-level sources without a merged,
+normalized lifecycle in the current repository. They are not source inputs to the
+initial Phase 2E result.
+
+#### As-of and no-look-ahead contract
+
+The initial public boundary is date-only. `analysisAsOfDate` means the end of that date
+in Japan time; intraday historical analysis is not claimed.
+
+- financial-summary rows require `DiscDate <= analysisAsOfDate`
+- dividend-event rows require `PubDate <= analysisAsOfDate`
+- `DiscTime`/`PubTime` and then `DiscNo`/`RefNo` provide deterministic ordering within
+  an eligible date; period-end, record, ex, board, and payment dates are never used as
+  availability dates
+- live analysis may use only rows actually returned by J-Quants; an approximate update
+  schedule never makes an absent row eligible
+- future disclosures, forecasts, corrections, and deletions are excluded before
+  validation and selection
+- the current company forecast is never back-applied to an earlier historical as-of
+  date
+
+For financial summary, select the latest eligible disclosure for each exact target
+fiscal-year end and actual/forecast kind. `DivAnn` and `FDivAnn` target `CurFYEn`;
+`NxFDivAnn` targets `NxtFYEn`. Do not map a next-year forecast to the current fiscal
+year. A blank value in the selected disclosure stays unavailable; do not recover it by
+forward-filling another period or by asking the LLM to infer it.
+
+For dividend events, replay eligible notifications in `PubDate`, `PubTime`, `RefNo`
+order. `StatCode = 1` creates the state identified by its `CARefNo`; `2` replaces that
+state; `3` removes it. A correction or deletion notified after the as-of boundary
+must not change the earlier result. Do not match events by company/fund text or
+heuristics when the source supplies reference identity.
+
+J-Quants generally applies data corrections by overwriting source data and does not
+provide an old vintage, version number, or ETag. Therefore a new run for an old as-of
+date cannot guarantee reproduction of a source-side retroactive overwrite that did
+not arrive as a separately dated disclosure/event. Persisted Snapshots are immutable
+historical evidence and must record collection time and source identity; a later
+source correction never rewrites an existing Snapshot.
+
+#### Value, units, and unavailable semantics
+
+- annual/event dividend per share uses `JPY_per_share`
+- annual and event amounts remain on the source-disclosed per-share basis; the initial
+  Engine does not retroactively split-adjust them or compare them as growth
+- J-Quants payout-ratio fields are ratios as delivered (for example `0.321`), not
+  percentages; presentation may format `0.321` as `32.1%`
+- source `0` is a valid zero dividend or payout ratio
+- empty string, null, or `-` means missing/undetermined according to the source and is
+  never coerced to zero
+- a non-finite or negative dividend amount is `invalid_data`
+- a non-finite payout ratio is `invalid_data`; a finite source ratio is preserved
+  without recalculation or capping, and negative/profit-distorted ratios must not be
+  presented as a sustainability claim
+- no eligible core row is `no_dividend_disclosure_data`
+- a selected row with no usable requested field is `missing_data`
+- no eligible event row is `no_dividend_event_data`, distinct from a zero amount
+- missing pre-2022 component detail is `component_breakdown_unavailable`, not ordinary
+  dividend of zero
+
+Do not convert the J-Quants ratio to percent in the source or Engine. Do not combine a
+dividend amount and a yield under the same field or unit.
+
+#### Adopted deterministic behavior
+
+The core Engine deterministically filters/validates as-of rows, resolves the target
+fiscal year, and selects the latest eligible actual and company forecast observations.
+It preserves source-provided payout ratios rather than implementing a second payout
+formula that could disagree with the issuer's disclosed basis.
+
+The optional event Engine only replays source update identity and derives an ordinary
+component when the source makes that derivation complete:
+
+```text
+CommSpecCode = 0:
+  ordinaryDividendPerShare = DivRate
+
+CommSpecCode = 1 and CommDivRate is available:
+  ordinaryDividendPerShare = DivRate - CommDivRate
+
+CommSpecCode = 2 and SpecDivRate is available:
+  ordinaryDividendPerShare = DivRate - SpecDivRate
+
+CommSpecCode = 3 and both component amounts are available:
+  ordinaryDividendPerShare = DivRate - CommDivRate - SpecDivRate
+```
+
+Missing component amounts make the ordinary component unavailable; they are not
+treated as zero. A negative derived value is `invalid_data`. The event result remains
+event-level: do not aggregate interim and year-end events into a new annual amount or
+merge them with the financial-summary annual amount.
+
+The Engine does not calculate dividend yield, forecast revision rate, dividend-growth
+rate/CAGR, increase/cut streak, DOE, total shareholder yield, or a capital-return
+score in the initial tranche.
+
+#### Candidate decisions
+
+| Candidate | Decision | Reason |
+| --- | --- | --- |
+| Actual annual dividend per share | **IMPLEMENT** | Separates a disclosed cash amount from yield and supplies an as-of-safe actual history absent from the canonical result. |
+| Company-forecast annual dividend per share | **IMPLEMENT** | Adds forward-looking issuer guidance with an explicit disclosure boundary; it is never back-applied. |
+| Source-provided actual/forecast payout ratio | **IMPLEMENT** | Adds sustainability context without duplicating a potentially different formula; keep the J-Quants ratio unit. |
+| Event-level commemorative/special classification | **IMPLEMENT** as optional Premium enrichment | Prevents one-off payments from being silently described as ordinary; keep report identity and do not aggregate events. |
+| Dividend yield | **REJECT** as a new Phase 2E metric | The current deterministic Engine/Snapshot already calculates and stores it. Forecast yield is deferred rather than creating a second ambiguous yield. |
+| Dividend growth rate/CAGR | **DEFER** | Annual totals are not safely comparable across splits and one-off distributions without a complete per-event/share-basis contract; special components begin only in 2022. |
+| Consecutive increases/cuts | **DEFER** | It inherits the same split, special-dividend, missing-year, and zero-versus-no-data problems as CAGR. |
+| DOE | **DEFER** | J-Quants has no direct DOE field; a future formula needs same-basis total dividend and average shareholders' equity/BPS across eligible periods. |
+| Payout/dividend policy narrative | **DEFER** | EDINET/TDnet documents are authoritative but unstructured and time-varying; extraction, provenance, and evaluation need a separate contract. |
+| Share repurchases and combined capital return | **DEFER** | A decision/authorization is not an executed buyback; a complete event-to-execution/cancellation lifecycle and cash basis are not in the current result. |
+| Total-return score, threshold, or Buy/Sell signal | **REJECT** | It adds unsupported judgment and violates the product boundary. |
+
+Deferred growth work must not apply the current J-Quants cumulative price adjustment
+factor blindly to annual DPS. That factor includes splits, consolidations, and rights
+issues and is defined for price bars; an annual dividend can span multiple record
+dates/share bases. A later proposal must establish event-level adjustment dates and
+complete special-component coverage before calculating a comparable series.
+
+#### Minimum result contract
+
+Exact file/type placement follows the merged conventions, but the structured boundary
+must preserve at least:
+
+```ts
+type AdvancedDividendUnavailableReason =
+  | 'no_dividend_disclosure_data'
+  | 'no_dividend_event_data'
+  | 'event_source_plan_unavailable'
+  | 'component_breakdown_unavailable'
+  | 'missing_data'
+  | 'invalid_data';
+
+interface DividendFiscalObservation {
+  kind: 'actual' | 'company_forecast';
+  fiscalYearEndDate: string;
+  disclosedDate: string;
+  disclosedTime: string | null;
+  disclosureNumber: string;
+  sourceField: 'DivAnn' | 'FDivAnn' | 'NxFDivAnn';
+  payoutRatioSourceField:
+    | 'PayoutRatioAnn'
+    | 'FPayoutRatioAnn'
+    | 'NxFPayoutRatioAnn';
+  annualDividendPerShare: number | null;
+  payoutRatio: number | null;
+}
+
+interface DividendEvent {
+  notifiedDate: string;
+  notifiedTime: string | null;
+  referenceNumber: string;
+  corporateActionReferenceNumber: string;
+  kind: 'interim' | 'fiscal_year_end';
+  decision: 'decided' | 'forecast';
+  term: string;
+  dividendPerShare: number | null;
+  ordinaryDividendPerShare: number | null;
+  commemorativeDividendPerShare: number | null;
+  specialDividendPerShare: number | null;
+  recordDate: string | null;
+  exDate: string | null;
+  paymentDate: string | null;
+}
+
+interface AdvancedDividendResult {
+  analysisAsOfDate: string;
+  collectedAt: string;
+  issuerCode: string;
+  dataDate: string | null;
+  observations: readonly DividendFiscalObservation[];
+  events: readonly DividendEvent[] | null;
+  unavailable: readonly {
+    scope: 'core' | 'event' | 'component';
+    reason: AdvancedDividendUnavailableReason;
+  }[];
+  provenance: {
+    financialSummary: { source: 'jquants'; endpoint: '/v2/fins/summary' };
+    dividendEvents: { source: 'jquants'; endpoint: '/v2/fins/dividend' } | null;
+    calculation: { source: 'advanced_dividend_engine' };
+  };
+  units: {
+    dividendPerShare: 'JPY_per_share';
+    payoutRatio: 'ratio';
+  };
+}
+```
+
+Observations are chronological by target fiscal-year end and then disclosure order.
+Actual and forecast observations stay distinct. `events = null` plus a typed event
+reason means unavailable/not collected; it never means no special dividend or zero
+dividend. The result must retain only source/report identity required for analysis and
+must not copy issuer addresses or unrelated disclosure metadata.
+`issuerCode` is the normalized five-digit JPX code. `dataDate` is the greatest eligible
+disclosure/notification date actually represented in the result, never a fiscal,
+record, ex, or payment date.
+
+No Snapshot schema is changed in P2-E0.
+
+#### Phase 2E sequence
+
+```text
+P2-E0 Source / Contract Design
+  → P2-E1 J-Quants financial-summary dividend source
+  → P2-E2 deterministic fiscal observation Engine
+  → P2-E3 optional dividend-event source and event replay
+  → P2-E4 Tool exposure + Snapshot V8
+  → P2-E5 Dashboard + comprehensive-analysis
+```
+
+P2-E1 adds only `/v2/fins/summary` mapping, pagination, ticker normalization, raw
+source validation, and typed empty/plan/source errors. Tests fix endpoint/parameters,
+field and ratio-unit mapping, pagination, plan/history boundaries, zero-versus-empty,
+invalid values, ordering, and input non-mutation.
+
+P2-E2 adds the pure as-of selector and result core. Tests fix current/next fiscal-year
+mapping, actual/forecast separation, latest eligible disclosure, same-day ordering,
+future exclusion, blank latest field without forward fill, valid zero, missing/invalid
+reasons, issuer identity/data-date provenance, stable historical results when future
+rows are appended, and non-mutation.
+
+P2-E3 adds the independently optional Premium `/v2/fins/dividend` source and pure
+event replay. Tests fix mapping, pagination, TSE/plan limitations, new/correction/
+deletion replay, future-event exclusion, special/commemorative component availability,
+ordinary-component formula, pre-2022 unavailable semantics, empty versus zero, no
+annual aggregation, and non-mutation.
+
+P2-E4 exposes one structured result and adds the minimum Snapshot V8. V1-V7 schemas
+remain immutable/readable, new saves become V8, existing files are not rewritten,
+unknown versions remain rejected, and optional dividend/event unavailability does not
+change existing complete/partial semantics. The collector uses only the structured
+result and verifies the locked issuer identity; no Markdown recovery is added.
+
+P2-E5 presents Snapshot values and updates comprehensive analysis. Dashboard and LLM
+must distinguish amount, ratio, and existing yield; actual and forecast; and ordinary,
+special, and commemorative components. They do not recalculate values, aggregate
+events, infer missing policy, claim that unavailable event detail means ordinary-only,
+or create a threshold, score, Entry/Stop/Target, or Buy/Sell signal.
+
+#### Deferred/rejected from initial Phase 2E
+
+- split/special-aware dividend CAGR and increase/cut streak — deferred
+- forecast yield and forecast-revision percentages — deferred
+- DOE and total-payout/total-shareholder-yield formulas — deferred
+- payout-policy narrative extraction and classification — deferred
+- buyback authorization/execution/cancellation lifecycle — deferred
+- using current forecasts in historical analysis or source period dates as availability — rejected
+- treating blank, `-`, empty responses, or unavailable Premium data as zero — rejected
+- LLM/Browser financial calculation, composite scores, thresholds, and signals — rejected
+
+## 25. Recommended Next Codex Task
+
+Phase 2D P2-D0 through P2-D5 are implemented as separate reviewable steps. Phase 2E
+begins with the docs-only P2-E0 contract above. The next implementation step is P2-E1,
+limited to the J-Quants financial-summary dividend source; do not advance to the
+Engine, Premium dividend events, Snapshot V8, or presentation in that PR.
