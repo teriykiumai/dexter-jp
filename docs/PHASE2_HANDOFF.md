@@ -536,9 +536,9 @@ Phase 2E — Advanced Dividend Analysis
 Phase 2F — Shikori / Volume Profile / POC / VAH / VAL
 ```
 
-Each Phase 2B–2F tranche requires its own detailed plan. Phase 2A is complete;
-Phase 2B implementation through P2-B4 is complete and P2-B5 is deferred after
-evaluation. Phase 2C Investor Type Flows now begins with its docs-only P2-C0 design.
+Each Phase 2B–2F tranche requires its own detailed plan. Phase 2A and the core Phase
+2B/2C sequences are complete. P2-B5 is an approved later follow-up; Phase 2D begins
+with its docs-only P2-D0 design.
 
 The Phase 2A sequence below is retained as implemented historical context.
 
@@ -791,13 +791,14 @@ GET /v2/markets/short-sale-report
 
 It publishes reports for short-position ratios of 0.5% or more.
 
-The 33-sector `/markets/short-ratio` endpoint is deferred to P2-B5 evaluation.
+The 33-sector `/markets/short-ratio` endpoint was deferred to P2-B5 evaluation.
 
-P2-B5 has now been evaluated with decision **DEFER**. The endpoint supplies daily
+P2-B5 was initially deferred and is now **IMPLEMENT LATER** after P2-D0 re-evaluation.
+The endpoint supplies daily
 33-sector selling-turnover components in JPY, not issuer-level short positions or
 outstanding balances. It can provide sector-wide short-selling-flow context, but a
-standalone daily value does not justify Snapshot V5 or a new Dashboard section before
-Phase 2D supplies a concrete sector-index/history consumer.
+standalone daily value does not justify a new Snapshot field or Dashboard section
+before Phase 2D supplies the concrete sector-index/history consumer.
 
 Future re-evaluation must resolve `S33` from authoritative J-Quants equity-master
 data at the analysis as-of boundary, preserve the distinction between trading date
@@ -934,3 +935,71 @@ P2-C0 Source / Contract Design
 
 P2-C0 is documentation only. See `docs/PHASE2_PLAN.md` for exact category meanings,
 typed shape, invariants, provenance, deferred scope, and per-step tests.
+
+## 23. Active Phase 2D Handoff
+
+Phase 2D adds an as-of-safe TSE 33-sector price-index benchmark for issuer analysis.
+It does not create a sector rank, score, signal, or issuer-level sector flow.
+
+Use official J-Quants V2 sources:
+
+```text
+classification:  GET /v2/equities/master
+sector prices:   GET /v2/indices/bars/daily
+business dates:  GET /v2/markets/calendar
+```
+
+Normalize the ticker through the existing JPX-code contract. For an explicit
+`analysisAsOfDate`, use calendar data to select the latest official business day on
+or before that date, then query equity master for that exact `classificationDate`.
+This prevents the master endpoint's non-trading-date behavior from admitting the next
+business day's classification. Require the returned date/code to match, preserve exact
+`S33`/`S33Nm`, and use the explicit official mapping in `docs/PHASE2_PLAN.md`. Never
+use current classification, EDINET text matching, or fuzzy identity resolution for a
+historical analysis. `S33 = 9999` is unsupported because it has no TSE 33-sector index.
+
+Use regular price-return sector index codes `0040` through `0060`, including their
+alphanumeric suffixes, and source `C` as official index points. Do not use Premium
+total-return sector indices, adjust/rebase the source, or treat an empty response as
+zero. General indices require Standard or Premium; both master and index storage begin
+2008-05-07, subject to plan history. Approximate master/index update times are not
+guaranteed, and live analysis may use only rows actually returned.
+
+The deterministic sector comparison reuses the existing TOPIX market-correlation
+semantics: 20/60/250 daily log-return windows, date inner join before latest-window
+selection, sample variance/covariance, annualization 245, and the existing correlation,
+beta, annualized alpha, R-squared, volatility, excess-return, insufficient-history,
+and zero-variance contracts. Filter all source rows to `Date <= analysisAsOfDate`
+before validation/alignment and never forward-fill. Preserve the existing TOPIX public
+result and exact values; use a narrow shared calculation core rather than a duplicate
+Engine or an arbitrary benchmark framework. Fix benchmark identity to the single S33
+resolved at `analysisAsOfDate` and use its one sector index across every 20/60/250
+lookback window. A sector change inside a lookback does not trigger index stitching
+and does not imply that the issuer belonged to the as-of sector for the whole window.
+
+The eventual structured result preserves `analysisAsOfDate`, sector code/name,
+index code, `classificationDate`, data date, existing metric windows, typed top-level
+unavailability, provenance, and units. P2-D0 does not change Snapshot. Later P2-D3 may
+add the minimum Snapshot V6 while retaining immutable/readable V1-V5 and existing
+complete/partial semantics.
+
+P2-B5 is now **IMPLEMENT LATER**, after core sector presentation, because daily sector
+short-selling turnover can add flow context distinct from sector price behavior. It
+must reuse the same S33 resolver and availability boundary in a separate approved step.
+Never combine it with the sector index into a score, attribute it to the issuer, merge
+it with reported short positions or margin balances, or add thresholds/signals.
+
+The fixed sequence is:
+
+```text
+P2-D0 Source / Contract Design
+  → P2-D1 J-Quants sector master/index source
+  → P2-D2 deterministic sector benchmark integration
+  → P2-D3 Tool exposure + Snapshot V6
+  → P2-D4 Dashboard + comprehensive-analysis
+  → P2-D5 sector short-ratio integration (separate approval)
+```
+
+P2-D0 is documentation only. See `docs/PHASE2_PLAN.md` for official references,
+the complete mapping/result/as-of contracts, unavailable semantics, deferred scope,
+and per-step tests.
