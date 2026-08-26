@@ -52,6 +52,7 @@ describe('comprehensive analysis skill', () => {
       'analyze_investor_type_flows',
       'analyze_peer_comparison',
       'analyze_market_correlation',
+      'analyze_sector_benchmark',
       'analyze_strategy',
     ]) {
       expect(skill?.instructions).toContain(toolName);
@@ -68,6 +69,7 @@ describe('comprehensive analysis skill', () => {
       '# Reported Short Positions',
       '# Investor Type Flows',
       '# Market Correlation',
+      '# Sector Benchmark',
       '# Entry / Stop / Target',
       '# Bull / Base / Bear',
       '# Risks',
@@ -107,6 +109,16 @@ describe('comprehensive analysis skill', () => {
     expect(skill?.instructions).toContain('risk-on/off');
     expect(skill?.instructions).toContain('Buy/Sell signal');
     expect(skill?.instructions).toContain('make no investment claim');
+    expect(skill?.instructions).toContain('single official TSE 33-sector price index');
+    expect(skill?.instructions).toContain('does not attribute sector-index values');
+    expect(skill?.instructions).toContain('analysisAsOfDate');
+    expect(skill?.instructions).toContain('classificationDate');
+    expect(skill?.instructions).toContain('stitch multiple');
+    expect(skill?.instructions).toContain('sector indices');
+    expect(skill?.instructions).toContain('current classification');
+    expect(skill?.instructions).toContain('do not recalculate or repair');
+    expect(skill?.instructions).toContain('Do not derive a sector rank');
+    expect(skill?.instructions).toContain('no sector-based investment claim');
 
     const invoked = await skillTool.invoke({
       skill: 'comprehensive-analysis',

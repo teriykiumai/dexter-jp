@@ -9,6 +9,7 @@ import {
   UNAVAILABLE_TEXT,
   INVESTOR_TYPE_FLOW_CONTEXT_NOTE,
   REPORTED_SHORT_POSITION_DISCLOSURE_NOTE,
+  SECTOR_BENCHMARK_CONTEXT_NOTE,
   WATCHLIST_STALE_AFTER_DAYS,
   buildDetailPath,
   mapSnapshotToDashboard,
@@ -256,6 +257,53 @@ function Dashboard({ snapshot, onBack }: { snapshot: AnalysisSnapshot; onBack: (
               ? '投資部門別データは未収集です。'
               : `投資部門別データは利用できません。${view.investorTypeFlows.unavailableReasons.join(' / ')}`}
           </div>
+        )}
+      </Card>
+
+      <Card title="Sector Benchmark" eyebrow="TSE 33-sector price index">
+        <p className="disclosure-note">{SECTOR_BENCHMARK_CONTEXT_NOTE}</p>
+        {view.sectorBenchmark.state !== 'not_collected' ? (
+          <>
+            <MetricGrid metrics={[
+              { label: 'Analysis as-of', value: view.sectorBenchmark.analysisAsOfDate },
+              { label: 'Benchmark type', value: view.sectorBenchmark.benchmarkType },
+              { label: 'Sector code', value: view.sectorBenchmark.sectorCode },
+              { label: 'Sector name', value: view.sectorBenchmark.sectorName },
+              { label: 'Index code', value: view.sectorBenchmark.indexCode },
+              { label: 'Classification date', value: view.sectorBenchmark.classificationDate },
+              { label: 'Data date', value: view.sectorBenchmark.dataDate },
+              { label: 'Aligned closes', value: view.sectorBenchmark.alignedPriceCount },
+            ]} />
+            {view.sectorBenchmark.windows.length ? (
+              <div className="correlation-grid">
+                {view.sectorBenchmark.windows.map(window => (
+                  <article className="window-card" key={window.period}>
+                    <h3>{window.period}日</h3>
+                    <MetricGrid metrics={[
+                      { label: '観測数', value: window.observations },
+                      { label: 'Correlation', value: window.correlation },
+                      { label: 'Beta', value: window.beta },
+                      { label: 'Alpha annualized', value: window.alpha },
+                      { label: 'R²', value: window.rSquared },
+                      { label: 'Stock volatility', value: window.stockVolatility },
+                      { label: 'Sector volatility', value: window.benchmarkVolatility },
+                      { label: 'Excess return', value: window.excessReturn },
+                    ]} />
+                    {window.unavailableReasons.length
+                      ? <p className="reason-list">{window.unavailableReasons.join(' / ')}</p>
+                      : null}
+                  </article>
+                ))}
+              </div>
+            ) : null}
+            {view.sectorBenchmark.unavailableReasons.length ? (
+              <p className="reason-list">
+                業種指数比較は利用できません。{view.sectorBenchmark.unavailableReasons.join(' / ')}
+              </p>
+            ) : null}
+          </>
+        ) : (
+          <div className="empty-state">業種指数比較は未収集です。</div>
         )}
       </Card>
 

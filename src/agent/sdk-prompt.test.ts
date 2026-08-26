@@ -23,7 +23,12 @@ describe('SDK comprehensive analysis prompt', () => {
     expect(prompt).toContain('recalculate or repair source');
     expect(prompt).toContain('crowding score');
     expect(prompt).toContain('risk-on/off');
+    expect(prompt).toContain('single official TSE 33-sector price index');
+    expect(prompt).toContain('stitch multiple');
+    expect(prompt).toContain('sector indices');
+    expect(prompt).toContain('no sector-based investment claim');
     expect(prompt).toContain('# Data Dates');
+    expect(prompt).toContain('# Sector Benchmark');
     expect(prompt).toContain('# Bull / Base / Bear');
     expect(prompt).toContain('may not create prices');
   });
