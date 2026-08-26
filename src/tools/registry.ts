@@ -22,12 +22,14 @@ import {
   getInvestorTypeFlows,
   getMarginData,
   getShortSaleReports,
+  getSectorIndex,
   getStockPrice,
   getTopix,
   isJQuantsAvailable,
   INVESTOR_TYPE_FLOWS_DESCRIPTION,
   MARGIN_DATA_DESCRIPTION,
   SHORT_SALE_REPORT_DESCRIPTION,
+  SECTOR_INDEX_DESCRIPTION,
   STOCK_PRICE_DESCRIPTION,
   TOPIX_DESCRIPTION,
 } from './finance/index.js';
@@ -283,6 +285,13 @@ export function getToolRegistry(model: string): RegisteredTool[] {
         tool: getTopix,
         description: TOPIX_DESCRIPTION,
         compactDescription: 'Daily TOPIX benchmark OHLC from J-Quants (Light plan or higher).',
+        concurrencySafe: true,
+      },
+      {
+        name: 'get_sector_index',
+        tool: getSectorIndex,
+        description: SECTOR_INDEX_DESCRIPTION,
+        compactDescription: 'As-of TSE 33-sector classification and price-index history from J-Quants (Standard plan or higher).',
         concurrencySafe: true,
       },
     );

@@ -30,6 +30,20 @@ export {
 } from './short-sale-report.js';
 export { getTopix, TOPIX_DESCRIPTION } from './topix.js';
 export {
+  getSectorIndex,
+  SECTOR_INDEX_CODE_BY_S33,
+  SECTOR_INDEX_DESCRIPTION,
+  SECTOR_INDEX_SOURCE_START_DATE,
+  selectSectorClassificationDate,
+  type Sector33Code,
+  type SectorCalendarDay,
+  type SectorClassificationSource,
+  type SectorIndexCode,
+  type SectorIndexPriceSourceRow,
+  type SectorIndexSourceResult,
+  type SectorIndexSourceUnavailableReason,
+} from './sector-index.js';
+export {
   ANALYZE_FINANCIAL_METRICS_DESCRIPTION,
   ANALYZE_INVESTOR_TYPE_FLOWS_DESCRIPTION,
   ANALYZE_MARKET_CORRELATION_DESCRIPTION,
