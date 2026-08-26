@@ -34,6 +34,7 @@ import {
   analyzeInvestorTypeFlowsTool,
   analyzePeerComparisonTool,
   analyzeMarketCorrelationTool,
+  analyzeSectorBenchmarkTool,
   analyzeStrategyTool,
   isJQuantsAvailable,
   createReadFilings,
@@ -137,6 +138,7 @@ export function buildDexterSdkTools(): ReturnType<typeof adaptLangChainTool>[] {
     analyzeInvestorTypeFlowsTool,
     analyzePeerComparisonTool,
     analyzeMarketCorrelationTool,
+    analyzeSectorBenchmarkTool,
     analyzeStrategyTool,
   ];
 

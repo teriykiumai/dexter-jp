@@ -9,6 +9,7 @@ const ANALYSIS_TOOL_NAMES = [
   'analyze_investor_type_flows',
   'analyze_peer_comparison',
   'analyze_market_correlation',
+  'analyze_sector_benchmark',
   'analyze_strategy',
 ];
 

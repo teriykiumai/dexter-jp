@@ -112,6 +112,39 @@ function peerResult(
   };
 }
 
+function sectorBenchmarkResult() {
+  return {
+    analysisAsOfDate: '2026-08-20',
+    benchmark: {
+      type: 'TSE33_SECTOR_PRICE_INDEX' as const,
+      sectorCode: '3700',
+      sectorName: '輸送用機器',
+      indexCode: '0050',
+      classificationDate: '2026-08-20',
+    },
+    dataDate: '2026-08-20',
+    alignedPriceCount: 251,
+    windows: [],
+    unavailable: [],
+    provenance: {
+      classification: { source: 'jquants' as const, endpoint: '/v2/equities/master' as const },
+      index: { source: 'jquants' as const, endpoint: '/v2/indices/bars/daily' as const },
+      calculation: { source: 'market_correlation_engine' as const },
+    },
+    units: {
+      indexLevel: 'index_points' as const,
+      observations: 'count' as const,
+      correlation: 'ratio' as const,
+      beta: 'ratio' as const,
+      alphaAnnualized: 'ratio' as const,
+      rSquared: 'ratio' as const,
+      stockVolatilityAnnualized: 'ratio' as const,
+      benchmarkVolatilityAnnualized: 'ratio' as const,
+      excessReturn: 'ratio' as const,
+    },
+  };
+}
+
 describe('StandardAgentSnapshotCollector', () => {
   test('preserves deterministic Advanced Technical values from tool result to Snapshot', async () => {
     const collector = new StandardAgentSnapshotCollector();
@@ -325,7 +358,7 @@ describe('StandardAgentSnapshotCollector', () => {
     const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
     expect(snapshot?.advancedTechnical).toEqual(advancedTechnical);
     expect(snapshot?.supplyDemand?.mean4w).toBe(950);
-    expect(snapshot?.schemaVersion).toBe(5);
+    expect(snapshot?.schemaVersion).toBe(6);
     expect(snapshot?.marketCorrelation?.windows).toEqual([{
       period: 20,
       startDate: '2026-07-24',
@@ -356,7 +389,7 @@ describe('StandardAgentSnapshotCollector', () => {
     expect(JSON.stringify(snapshot)).not.toContain('2025-08-01');
   });
 
-  test('collects only structured reported-position analysis into Snapshot V5', () => {
+  test('collects only structured reported-position analysis into the current Snapshot', () => {
     const collector = new StandardAgentSnapshotCollector();
     invokeSkill(collector);
     lockToyota(collector);
@@ -384,7 +417,7 @@ describe('StandardAgentSnapshotCollector', () => {
 
     const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
 
-    expect(snapshot?.schemaVersion).toBe(5);
+    expect(snapshot?.schemaVersion).toBe(6);
     expect(snapshot?.status).toBe('partial');
     expect(snapshot?.reportedShortPositions?.reports[0]).toEqual({
       disclosedDate: '2026-08-20',
@@ -407,6 +440,117 @@ describe('StandardAgentSnapshotCollector', () => {
       expect.objectContaining({ source: 'jquants', role: 'short_position_data' }),
     ]));
     expect(JSON.stringify(snapshot)).not.toContain('must-not-survive');
+  });
+
+  test('collects only the structured sector benchmark result into Snapshot V6', () => {
+    const collector = new StandardAgentSnapshotCollector();
+    invokeSkill(collector);
+    lockToyota(collector);
+    start(collector, 'analyze_sector_benchmark', 'sector-1', {
+      ticker: '7203',
+      analysisAsOfDate: '2026-08-20',
+      from: '2025-08-01',
+    });
+    end(collector, 'analyze_sector_benchmark', 'sector-1', {
+      ...sectorBenchmarkResult(),
+      rawSourceRows: 'must-not-survive',
+    });
+
+    const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
+
+    expect(snapshot?.schemaVersion).toBe(6);
+    expect(snapshot?.sectorBenchmark).toEqual(sectorBenchmarkResult());
+    expect(snapshot?.dataDates.sectorBenchmark).toBe('2026-08-20');
+    expect(snapshot?.units.sectorBenchmark.indexLevel).toBe('index_points');
+    expect(snapshot?.provenance.sectorBenchmark).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'market_correlation_engine', role: 'calculation' }),
+      expect.objectContaining({ source: 'jquants', role: 'benchmark_data' }),
+      expect.objectContaining({ source: 'jquants', role: 'price_data' }),
+    ]));
+    expect(JSON.stringify(snapshot)).not.toContain('must-not-survive');
+    expect(JSON.stringify(snapshot)).not.toContain('2025-08-01');
+  });
+
+  test('preserves typed sector source absence instead of converting it to zero', () => {
+    const collector = new StandardAgentSnapshotCollector();
+    invokeSkill(collector);
+    lockToyota(collector);
+    start(collector, 'analyze_sector_benchmark', 'sector-empty', {
+      ticker: '7203',
+      analysisAsOfDate: '2026-08-20',
+      stockPrices: [],
+      sectorSource: {
+        analysisAsOfDate: '2026-08-20',
+        reason: 'no_sector_index_data',
+      },
+    });
+    end(collector, 'analyze_sector_benchmark', 'sector-empty', {
+      ...sectorBenchmarkResult(),
+      benchmark: null,
+      dataDate: null,
+      alignedPriceCount: 0,
+      windows: [],
+      unavailable: [{ reason: 'no_sector_index_data' }],
+    });
+
+    const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
+
+    expect(snapshot?.sectorBenchmark?.alignedPriceCount).toBe(0);
+    expect(snapshot?.sectorBenchmark?.unavailable).toEqual([
+      { reason: 'no_sector_index_data' },
+    ]);
+    expect(snapshot?.unavailable).toContainEqual({
+      section: 'sectorBenchmark',
+      reason: 'no_sector_index_data',
+    });
+  });
+
+  test('does not claim stock price provenance for a source-level unavailable sector result', () => {
+    for (const withExistingPriceHistory of [false, true]) {
+      const collector = new StandardAgentSnapshotCollector();
+      invokeSkill(collector);
+      lockToyota(collector);
+      if (withExistingPriceHistory) {
+        start(collector, 'get_stock_price', 'price-before-sector', {
+          ticker: '7203',
+          from: '2026-08-20',
+        });
+        end(collector, 'get_stock_price', 'price-before-sector', [{
+          date: '2026-08-20',
+          open: 3_000,
+          high: 3_050,
+          low: 2_990,
+          close: 3_040,
+          volume: 10_000,
+        }]);
+      }
+      start(collector, 'analyze_sector_benchmark', 'sector-no-source', {
+        ticker: '7203',
+        analysisAsOfDate: '2026-08-20',
+        sectorSource: {
+          analysisAsOfDate: '2026-08-20',
+          reason: 'sector_classification_unavailable',
+        },
+      });
+      end(collector, 'analyze_sector_benchmark', 'sector-no-source', {
+        ...sectorBenchmarkResult(),
+        benchmark: null,
+        dataDate: null,
+        alignedPriceCount: 0,
+        windows: [],
+        unavailable: [{ reason: 'sector_classification_unavailable' }],
+      });
+
+      const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
+
+      expect(snapshot?.sectorBenchmark?.unavailable).toEqual([
+        { reason: 'sector_classification_unavailable' },
+      ]);
+      expect(snapshot?.provenance.sectorBenchmark.some(item => (
+        item.source === 'jquants' && item.role === 'price_data'
+      ))).toBe(false);
+      expect(snapshot?.priceHistory !== null).toBe(withExistingPriceHistory);
+    }
   });
 
   test('preserves no-public-disclosure as unavailable rather than zero', () => {
@@ -436,7 +580,7 @@ describe('StandardAgentSnapshotCollector', () => {
     });
   });
 
-  test('collects only structured investor-type analysis with dates and provenance into Snapshot V5', () => {
+  test('collects only structured investor-type analysis with dates and provenance into the current Snapshot', () => {
     const collector = new StandardAgentSnapshotCollector();
     invokeSkill(collector);
     lockToyota(collector);
@@ -478,7 +622,7 @@ describe('StandardAgentSnapshotCollector', () => {
 
     const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
 
-    expect(snapshot?.schemaVersion).toBe(5);
+    expect(snapshot?.schemaVersion).toBe(6);
     expect(snapshot?.investorTypeFlows).toEqual({
       dataDate: '2026-08-20',
       section: 'TokyoNagoya',

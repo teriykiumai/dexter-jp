@@ -1,14 +1,14 @@
 import {
   ANALYSIS_SNAPSHOT_SCHEMA_VERSION,
   AnalysisSnapshotInputSchema,
-  AnalysisSnapshotV5Schema,
-  type AnalysisSnapshotV5,
+  AnalysisSnapshotV6Schema,
+  type AnalysisSnapshotV6,
   type AnalysisSnapshotInput,
   type InvestorTypeFlowProvenance,
   type ReportedShortPositionProvenance,
   type SnapshotProvenance,
   type SnapshotSection,
-  type SnapshotUnavailableV5,
+  type SnapshotUnavailableV6,
 } from './schema.js';
 
 export const REQUIRED_ANALYSIS_SNAPSHOT_SECTIONS = [
@@ -99,6 +99,18 @@ const UNITS = {
     balance: 'thousand_JPY',
   },
   marketCorrelation: {
+    alignedPriceCount: 'count',
+    observations: 'count',
+    correlation: 'ratio',
+    beta: 'ratio',
+    alphaAnnualized: 'ratio',
+    rSquared: 'ratio',
+    stockVolatilityAnnualized: 'ratio',
+    benchmarkVolatilityAnnualized: 'ratio',
+    excessReturn: 'ratio',
+  },
+  sectorBenchmark: {
+    indexLevel: 'index_points',
     alignedPriceCount: 'count',
     observations: 'count',
     correlation: 'ratio',
@@ -224,8 +236,8 @@ function peerComparisonState(input: AnalysisSnapshotInput) {
   };
 }
 
-function aggregateUnavailable(input: AnalysisSnapshotInput): SnapshotUnavailableV5[] {
-  const unavailable: SnapshotUnavailableV5[] = missingSections(input).map(section => ({
+function aggregateUnavailable(input: AnalysisSnapshotInput): SnapshotUnavailableV6[] {
+  const unavailable: SnapshotUnavailableV6[] = missingSections(input).map(section => ({
     section,
     reason: 'missing_required_section',
   }));
@@ -276,6 +288,22 @@ function aggregateUnavailable(input: AnalysisSnapshotInput): SnapshotUnavailable
       });
     }
   }
+  if (input.sectorBenchmark === null) {
+    unavailable.push({ section: 'sectorBenchmark', reason: 'not_collected' });
+  } else {
+    for (const item of input.sectorBenchmark.unavailable) {
+      unavailable.push({ section: 'sectorBenchmark', reason: item.reason });
+    }
+    for (const window of input.sectorBenchmark.windows) {
+      for (const item of window.unavailable) {
+        unavailable.push({
+          section: 'sectorBenchmark',
+          metric: `${window.period}.${item.metric}`,
+          reason: item.reason,
+        });
+      }
+    }
+  }
   for (const item of input.strategy?.unavailable ?? []) {
     unavailable.push({ section: 'strategy', metric: item.candidate, reason: item.reason });
   }
@@ -290,14 +318,14 @@ function aggregateUnavailable(input: AnalysisSnapshotInput): SnapshotUnavailable
   return [...unavailable, ...input.additionalUnavailable];
 }
 
-export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): AnalysisSnapshotV5 {
+export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): AnalysisSnapshotV6 {
   const input = AnalysisSnapshotInputSchema.parse(rawInput);
   const fundamentalDate = latestFundamentalDate(input);
   const peerDate = latestPeerDate(input);
   const priceDate = latestPriceDate(input);
   const missing = missingSections(input);
 
-  return AnalysisSnapshotV5Schema.parse({
+  return AnalysisSnapshotV6Schema.parse({
     schemaVersion: ANALYSIS_SNAPSHOT_SCHEMA_VERSION,
     status: missing.length === 0 ? 'complete' : 'partial',
     canonicalTicker: input.identity.canonicalTicker,
@@ -317,6 +345,7 @@ export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): Analysis
       investorTypeFlows: input.investorTypeFlows?.dataDate ?? null,
       supplyDemand: input.supplyDemand?.dataDate ?? null,
       marketCorrelation: input.marketCorrelation?.dataDate ?? null,
+      sectorBenchmark: input.sectorBenchmark?.dataDate ?? null,
       strategy: input.strategy?.dataDate ?? null,
       priceHistory: priceDate,
     },
@@ -448,6 +477,29 @@ export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): Analysis
               : []),
           ]
         : [],
+      sectorBenchmark: input.sectorBenchmark
+        ? [
+            ...provenance(
+              'market_correlation_engine',
+              'calculation',
+              input.sectorBenchmark.dataDate,
+            ),
+            ...provenance(
+              'jquants',
+              'benchmark_data',
+              input.sectorBenchmark.benchmark?.classificationDate
+                ?? input.sectorBenchmark.dataDate,
+            ),
+            ...(input.sourceUsage.sectorBenchmark.stockFromJQuants
+              ? provenance(
+                  'jquants',
+                  'price_data',
+                  input.sectorBenchmark.dataDate,
+                  input.priceSourceUrls,
+                )
+              : []),
+          ]
+        : [],
       strategy: input.strategy
         ? provenance('strategy_engine', 'calculation', input.strategy.dataDate)
         : [],
@@ -467,6 +519,7 @@ export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): Analysis
     reportedShortPositions: input.reportedShortPositions,
     investorTypeFlows: input.investorTypeFlows,
     marketCorrelation: input.marketCorrelation,
+    sectorBenchmark: input.sectorBenchmark,
     strategy: input.strategy,
     priceHistory: input.priceHistory,
     scenarios: input.scenarios,

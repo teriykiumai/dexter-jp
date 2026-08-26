@@ -43,6 +43,7 @@ function partialSnapshot(
     reportedShortPositions: null,
     investorTypeFlows: null,
     marketCorrelation: null,
+    sectorBenchmark: null,
     strategy: null,
     priceHistory: null,
     scenarios: null,
@@ -59,6 +60,7 @@ function partialSnapshot(
       marketCorrelation: { stockFromJQuants: false, benchmarkFromJQuants: false },
       reportedShortPositions: { sourceFromJQuants: false },
       investorTypeFlows: { sourceFromJQuants: false, calendarFromJQuants: false },
+      sectorBenchmark: { stockFromJQuants: false },
     },
     additionalUnavailable: [],
   };
@@ -111,7 +113,7 @@ describe('dashboard request handler', () => {
 
     const latestResponse = await handleDashboardRequest(request('/api/analyses/7203'), repository);
     expect(await responseJson(latestResponse)).toMatchObject({
-      schemaVersion: 5,
+      schemaVersion: 6,
       canonicalTicker: '7203',
       generatedAt: latest.generatedAt,
       finalReportMarkdown: '# Analysis',

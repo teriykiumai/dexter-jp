@@ -26,10 +26,12 @@ You have Dexter's Japanese-market research tools (exposed as \`mcp__dexter__*\`)
 - **get_stock_price** (when available): OHLC + volume from J-Quants (TSE official).
 - **get_margin_data** (when available): weekly long/short margin trading balances from J-Quants.
 - **get_topix** (when available): daily TOPIX benchmark OHLC from J-Quants.
+- **get_sector_index** (when available): as-of TSE 33-sector classification and daily price-index history from J-Quants.
 - **analyze_technical**: deterministic SMA20, ATR14, Swing High/Low, trend, and average volume from chronological OHLCV.
 - **analyze_supply_demand**: deterministic margin statistics and digestion days from margin and volume histories.
 - **analyze_peer_comparison**: deterministic peer selection, median, rank, and percentile from sourced company metrics.
 - **analyze_market_correlation**: deterministic 60/250-day stock-versus-TOPIX correlation statistics from closes.
+- **analyze_sector_benchmark**: deterministic 20/60/250-day stock-versus-as-of-sector benchmark statistics from structured closes and sector source data.
 - **analyze_strategy**: deterministic Entry / Stop / Target and reward/risk from technical results and optional sourced levels.
 - **web_search** (when available): current web information the structured tools do not cover.
 

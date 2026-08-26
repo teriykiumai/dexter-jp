@@ -5,6 +5,7 @@ import {
   analyzeMarketCorrelation,
   analyzePeerComparison,
   analyzeReportedShortPositions,
+  analyzeSectorBenchmark,
   analyzeStrategy,
   analyzeSupplyDemand,
   analyzeTechnical,
@@ -17,6 +18,7 @@ import {
   analyzeMarketCorrelationTool,
   analyzePeerComparisonTool,
   analyzeReportedShortPositionsTool,
+  analyzeSectorBenchmarkTool,
   analyzeStrategyTool,
   analyzeSupplyDemandTool,
   analyzeTechnicalTool,
@@ -89,6 +91,7 @@ describe('deterministic analysis tools', () => {
       'analyze_investor_type_flows',
       'analyze_peer_comparison',
       'analyze_market_correlation',
+      'analyze_sector_benchmark',
       'analyze_strategy',
     ]);
     expect(new Set(names).size).toBe(names.length);
@@ -415,6 +418,184 @@ describe('deterministic analysis tools', () => {
       topixPrices,
     }));
     expect(actual).toEqual(analyzeMarketCorrelation(stockPrices, topixPrices));
+  });
+
+  test('delegates one supplied as-of sector source without fetching or stitching', async () => {
+    const stockPrices = dates(61).map((date, index) => ({ date, close: 100 + index }));
+    const sectorSource = {
+      analysisAsOfDate: dates(61).at(-1)!,
+      classification: {
+        issuerCode: '72030',
+        classificationDate: dates(61).at(-1)!,
+        sectorCode: '3700' as const,
+        sectorName: '輸送用機器',
+        indexCode: '0050' as const,
+      },
+      prices: dates(61).map((date, index) => ({
+        date,
+        indexCode: '0050' as const,
+        open: null,
+        high: null,
+        low: null,
+        close: 2_000 + index * 2,
+      })),
+    };
+
+    const actual = toolData(await analyzeSectorBenchmarkTool.invoke({
+      ticker: '7203',
+      analysisAsOfDate: sectorSource.analysisAsOfDate,
+      stockPrices,
+      sectorSource,
+    }));
+
+    expect(actual).toEqual(analyzeSectorBenchmark(stockPrices, sectorSource));
+  });
+
+  test('short-circuits supplied sector source unavailability without fetching stock', async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCount = 0;
+    globalThis.fetch = (async () => {
+      fetchCount += 1;
+      throw new Error('Unexpected fetch');
+    }) as unknown as typeof fetch;
+
+    try {
+      for (const reason of [
+        'sector_classification_unavailable',
+        'unsupported_sector',
+        'no_sector_index_data',
+      ] as const) {
+        const sectorSource = {
+          analysisAsOfDate: '2026-08-20',
+          reason,
+        };
+        const actual = toolData(await analyzeSectorBenchmarkTool.invoke({
+          ticker: '7203',
+          analysisAsOfDate: sectorSource.analysisAsOfDate,
+          sectorSource,
+        }));
+
+        expect(actual).toEqual(analyzeSectorBenchmark([], sectorSource));
+      }
+      expect(fetchCount).toBe(0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('rejects supplied sector source data for a different issuer', async () => {
+    const stockPrices = dates(21).map((date, index) => ({ date, close: 100 + index }));
+    const analysisAsOfDate = dates(21).at(-1)!;
+
+    await expect(analyzeSectorBenchmarkTool.invoke({
+      ticker: '7203',
+      analysisAsOfDate,
+      stockPrices,
+      sectorSource: {
+        analysisAsOfDate,
+        classification: {
+          issuerCode: '67580',
+          classificationDate: analysisAsOfDate,
+          sectorCode: '3650',
+          sectorName: '電気機器',
+          indexCode: '004F',
+        },
+        prices: [],
+      },
+    })).rejects.toThrow('sectorSource issuerCode must match ticker.');
+  });
+
+  test('fetches stock, calendar, master, and one sector index exactly once in direct mode', async () => {
+    const priceDates = dates(251);
+    const analysisAsOfDate = priceDates.at(-1)!;
+    const originalFetch = globalThis.fetch;
+    const previousApiKey = process.env.JQUANTS_API_KEY;
+    process.env.JQUANTS_API_KEY = 'test-jquants-key';
+    const fetchCounts = {
+      stock: 0,
+      calendar: 0,
+      master: 0,
+      sectorIndex: 0,
+    };
+
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const href = input instanceof URL
+        ? input.href
+        : typeof input === 'string'
+          ? input
+          : input.url;
+      const url = new URL(href);
+      let data: Record<string, unknown>[];
+
+      if (url.pathname.endsWith('/equities/bars/daily')) {
+        fetchCounts.stock += 1;
+        data = priceDates.map((date, index) => ({
+          Date: date,
+          Code: '72030',
+          AdjO: 100 + index,
+          AdjH: 102 + index,
+          AdjL: 99 + index,
+          AdjC: 101 + index,
+          AdjVo: 1_000 + index,
+          Va: null,
+        }));
+      } else if (url.pathname.endsWith('/markets/calendar')) {
+        fetchCounts.calendar += 1;
+        data = [{ Date: analysisAsOfDate, HolDiv: '1' }];
+      } else if (url.pathname.endsWith('/equities/master')) {
+        fetchCounts.master += 1;
+        data = [{
+          Date: analysisAsOfDate,
+          Code: '72030',
+          S33: '3700',
+          S33Nm: '輸送用機器',
+        }];
+      } else if (url.pathname.endsWith('/indices/bars/daily')) {
+        fetchCounts.sectorIndex += 1;
+        data = priceDates.map((date, index) => ({
+          Date: date,
+          Code: '0050',
+          O: 2_000 + index,
+          H: 2_002 + index,
+          L: 1_999 + index,
+          C: 2_001 + index * 1.01,
+        }));
+      } else {
+        throw new Error(`Unexpected test URL: ${url.pathname}`);
+      }
+
+      return new Response(JSON.stringify({ data }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    try {
+      const actual = toolData(await analyzeSectorBenchmarkTool.invoke({
+        ticker: '7203',
+        analysisAsOfDate,
+        from: priceDates[0],
+      })) as {
+        benchmark: { sectorCode: string; indexCode: string } | null;
+        alignedPriceCount: number;
+        windows: Array<{ period: number; observations: number }>;
+      };
+
+      expect(actual.benchmark).toMatchObject({ sectorCode: '3700', indexCode: '0050' });
+      expect(actual.alignedPriceCount).toBe(251);
+      expect(actual.windows.map((window) => window.period)).toEqual([20, 60, 250]);
+      expect(actual.windows.find((window) => window.period === 250)?.observations).toBe(250);
+      expect(fetchCounts).toEqual({
+        stock: 1,
+        calendar: 1,
+        master: 1,
+        sectorIndex: 1,
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (previousApiKey === undefined) delete process.env.JQUANTS_API_KEY;
+      else process.env.JQUANTS_API_KEY = previousApiKey;
+    }
   });
 
   test('delegates technical levels and sourced options to the Strategy Engine', async () => {

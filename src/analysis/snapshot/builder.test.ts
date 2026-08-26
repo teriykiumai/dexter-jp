@@ -177,6 +177,36 @@ function completeInput(): AnalysisSnapshotInput {
       alignedPriceCount: 251,
       windows: [],
     },
+    sectorBenchmark: {
+      analysisAsOfDate: '2026-08-21',
+      benchmark: {
+        type: 'TSE33_SECTOR_PRICE_INDEX',
+        sectorCode: '3700',
+        sectorName: '輸送用機器',
+        indexCode: '0050',
+        classificationDate: '2026-08-21',
+      },
+      dataDate: '2026-08-21',
+      alignedPriceCount: 251,
+      windows: [],
+      unavailable: [],
+      provenance: {
+        classification: { source: 'jquants', endpoint: '/v2/equities/master' },
+        index: { source: 'jquants', endpoint: '/v2/indices/bars/daily' },
+        calculation: { source: 'market_correlation_engine' },
+      },
+      units: {
+        indexLevel: 'index_points',
+        observations: 'count',
+        correlation: 'ratio',
+        beta: 'ratio',
+        alphaAnnualized: 'ratio',
+        rSquared: 'ratio',
+        stockVolatilityAnnualized: 'ratio',
+        benchmarkVolatilityAnnualized: 'ratio',
+        excessReturn: 'ratio',
+      },
+    },
     strategy: {
       dataDate: '2026-08-21',
       entry: {
@@ -207,6 +237,7 @@ function completeInput(): AnalysisSnapshotInput {
       marketCorrelation: { stockFromJQuants: true, benchmarkFromJQuants: true },
       reportedShortPositions: { sourceFromJQuants: true },
       investorTypeFlows: { sourceFromJQuants: true, calendarFromJQuants: true },
+      sectorBenchmark: { stockFromJQuants: true },
     },
     additionalUnavailable: [],
   };
@@ -216,7 +247,7 @@ describe('buildAnalysisSnapshot', () => {
   test('uses an explicit required-section contract and remains complete for metric-level unavailable states', () => {
     const snapshot = buildAnalysisSnapshot(completeInput());
 
-    expect(snapshot.schemaVersion).toBe(5);
+    expect(snapshot.schemaVersion).toBe(6);
     expect(REQUIRED_ANALYSIS_SNAPSHOT_SECTIONS).toEqual([
       'identity',
       'fundamental',
@@ -286,6 +317,11 @@ describe('buildAnalysisSnapshot', () => {
       expect.objectContaining({ source: 'jquants', role: 'price_data' }),
       expect.objectContaining({ source: 'jquants', role: 'benchmark_data' }),
     ]));
+    expect(snapshot.provenance.sectorBenchmark).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'market_correlation_engine', role: 'calculation' }),
+      expect.objectContaining({ source: 'jquants', role: 'benchmark_data' }),
+      expect.objectContaining({ source: 'jquants', role: 'price_data' }),
+    ]));
     expect(snapshot.units.valuation.per).toBe('multiple');
     expect(snapshot.units.peerComparison.percentile).toBe('ratio');
     expect(snapshot.units.supplyDemand.percentile52w).toBe('ratio');
@@ -311,12 +347,68 @@ describe('buildAnalysisSnapshot', () => {
       total: 'thousand_JPY',
       balance: 'thousand_JPY',
     });
+    expect(snapshot.units.sectorBenchmark).toEqual({
+      indexLevel: 'index_points',
+      alignedPriceCount: 'count',
+      observations: 'count',
+      correlation: 'ratio',
+      beta: 'ratio',
+      alphaAnnualized: 'ratio',
+      rSquared: 'ratio',
+      stockVolatilityAnnualized: 'ratio',
+      benchmarkVolatilityAnnualized: 'ratio',
+      excessReturn: 'ratio',
+    });
     expect(snapshot.dataDates.advancedTechnical).toBe('2026-08-21');
     expect(snapshot.advancedTechnical).toEqual(completeInput().advancedTechnical);
     expect(snapshot.dataDates.reportedShortPositions).toBe('2026-08-20');
     expect(snapshot.reportedShortPositions).toEqual(completeInput().reportedShortPositions);
     expect(snapshot.dataDates.investorTypeFlows).toBe('2026-08-20');
     expect(snapshot.investorTypeFlows).toEqual(completeInput().investorTypeFlows);
+    expect(snapshot.dataDates.sectorBenchmark).toBe('2026-08-21');
+    expect(snapshot.sectorBenchmark).toEqual(completeInput().sectorBenchmark);
+  });
+
+  test('preserves sector unavailable states without changing complete status', () => {
+    for (const reason of [
+      'sector_classification_unavailable',
+      'unsupported_sector',
+      'no_sector_index_data',
+      'invalid_data',
+    ] as const) {
+      const input = completeInput();
+      input.sectorBenchmark = {
+        ...input.sectorBenchmark!,
+        benchmark: null,
+        dataDate: null,
+        alignedPriceCount: 0,
+        windows: [],
+        unavailable: [{ reason }],
+      };
+
+      const snapshot = buildAnalysisSnapshot(input);
+
+      expect(snapshot.status).toBe('complete');
+      expect(snapshot.sectorBenchmark).toEqual(input.sectorBenchmark);
+      expect(snapshot.unavailable).toContainEqual({
+        section: 'sectorBenchmark',
+        reason,
+      });
+    }
+  });
+
+  test('treats an uncollected optional sector benchmark as not collected, not partial', () => {
+    const input = completeInput();
+    input.sectorBenchmark = null;
+
+    const snapshot = buildAnalysisSnapshot(input);
+
+    expect(snapshot.status).toBe('complete');
+    expect(snapshot.sectorBenchmark).toBeNull();
+    expect(snapshot.unavailable).toContainEqual({
+      section: 'sectorBenchmark',
+      reason: 'not_collected',
+    });
   });
 
   test('preserves reported-position unavailable reasons without changing complete status', () => {
