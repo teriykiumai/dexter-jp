@@ -90,8 +90,8 @@ Preserve dates and nulls. Do not forward-fill, interpolate, or silently remove m
 4. Call `analyze_reported_short_positions` with the verified target `ticker` and an explicit `analysisAsOfDate`. For historical analysis, use the simulated as-of date. Otherwise use the current analysis date. Treat `disclosedDate` as the information-availability date and `calculatedDate` only as the position reference date.
 5. Call `analyze_investor_type_flows` with the verified target `ticker` and the same explicit `analysisAsOfDate`. Interpret only its correction/as-of-processed structured result.
 6. Pass stock and TOPIX closes to `analyze_market_correlation`.
-7. Call `analyze_sector_benchmark` with the verified target `ticker`, the same history start, and the explicit `analysisAsOfDate`. Interpret only its structured deterministic result.
-8. Call `analyze_sector_short_ratio` with the verified target `ticker`, the same history start, and the explicit `analysisAsOfDate`. When an authoritative as-of sector classification is already available from the sector benchmark path, reuse that structured identity instead of resolving it again. Interpret only its structured deterministic result.
+7. Call `get_sector_index` once with the verified target `ticker`, the same history start, and the explicit `analysisAsOfDate`. Pass its full structured source result to `analyze_sector_benchmark` and interpret only the deterministic result.
+8. Call `analyze_sector_short_ratio` with the verified target `ticker`, the same history start, and the explicit `analysisAsOfDate`. Reuse only the trusted `sectorIdentity` envelope returned by that `get_sector_index` call. Never construct or pass a bare classification. The tool verifies the envelope's `issuerCode`, source `analysisAsOfDate`, classification fields, and provenance before reusing it. Interpret only its structured deterministic result.
 9. Pass the verified target `ticker` plus `dataDate`, `latestSwingHigh`, `latestSwingLow`, and `atr14` from the Technical result to `analyze_strategy`.
 10. Supply Strategy `tickSize` or `resistanceLevels` only when a reliable source provided them; otherwise omit them. Without a sourced tick size, report the strictly-above trigger but no exact entry or 2R target.
 
@@ -172,12 +172,13 @@ Use the same direct ticker boundary for `analyze_reported_short_positions`, with
 explicit `analysisAsOfDate`; do not substitute `calculatedDate` for that boundary.
 Use that explicit boundary for `analyze_investor_type_flows` as well; do not substitute
 `periodEndDate` for publication availability.
-Use the same history start and explicit `analysisAsOfDate` for the direct
-`analyze_sector_benchmark` call. Do not re-resolve or replace its as-of sector identity
-in narrative reasoning.
-Use the same boundary for `analyze_sector_short_ratio`; reuse an already resolved
-authoritative sector classification when the tool surface supports it, and never
-substitute a current classification for a historical analysis.
+Use one `get_sector_index` source result for both sector consumers: pass the complete
+source result to `analyze_sector_benchmark` and its trusted `sectorIdentity` envelope
+to `analyze_sector_short_ratio`. Keep the same history start and explicit
+`analysisAsOfDate`; do not reconstruct a bare classification, change `issuerCode`,
+replace source provenance, or substitute a current classification for a historical
+analysis. If the trusted envelope is unavailable, let the analysis tool resolve the
+target again rather than inventing identity fields.
 
 ## 6. Build conditional scenarios
 

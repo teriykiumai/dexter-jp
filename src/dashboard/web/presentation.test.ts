@@ -1101,6 +1101,7 @@ describe('snapshot presentation mapping', () => {
       dataDates: { ...base.dataDates, sectorShortRatio: '2026-08-21' },
       sectorShortRatio: {
         analysisAsOfDate: '2026-08-21',
+        issuerCode: '72030',
         sector: {
           classificationDate: '2026-08-21',
           sectorCode: '3700',
@@ -1186,6 +1187,7 @@ describe('snapshot presentation mapping', () => {
       ...base,
       sectorShortRatio: {
         analysisAsOfDate: '2026-08-21',
+        issuerCode: '72030',
         sector: {
           classificationDate: '2026-08-21', sectorCode: '3700', sectorName: '輸送用機器',
         },

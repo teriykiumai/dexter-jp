@@ -23,6 +23,16 @@ export const CanonicalTickerSchema = z.string().regex(JAPANESE_SECURITIES_CODE_P
   message: 'canonicalTicker must be a valid four-character Japanese securities code.',
 });
 
+const JQuantsIssuerCodeSchema = z.string().refine((value) => {
+  try {
+    return value.length === 5
+      && value.endsWith('0')
+      && `${normalizeJapaneseSecuritiesCode(value)}0` === value;
+  } catch {
+    return false;
+  }
+}, { message: 'issuerCode must be a normalized five-character J-Quants code.' });
+
 export function normalizeCanonicalTicker(value: string): string {
   return normalizeJapaneseSecuritiesCode(value);
 }
@@ -736,6 +746,7 @@ const sectorShortRatioSourceProvenanceSchema = z.object({
 
 export const SectorShortRatioResultSchema = z.object({
   analysisAsOfDate: z.string().min(1),
+  issuerCode: JQuantsIssuerCodeSchema,
   sector: sectorShortRatioClassificationSchema.nullable(),
   dataDate: nullableDate,
   observations: z.array(z.object({

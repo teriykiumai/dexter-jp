@@ -32,6 +32,8 @@ describe('SDK comprehensive analysis prompt', () => {
     expect(prompt).toContain("not the analyzed issuer's short position");
     expect(prompt).toContain('aggregate sectors or dates');
     expect(prompt).toContain('make no sector-flow investment claim');
+    expect(prompt).toContain('trusted `sectorIdentity` envelope');
+    expect(prompt).toContain('Never construct or pass a bare classification');
     expect(prompt).toContain('# Data Dates');
     expect(prompt).toContain('# Sector Benchmark');
     expect(prompt).toContain('# Sector Short-selling Flow');

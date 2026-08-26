@@ -604,6 +604,7 @@ describe('deterministic analysis tools', () => {
   test('delegates supplied sector short-ratio rows to the deterministic engine without fetching', async () => {
     const sectorSource = {
       analysisAsOfDate: '2026-08-20',
+      issuerCode: '72030',
       classification: {
         classificationDate: '2026-08-20',
         sectorCode: '3700' as const,
@@ -671,10 +672,14 @@ describe('deterministic analysis tools', () => {
         ticker: '7203',
         analysisAsOfDate: '2026-08-20',
         from: '2026-01-01',
-        classification: {
+        sectorIdentity: {
+          analysisAsOfDate: '2026-08-20',
+          issuerCode: '72030',
           classificationDate: '2026-08-20',
           sectorCode: '3700',
           sectorName: '輸送用機器',
+          indexCode: '0050',
+          provenance: { source: 'jquants', endpoint: '/v2/equities/master' },
         },
       })) as { observations: Array<{ shortSellingRatio: number }> };
 
@@ -684,6 +689,71 @@ describe('deterministic analysis tools', () => {
       globalThis.fetch = originalFetch;
       if (previousApiKey === undefined) delete process.env.JQUANTS_API_KEY;
       else process.env.JQUANTS_API_KEY = previousApiKey;
+    }
+  });
+
+  test('rejects unbound sector identities and sources before fetching short-ratio data', async () => {
+    let fetchCount = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      fetchCount += 1;
+      throw new Error('Unexpected fetch');
+    }) as unknown as typeof fetch;
+    const sectorIdentity = {
+      analysisAsOfDate: '2026-08-20',
+      issuerCode: '72030',
+      classificationDate: '2026-08-20',
+      sectorCode: '3700' as const,
+      sectorName: '輸送用機器',
+      indexCode: '0050' as const,
+      provenance: {
+        source: 'jquants' as const,
+        endpoint: '/v2/equities/master' as const,
+      },
+    };
+    const sectorSource = {
+      analysisAsOfDate: '2026-08-20',
+      issuerCode: '72030',
+      classification: {
+        classificationDate: '2026-08-20',
+        sectorCode: '3700' as const,
+        sectorName: '輸送用機器',
+      },
+      rows: [],
+      reason: 'no_sector_short_ratio_data' as const,
+      error: 'No source rows.',
+      provenance: {
+        classification: {
+          source: 'jquants' as const,
+          endpoint: '/v2/equities/master' as const,
+        },
+        flow: {
+          source: 'jquants' as const,
+          endpoint: '/v2/markets/short-ratio' as const,
+        },
+      },
+    };
+
+    try {
+      await expect(analyzeSectorShortRatioTool.invoke({
+        ticker: '7203', analysisAsOfDate: '2026-08-20', from: '2026-01-01',
+        sectorIdentity: { ...sectorIdentity, issuerCode: '67580' },
+      })).rejects.toThrow('sectorIdentity issuerCode must match ticker.');
+      await expect(analyzeSectorShortRatioTool.invoke({
+        ticker: '7203', analysisAsOfDate: '2026-08-20', from: '2026-01-01',
+        sectorIdentity: { ...sectorIdentity, analysisAsOfDate: '2026-08-19' },
+      })).rejects.toThrow('sectorIdentity analysisAsOfDate must match analysisAsOfDate.');
+      await expect(analyzeSectorShortRatioTool.invoke({
+        ticker: '7203', analysisAsOfDate: '2026-08-20',
+        sectorSource: { ...sectorSource, issuerCode: '67580' },
+      })).rejects.toThrow('sectorSource issuerCode must match ticker.');
+      await expect(analyzeSectorShortRatioTool.invoke({
+        ticker: '7203', analysisAsOfDate: '2026-08-20',
+        sectorSource: { ...sectorSource, analysisAsOfDate: '2026-08-19' },
+      })).rejects.toThrow('sectorSource analysisAsOfDate must match analysisAsOfDate.');
+      expect(fetchCount).toBe(0);
+    } finally {
+      globalThis.fetch = originalFetch;
     }
   });
 

@@ -131,6 +131,9 @@ describe('comprehensive analysis skill', () => {
     expect(skill?.instructions).toContain('squeeze/crowding label');
     expect(skill?.instructions).toContain('combine this result');
     expect(skill?.instructions).toContain('make no sector-flow investment claim');
+    expect(skill?.instructions).toContain('trusted `sectorIdentity` envelope');
+    expect(skill?.instructions).toContain('Never construct or pass a bare classification');
+    expect(skill?.instructions).toContain('change `issuerCode`');
 
     const invoked = await skillTool.invoke({
       skill: 'comprehensive-analysis',

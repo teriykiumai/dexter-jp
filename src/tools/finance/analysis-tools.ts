@@ -187,6 +187,18 @@ const sectorShortRatioClassificationSchema = z.object({
   sectorCode: sector33CodeSchema,
   sectorName: z.string(),
 });
+const sectorClassificationEnvelopeSchema = z.object({
+  analysisAsOfDate: z.string(),
+  issuerCode: z.string(),
+  classificationDate: z.string(),
+  sectorCode: sector33CodeSchema,
+  sectorName: z.string(),
+  indexCode: sectorIndexCodeSchema,
+  provenance: z.object({
+    source: z.literal('jquants'),
+    endpoint: z.literal('/v2/equities/master'),
+  }),
+});
 const sectorShortRatioSourceRowSchema = z.object({
   date: z.string(),
   sectorCode: sector33CodeSchema,
@@ -207,6 +219,7 @@ const sectorShortRatioProvenanceSchema = z.object({
 const sectorShortRatioSourceSchema = z.union([
   z.object({
     analysisAsOfDate: z.string(),
+    issuerCode: z.string(),
     classification: sectorShortRatioClassificationSchema,
     rows: z.array(sectorShortRatioSourceRowSchema),
     provenance: sectorShortRatioProvenanceSchema.extend({
@@ -216,6 +229,7 @@ const sectorShortRatioSourceSchema = z.union([
   }),
   z.object({
     analysisAsOfDate: z.string(),
+    issuerCode: z.string(),
     classification: sectorShortRatioClassificationSchema.nullable(),
     reason: z.enum([
       'sector_classification_unavailable',
@@ -679,7 +693,7 @@ export const analyzeSectorBenchmarkTool = new DynamicStructuredTool({
 });
 
 export const ANALYZE_SECTOR_SHORT_RATIO_DESCRIPTION = `
-Calculate the daily TSE 33-sector short-selling turnover total and ratio from the three official J-Quants JPY source values. This is sector-wide flow context, not an issuer position. Source observations remain separate with no forward fill, aggregation across sectors, baseline statistic, threshold, squeeze label, score, or signal.
+Calculate the daily TSE 33-sector short-selling turnover total and ratio from the three official J-Quants JPY source values. This is sector-wide flow context, not an issuer position. A reused sector identity must be the trusted get_sector_index envelope bound to the same issuerCode and analysisAsOfDate. Source observations remain separate with no forward fill, aggregation across sectors, baseline statistic, threshold, squeeze label, score, or signal.
 `.trim();
 
 export const analyzeSectorShortRatioTool = new DynamicStructuredTool({
@@ -695,26 +709,37 @@ export const analyzeSectorShortRatioTool = new DynamicStructuredTool({
     from: z.string().optional().describe(
       'History start date required when source rows must be fetched directly.',
     ),
-    classification: sectorShortRatioClassificationSchema.optional().describe(
-      'Optional authoritative identity from get_sector_index or analyze_sector_benchmark.',
+    sectorIdentity: sectorClassificationEnvelopeSchema.optional().describe(
+      'Optional trusted sectorIdentity envelope returned by get_sector_index.',
     ),
     sectorSource: sectorShortRatioSourceSchema.optional().describe(
       'Optional structured output from get_sector_short_ratio, including typed unavailable state.',
     ),
   }),
-  func: async ({ ticker, analysisAsOfDate, from, classification, sectorSource }) => {
+  func: async ({ ticker, analysisAsOfDate, from, sectorIdentity, sectorSource }) => {
+    const issuerCode = toJQuantsSecuritiesCode(ticker);
+    if (sectorIdentity?.analysisAsOfDate !== undefined
+      && sectorIdentity.analysisAsOfDate !== analysisAsOfDate) {
+      throw new Error('sectorIdentity analysisAsOfDate must match analysisAsOfDate.');
+    }
+    if (sectorIdentity && sectorIdentity.issuerCode !== issuerCode) {
+      throw new Error('sectorIdentity issuerCode must match ticker.');
+    }
     if (sectorSource && sectorSource.analysisAsOfDate !== analysisAsOfDate) {
       throw new Error('sectorSource analysisAsOfDate must match analysisAsOfDate.');
+    }
+    if (sectorSource && sectorSource.issuerCode !== issuerCode) {
+      throw new Error('sectorSource issuerCode must match ticker.');
     }
     if (!sectorSource) {
       if (!from) {
         throw new Error('analyze_sector_short_ratio requires sectorSource or history from.');
       }
       sectorSource = await fetchSectorShortRatioSource({
-        ticker,
+        ...(sectorIdentity ? {} : { ticker }),
         analysisAsOfDate,
         from,
-        classification,
+        sectorIdentity,
       });
     }
     return formatToolResult(

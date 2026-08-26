@@ -1,3 +1,4 @@
+import { toJQuantsSecuritiesCode } from '../../utils/japanese-securities-code.js';
 import type {
   SectorShortRatioClassification,
   SectorShortRatioSource,
@@ -29,6 +30,7 @@ export interface SectorShortRatioObservation {
 
 export interface SectorShortRatioResult {
   readonly analysisAsOfDate: string;
+  readonly issuerCode: string;
   readonly sector: SectorShortRatioClassification | null;
   readonly dataDate: string | null;
   readonly observations: readonly SectorShortRatioObservation[];
@@ -77,6 +79,7 @@ function unavailableResult(
 ): SectorShortRatioResult {
   return {
     analysisAsOfDate: source.analysisAsOfDate,
+    issuerCode: source.issuerCode,
     sector: source.classification,
     dataDate: null,
     observations: [],
@@ -147,8 +150,15 @@ function calculateObservation(row: SectorShortRatioSourceRow): SectorShortRatioO
 /** Calculate only source-defined daily sector short-selling totals and ratios. */
 export function analyzeSectorShortRatio(source: SectorShortRatioSource): SectorShortRatioResult {
   if ('reason' in source) return unavailableResult(source, source.reason);
+  let normalizedIssuerCode: string;
+  try {
+    normalizedIssuerCode = toJQuantsSecuritiesCode(source.issuerCode);
+  } catch {
+    return unavailableResult(source, 'invalid_data');
+  }
   if (
-    !isCanonicalDate(source.analysisAsOfDate)
+    normalizedIssuerCode !== source.issuerCode
+    || !isCanonicalDate(source.analysisAsOfDate)
     || !isCanonicalDate(source.classification.classificationDate)
     || source.classification.classificationDate > source.analysisAsOfDate
   ) {
@@ -175,6 +185,7 @@ export function analyzeSectorShortRatio(source: SectorShortRatioSource): SectorS
   const observations = rows.map(calculateObservation);
   return {
     analysisAsOfDate: source.analysisAsOfDate,
+    issuerCode: source.issuerCode,
     sector: source.classification,
     dataDate: observations.at(-1)?.date ?? null,
     observations,

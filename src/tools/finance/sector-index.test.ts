@@ -92,6 +92,8 @@ describe('getSectorIndex', () => {
   test('preserves source-only and as-of benchmark semantics in the tool description', () => {
     expect(getSectorIndex.description).toContain('Standard plan or higher');
     expect(getSectorIndex.description).toContain('one as-of sector index only');
+    expect(getSectorIndex.description).toContain('trusted sectorIdentity envelope');
+    expect(getSectorIndex.description).toContain('issuerCode');
     expect(getSectorIndex.description).toContain('does not stitch');
     expect(getSectorIndex.description).toContain('no correlation');
     expect(getSectorIndex.description).toContain('unavailable, not zero');
@@ -183,6 +185,15 @@ describe('getSectorIndex', () => {
         sectorCode: '3700',
         sectorName: '輸送用機器',
         indexCode: '0050',
+      },
+      sectorIdentity: {
+        analysisAsOfDate: '2026-05-20',
+        issuerCode: '72030',
+        classificationDate: '2026-05-20',
+        sectorCode: '3700',
+        sectorName: '輸送用機器',
+        indexCode: '0050',
+        provenance: { source: 'jquants', endpoint: '/v2/equities/master' },
       },
       prices: [
         {

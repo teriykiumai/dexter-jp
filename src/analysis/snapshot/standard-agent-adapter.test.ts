@@ -148,6 +148,7 @@ function sectorBenchmarkResult() {
 function sectorShortRatioResult() {
   return {
     analysisAsOfDate: '2026-08-20',
+    issuerCode: '72030',
     sector: {
       classificationDate: '2026-08-20',
       sectorCode: '3700',
@@ -543,6 +544,30 @@ describe('StandardAgentSnapshotCollector', () => {
     ]));
     expect(JSON.stringify(snapshot)).not.toContain('must-not-survive');
     expect(JSON.stringify(snapshot)).not.toContain('2026-01-01');
+  });
+
+  test('rejects sector flow for another issuer without claiming classification provenance', () => {
+    const collector = new StandardAgentSnapshotCollector();
+    invokeSkill(collector);
+    lockToyota(collector);
+    start(collector, 'analyze_sector_short_ratio', 'sector-short-mismatch', {
+      ticker: '7203',
+      analysisAsOfDate: '2026-08-20',
+      from: '2026-01-01',
+    });
+    end(collector, 'analyze_sector_short_ratio', 'sector-short-mismatch', {
+      ...sectorShortRatioResult(),
+      issuerCode: '67580',
+    });
+
+    const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
+
+    expect(snapshot?.sectorShortRatio).toBeNull();
+    expect(snapshot?.provenance.sectorShortRatio).toEqual([]);
+    expect(snapshot?.unavailable).toContainEqual({
+      section: 'sectorShortRatio',
+      reason: 'locked_ticker_mismatch',
+    });
   });
 
   test('preserves unavailable sector flow as unavailable rather than zero', () => {

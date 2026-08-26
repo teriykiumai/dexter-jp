@@ -209,6 +209,7 @@ function completeInput(): AnalysisSnapshotInput {
     },
     sectorShortRatio: {
       analysisAsOfDate: '2026-08-21',
+      issuerCode: '72030',
       sector: {
         classificationDate: '2026-08-21',
         sectorCode: '3700',

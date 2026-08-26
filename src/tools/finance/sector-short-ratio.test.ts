@@ -27,6 +27,19 @@ function sourceRow(overrides: Record<string, unknown> = {}): Record<string, unkn
   };
 }
 
+function sectorIdentity(overrides: Record<string, unknown> = {}) {
+  return {
+    analysisAsOfDate: '2026-05-20',
+    issuerCode: '72030',
+    classificationDate: '2026-05-20',
+    sectorCode: '3700' as const,
+    sectorName: '輸送用機器',
+    indexCode: '0050' as const,
+    provenance: { source: 'jquants' as const, endpoint: '/v2/equities/master' as const },
+    ...overrides,
+  };
+}
+
 function parseToolResult(result: unknown): unknown {
   return JSON.parse(String(result)).data;
 }
@@ -41,11 +54,13 @@ describe('getSectorShortRatio', () => {
   test('documents sector-flow boundaries without an issuer claim or source calculation', () => {
     expect(getSectorShortRatio.description).toContain('sector-wide trading-flow');
     expect(getSectorShortRatio.description).toContain('not an issuer short position');
+    expect(getSectorShortRatio.description).toContain('trusted sectorIdentity envelope');
+    expect(getSectorShortRatio.description).toContain('bare classification is not accepted');
     expect(getSectorShortRatio.description).toContain('unavailable, not zero');
     expect(getSectorShortRatio.description).toContain('No ratio');
   });
 
-  test('reuses an authoritative classification and maps paginated official fields exactly', async () => {
+  test('reuses a trusted sector identity and maps paginated official fields exactly', async () => {
     process.env.JQUANTS_API_KEY = 'secret-test-key';
     const requests: Array<{ url: URL; apiKey: string | null }> = [];
     let page = 0;
@@ -65,11 +80,7 @@ describe('getSectorShortRatio', () => {
     const input = Object.freeze({
       analysisAsOfDate: '20260520',
       from: '2026-05-01',
-      classification: Object.freeze({
-        classificationDate: '2026-05-20',
-        sectorCode: '3700' as const,
-        sectorName: '輸送用機器',
-      }),
+      sectorIdentity: Object.freeze(sectorIdentity()),
     });
     const result = await fetchSectorShortRatioSource(input);
 
@@ -82,6 +93,7 @@ describe('getSectorShortRatio', () => {
     expect(requests.every(({ url }) => !String(url).includes('secret-test-key'))).toBe(true);
     expect(result).toEqual({
       analysisAsOfDate: '2026-05-20',
+      issuerCode: '72030',
       classification: {
         classificationDate: '2026-05-20',
         sectorCode: '3700',
@@ -106,11 +118,7 @@ describe('getSectorShortRatio', () => {
         flow: { source: 'jquants', endpoint: '/v2/markets/short-ratio' },
       },
     });
-    expect(input.classification).toEqual({
-      classificationDate: '2026-05-20',
-      sectorCode: '3700',
-      sectorName: '輸送用機器',
-    });
+    expect(input.sectorIdentity).toEqual(sectorIdentity());
   });
 
   test('uses the shared calendar/equity-master resolver in direct ticker mode', async () => {
@@ -142,6 +150,7 @@ describe('getSectorShortRatio', () => {
       '/v2/markets/short-ratio',
     ]);
     expect(result).toMatchObject({
+      issuerCode: '72030',
       classification: { sectorCode: '3700', sectorName: '輸送用機器' },
       rows: [{ date: '2026-05-20', sectorCode: '3700' }],
     });
@@ -154,9 +163,7 @@ describe('getSectorShortRatio', () => {
     const result = parseToolResult(await getSectorShortRatio.invoke({
       analysisAsOfDate: '2026-05-20',
       from: '2026-05-01',
-      classification: {
-        classificationDate: '2026-05-20', sectorCode: '3700', sectorName: '輸送用機器',
-      },
+      sectorIdentity: sectorIdentity(),
     }));
 
     expect(result).toMatchObject({
@@ -164,6 +171,28 @@ describe('getSectorShortRatio', () => {
       classification: { sectorCode: '3700' },
     });
     expect(JSON.stringify(result)).not.toContain('shortSellingRatio');
+  });
+
+  test('rejects an identity for another issuer or as-of boundary before source fetch', async () => {
+    let fetchCount = 0;
+    globalThis.fetch = (async () => {
+      fetchCount += 1;
+      throw new Error('Unexpected fetch');
+    }) as unknown as typeof fetch;
+
+    await expect(getSectorShortRatio.invoke({
+      ticker: '7203',
+      analysisAsOfDate: '2026-05-20',
+      from: '2026-05-01',
+      sectorIdentity: sectorIdentity({ issuerCode: '67580' }),
+    })).rejects.toThrow('sectorIdentity issuerCode must match ticker.');
+    await expect(getSectorShortRatio.invoke({
+      ticker: '7203',
+      analysisAsOfDate: '2026-05-20',
+      from: '2026-05-01',
+      sectorIdentity: sectorIdentity({ analysisAsOfDate: '2026-05-19' }),
+    })).rejects.toThrow('sectorIdentity analysisAsOfDate must match analysisAsOfDate.');
+    expect(fetchCount).toBe(0);
   });
 
   test('rejects bad boundaries, mismatched S33, duplicate dates, and plan errors', async () => {
@@ -176,18 +205,14 @@ describe('getSectorShortRatio', () => {
     await expect(getSectorShortRatio.invoke({
       analysisAsOfDate: '2026-05-20',
       from: '2026-05-21',
-      classification: {
-        classificationDate: '2026-05-20', sectorCode: '3700', sectorName: '輸送用機器',
-      },
+      sectorIdentity: sectorIdentity(),
     })).rejects.toThrow('from must be on or before analysisAsOfDate');
     expect(fetchCount).toBe(0);
 
     globalThis.fetch = (async () => response([sourceRow({ S33: '3650' })])) as unknown as typeof fetch;
     await expect(getSectorShortRatio.invoke({
       analysisAsOfDate: '2026-05-20', from: '2026-05-01',
-      classification: {
-        classificationDate: '2026-05-20', sectorCode: '3700', sectorName: '輸送用機器',
-      },
+      sectorIdentity: sectorIdentity(),
     })).rejects.toMatchObject({ kind: 'invalid_response' });
 
     globalThis.fetch = (async () => response([
@@ -195,9 +220,7 @@ describe('getSectorShortRatio', () => {
     ])) as unknown as typeof fetch;
     await expect(getSectorShortRatio.invoke({
       analysisAsOfDate: '2026-05-20', from: '2026-05-01',
-      classification: {
-        classificationDate: '2026-05-20', sectorCode: '3700', sectorName: '輸送用機器',
-      },
+      sectorIdentity: sectorIdentity(),
     })).rejects.toMatchObject({ kind: 'invalid_response' });
 
     globalThis.fetch = (async () => new Response(JSON.stringify({
@@ -205,9 +228,7 @@ describe('getSectorShortRatio', () => {
     }), { status: 403 })) as unknown as typeof fetch;
     await expect(getSectorShortRatio.invoke({
       analysisAsOfDate: '2026-05-20', from: '2026-05-01',
-      classification: {
-        classificationDate: '2026-05-20', sectorCode: '3700', sectorName: '輸送用機器',
-      },
+      sectorIdentity: sectorIdentity(),
     })).rejects.toMatchObject({ kind: 'plan_unavailable', status: 403 });
   });
 });

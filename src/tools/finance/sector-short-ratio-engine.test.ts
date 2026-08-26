@@ -5,6 +5,7 @@ import type { SectorShortRatioSourceResult } from './sector-short-ratio.js';
 function source(): SectorShortRatioSourceResult {
   return {
     analysisAsOfDate: '2026-05-20',
+    issuerCode: '72030',
     classification: {
       classificationDate: '2026-05-20',
       sectorCode: '3700',
@@ -97,6 +98,7 @@ describe('analyzeSectorShortRatio', () => {
   test('preserves source-level unavailability and provenance without claiming zero', () => {
     const result = analyzeSectorShortRatio({
       analysisAsOfDate: '2026-05-20',
+      issuerCode: '72030',
       classification: null,
       reason: 'sector_classification_unavailable',
       error: 'No classification.',

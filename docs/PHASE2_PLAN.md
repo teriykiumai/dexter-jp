@@ -2006,8 +2006,14 @@ The source tool calls `GET /v2/markets/short-ratio` with the authoritative as-of
 `from`, and `to = analysisAsOfDate`, following existing pagination. It preserves one
 daily row per returned `Date` and the official fields `SellExShortVa`,
 `ShrtWithResVa`, and `ShrtNoResVa` as nullable JPY values. It reuses a previously
-resolved sector classification when supplied; otherwise it uses the same as-of-safe
-P2-D1 resolver. It excludes future rows, never forward-fills a missing/non-trading
+resolved classification only through the trusted `sectorIdentity` envelope emitted
+by `get_sector_index`; otherwise it uses the same as-of-safe P2-D1 resolver. The
+envelope preserves source `analysisAsOfDate`, normalized `issuerCode`,
+`classificationDate`, sector code/name, index code, and J-Quants equity-master
+provenance. A bare classification is never trusted. Before a reused identity or
+sector-source result is accepted, its issuer code must match the normalized target
+ticker and its source as-of boundary must match the requested `analysisAsOfDate`.
+It excludes future rows, never forward-fills a missing/non-trading
 date, rejects conflicting S33 or duplicate dates, and keeps an empty response as
 `no_sector_short_ratio_data`, not zero. J-Quants plan/authentication/transport errors
 retain the existing typed source semantics.
@@ -2027,9 +2033,9 @@ A source null makes that observation `missing_data`; a non-finite or negative so
 value makes it `invalid_data`; a zero `totalSellingValue` makes only the ratio
 `zero_total_selling_value`. Values are not skipped, filled, interpolated, or rolled
 into a baseline. Units remain JPY for every value and ratio for
-`shortSellingRatio`. The result preserves `analysisAsOfDate`, the as-of sector code,
-name and `classificationDate`, `dataDate`, daily observations, typed unavailable
-reasons, and source/calculation provenance.
+`shortSellingRatio`. The result preserves `analysisAsOfDate`, `issuerCode`, the as-of
+sector code/name and `classificationDate`, `dataDate`, daily observations, typed
+unavailable reasons, and source/calculation provenance.
 
 P2-D5 exposes this structured result and adds the minimum Snapshot V7. V1-V6 schemas
 remain immutable/readable, new saves become V7, old files are not rewritten, and
@@ -2041,8 +2047,13 @@ not aggregate dates/sectors, calculate a historical mean or trend, combine the r
 with the sector benchmark or another flow source, or create a rank, threshold,
 squeeze/crowding label, score, Entry/Stop/Target, or Buy/Sell signal.
 
-Tests fix endpoint/field/parameter mapping, pagination, shared classification reuse,
-as-of/future exclusion, missing and empty semantics, deterministic formulas, zero
+The Snapshot collector independently verifies the Engine result `issuerCode` against
+the run's locked ticker. A mismatch is rejected and cannot persist either the sector
+result or J-Quants classification provenance.
+
+Tests fix endpoint/field/parameter mapping, pagination, trusted identity reuse,
+issuer/as-of rejection before source fetch, as-of/future exclusion, missing and empty
+semantics, deterministic formulas, zero
 denominator and invalid values, ordering/non-mutation, structured tool/collector
 pass-through, V1-V6 read compatibility and V7 write, Dashboard unavailable-versus-
 zero presentation, and comprehensive-analysis non-attribution/non-calculation rules.

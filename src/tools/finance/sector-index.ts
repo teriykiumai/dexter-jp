@@ -1,5 +1,6 @@
 import { DynamicStructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
+import { toJQuantsSecuritiesCode } from '../../utils/japanese-securities-code.js';
 import { formatToolResult } from '../types.js';
 import {
   JQuantsApiError,
@@ -71,13 +72,29 @@ export interface SectorClassificationSource {
   indexCode: SectorIndexCode;
 }
 
+export interface SectorClassificationEnvelope {
+  analysisAsOfDate: string;
+  issuerCode: string;
+  classificationDate: string;
+  sectorCode: Sector33Code;
+  sectorName: string;
+  indexCode: SectorIndexCode;
+  provenance: {
+    source: 'jquants';
+    endpoint: '/v2/equities/master';
+  };
+}
+
 export type SectorClassificationResolution =
   | {
       analysisAsOfDate: string;
+      issuerCode: string;
       classification: SectorClassificationSource;
+      sectorIdentity: SectorClassificationEnvelope;
     }
   | {
       analysisAsOfDate: string;
+      issuerCode: string;
       reason: SectorClassificationUnavailableReason;
       error: string;
     };
@@ -94,6 +111,7 @@ export interface SectorIndexPriceSourceRow {
 export interface SectorIndexSourceResult {
   analysisAsOfDate: string;
   classification: SectorClassificationSource;
+  sectorIdentity?: SectorClassificationEnvelope;
   prices: SectorIndexPriceSourceRow[];
 }
 
@@ -102,7 +120,7 @@ Fetches an issuer's as-of TSE 33-sector classification and the corresponding dai
 
 **Requires:** JQUANTS_API_KEY and a J-Quants Standard plan or higher for general index data.
 
-The classification is resolved from the official trading calendar and equity master at analysisAsOfDate. The returned history uses that one as-of sector index only; it does not claim that the issuer belonged to the sector throughout the history and does not stitch indices after sector changes. Values are source-provided index points and no correlation or other financial metric is calculated. Empty data is unavailable, not zero.
+The classification is resolved from the official trading calendar and equity master at analysisAsOfDate. The result includes a trusted sectorIdentity envelope binding issuerCode, analysisAsOfDate, classification, and source provenance for reuse by other sector tools. The returned history uses that one as-of sector index only; it does not claim that the issuer belonged to the sector throughout the history and does not stitch indices after sector changes. Values are source-provided index points and no correlation or other financial metric is calculated. Empty data is unavailable, not zero.
 `.trim();
 
 const SectorIndexInputSchema = z.object({
@@ -137,6 +155,65 @@ export function normalizeSectorSourceDate(value: string, fieldName: string): str
     throw new Error(`${fieldName} must be a valid YYYY-MM-DD or YYYYMMDD date.`);
   }
   return normalized;
+}
+
+export function validateSectorClassificationEnvelope(
+  envelope: SectorClassificationEnvelope,
+  analysisAsOfDateInput: string,
+): SectorClassificationEnvelope {
+  const analysisAsOfDate = normalizeSectorSourceDate(
+    analysisAsOfDateInput,
+    'analysisAsOfDate',
+  );
+  const envelopeAsOfDate = normalizeSectorSourceDate(
+    envelope.analysisAsOfDate,
+    'sectorIdentity.analysisAsOfDate',
+  );
+  const classificationDate = normalizeSectorSourceDate(
+    envelope.classificationDate,
+    'sectorIdentity.classificationDate',
+  );
+  if (envelopeAsOfDate !== analysisAsOfDate) {
+    throw new Error('sectorIdentity analysisAsOfDate must match analysisAsOfDate.');
+  }
+  if (classificationDate > analysisAsOfDate) {
+    throw new Error('sectorIdentity classificationDate must be on or before analysisAsOfDate.');
+  }
+  if (toJQuantsSecuritiesCode(envelope.issuerCode) !== envelope.issuerCode) {
+    throw new Error('sectorIdentity issuerCode must be a normalized J-Quants code.');
+  }
+  if (
+    SECTOR_INDEX_CODE_BY_S33[envelope.sectorCode] !== envelope.indexCode
+    || envelope.sectorName.length === 0
+  ) {
+    throw new Error('sectorIdentity must contain a supported official S33 identity.');
+  }
+  if (
+    envelope.provenance.source !== 'jquants'
+    || envelope.provenance.endpoint !== '/v2/equities/master'
+  ) {
+    throw new Error('sectorIdentity must preserve J-Quants equity-master provenance.');
+  }
+  return {
+    ...envelope,
+    analysisAsOfDate: envelopeAsOfDate,
+    classificationDate,
+  };
+}
+
+function sectorClassificationEnvelope(
+  analysisAsOfDate: string,
+  classification: SectorClassificationSource,
+): SectorClassificationEnvelope {
+  return {
+    analysisAsOfDate,
+    issuerCode: classification.issuerCode,
+    classificationDate: classification.classificationDate,
+    sectorCode: classification.sectorCode,
+    sectorName: classification.sectorName,
+    indexCode: classification.indexCode,
+    provenance: { source: 'jquants', endpoint: '/v2/equities/master' },
+  };
 }
 
 function invalidResponse(endpoint: string, detail: string): never {
@@ -322,19 +399,21 @@ export async function resolveSectorClassification(
     analysisAsOfDateInput,
     'analysisAsOfDate',
   );
+  const issuerCode = await resolveJQuantsCode(ticker);
   if (analysisAsOfDate < SECTOR_INDEX_SOURCE_START_DATE) {
     return {
       analysisAsOfDate,
+      issuerCode,
       reason: 'sector_classification_unavailable',
       error: `Sector classification is unavailable before ${SECTOR_INDEX_SOURCE_START_DATE}.`,
     };
   }
 
-  const issuerCode = await resolveJQuantsCode(ticker);
   const classificationDate = await fetchClassificationDate(analysisAsOfDate);
   if (!classificationDate) {
     return {
       analysisAsOfDate,
+      issuerCode,
       reason: 'sector_classification_unavailable',
       error: `No official classification business date found on or before ${analysisAsOfDate}.`,
     };
@@ -352,6 +431,7 @@ export async function resolveSectorClassification(
   if (classification === null) {
     return {
       analysisAsOfDate,
+      issuerCode,
       reason: 'sector_classification_unavailable',
       error: `No exact as-of sector classification found for ${ticker}.`,
     };
@@ -359,11 +439,17 @@ export async function resolveSectorClassification(
   if (classification === 'unsupported') {
     return {
       analysisAsOfDate,
+      issuerCode,
       reason: 'unsupported_sector',
       error: `The as-of S33 classification for ${ticker} has no TSE 33-sector index.`,
     };
   }
-  return { analysisAsOfDate, classification };
+  return {
+    analysisAsOfDate,
+    issuerCode,
+    classification,
+    sectorIdentity: sectorClassificationEnvelope(analysisAsOfDate, classification),
+  };
 }
 
 export const getSectorIndex = new DynamicStructuredTool({
@@ -383,7 +469,7 @@ export const getSectorIndex = new DynamicStructuredTool({
     }
     const resolution = await resolveSectorClassification(input.ticker, analysisAsOfDate);
     if ('reason' in resolution) return unavailable(resolution.reason, resolution.error);
-    const { classification } = resolution;
+    const { classification, sectorIdentity } = resolution;
 
     const indexRows = await jquantsGetAll<Record<string, unknown>>('/indices/bars/daily', {
       code: classification.indexCode,
@@ -406,6 +492,7 @@ export const getSectorIndex = new DynamicStructuredTool({
     const result: SectorIndexSourceResult = {
       analysisAsOfDate,
       classification,
+      sectorIdentity,
       prices,
     };
     return formatToolResult(result, []);

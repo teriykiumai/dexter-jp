@@ -797,8 +797,12 @@ context was established. It supplies daily 33-sector selling-turnover components
 JPY, not issuer-level short positions or outstanding balances.
 
 P2-D5 resolves `S33` through the authoritative as-of-safe J-Quants equity-master
-boundary, reuses an already resolved identity where available, and treats empty or
-non-trading responses as unavailable rather than zero. Its deterministic Engine
+boundary and reuses an identity only through the trusted `sectorIdentity` envelope
+returned by `get_sector_index`. The envelope binds source `analysisAsOfDate`, normalized
+`issuerCode`, classification fields, index code, and equity-master provenance; a bare
+classification is not trusted. Both reused identities and supplied sector-source
+results must match the requested as-of boundary and normalized target ticker. Empty or
+non-trading responses remain unavailable rather than zero. Its deterministic Engine
 calculates only daily short-selling value, total-selling value, and their ratio from
 the three source turnover fields. Never attribute the sector result to the issuer,
 combine it with `ReportedShortPosition[]`, margin interest, the sector benchmark, or
@@ -982,8 +986,9 @@ immutable/readable V1-V5 and existing complete/partial semantics.
 P2-D5 adds daily sector short-selling-turnover context distinct from sector price
 behavior. It reuses the same S33 resolver and availability boundary, preserves the
 three nullable JPY source components, and calculates only daily short-selling value,
-total-selling value, and their ratio. Snapshot V7 is the writer while V1-V6 remain
-readable and immutable. Dashboard and comprehensive analysis pass through the
+total-selling value, and their ratio. The collector verifies the result `issuerCode`
+against the locked ticker before persistence. Snapshot V7 is the writer while V1-V6
+remain readable and immutable. Dashboard and comprehensive analysis pass through the
 structured values without issuer attribution, historical aggregation, Browser/LLM
 calculation, cross-source combination, threshold, squeeze/crowding label, score, or
 signal.

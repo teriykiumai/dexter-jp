@@ -38,6 +38,7 @@ export {
   type Sector33Code,
   type SectorCalendarDay,
   type SectorClassificationSource,
+  type SectorClassificationEnvelope,
   type SectorClassificationResolution,
   type SectorClassificationUnavailableReason,
   type SectorIndexCode,
@@ -46,6 +47,7 @@ export {
   type SectorIndexSourceUnavailableReason,
   normalizeSectorSourceDate,
   resolveSectorClassification,
+  validateSectorClassificationEnvelope,
 } from './sector-index.js';
 export {
   fetchSectorShortRatioSource,

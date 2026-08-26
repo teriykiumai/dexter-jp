@@ -557,9 +557,26 @@ export class StandardAgentSnapshotCollector {
           );
         }
         break;
-      case 'analyze_sector_short_ratio':
-        this.sectorShortRatio ??= SectorShortRatioResultSchema.parse(call.validatedResult);
+      case 'analyze_sector_short_ratio': {
+        const result = SectorShortRatioResultSchema.parse(call.validatedResult);
+        let resultTicker: string;
+        try {
+          resultTicker = normalizeCanonicalTicker(result.issuerCode);
+        } catch {
+          this.reject(null, call.tool, 'invalid_result_target_ticker');
+          return;
+        }
+        if (resultTicker !== this.identity.canonicalTicker) {
+          this.reject(null, call.tool, 'locked_ticker_mismatch');
+          this.additionalUnavailable.push({
+            section: 'sectorShortRatio',
+            reason: 'locked_ticker_mismatch',
+          });
+          return;
+        }
+        this.sectorShortRatio ??= result;
         break;
+      }
       case 'analyze_strategy':
         this.strategy ??= StrategyResultSchema.parse(call.validatedResult);
         break;
