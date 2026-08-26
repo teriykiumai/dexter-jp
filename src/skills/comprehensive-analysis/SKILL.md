@@ -4,6 +4,7 @@ description: >
   Performs a complete Japanese listed-company analysis across company identity,
   fundamentals, valuation, peers, technicals, margin supply-demand, public
   short-position reports, investor-type market context, TOPIX correlation,
+  as-of TSE 33-sector benchmark comparison,
   deterministic Entry/Stop/Target,
   Bull/Base/Bear scenarios, and risks. Use for broad requests such as
   "7203を分析して", "この銘柄を総合分析",
@@ -18,7 +19,7 @@ Run the complete MVP workflow for one company. Reuse retrieved datasets between 
 
 - Standard Agent: call `get_financials` once with a complete request for company identity, six-year financial history, latest valuation/quality ratios, and recent earnings. Use `company_screener` for the same-sector candidate set.
 - Claude Agent SDK: use the available leaf tools `get_company_info`, `get_financial_statements`, `get_key_ratios`, and `get_earnings`; use `screen_companies` for the candidate set.
-- Both modes: use `read_filings`, `get_stock_price`, `get_margin_data`, `get_topix`, and the eight `analyze_*` tools when available.
+- Both modes: use `read_filings`, `get_stock_price`, `get_margin_data`, `get_topix`, and the nine `analyze_*` tools when available.
 
 Never call a tool name that is absent from the current tool list.
 
@@ -34,6 +35,7 @@ Never call a tool name that is absent from the current tool list.
 - [ ] Public short-position reports
 - [ ] Investor-type market context
 - [ ] Market correlation analysis
+- [ ] TSE 33-sector benchmark analysis
 - [ ] Strategy candidates
 - [ ] Bull / Base / Bear and risks
 - [ ] Final report and missing-data audit
@@ -87,14 +89,30 @@ Preserve dates and nulls. Do not forward-fill, interpolate, or silently remove m
 4. Call `analyze_reported_short_positions` with the verified target `ticker` and an explicit `analysisAsOfDate`. For historical analysis, use the simulated as-of date. Otherwise use the current analysis date. Treat `disclosedDate` as the information-availability date and `calculatedDate` only as the position reference date.
 5. Call `analyze_investor_type_flows` with the verified target `ticker` and the same explicit `analysisAsOfDate`. Interpret only its correction/as-of-processed structured result.
 6. Pass stock and TOPIX closes to `analyze_market_correlation`.
-7. Pass the verified target `ticker` plus `dataDate`, `latestSwingHigh`, `latestSwingLow`, and `atr14` from the Technical result to `analyze_strategy`.
-8. Supply Strategy `tickSize` or `resistanceLevels` only when a reliable source provided them; otherwise omit them. Without a sourced tick size, report the strictly-above trigger but no exact entry or 2R target.
+7. Call `analyze_sector_benchmark` with the verified target `ticker`, the same history start, and the explicit `analysisAsOfDate`. Interpret only its structured deterministic result.
+8. Pass the verified target `ticker` plus `dataDate`, `latestSwingHigh`, `latestSwingLow`, and `atr14` from the Technical result to `analyze_strategy`.
+9. Supply Strategy `tickSize` or `resistanceLevels` only when a reliable source provided them; otherwise omit them. Without a sourced tick size, report the strictly-above trigger but no exact entry or 2R target.
 
 Never reproduce or repair the Engine calculations in narrative reasoning. Carry every `unavailable` reason into the report.
 When `mean4w` is available, interpret it as the recent buying-balance baseline alongside
 the current balance and existing 13-week mean; do not derive an unprovided deviation or signal.
 Interpret the 20-day market-correlation window as recent context alongside the existing
 60-day and 250-day windows; do not derive a threshold, regime label, or trading signal.
+
+Interpret only the structured `analyze_sector_benchmark` result. This compares the
+issuer's adjusted returns with the single official TSE 33-sector price index resolved
+at `analysisAsOfDate`; it does not attribute sector-index values or flows to the
+issuer. Distinguish `analysisAsOfDate`, `classificationDate`, and `dataDate`. The one
+as-of sector benchmark is fixed across every 20/60/250 return window. Do not claim
+that the issuer belonged to that sector throughout each lookback, stitch multiple
+sector indices, or apply a current classification to a historical analysis. Use only
+the Engine-provided observations, correlation, beta, annualized alpha, R-squared,
+volatilities, excess return, and unavailable reasons; do not recalculate or repair
+them in the LLM. Do not combine the result with Supply/Demand, public short-position
+reports, or investor-type flows. Do not derive a sector rank, rotation/momentum or
+composite score, threshold, risk-on/off classification, Entry/Stop/Target, or Buy/Sell
+signal. If classification, sector-index data, or a metric is unavailable, state the
+gap and make no sector-based investment claim.
 
 Interpret only the structured `analyze_reported_short_positions` result. J-Quants
 short-sale-report covers public reports for short-position ratios of 0.5% or more;
@@ -139,6 +157,9 @@ Use the same direct ticker boundary for `analyze_reported_short_positions`, with
 explicit `analysisAsOfDate`; do not substitute `calculatedDate` for that boundary.
 Use that explicit boundary for `analyze_investor_type_flows` as well; do not substitute
 `periodEndDate` for publication availability.
+Use the same history start and explicit `analysisAsOfDate` for the direct
+`analyze_sector_benchmark` call. Do not re-resolve or replace its as-of sector identity
+in narrative reasoning.
 
 ## 6. Build conditional scenarios
 
@@ -174,10 +195,11 @@ Use these headings exactly and in this order:
 # Reported Short Positions
 # Investor Type Flows
 # Market Correlation
+# Sector Benchmark
 # Entry / Stop / Target
 # Bull / Base / Bear
 # Risks
 # Conclusion
 ```
 
-Under `Data Dates`, list the basis date for company financials, earnings, stock prices, margin data, public short-position reports, investor-type flows, TOPIX, and each Engine result when available. For public short-position reports, label `disclosedDate` as the information-availability date and do not present `calculatedDate` as the disclosure date. For investor-type flows, show `section = TokyoNagoya`, `publishedDate`, `periodStartDate`, and `periodEndDate` separately and identify the values as market context rather than issuer flow. Within the report, separate Fact, Interpretation, and Risk. The conclusion must summarize the evidence and limitations without inventing a recommendation or price.
+Under `Data Dates`, list the basis date for company financials, earnings, stock prices, margin data, public short-position reports, investor-type flows, TOPIX, sector benchmark, and each Engine result when available. For public short-position reports, label `disclosedDate` as the information-availability date and do not present `calculatedDate` as the disclosure date. For investor-type flows, show `section = TokyoNagoya`, `publishedDate`, `periodStartDate`, and `periodEndDate` separately and identify the values as market context rather than issuer flow. For the sector benchmark, show `analysisAsOfDate`, `classificationDate`, sector code/name, index code, and `dataDate` separately. Within the report, separate Fact, Interpretation, and Risk. The conclusion must summarize the evidence and limitations without inventing a recommendation or price.

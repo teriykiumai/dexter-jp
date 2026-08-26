@@ -19,6 +19,7 @@ import {
   UNAVAILABLE_TEXT,
   INVESTOR_TYPE_FLOW_CONTEXT_NOTE,
   REPORTED_SHORT_POSITION_DISCLOSURE_NOTE,
+  SECTOR_BENCHMARK_CONTEXT_NOTE,
   WATCHLIST_STALE_AFTER_DAYS,
   buildDetailPath,
   displayText,
@@ -852,6 +853,217 @@ describe('snapshot presentation mapping', () => {
       text: UNAVAILABLE_TEXT,
       available: false,
     });
+  });
+
+  test('passes through the V6 sector identity and stored window metrics without recalculation', () => {
+    const base = v6Snapshot();
+    const snapshot: AnalysisSnapshotV6 = {
+      ...base,
+      dataDates: { ...base.dataDates, sectorBenchmark: '2026-08-21' },
+      sectorBenchmark: {
+        analysisAsOfDate: '2026-08-22',
+        benchmark: {
+          type: 'TSE33_SECTOR_PRICE_INDEX',
+          sectorCode: '3700',
+          sectorName: '輸送用機器',
+          indexCode: '0050',
+          classificationDate: '2026-08-21',
+        },
+        dataDate: '2026-08-21',
+        alignedPriceCount: 21,
+        windows: [{
+          period: 20,
+          startDate: '2026-07-24',
+          endDate: '2026-08-21',
+          observations: 20,
+          correlation: 0.625,
+          beta: 1.1,
+          alphaAnnualized: 0.02,
+          rSquared: 0.777,
+          stockVolatilityAnnualized: 0.25,
+          benchmarkVolatilityAnnualized: 0.18,
+          excessReturn: 0.03,
+          unavailable: [],
+        }],
+        unavailable: [],
+        provenance: {
+          classification: { source: 'jquants', endpoint: '/v2/equities/master' },
+          index: { source: 'jquants', endpoint: '/v2/indices/bars/daily' },
+          calculation: { source: 'market_correlation_engine' },
+        },
+        units: {
+          indexLevel: 'index_points',
+          observations: 'count',
+          correlation: 'ratio',
+          beta: 'ratio',
+          alphaAnnualized: 'ratio',
+          rSquared: 'ratio',
+          stockVolatilityAnnualized: 'ratio',
+          benchmarkVolatilityAnnualized: 'ratio',
+          excessReturn: 'ratio',
+        },
+      },
+      unavailable: base.unavailable.filter(item => item.section !== 'sectorBenchmark'),
+    };
+
+    const view = mapSnapshotToDashboard(snapshot);
+
+    expect(view.sectorBenchmark).toMatchObject({
+      state: 'available',
+      analysisAsOfDate: { text: '2026-08-22', available: true },
+      benchmarkType: { text: 'TSE33_SECTOR_PRICE_INDEX', available: true },
+      sectorCode: { text: '3700', available: true },
+      sectorName: { text: '輸送用機器', available: true },
+      indexCode: { text: '0050', available: true },
+      classificationDate: { text: '2026-08-21', available: true },
+      dataDate: { text: '2026-08-21', available: true },
+      alignedPriceCount: { text: '21', available: true },
+      unavailableReasons: [],
+    });
+    expect(view.sectorBenchmark.windows).toEqual([{
+      period: 20,
+      observations: { text: '20', available: true },
+      correlation: { text: '0.625', available: true },
+      beta: { text: '1.1', available: true },
+      alpha: { text: '2%', available: true },
+      rSquared: { text: '0.777', available: true },
+      stockVolatility: { text: '25%', available: true },
+      benchmarkVolatility: { text: '18%', available: true },
+      excessReturn: { text: '3%', available: true },
+      unavailableReasons: [],
+    }]);
+    expect(view.dataDates).toContainEqual({
+      label: '業種指数比較',
+      value: { text: '2026-08-21', available: true },
+    });
+    expect(SECTOR_BENCHMARK_CONTEXT_NOTE).toContain('analysisAsOfDate');
+    expect(SECTOR_BENCHMARK_CONTEXT_NOTE).toContain('lookback期間全体');
+    expect(SECTOR_BENCHMARK_CONTEXT_NOTE).toContain('current classification');
+    expect(SECTOR_BENCHMARK_CONTEXT_NOTE).toContain('stitch');
+    expect(SECTOR_BENCHMARK_CONTEXT_NOTE).toContain('rank・score・signal');
+  });
+
+  test('keeps sector source and metric unavailability distinct from zero', () => {
+    const base = v6Snapshot();
+    for (const reason of [
+      'sector_classification_unavailable',
+      'unsupported_sector',
+      'no_sector_index_data',
+      'invalid_data',
+    ] as const) {
+      const snapshot: AnalysisSnapshotV6 = {
+        ...base,
+        sectorBenchmark: {
+          analysisAsOfDate: '2026-08-21',
+          benchmark: null,
+          dataDate: null,
+          alignedPriceCount: 0,
+          windows: [],
+          unavailable: [{ reason }],
+          provenance: {
+            classification: { source: 'jquants', endpoint: '/v2/equities/master' },
+            index: { source: 'jquants', endpoint: '/v2/indices/bars/daily' },
+            calculation: { source: 'market_correlation_engine' },
+          },
+          units: {
+            indexLevel: 'index_points',
+            observations: 'count',
+            correlation: 'ratio',
+            beta: 'ratio',
+            alphaAnnualized: 'ratio',
+            rSquared: 'ratio',
+            stockVolatilityAnnualized: 'ratio',
+            benchmarkVolatilityAnnualized: 'ratio',
+            excessReturn: 'ratio',
+          },
+        },
+      };
+
+      const view = mapSnapshotToDashboard(snapshot).sectorBenchmark;
+
+      expect(view.state).toBe('unavailable');
+      expect(view.windows).toEqual([]);
+      expect(view.unavailableReasons).toEqual([reason.replaceAll('_', ' ')]);
+      expect(view.sectorName.available).toBe(false);
+    }
+
+    const metricUnavailable: AnalysisSnapshotV6 = {
+      ...base,
+      sectorBenchmark: {
+        analysisAsOfDate: '2026-08-21',
+        benchmark: {
+          type: 'TSE33_SECTOR_PRICE_INDEX',
+          sectorCode: '3700',
+          sectorName: '輸送用機器',
+          indexCode: '0050',
+          classificationDate: '2026-08-21',
+        },
+        dataDate: '2026-08-21',
+        alignedPriceCount: 20,
+        windows: [{
+          period: 20,
+          startDate: null,
+          endDate: null,
+          observations: 19,
+          correlation: null,
+          beta: null,
+          alphaAnnualized: null,
+          rSquared: null,
+          stockVolatilityAnnualized: null,
+          benchmarkVolatilityAnnualized: null,
+          excessReturn: null,
+          unavailable: [{ metric: 'correlation', reason: 'insufficient_history' }],
+        }],
+        unavailable: [],
+        provenance: {
+          classification: { source: 'jquants', endpoint: '/v2/equities/master' },
+          index: { source: 'jquants', endpoint: '/v2/indices/bars/daily' },
+          calculation: { source: 'market_correlation_engine' },
+        },
+        units: {
+          indexLevel: 'index_points',
+          observations: 'count',
+          correlation: 'ratio',
+          beta: 'ratio',
+          alphaAnnualized: 'ratio',
+          rSquared: 'ratio',
+          stockVolatilityAnnualized: 'ratio',
+          benchmarkVolatilityAnnualized: 'ratio',
+          excessReturn: 'ratio',
+        },
+      },
+    };
+    const unavailableWindow = mapSnapshotToDashboard(
+      metricUnavailable,
+    ).sectorBenchmark.windows[0];
+
+    expect(unavailableWindow?.observations).toEqual({ text: '19', available: true });
+    expect(unavailableWindow?.correlation).toEqual({
+      text: UNAVAILABLE_TEXT,
+      available: false,
+    });
+    expect(unavailableWindow?.unavailableReasons).toEqual([
+      'correlation: insufficient history',
+    ]);
+  });
+
+  test('treats V1-V5 and a null V6 sector benchmark as not collected', () => {
+    for (const snapshot of [
+      v1Snapshot(),
+      v2Snapshot(),
+      v3Snapshot(),
+      baseSnapshot(),
+      v5Snapshot(),
+      v6Snapshot(),
+    ]) {
+      const view = mapSnapshotToDashboard(snapshot);
+
+      expect(view.sectorBenchmark.state).toBe('not_collected');
+      expect(view.sectorBenchmark.windows).toEqual([]);
+      if (snapshot.schemaVersion !== 6) {
+        expect(view.dataDates.map(item => item.label)).not.toContain('業種指数比較');
+      }
+    }
   });
 
   test('treats V1 Advanced Technical as not collected', () => {

@@ -96,11 +96,34 @@ export interface InvestorTypeFlowsView {
   unavailableReasons: string[];
 }
 
+export interface SectorBenchmarkWindowView extends CorrelationWindowView {
+  stockVolatility: DisplayValue;
+  benchmarkVolatility: DisplayValue;
+  excessReturn: DisplayValue;
+}
+
+export interface SectorBenchmarkView {
+  state: 'available' | 'unavailable' | 'not_collected';
+  analysisAsOfDate: DisplayValue;
+  benchmarkType: DisplayValue;
+  sectorCode: DisplayValue;
+  sectorName: DisplayValue;
+  indexCode: DisplayValue;
+  classificationDate: DisplayValue;
+  dataDate: DisplayValue;
+  alignedPriceCount: DisplayValue;
+  windows: SectorBenchmarkWindowView[];
+  unavailableReasons: string[];
+}
+
 export const REPORTED_SHORT_POSITION_DISCLOSURE_NOTE =
   'J-Quantsの0.5%以上の公開報告です。未収集・利用不可は、空売り残高0、空売り主体なし、0.5%未満のpositionなし、または買い戻し完了を意味しません。信用売残や市場全体のshort interestとは別データです。';
 
 export const INVESTOR_TYPE_FLOW_CONTEXT_NOTE =
   'Tokyo/Nagoya市場全体の週次market contextです。個別銘柄の売買フローではありません。公表日と売買期間を区別し、Snapshotに保存されたsource categoryと値をそのまま表示します。';
+
+export const SECTOR_BENCHMARK_CONTEXT_NOTE =
+  'analysisAsOfDate時点で解決した単一の東証33業種指数を各window全体に使用したhistorical comparisonです。銘柄がlookback期間全体で同じsectorに所属していたことを意味せず、current classificationの過去適用、複数sector indexのstitch、銘柄への業種指数値の帰属、rank・score・signalは行いません。';
 
 export interface DashboardViewModel {
   header: {
@@ -133,6 +156,7 @@ export interface DashboardViewModel {
   } | null;
   reportedShortPositions: ReportedShortPositionsView;
   investorTypeFlows: InvestorTypeFlowsView;
+  sectorBenchmark: SectorBenchmarkView;
   dataDates: DashboardMetric[];
   scenarios: AnalysisSnapshot['scenarios'];
   risks: AnalysisSnapshot['risks'];
@@ -174,7 +198,7 @@ const numberFormatter = (maximumFractionDigits: number) => new Intl.NumberFormat
 
 export function formatMetric(
   value: number | null | undefined,
-  unit: MetricUnit | 'index' | 'thousand_JPY' | null | undefined,
+  unit: MetricUnit | 'index' | 'thousand_JPY' | 'index_points' | null | undefined,
   options: FormatOptions = {},
 ): DisplayValue {
   if (value === null || value === undefined || !Number.isFinite(value)) {
@@ -196,6 +220,7 @@ export function formatMetric(
     switch (unit) {
       case 'JPY': return `¥${formatted}`;
       case 'thousand_JPY': return `${formatted} 千円`;
+      case 'index_points': return `${formatted} points`;
       case 'shares': return `${formatted} 株`;
       case 'percent': return `${formatted}%`;
       case 'multiple': return `${formatted}x`;
@@ -268,6 +293,7 @@ const dataDateLabels = {
   investorTypeFlows: '投資部門別 公表日',
   supplyDemand: '需給',
   marketCorrelation: '市場相関',
+  sectorBenchmark: '業種指数比較',
   strategy: 'Strategy',
   priceHistory: '価格履歴',
 } as const;
@@ -391,6 +417,12 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
     : null;
   const investorTypeFlowUnits = 'investorTypeFlows' in snapshot.units
     ? snapshot.units.investorTypeFlows
+    : null;
+  const sectorBenchmark = 'sectorBenchmark' in snapshot
+    ? snapshot.sectorBenchmark
+    : null;
+  const sectorBenchmarkUnits = 'sectorBenchmark' in snapshot.units
+    ? snapshot.units.sectorBenchmark
     : null;
 
   const bars = (snapshot.priceHistory ?? []).flatMap(bar => (
@@ -682,6 +714,71 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
     )) ?? [],
   };
 
+  const sectorBenchmarkView: SectorBenchmarkView = {
+    state: !('sectorBenchmark' in snapshot) || sectorBenchmark === null
+      ? 'not_collected'
+      : sectorBenchmark.benchmark === null || sectorBenchmark.unavailable.length > 0
+        ? 'unavailable'
+        : 'available',
+    analysisAsOfDate: displayText(sectorBenchmark?.analysisAsOfDate),
+    benchmarkType: displayText(sectorBenchmark?.benchmark?.type),
+    sectorCode: displayText(sectorBenchmark?.benchmark?.sectorCode),
+    sectorName: displayText(sectorBenchmark?.benchmark?.sectorName),
+    indexCode: displayText(sectorBenchmark?.benchmark?.indexCode),
+    classificationDate: displayText(sectorBenchmark?.benchmark?.classificationDate),
+    dataDate: displayText(sectorBenchmark?.dataDate),
+    alignedPriceCount: formatMetric(
+      sectorBenchmark?.alignedPriceCount,
+      sectorBenchmarkUnits?.alignedPriceCount,
+    ),
+    windows: sectorBenchmark && sectorBenchmarkUnits
+      ? sectorBenchmark.windows.map(window => ({
+          period: window.period,
+          observations: formatMetric(
+            window.observations,
+            sectorBenchmarkUnits.observations,
+          ),
+          correlation: formatMetric(
+            window.correlation,
+            sectorBenchmarkUnits.correlation,
+            { maximumFractionDigits: 3 },
+          ),
+          beta: formatMetric(window.beta, sectorBenchmarkUnits.beta, {
+            maximumFractionDigits: 3,
+          }),
+          alpha: formatMetric(
+            window.alphaAnnualized,
+            sectorBenchmarkUnits.alphaAnnualized,
+            { ratioAsPercent: true },
+          ),
+          rSquared: formatMetric(window.rSquared, sectorBenchmarkUnits.rSquared, {
+            maximumFractionDigits: 3,
+          }),
+          stockVolatility: formatMetric(
+            window.stockVolatilityAnnualized,
+            sectorBenchmarkUnits.stockVolatilityAnnualized,
+            { ratioAsPercent: true },
+          ),
+          benchmarkVolatility: formatMetric(
+            window.benchmarkVolatilityAnnualized,
+            sectorBenchmarkUnits.benchmarkVolatilityAnnualized,
+            { ratioAsPercent: true },
+          ),
+          excessReturn: formatMetric(
+            window.excessReturn,
+            sectorBenchmarkUnits.excessReturn,
+            { ratioAsPercent: true },
+          ),
+          unavailableReasons: window.unavailable.map(item => (
+            `${item.metric}: ${reasonText(item.reason)}`
+          )),
+        }))
+      : [],
+    unavailableReasons: sectorBenchmark?.unavailable.map(item => (
+      reasonText(item.reason)
+    )) ?? [],
+  };
+
   const dates = snapshot.dataDates;
   const dateEntries: Array<[keyof typeof dataDateLabels, string | null]> = [
     ['identity', dates.identity],
@@ -706,6 +803,9 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
   }
   if ('investorTypeFlows' in snapshot.dataDates) {
     dateEntries.push(['investorTypeFlows', snapshot.dataDates.investorTypeFlows]);
+  }
+  if ('sectorBenchmark' in snapshot.dataDates) {
+    dateEntries.push(['sectorBenchmark', snapshot.dataDates.sectorBenchmark]);
   }
 
   return {
@@ -743,6 +843,7 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
     advancedTechnical: advancedTechnicalView,
     reportedShortPositions: reportedShortPositionsView,
     investorTypeFlows: investorTypeFlowsView,
+    sectorBenchmark: sectorBenchmarkView,
     dataDates: dateEntries.map(([key, value]) => ({
       label: dataDateLabels[key],
       value: displayText(value),
