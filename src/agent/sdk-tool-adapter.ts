@@ -26,6 +26,7 @@ import {
   getMarginData,
   getShortSaleReports,
   getSectorIndex,
+  getSectorShortRatio,
   getStockPrice,
   getTopix,
   analyzeTechnicalTool,
@@ -35,6 +36,7 @@ import {
   analyzePeerComparisonTool,
   analyzeMarketCorrelationTool,
   analyzeSectorBenchmarkTool,
+  analyzeSectorShortRatioTool,
   analyzeStrategyTool,
   isJQuantsAvailable,
   createReadFilings,
@@ -139,6 +141,7 @@ export function buildDexterSdkTools(): ReturnType<typeof adaptLangChainTool>[] {
     analyzePeerComparisonTool,
     analyzeMarketCorrelationTool,
     analyzeSectorBenchmarkTool,
+    analyzeSectorShortRatioTool,
     analyzeStrategyTool,
   ];
 
@@ -150,6 +153,7 @@ export function buildDexterSdkTools(): ReturnType<typeof adaptLangChainTool>[] {
       getInvestorTypeFlows,
       getShortSaleReports,
       getSectorIndex,
+      getSectorShortRatio,
       getTopix,
     );
   }

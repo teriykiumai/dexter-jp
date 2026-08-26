@@ -145,6 +145,43 @@ function sectorBenchmarkResult() {
   };
 }
 
+function sectorShortRatioResult() {
+  return {
+    analysisAsOfDate: '2026-08-20',
+    issuerCode: '72030',
+    sector: {
+      classificationDate: '2026-08-20',
+      sectorCode: '3700',
+      sectorName: '輸送用機器',
+    },
+    dataDate: '2026-08-20',
+    observations: [{
+      date: '2026-08-20',
+      nonShortSellingValue: 100,
+      restrictedShortSellingValue: 20,
+      unrestrictedShortSellingValue: 30,
+      shortSellingValue: 50,
+      totalSellingValue: 150,
+      shortSellingRatio: 1 / 3,
+      unavailable: [],
+    }],
+    unavailable: [],
+    provenance: {
+      classification: { source: 'jquants' as const, endpoint: '/v2/equities/master' as const },
+      flow: { source: 'jquants' as const, endpoint: '/v2/markets/short-ratio' as const },
+      calculation: { source: 'sector_short_ratio_engine' as const },
+    },
+    units: {
+      nonShortSellingValue: 'JPY' as const,
+      restrictedShortSellingValue: 'JPY' as const,
+      unrestrictedShortSellingValue: 'JPY' as const,
+      shortSellingValue: 'JPY' as const,
+      totalSellingValue: 'JPY' as const,
+      shortSellingRatio: 'ratio' as const,
+    },
+  };
+}
+
 describe('StandardAgentSnapshotCollector', () => {
   test('preserves deterministic Advanced Technical values from tool result to Snapshot', async () => {
     const collector = new StandardAgentSnapshotCollector();
@@ -358,7 +395,7 @@ describe('StandardAgentSnapshotCollector', () => {
     const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
     expect(snapshot?.advancedTechnical).toEqual(advancedTechnical);
     expect(snapshot?.supplyDemand?.mean4w).toBe(950);
-    expect(snapshot?.schemaVersion).toBe(6);
+    expect(snapshot?.schemaVersion).toBe(7);
     expect(snapshot?.marketCorrelation?.windows).toEqual([{
       period: 20,
       startDate: '2026-07-24',
@@ -417,7 +454,7 @@ describe('StandardAgentSnapshotCollector', () => {
 
     const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
 
-    expect(snapshot?.schemaVersion).toBe(6);
+    expect(snapshot?.schemaVersion).toBe(7);
     expect(snapshot?.status).toBe('partial');
     expect(snapshot?.reportedShortPositions?.reports[0]).toEqual({
       disclosedDate: '2026-08-20',
@@ -442,7 +479,7 @@ describe('StandardAgentSnapshotCollector', () => {
     expect(JSON.stringify(snapshot)).not.toContain('must-not-survive');
   });
 
-  test('collects only the structured sector benchmark result into Snapshot V6', () => {
+  test('collects only the structured sector benchmark result into the current Snapshot', () => {
     const collector = new StandardAgentSnapshotCollector();
     invokeSkill(collector);
     lockToyota(collector);
@@ -458,7 +495,7 @@ describe('StandardAgentSnapshotCollector', () => {
 
     const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
 
-    expect(snapshot?.schemaVersion).toBe(6);
+    expect(snapshot?.schemaVersion).toBe(7);
     expect(snapshot?.sectorBenchmark).toEqual(sectorBenchmarkResult());
     expect(snapshot?.dataDates.sectorBenchmark).toBe('2026-08-20');
     expect(snapshot?.units.sectorBenchmark.indexLevel).toBe('index_points');
@@ -469,6 +506,99 @@ describe('StandardAgentSnapshotCollector', () => {
     ]));
     expect(JSON.stringify(snapshot)).not.toContain('must-not-survive');
     expect(JSON.stringify(snapshot)).not.toContain('2025-08-01');
+  });
+
+  test('collects structured sector short-selling flow without issuer attribution or recalculation', () => {
+    const collector = new StandardAgentSnapshotCollector();
+    invokeSkill(collector);
+    lockToyota(collector);
+    start(collector, 'analyze_sector_short_ratio', 'sector-short-1', {
+      ticker: '7203',
+      analysisAsOfDate: '2026-08-20',
+      from: '2026-01-01',
+    });
+    end(collector, 'analyze_sector_short_ratio', 'sector-short-1', {
+      ...sectorShortRatioResult(),
+      sourceRows: 'must-not-survive',
+    });
+
+    const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
+
+    expect(snapshot?.schemaVersion).toBe(7);
+    expect(snapshot?.sectorShortRatio).toEqual(sectorShortRatioResult());
+    expect(snapshot?.dataDates.sectorShortRatio).toBe('2026-08-20');
+    expect(snapshot?.provenance.sectorShortRatio).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        source: 'sector_short_ratio_engine', role: 'calculation', endpoint: null,
+      }),
+      expect.objectContaining({
+        source: 'jquants',
+        role: 'sector_classification_data',
+        endpoint: '/v2/equities/master',
+      }),
+      expect.objectContaining({
+        source: 'jquants',
+        role: 'sector_short_ratio_data',
+        endpoint: '/v2/markets/short-ratio',
+      }),
+    ]));
+    expect(JSON.stringify(snapshot)).not.toContain('must-not-survive');
+    expect(JSON.stringify(snapshot)).not.toContain('2026-01-01');
+  });
+
+  test('rejects sector flow for another issuer without claiming classification provenance', () => {
+    const collector = new StandardAgentSnapshotCollector();
+    invokeSkill(collector);
+    lockToyota(collector);
+    start(collector, 'analyze_sector_short_ratio', 'sector-short-mismatch', {
+      ticker: '7203',
+      analysisAsOfDate: '2026-08-20',
+      from: '2026-01-01',
+    });
+    end(collector, 'analyze_sector_short_ratio', 'sector-short-mismatch', {
+      ...sectorShortRatioResult(),
+      issuerCode: '67580',
+    });
+
+    const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
+
+    expect(snapshot?.sectorShortRatio).toBeNull();
+    expect(snapshot?.provenance.sectorShortRatio).toEqual([]);
+    expect(snapshot?.unavailable).toContainEqual({
+      section: 'sectorShortRatio',
+      reason: 'locked_ticker_mismatch',
+    });
+  });
+
+  test('preserves unavailable sector flow as unavailable rather than zero', () => {
+    const collector = new StandardAgentSnapshotCollector();
+    invokeSkill(collector);
+    lockToyota(collector);
+    start(collector, 'analyze_sector_short_ratio', 'sector-short-empty', {
+      ticker: '7203',
+      analysisAsOfDate: '2026-08-20',
+      from: '2026-01-01',
+    });
+    end(collector, 'analyze_sector_short_ratio', 'sector-short-empty', {
+      ...sectorShortRatioResult(),
+      dataDate: null,
+      observations: [],
+      unavailable: [{ reason: 'no_sector_short_ratio_data' }],
+    });
+
+    const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
+
+    expect(snapshot?.sectorShortRatio?.observations).toEqual([]);
+    expect(snapshot?.sectorShortRatio?.unavailable).toEqual([
+      { reason: 'no_sector_short_ratio_data' },
+    ]);
+    expect(snapshot?.sectorShortRatio?.sector).toEqual(
+      sectorShortRatioResult().sector,
+    );
+    expect(snapshot?.unavailable).toContainEqual({
+      section: 'sectorShortRatio',
+      reason: 'no_sector_short_ratio_data',
+    });
   });
 
   test('preserves typed sector source absence instead of converting it to zero', () => {
@@ -622,7 +752,7 @@ describe('StandardAgentSnapshotCollector', () => {
 
     const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
 
-    expect(snapshot?.schemaVersion).toBe(6);
+    expect(snapshot?.schemaVersion).toBe(7);
     expect(snapshot?.investorTypeFlows).toEqual({
       dataDate: '2026-08-20',
       section: 'TokyoNagoya',

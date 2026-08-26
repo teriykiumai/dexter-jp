@@ -1340,7 +1340,7 @@ limitations into narrative interpretation.
 
 ### P2-B5 — Sector Short-ratio Evaluation
 
-Decision after P2-D0 re-evaluation: **IMPLEMENT LATER**.
+Decision after P2-D0 re-evaluation: **IMPLEMENT** in P2-D5.
 
 `GET /v2/markets/short-ratio` returns daily 33-sector selling-turnover components
 in JPY: non-short selling, short selling with price restrictions, and short selling
@@ -1394,10 +1394,10 @@ obtained for the requested source boundary; it is not zero short selling. Do not
 thresholds, squeeze labels, Buy/Sell signals, cross-sector aggregation, or inferred
 issuer values.
 
-No source tool, deterministic engine, Snapshot field, Dashboard component, or
-comprehensive-analysis instruction is added by P2-B5. Implement it only after Phase
-2D establishes the concrete sector-context consumer, using the shared S33 resolver
-and availability boundary fixed by P2-D0.
+P2-D5 implements the source, deterministic result, Snapshot V7, Dashboard, and
+comprehensive-analysis integration only after Phase 2D establishes the concrete
+sector context. It reuses the shared S33 resolver and availability boundary fixed by
+P2-D0; the implementation contract is fixed below in the Phase 2D section.
 
 ### Phase 2B Sequence
 
@@ -1989,8 +1989,8 @@ created in P2-D0.
 
 #### P2-B5 re-evaluation
 
-Decision: **IMPLEMENT LATER**, in a separate step after the core sector benchmark is
-presented. The sector index supplies price behavior while `/v2/markets/short-ratio`
+Decision: **IMPLEMENT** as P2-D5, after the core sector benchmark is presented. The
+sector index supplies price behavior while `/v2/markets/short-ratio`
 supplies daily sector selling-turnover components in JPY, so it can add distinct
 sector-flow context once an authoritative sector identity is already visible.
 
@@ -2000,6 +2000,67 @@ The later step must reuse the same as-of-safe `S33` resolver and apply
 score, attribute it to the issuer, aggregate it with issuer reported positions or
 margin balances, or add thresholds, squeeze labels, or Buy/Sell signals.
 
+#### P2-D5 implementation contract
+
+The source tool calls `GET /v2/markets/short-ratio` with the authoritative as-of S33,
+`from`, and `to = analysisAsOfDate`, following existing pagination. It preserves one
+daily row per returned `Date` and the official fields `SellExShortVa`,
+`ShrtWithResVa`, and `ShrtNoResVa` as nullable JPY values. It accepts a previously
+resolved classification only as the structured `sectorIdentity` envelope emitted by
+`get_sector_index`; the same as-of-safe P2-D1 resolver still verifies it. The
+envelope preserves source `analysisAsOfDate`, normalized `issuerCode`,
+`classificationDate`, sector code/name, index code, and J-Quants equity-master
+provenance. A bare classification is never accepted, and literal provenance fields
+are not authentication. Before an envelope is used, the source re-resolves the
+normalized target ticker and requested `analysisAsOfDate` through the P2-D1 resolver
+and requires exact `issuerCode`, `classificationDate`, sector code/name, and index-code
+agreement. A supplied sector-source result must also match the target issuer and source
+as-of boundary.
+It excludes future rows, never forward-fills a missing/non-trading
+date, rejects conflicting S33 or duplicate dates, and keeps an empty response as
+`no_sector_short_ratio_data`, not zero. J-Quants plan/authentication/transport errors
+retain the existing typed source semantics.
+
+The pure Engine emits chronological daily observations and calculates only:
+
+```text
+shortSellingValue = restrictedShortSellingValue
+                  + unrestrictedShortSellingValue
+
+totalSellingValue = nonShortSellingValue + shortSellingValue
+
+shortSellingRatio = shortSellingValue / totalSellingValue
+```
+
+A source null makes that observation `missing_data`; a non-finite or negative source
+value makes it `invalid_data`; a zero `totalSellingValue` makes only the ratio
+`zero_total_selling_value`. Values are not skipped, filled, interpolated, or rolled
+into a baseline. Units remain JPY for every value and ratio for
+`shortSellingRatio`. The result preserves `analysisAsOfDate`, `issuerCode`, the as-of
+sector code/name and `classificationDate`, `dataDate`, daily observations, typed
+unavailable reasons, and source/calculation provenance.
+
+P2-D5 exposes this structured result and adds the minimum Snapshot V7. V1-V6 schemas
+remain immutable/readable, new saves become V7, old files are not rewritten, and
+unknown versions are rejected. The optional section does not change existing
+complete/partial semantics. Dashboard and comprehensive analysis use Snapshot/Engine
+values only and identify them as sector-wide daily selling turnover, not an issuer
+position, outstanding short-interest balance, or margin-interest balance. They do
+not aggregate dates/sectors, calculate a historical mean or trend, combine the result
+with the sector benchmark or another flow source, or create a rank, threshold,
+squeeze/crowding label, score, Entry/Stop/Target, or Buy/Sell signal.
+
+The Snapshot collector independently verifies the Engine result `issuerCode` against
+the run's locked ticker. A mismatch is rejected and cannot persist either the sector
+result or J-Quants classification provenance.
+
+Tests fix endpoint/field/parameter mapping, pagination, authoritative identity
+reverification, same-issuer wrong-S33 rejection before the flow fetch, issuer/as-of
+rejection, as-of/future exclusion, missing and empty semantics, deterministic formulas, zero
+denominator and invalid values, ordering/non-mutation, structured tool/collector
+pass-through, V1-V6 read compatibility and V7 write, Dashboard unavailable-versus-
+zero presentation, and comprehensive-analysis non-attribution/non-calculation rules.
+
 #### Phase 2D sequence
 
 ```text
@@ -2008,7 +2069,7 @@ P2-D0 Source / Contract Design
   → P2-D2 deterministic sector benchmark integration
   → P2-D3 Tool exposure + Snapshot V6
   → P2-D4 Dashboard + comprehensive-analysis
-  → P2-D5 sector short-ratio integration (IMPLEMENT LATER; separate approval)
+  → P2-D5 sector short-ratio integration
 ```
 
 P2-D1 adds only the calendar-backed S33 resolver, explicit mapping, and sector-index
@@ -2030,7 +2091,8 @@ does not change existing complete/partial semantics.
 
 P2-D4 displays Snapshot values and updates comprehensive analysis to interpret sector
 context without Browser/LLM calculation, issuer attribution, ranks, scores, signals,
-or silent claims from unavailable data. P2-D5 remains a separately approved follow-up.
+or silent claims from unavailable data. P2-D5 adds only the separately approved daily
+sector short-selling-flow context under the contract above.
 
 #### Deferred / rejected from initial Phase 2D
 
@@ -2045,6 +2107,6 @@ or silent claims from unavailable data. P2-D5 remains a separately approved foll
 
 ## 24. Recommended Next Codex Task
 
-After P2-D0 is merged, implement P2-D1 only. Do not add the deterministic comparison,
-Snapshot V6, collector integration, Dashboard presentation, comprehensive-analysis
-changes, or sector short-ratio in the source PR.
+Phase 2D P2-D0 through P2-D5 are implemented as separate reviewable steps. Preserve
+their merged source, deterministic Engine, Snapshot V6/V7, presentation, and
+comprehensive-analysis contracts in later work.

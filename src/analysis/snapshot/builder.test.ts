@@ -207,6 +207,40 @@ function completeInput(): AnalysisSnapshotInput {
         excessReturn: 'ratio',
       },
     },
+    sectorShortRatio: {
+      analysisAsOfDate: '2026-08-21',
+      issuerCode: '72030',
+      sector: {
+        classificationDate: '2026-08-21',
+        sectorCode: '3700',
+        sectorName: '輸送用機器',
+      },
+      dataDate: '2026-08-21',
+      observations: [{
+        date: '2026-08-21',
+        nonShortSellingValue: 100,
+        restrictedShortSellingValue: 20,
+        unrestrictedShortSellingValue: 30,
+        shortSellingValue: 50,
+        totalSellingValue: 150,
+        shortSellingRatio: 1 / 3,
+        unavailable: [],
+      }],
+      unavailable: [],
+      provenance: {
+        classification: { source: 'jquants', endpoint: '/v2/equities/master' },
+        flow: { source: 'jquants', endpoint: '/v2/markets/short-ratio' },
+        calculation: { source: 'sector_short_ratio_engine' },
+      },
+      units: {
+        nonShortSellingValue: 'JPY',
+        restrictedShortSellingValue: 'JPY',
+        unrestrictedShortSellingValue: 'JPY',
+        shortSellingValue: 'JPY',
+        totalSellingValue: 'JPY',
+        shortSellingRatio: 'ratio',
+      },
+    },
     strategy: {
       dataDate: '2026-08-21',
       entry: {
@@ -247,7 +281,7 @@ describe('buildAnalysisSnapshot', () => {
   test('uses an explicit required-section contract and remains complete for metric-level unavailable states', () => {
     const snapshot = buildAnalysisSnapshot(completeInput());
 
-    expect(snapshot.schemaVersion).toBe(6);
+    expect(snapshot.schemaVersion).toBe(7);
     expect(REQUIRED_ANALYSIS_SNAPSHOT_SECTIONS).toEqual([
       'identity',
       'fundamental',
@@ -322,6 +356,21 @@ describe('buildAnalysisSnapshot', () => {
       expect.objectContaining({ source: 'jquants', role: 'benchmark_data' }),
       expect.objectContaining({ source: 'jquants', role: 'price_data' }),
     ]));
+    expect(snapshot.provenance.sectorShortRatio).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        source: 'sector_short_ratio_engine', role: 'calculation', endpoint: null,
+      }),
+      expect.objectContaining({
+        source: 'jquants',
+        role: 'sector_classification_data',
+        endpoint: '/v2/equities/master',
+      }),
+      expect.objectContaining({
+        source: 'jquants',
+        role: 'sector_short_ratio_data',
+        endpoint: '/v2/markets/short-ratio',
+      }),
+    ]));
     expect(snapshot.units.valuation.per).toBe('multiple');
     expect(snapshot.units.peerComparison.percentile).toBe('ratio');
     expect(snapshot.units.supplyDemand.percentile52w).toBe('ratio');
@@ -359,6 +408,14 @@ describe('buildAnalysisSnapshot', () => {
       benchmarkVolatilityAnnualized: 'ratio',
       excessReturn: 'ratio',
     });
+    expect(snapshot.units.sectorShortRatio).toEqual({
+      nonShortSellingValue: 'JPY',
+      restrictedShortSellingValue: 'JPY',
+      unrestrictedShortSellingValue: 'JPY',
+      shortSellingValue: 'JPY',
+      totalSellingValue: 'JPY',
+      shortSellingRatio: 'ratio',
+    });
     expect(snapshot.dataDates.advancedTechnical).toBe('2026-08-21');
     expect(snapshot.advancedTechnical).toEqual(completeInput().advancedTechnical);
     expect(snapshot.dataDates.reportedShortPositions).toBe('2026-08-20');
@@ -367,6 +424,8 @@ describe('buildAnalysisSnapshot', () => {
     expect(snapshot.investorTypeFlows).toEqual(completeInput().investorTypeFlows);
     expect(snapshot.dataDates.sectorBenchmark).toBe('2026-08-21');
     expect(snapshot.sectorBenchmark).toEqual(completeInput().sectorBenchmark);
+    expect(snapshot.dataDates.sectorShortRatio).toBe('2026-08-21');
+    expect(snapshot.sectorShortRatio).toEqual(completeInput().sectorShortRatio);
   });
 
   test('preserves sector unavailable states without changing complete status', () => {

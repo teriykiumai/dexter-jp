@@ -10,6 +10,7 @@ import {
   INVESTOR_TYPE_FLOW_CONTEXT_NOTE,
   REPORTED_SHORT_POSITION_DISCLOSURE_NOTE,
   SECTOR_BENCHMARK_CONTEXT_NOTE,
+  SECTOR_SHORT_RATIO_CONTEXT_NOTE,
   WATCHLIST_STALE_AFTER_DAYS,
   buildDetailPath,
   mapSnapshotToDashboard,
@@ -142,6 +143,55 @@ function Dashboard({ snapshot, onBack }: { snapshot: AnalysisSnapshot; onBack: (
               : null}
           </>
         ) : <div className="empty-state">Advanced Technicalは未収集です。</div>}
+      </Card>
+
+      <Card title="Sector Short-selling Flow" eyebrow="TSE 33-sector daily turnover">
+        <p className="disclosure-note">{SECTOR_SHORT_RATIO_CONTEXT_NOTE}</p>
+        {view.sectorShortRatio.state !== 'not_collected' ? (
+          <>
+            <MetricGrid metrics={[
+              { label: 'Analysis as-of', value: view.sectorShortRatio.analysisAsOfDate },
+              { label: 'Classification date', value: view.sectorShortRatio.classificationDate },
+              { label: 'Sector code', value: view.sectorShortRatio.sectorCode },
+              { label: 'Sector name', value: view.sectorShortRatio.sectorName },
+              { label: 'Data date', value: view.sectorShortRatio.dataDate },
+            ]} />
+            {view.sectorShortRatio.observations.length ? (
+              <div className="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Date</th><th>Non-short selling</th><th>Restricted short</th>
+                      <th>Unrestricted short</th><th>Short selling</th>
+                      <th>Total selling</th><th>Short ratio</th><th>Availability</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {view.sectorShortRatio.observations.map(observation => (
+                      <tr key={observation.date.text}>
+                        <td><Value value={observation.date} /></td>
+                        <td><Value value={observation.nonShortSellingValue} /></td>
+                        <td><Value value={observation.restrictedShortSellingValue} /></td>
+                        <td><Value value={observation.unrestrictedShortSellingValue} /></td>
+                        <td><Value value={observation.shortSellingValue} /></td>
+                        <td><Value value={observation.totalSellingValue} /></td>
+                        <td><Value value={observation.shortSellingRatio} /></td>
+                        <td>{observation.unavailableReasons.join(' / ') || 'available'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+            {view.sectorShortRatio.unavailableReasons.length ? (
+              <p className="reason-list">
+                業種別空売りflowは利用できません。{view.sectorShortRatio.unavailableReasons.join(' / ')}
+              </p>
+            ) : null}
+          </>
+        ) : (
+          <div className="empty-state">業種別空売りflowは未収集です。</div>
+        )}
       </Card>
 
       <div className="two-column">

@@ -24,6 +24,7 @@ const CORE_TOOL_NAMES = [
   'analyze_peer_comparison',
   'analyze_market_correlation',
   'analyze_sector_benchmark',
+  'analyze_sector_short_ratio',
   'analyze_strategy',
 ];
 

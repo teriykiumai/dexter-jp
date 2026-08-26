@@ -116,6 +116,28 @@ export interface SectorBenchmarkView {
   unavailableReasons: string[];
 }
 
+export interface SectorShortRatioObservationView {
+  date: DisplayValue;
+  nonShortSellingValue: DisplayValue;
+  restrictedShortSellingValue: DisplayValue;
+  unrestrictedShortSellingValue: DisplayValue;
+  shortSellingValue: DisplayValue;
+  totalSellingValue: DisplayValue;
+  shortSellingRatio: DisplayValue;
+  unavailableReasons: string[];
+}
+
+export interface SectorShortRatioView {
+  state: 'available' | 'unavailable' | 'not_collected';
+  analysisAsOfDate: DisplayValue;
+  classificationDate: DisplayValue;
+  sectorCode: DisplayValue;
+  sectorName: DisplayValue;
+  dataDate: DisplayValue;
+  observations: SectorShortRatioObservationView[];
+  unavailableReasons: string[];
+}
+
 export const REPORTED_SHORT_POSITION_DISCLOSURE_NOTE =
   'J-Quantsの0.5%以上の公開報告です。未収集・利用不可は、空売り残高0、空売り主体なし、0.5%未満のpositionなし、または買い戻し完了を意味しません。信用売残や市場全体のshort interestとは別データです。';
 
@@ -124,6 +146,9 @@ export const INVESTOR_TYPE_FLOW_CONTEXT_NOTE =
 
 export const SECTOR_BENCHMARK_CONTEXT_NOTE =
   'analysisAsOfDate時点で解決した単一の東証33業種指数を各window全体に使用したhistorical comparisonです。銘柄がlookback期間全体で同じsectorに所属していたことを意味せず、current classificationの過去適用、複数sector indexのstitch、銘柄への業種指数値の帰属、rank・score・signalは行いません。';
+
+export const SECTOR_SHORT_RATIO_CONTEXT_NOTE =
+  '東証33業種単位の日次売買代金flowです。個別銘柄のshort position、残高、信用売残ではありません。Snapshotのsource値とdeterministic ratioだけを表示し、業種指数・公開空売り残高報告・信用残との合算、forward fill、threshold・squeeze・Buy/Sell signalは行いません。';
 
 export interface DashboardViewModel {
   header: {
@@ -157,6 +182,7 @@ export interface DashboardViewModel {
   reportedShortPositions: ReportedShortPositionsView;
   investorTypeFlows: InvestorTypeFlowsView;
   sectorBenchmark: SectorBenchmarkView;
+  sectorShortRatio: SectorShortRatioView;
   dataDates: DashboardMetric[];
   scenarios: AnalysisSnapshot['scenarios'];
   risks: AnalysisSnapshot['risks'];
@@ -294,6 +320,7 @@ const dataDateLabels = {
   supplyDemand: '需給',
   marketCorrelation: '市場相関',
   sectorBenchmark: '業種指数比較',
+  sectorShortRatio: '業種別空売り比率',
   strategy: 'Strategy',
   priceHistory: '価格履歴',
 } as const;
@@ -423,6 +450,12 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
     : null;
   const sectorBenchmarkUnits = 'sectorBenchmark' in snapshot.units
     ? snapshot.units.sectorBenchmark
+    : null;
+  const sectorShortRatio = 'sectorShortRatio' in snapshot
+    ? snapshot.sectorShortRatio
+    : null;
+  const sectorShortRatioUnits = 'sectorShortRatio' in snapshot.units
+    ? snapshot.units.sectorShortRatio
     : null;
 
   const bars = (snapshot.priceHistory ?? []).flatMap(bar => (
@@ -779,6 +812,51 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
     )) ?? [],
   };
 
+  const sectorShortRatioView: SectorShortRatioView = {
+    state: !('sectorShortRatio' in snapshot) || sectorShortRatio === null
+      ? 'not_collected'
+      : sectorShortRatio.observations.length > 0
+        ? 'available'
+        : 'unavailable',
+    analysisAsOfDate: displayText(sectorShortRatio?.analysisAsOfDate),
+    classificationDate: displayText(sectorShortRatio?.sector?.classificationDate),
+    sectorCode: displayText(sectorShortRatio?.sector?.sectorCode),
+    sectorName: displayText(sectorShortRatio?.sector?.sectorName),
+    dataDate: displayText(sectorShortRatio?.dataDate),
+    observations: sectorShortRatio && sectorShortRatioUnits
+      ? sectorShortRatio.observations.slice(-20).reverse().map(observation => ({
+          date: displayText(observation.date),
+          nonShortSellingValue: formatMetric(
+            observation.nonShortSellingValue,
+            sectorShortRatioUnits.nonShortSellingValue,
+          ),
+          restrictedShortSellingValue: formatMetric(
+            observation.restrictedShortSellingValue,
+            sectorShortRatioUnits.restrictedShortSellingValue,
+          ),
+          unrestrictedShortSellingValue: formatMetric(
+            observation.unrestrictedShortSellingValue,
+            sectorShortRatioUnits.unrestrictedShortSellingValue,
+          ),
+          shortSellingValue: formatMetric(
+            observation.shortSellingValue,
+            sectorShortRatioUnits.shortSellingValue,
+          ),
+          totalSellingValue: formatMetric(
+            observation.totalSellingValue,
+            sectorShortRatioUnits.totalSellingValue,
+          ),
+          shortSellingRatio: formatMetric(
+            observation.shortSellingRatio,
+            sectorShortRatioUnits.shortSellingRatio,
+            { ratioAsPercent: true },
+          ),
+          unavailableReasons: observation.unavailable.map(item => reasonText(item.reason)),
+        }))
+      : [],
+    unavailableReasons: sectorShortRatio?.unavailable.map(item => reasonText(item.reason)) ?? [],
+  };
+
   const dates = snapshot.dataDates;
   const dateEntries: Array<[keyof typeof dataDateLabels, string | null]> = [
     ['identity', dates.identity],
@@ -806,6 +884,9 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
   }
   if ('sectorBenchmark' in snapshot.dataDates) {
     dateEntries.push(['sectorBenchmark', snapshot.dataDates.sectorBenchmark]);
+  }
+  if ('sectorShortRatio' in snapshot.dataDates) {
+    dateEntries.push(['sectorShortRatio', snapshot.dataDates.sectorShortRatio]);
   }
 
   return {
@@ -844,6 +925,7 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
     reportedShortPositions: reportedShortPositionsView,
     investorTypeFlows: investorTypeFlowsView,
     sectorBenchmark: sectorBenchmarkView,
+    sectorShortRatio: sectorShortRatioView,
     dataDates: dateEntries.map(([key, value]) => ({
       label: dataDateLabels[key],
       value: displayText(value),

@@ -5,6 +5,7 @@ import {
   AnalysisSnapshotV3Schema,
   AnalysisSnapshotV4Schema,
   AnalysisSnapshotV5Schema,
+  AnalysisSnapshotV6Schema,
   buildAnalysisSnapshot,
   buildAnalysisSnapshotLatestItem,
   type AnalysisSnapshot,
@@ -13,6 +14,7 @@ import {
   type AnalysisSnapshotV4,
   type AnalysisSnapshotV5,
   type AnalysisSnapshotV6,
+  type AnalysisSnapshotV7,
   type AnalysisSnapshotInput,
 } from '../../analysis/snapshot/index.js';
 import {
@@ -20,6 +22,7 @@ import {
   INVESTOR_TYPE_FLOW_CONTEXT_NOTE,
   REPORTED_SHORT_POSITION_DISCLOSURE_NOTE,
   SECTOR_BENCHMARK_CONTEXT_NOTE,
+  SECTOR_SHORT_RATIO_CONTEXT_NOTE,
   WATCHLIST_STALE_AFTER_DAYS,
   buildDetailPath,
   displayText,
@@ -30,7 +33,7 @@ import {
   sortWatchlistItems,
 } from './presentation.js';
 
-function v6Snapshot(): AnalysisSnapshotV6 {
+function v7Snapshot(): AnalysisSnapshotV7 {
   const input: AnalysisSnapshotInput = {
     identity: {
       canonicalTicker: '7203',
@@ -53,6 +56,7 @@ function v6Snapshot(): AnalysisSnapshotV6 {
     investorTypeFlows: null,
     marketCorrelation: null,
     sectorBenchmark: null,
+    sectorShortRatio: null,
     strategy: null,
     priceHistory: null,
     scenarios: null,
@@ -74,6 +78,30 @@ function v6Snapshot(): AnalysisSnapshotV6 {
     additionalUnavailable: [],
   };
   return buildAnalysisSnapshot(input);
+}
+
+function v6Snapshot(): AnalysisSnapshotV6 {
+  const v7 = v7Snapshot();
+  const {
+    sectorShortRatio: _sectorShortRatio,
+    dataDates: v7DataDates,
+    provenance: v7Provenance,
+    units: v7Units,
+    unavailable: v7Unavailable,
+    ...common
+  } = v7;
+  const { sectorShortRatio: _sectorShortRatioDate, ...dataDates } = v7DataDates;
+  const { sectorShortRatio: _sectorShortRatioProvenance, ...provenance } = v7Provenance;
+  const { sectorShortRatio: _sectorShortRatioUnits, ...units } = v7Units;
+
+  return AnalysisSnapshotV6Schema.parse({
+    ...common,
+    schemaVersion: 6,
+    dataDates,
+    provenance,
+    units,
+    unavailable: v7Unavailable.filter(item => item.section !== 'sectorShortRatio'),
+  });
 }
 
 function v5Snapshot(): AnalysisSnapshotV5 {
@@ -1066,6 +1094,162 @@ describe('snapshot presentation mapping', () => {
     }
   });
 
+  test('passes through V7 sector short-selling flow values and stored ratios without recalculation', () => {
+    const base = v7Snapshot();
+    const snapshot: AnalysisSnapshotV7 = {
+      ...base,
+      dataDates: { ...base.dataDates, sectorShortRatio: '2026-08-21' },
+      sectorShortRatio: {
+        analysisAsOfDate: '2026-08-21',
+        issuerCode: '72030',
+        sector: {
+          classificationDate: '2026-08-21',
+          sectorCode: '3700',
+          sectorName: '輸送用機器',
+        },
+        dataDate: '2026-08-21',
+        observations: [
+          {
+            date: '2026-08-20',
+            nonShortSellingValue: 100,
+            restrictedShortSellingValue: 0,
+            unrestrictedShortSellingValue: 0,
+            shortSellingValue: 0,
+            totalSellingValue: 100,
+            shortSellingRatio: 0,
+            unavailable: [],
+          },
+          {
+            date: '2026-08-21',
+            nonShortSellingValue: 100,
+            restrictedShortSellingValue: 20,
+            unrestrictedShortSellingValue: 30,
+            shortSellingValue: 999,
+            totalSellingValue: 1_099,
+            shortSellingRatio: 0.9,
+            unavailable: [],
+          },
+        ],
+        unavailable: [],
+        provenance: {
+          classification: { source: 'jquants', endpoint: '/v2/equities/master' },
+          flow: { source: 'jquants', endpoint: '/v2/markets/short-ratio' },
+          calculation: { source: 'sector_short_ratio_engine' },
+        },
+        units: {
+          nonShortSellingValue: 'JPY',
+          restrictedShortSellingValue: 'JPY',
+          unrestrictedShortSellingValue: 'JPY',
+          shortSellingValue: 'JPY',
+          totalSellingValue: 'JPY',
+          shortSellingRatio: 'ratio',
+        },
+      },
+      unavailable: base.unavailable.filter(item => item.section !== 'sectorShortRatio'),
+    };
+
+    const view = mapSnapshotToDashboard(snapshot);
+
+    expect(view.sectorShortRatio).toMatchObject({
+      state: 'available',
+      analysisAsOfDate: { text: '2026-08-21', available: true },
+      classificationDate: { text: '2026-08-21', available: true },
+      sectorCode: { text: '3700', available: true },
+      sectorName: { text: '輸送用機器', available: true },
+      dataDate: { text: '2026-08-21', available: true },
+      unavailableReasons: [],
+    });
+    expect(view.sectorShortRatio.observations[0]).toEqual({
+      date: { text: '2026-08-21', available: true },
+      nonShortSellingValue: { text: '¥100', available: true },
+      restrictedShortSellingValue: { text: '¥20', available: true },
+      unrestrictedShortSellingValue: { text: '¥30', available: true },
+      shortSellingValue: { text: '¥999', available: true },
+      totalSellingValue: { text: '¥1,099', available: true },
+      shortSellingRatio: { text: '90%', available: true },
+      unavailableReasons: [],
+    });
+    expect(view.sectorShortRatio.observations[1]?.shortSellingRatio).toEqual({
+      text: '0%', available: true,
+    });
+    expect(view.dataDates).toContainEqual({
+      label: '業種別空売り比率',
+      value: { text: '2026-08-21', available: true },
+    });
+    expect(SECTOR_SHORT_RATIO_CONTEXT_NOTE).toContain('個別銘柄のshort position');
+    expect(SECTOR_SHORT_RATIO_CONTEXT_NOTE).toContain('合算');
+    expect(SECTOR_SHORT_RATIO_CONTEXT_NOTE).toContain('Buy/Sell signal');
+  });
+
+  test('keeps sector short-ratio unavailable observations and empty source distinct from zero', () => {
+    const base = v7Snapshot();
+    const unavailableObservation: AnalysisSnapshotV7 = {
+      ...base,
+      sectorShortRatio: {
+        analysisAsOfDate: '2026-08-21',
+        issuerCode: '72030',
+        sector: {
+          classificationDate: '2026-08-21', sectorCode: '3700', sectorName: '輸送用機器',
+        },
+        dataDate: '2026-08-21',
+        observations: [{
+          date: '2026-08-21',
+          nonShortSellingValue: null,
+          restrictedShortSellingValue: 0,
+          unrestrictedShortSellingValue: 0,
+          shortSellingValue: null,
+          totalSellingValue: null,
+          shortSellingRatio: null,
+          unavailable: [{ reason: 'missing_data' }],
+        }],
+        unavailable: [],
+        provenance: {
+          classification: { source: 'jquants', endpoint: '/v2/equities/master' },
+          flow: { source: 'jquants', endpoint: '/v2/markets/short-ratio' },
+          calculation: { source: 'sector_short_ratio_engine' },
+        },
+        units: {
+          nonShortSellingValue: 'JPY', restrictedShortSellingValue: 'JPY',
+          unrestrictedShortSellingValue: 'JPY', shortSellingValue: 'JPY',
+          totalSellingValue: 'JPY', shortSellingRatio: 'ratio',
+        },
+      },
+    };
+    const observation = mapSnapshotToDashboard(
+      unavailableObservation,
+    ).sectorShortRatio.observations[0];
+    expect(observation?.shortSellingRatio).toEqual({ text: UNAVAILABLE_TEXT, available: false });
+    expect(observation?.unavailableReasons).toEqual(['missing data']);
+
+    const noData: AnalysisSnapshotV7 = {
+      ...base,
+      sectorShortRatio: {
+        ...unavailableObservation.sectorShortRatio!,
+        dataDate: null,
+        observations: [],
+        unavailable: [{ reason: 'no_sector_short_ratio_data' }],
+      },
+    };
+    const noDataView = mapSnapshotToDashboard(noData).sectorShortRatio;
+    expect(noDataView.state).toBe('unavailable');
+    expect(noDataView.observations).toEqual([]);
+    expect(noDataView.unavailableReasons).toEqual(['no sector short ratio data']);
+  });
+
+  test('treats V1-V6 and a null V7 sector short ratio as not collected', () => {
+    for (const snapshot of [
+      v1Snapshot(), v2Snapshot(), v3Snapshot(), baseSnapshot(),
+      v5Snapshot(), v6Snapshot(), v7Snapshot(),
+    ]) {
+      const view = mapSnapshotToDashboard(snapshot);
+      expect(view.sectorShortRatio.state).toBe('not_collected');
+      expect(view.sectorShortRatio.observations).toEqual([]);
+      if (snapshot.schemaVersion !== 7) {
+        expect(view.dataDates.map(item => item.label)).not.toContain('業種別空売り比率');
+      }
+    }
+  });
+
   test('treats V1 Advanced Technical as not collected', () => {
     const view = mapSnapshotToDashboard(v1Snapshot());
 
@@ -1226,6 +1410,62 @@ describe('watchlist presentation mapping', () => {
     expect(WATCHLIST_STALE_AFTER_DAYS).toBe(7);
     expect(boundary.stale).toBeFalse();
     expect(stale.stale).toBeTrue();
+  });
+
+  test('uses the newest V7 sector short-ratio date for Watchlist freshness', () => {
+    const base = v7Snapshot();
+    const snapshot: AnalysisSnapshotV7 = {
+      ...base,
+      dataDates: {
+        ...base.dataDates,
+        sectorShortRatio: '2026-08-22',
+      },
+      sectorShortRatio: {
+        analysisAsOfDate: '2026-08-22',
+        issuerCode: '72030',
+        sector: {
+          classificationDate: '2026-08-21',
+          sectorCode: '3700',
+          sectorName: '輸送用機器',
+        },
+        dataDate: '2026-08-22',
+        observations: [{
+          date: '2026-08-22',
+          nonShortSellingValue: 100,
+          restrictedShortSellingValue: 20,
+          unrestrictedShortSellingValue: 30,
+          shortSellingValue: 50,
+          totalSellingValue: 150,
+          shortSellingRatio: 1 / 3,
+          unavailable: [],
+        }],
+        unavailable: [],
+        provenance: {
+          classification: { source: 'jquants', endpoint: '/v2/equities/master' },
+          flow: { source: 'jquants', endpoint: '/v2/markets/short-ratio' },
+          calculation: { source: 'sector_short_ratio_engine' },
+        },
+        units: {
+          nonShortSellingValue: 'JPY',
+          restrictedShortSellingValue: 'JPY',
+          unrestrictedShortSellingValue: 'JPY',
+          shortSellingValue: 'JPY',
+          totalSellingValue: 'JPY',
+          shortSellingRatio: 'ratio',
+        },
+      },
+      unavailable: base.unavailable.filter(item => item.section !== 'sectorShortRatio'),
+    };
+
+    const latest = buildAnalysisSnapshotLatestItem(snapshot);
+    const view = mapLatestAnalysisToWatchlistItem(
+      latest,
+      new Date('2026-08-29T18:30:00.000Z'),
+    );
+
+    expect(latest.latestSourceDataDate).toBe('2026-08-22');
+    expect(view.latestDataDateRaw).toBe('2026-08-22');
+    expect(view.stale).toBeFalse();
   });
 
   test('sorts by generatedAt or latest source data date with missing dates last', () => {
