@@ -2550,11 +2550,12 @@ parameters: code, from, to, pagination_key
 ```
 
 The official J-Quants schema provides `Date`, `Code`, raw `O/H/L/C/Vo`,
-`AdjFactor`, and adjusted `AdjO/AdjH/AdjL/AdjC/AdjVo`. The initial profile uses the
-adjusted OHLC and adjusted volume together. It never combines raw prices with
-adjusted volume, adjusted prices with raw volume, or independently reconstructs the
-adjustment. `AdjFactor` remains source metadata used to establish methodology and
-provenance; it is not a new calculation input.
+`AdjFactor`, adjusted `AdjO/AdjH/AdjL/AdjC/AdjVo`, and `ExRT`. `ExRT = 3` identifies
+a rights issue. The initial profile uses adjusted OHLC and adjusted volume together
+only when the source envelope establishes a common basis. It never combines raw
+prices with adjusted volume, adjusted prices with raw volume, or independently
+reconstructs the adjustment. `AdjFactor` and `ExRT` remain source metadata used to
+establish methodology and provenance; neither is a new calculation input.
 
 Primary references checked for P2-F0:
 
@@ -2566,11 +2567,67 @@ Primary references checked for P2-F0:
 
 The source is daily. Official dataset material describes stock prices before and
 after corporate-action adjustment and states that adjusted prices are retroactively
-adjusted. The current personal plans expose daily OHLC on Free or higher: Free has two
-years with a latest-twelve-weeks delay, Light five years, Standard ten years, and
-Premium the offered history up to twenty years. Runtime uses only rows actually
-returned for the configured plan and follows every `pagination_key`. An empty
-successful response is `no_price_data`; it is not zero volume.
+adjusted. The daily-bar specification also states that rights-issue price adjustment
+does not adjust `Vo` or `AdjVo`. Its rights-issue price-adjustment coverage excludes
+foreign stocks and TOKYO PRO Market issues, and the source does not support every
+possible corporate action. Therefore the `Adj*` prefix alone does not prove a common
+adjusted price/volume basis.
+
+If the canonical window contains `ExRT = 3`, return
+`corporate_action_basis_unavailable` with no bins, POC, or Value Area. Do not derive a
+volume conversion or use the apparent adjusted fields as proof. Use the same reason
+when an unsupported corporate action, mixed basis, missing basis metadata, or another
+source condition prevents the common price/volume basis from being established.
+Rights-issue or unknown-basis rows outside the canonical latest-120 window do not
+affect the result because canonical selection precedes basis validation.
+
+P2-F2 must define one typed source envelope that retains `AdjFactor` and `ExRT` for
+every supplied row and records the exact J-Quants field mapping in provenance. P2-F3
+must make its direct source mapper produce that envelope. The existing range-mode
+`get_stock_price` result maps adjusted OHLCV to generic fields and omits both metadata
+fields; generic supplied OHLCV rows therefore cannot prove the basis and must not be
+accepted as reusable volume-profile source input. Supplied-row mode may avoid a
+duplicate fetch only when it receives and validates the complete typed envelope from
+that mapping path; a bare generic row array or `priceBasis` literal is insufficient.
+
+The minimum reusable source boundary is:
+
+```ts
+type VolumeProfileSource = Readonly<{
+  issuerCode: string;
+  rows: readonly Readonly<{
+    Date: string;
+    Code: string;
+    AdjO: number | null;
+    AdjH: number | null;
+    AdjL: number | null;
+    AdjC: number | null;
+    AdjVo: number | null;
+    AdjFactor: number | null;
+    ExRT: string | null;
+  }>[];
+  provenance: Readonly<{
+    source: 'jquants';
+    endpoint: '/v2/equities/bars/daily';
+    mapping: 'jquants_adjusted_ohlcv_with_corporate_actions_v1';
+  }>;
+}>;
+```
+
+This envelope is evidence of source identity and retained metadata, not proof that a
+rights-issue window is usable; the Engine still applies the canonical-window basis
+rule above. Source metadata cannot prove the absence of a corporate action that
+J-Quants does not support or identify. A valid profile therefore establishes the
+common basis only for the source-supported and identified adjustment scope; it is not
+a claim that every possible historical event was observable. If an unsupported event
+is otherwise known or the mapping cannot establish its scope, return
+`corporate_action_basis_unavailable`.
+
+The current personal plans expose daily OHLC on Free or higher: Free has two years
+with a latest-twelve-weeks delay, Light five years, Standard ten years, and Premium
+the offered history up to twenty years. Runtime uses only rows actually returned for
+the configured plan and follows every `pagination_key`. An empty successful response
+is `no_price_data`; it is not zero volume.
 
 Published update times are operational schedules, not historical-vintage evidence or
 a guarantee that a row was available at a particular instant. `analysisAsOfDate` is
@@ -2601,21 +2658,27 @@ eligible = rows where Date <= analysisAsOfDate
 require eligible dates to be unique and strictly chronological
 canonical = latest min(eligible.length, 120) rows
 require canonical.length >= 60
+validate corporate-action price/volume basis only inside canonical
 validate prices, volume, and bar geometry only inside canonical
 ```
 
 The latest 120 trading bars provide an approximately six-month medium-term profile
 while bounding output size and avoiding an automatic one-year carryover from the
-Technical 251-bar contract. The current comprehensive-analysis price request can
-supply the data without making 251 bars part of this metric's meaning. With 60-119
-eligible bars, use every available bar. With 120 or more, use exactly the latest 120.
+Technical 251-bar contract. The existing generic comprehensive-analysis price result
+does not satisfy the source-envelope requirement and does not make 251 bars part of
+this metric's meaning. With 60-119 eligible bars, use every available bar. With 120 or
+more, use exactly the latest 120.
 
 Filter future rows before validation so a later appended row cannot change an
 historical result. Do not sort, deduplicate, skip, forward-fill, interpolate, or
 restart a sequence. Duplicate, malformed, or non-ascending eligible dates are
 `invalid_chronology`. Value validation occurs after canonical selection, so missing
-or invalid observations before the latest 120 do not affect the result. Missing
-trading dates and non-trading days remain absent; they are not zero-volume rows.
+or invalid observations before the latest 120 do not affect the result. Exchange-
+closed dates are absent and do not count toward the 60/120 bars. By contrast, an
+issue-specific no-sale day returned by J-Quants is an observation and does count; it
+must not be dropped. Its null OHLC and volume produce `missing_price_data` and
+`missing_volume_data` when the row is inside the canonical window, rather than zero
+volume or a shorter sequence.
 
 For every canonical bar:
 
@@ -2750,13 +2813,7 @@ type VolumeProfileUnavailableReason =
   | 'zero_total_volume'
   | 'no_price_data'
   | 'corporate_action_basis_unavailable'
-  | 'invalid_input'
-  | 'metric_calculation_unavailable'
-  | 'missing_api_key'
-  | 'network_error'
-  | 'http_error'
-  | 'plan_unavailable'
-  | 'invalid_response';
+  | 'invalid_input';
 
 interface VolumeProfileBin {
   index: number;
@@ -2801,7 +2858,7 @@ interface VolumeProfileResult {
     lastBinIndex: number;
   } | null;
   unavailable: readonly {
-    scope: 'profile' | 'poc' | 'valueArea';
+    scope: 'profile';
     reason: VolumeProfileUnavailableReason;
   }[];
   methodology: {
@@ -2812,6 +2869,15 @@ interface VolumeProfileResult {
   provenance: {
     source: 'jquants';
     endpoint: '/v2/equities/bars/daily';
+    sourceMapping: 'jquants_adjusted_ohlcv_with_corporate_actions_v1';
+    adjustmentFactorField: 'AdjFactor';
+    exRightsField: 'ExRT';
+    observedExRightsTypes: readonly string[];
+    corporateActionBasisStatus:
+      | 'not_evaluated'
+      | 'supported_common_basis_established'
+      | 'rights_issue_unavailable'
+      | 'unknown_basis_unavailable';
     calculation: 'volume_profile_engine';
   };
   units: {
@@ -2827,22 +2893,25 @@ actually used, never the request date or a plan-implied date. `inputBarCount` is
 canonical bar count, at most 120. `collectedAt` is the UTC collection timestamp.
 `priceBasis` and `volumeBasis` use the adjusted literal only when the common source
 basis was established; they are null for source/basis unavailability. Missing price
-and missing volume remain separate.
+and missing volume remain separate. `corporateActionBasisStatus = 'not_evaluated'`
+applies when no canonical basis check occurred, such as successful empty data or
+insufficient history; an empty `observedExRightsTypes` must not be treated as proof of
+no corporate action.
 Non-finite or non-positive prices, non-finite or negative volume, and invalid bar
 geometry remain distinct invalid reasons. Zero volume is not missing.
 
-Ordinarily, any validated positive-volume profile has calculable POC and Value Area.
-The metric-level scope exists so an unexpected calculation failure can preserve valid
-bins without turning the affected metric or the whole profile into zero. A source
-failure remains the existing typed J-Quants error; a plan restriction is not relabelled
-as an empty or zero profile.
+Every validated positive-volume profile must produce bins, POC, and Value Area
+together. Failure after those preconditions is an implementation invariant violation,
+not data unavailability; throw an explicit internal error and do not emit or persist a
+partial successful result. Source/auth/plan/network/HTTP/response failures remain the
+existing typed `JQuantsApiError` and propagate unchanged. They are not members of
+`VolumeProfileUnavailableReason`, are not serialized as deterministic result
+unavailability, and are never relabelled as an empty or zero profile.
 
 Before a valid profile exists, return `bins = null`, `poc = null`,
 `valueArea = null`, `effectiveBinCount = 0`, and null min/max prices. Preserve known
-request identity and any canonical dates/count already established. A POC-only
-calculation failure also makes Value Area unavailable because Value Area must start at
-the canonical POC; do not choose a substitute bin. A Value-Area-only failure preserves
-the valid bins and POC.
+request identity, retained corporate-action provenance, and any canonical dates/count
+already established. Never choose a substitute POC or preserve partial core metrics.
 
 P2-F0 does not change Snapshot schema. P2-F4 will persist the bounded full bin
 distribution as well as POC and Value Area. Saving only aggregates is rejected because
@@ -2860,6 +2929,7 @@ dates, units, and source/calculation provenance.
 | 120-bar maximum / 60-bar minimum | **IMPLEMENT** | Gives medium-term context without inheriting the unrelated 251-bar Technical contract. |
 | POC and contiguous 70% Value Area | **IMPLEMENT** | Deterministic descriptive summary with fixed tie and overshoot behavior. |
 | Full 50-bin distribution in Snapshot V9 | **IMPLEMENT LATER** in P2-F4 | Required for pass-through visualization without Browser calculation. |
+| Rights-issue-window common-basis conversion | **DEFER** | J-Quants adjusts rights-issue prices but not volume; v1 returns typed unavailability instead of inventing a conversion. |
 | Minute/tick profile | **DEFER** | Separate add-on, coverage, adjustment, and as-of contract; not needed for the initial daily proxy. |
 | Close/typical-price point allocation or equal touched-bin allocation | **REJECT** | Discards range information or introduces boundary distortion. |
 | Actual holder cost basis, retained-position amount, or true shikori | **REJECT** | Not observable from daily OHLCV. |
@@ -2889,20 +2959,28 @@ and typed unavailable semantics. Tests fix 59 unavailable / 60 available bars,
 60-119 all-history behavior, exactly latest 120 bars, canonical-window-old-row
 invariance, future-row historical invariance, duplicate/non-chronological dates, POC
 ties, Value Area lower tie, exact target, whole-bin overshoot, one-bin behavior, zero
-total volume, metric-level unavailable preservation, provenance, and non-mutation.
+total volume, returned no-sale rows as counted missing observations, a rights issue
+inside the canonical window as `corporate_action_basis_unavailable` including the
+documented foreign-stock/TOKYO PRO Market exceptions, rights-issue and invalid metadata
+outside the latest 120 as irrelevant, mixed/unknown adjustment basis, all-or-nothing
+bins/POC/Value Area invariants, provenance, and non-mutation.
 
 P2-F3 exposes a separate `analyze_volume_profile` structured tool so the existing
 Phase 1 `TechnicalResult` and `analyze_technical` semantics remain unchanged. It
-reuses already-fetched adjusted OHLCV when supplied and uses the existing J-Quants
-client only for direct ticker mode. It must not fetch the same price history twice in
-one path. Tests fix pagination, numeric and alphanumeric JPX codes, source field/basis
-mapping, plan/auth/network/invalid-response propagation, successful empty data,
-corporate-action-basis unavailability, no duplicate fetch, and structured-only output.
+reuses already-fetched data only through the typed `VolumeProfileSource` envelope and
+uses the existing J-Quants client for direct ticker mode. Generic `get_stock_price`
+OHLCV is not reusable basis proof. It must not fetch the same price history twice in
+one path. Tests fix pagination, numeric and alphanumeric JPX codes, retention of
+`AdjFactor`/`ExRT`, exact source field/basis mapping, rejection of bare generic OHLCV,
+unchanged typed `JQuantsApiError` propagation for plan/auth/network/HTTP/invalid-
+response failures, successful empty data, corporate-action-basis unavailability, no
+duplicate fetch when the typed envelope is supplied, and structured-only output.
 
 P2-F4 adds the minimum Snapshot V9 and collector integration. V1-V8 remain immutable
 and readable, new saves become V9, existing files are not migrated or rewritten, and
 unknown versions remain rejected. Full bins, aggregate metrics, method identity,
-units, dates, and provenance pass through from the structured result. Volume-profile
+units, dates, corporate-action basis status, and provenance pass through from the
+structured result. Volume-profile
 unavailability alone does not change existing complete/partial semantics. The
 collector locks issuer identity and never reconstructs values from Markdown.
 

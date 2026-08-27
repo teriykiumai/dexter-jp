@@ -1095,11 +1095,17 @@ overhead supply. POC, VAH, and VAL remain descriptive deterministic outputs and 
 become support/resistance, Entry/Stop/Target, a score, threshold, or Buy/Sell signal.
 
 Reuse J-Quants V2 `GET /v2/equities/bars/daily`, existing pagination, and JPX code
-normalization. Use `AdjO/AdjH/AdjL/AdjC/AdjVo` together on the source corporate-action-
-adjusted basis and retain `AdjFactor` as source/method provenance. Never mix raw and
-adjusted fields. Daily OHLC is available on Free or higher subject to plan history and
-the Free latest-twelve-weeks delay. Use only rows actually returned. A successful
-empty response is unavailable, not zero.
+normalization. Use `AdjO/AdjH/AdjL/AdjC/AdjVo` together only after establishing the
+source corporate-action basis, and retain both `AdjFactor` and `ExRT` in the typed
+source envelope and provenance. Never mix raw and adjusted fields. J-Quants does not
+adjust volume for rights issues (`ExRT = 3`), its rights-issue price adjustment excludes
+foreign stocks and TOKYO PRO Market issues, and not every corporate action is source-
+supported. A canonical window containing a rights issue, or whose common basis cannot
+be proven, is `corporate_action_basis_unavailable`; no manual conversion is allowed.
+Generic `get_stock_price` OHLCV omits the required metadata and is not reusable basis
+proof. Daily OHLC is available on Free or higher subject to plan history and the Free
+latest-twelve-weeks delay. Use only rows actually returned. A successful empty response
+is unavailable, not zero; typed J-Quants source errors propagate unchanged.
 
 `analysisAsOfDate` is an inclusive date-only end-of-day boundary. Exclude future rows
 first; a same-day bar is eligible only if returned. Current adjusted history can be
@@ -1113,8 +1119,11 @@ The canonical sequence is every available eligible bar when 60-119 exist and exa
 the latest 120 when at least 120 exist. Fewer than 60 is `insufficient_history`.
 Eligible dates must be unique and strictly chronological. Do not sort, skip, fill,
 interpolate, or restart. Validate price/volume values only after latest-120 selection,
-so older values outside the canonical window cannot change the result. Zero-volume
-bars are valid; all-zero total volume is explicitly unavailable.
+so older values or corporate-action flags outside the canonical window cannot change
+the result. Exchange-closed dates are absent and do not count. A returned issue-
+specific no-sale row does count and its null OHLC/volume is missing data; never drop it
+or convert it to zero. Zero-volume bars with otherwise valid fields are valid; all-zero
+total volume is explicitly unavailable.
 
 Use 50 equal linear bins across canonical adjusted low-to-high. Bins are lower-
 inclusive/upper-exclusive except for the final upper-inclusive bin; maximum price is
@@ -1139,7 +1148,9 @@ VAL, and VAH at the same price and achieved share 1.
 The structured result preserves issuer/as-of/collection identity, canonical window
 dates and count, price/volume basis, versioned allocation and binning methods, full
 bins, POC, Value Area target/achieved share, scoped unavailable reasons, methodology
-identity, J-Quants/calculation provenance, and explicit units. See
+identity, retained corporate-action basis status, J-Quants/calculation provenance, and
+explicit units. Valid positive-volume bins, POC, and Value Area succeed together; an
+impossible later failure is an internal error, not partial metric unavailability. See
 `docs/PHASE2_PLAN.md` for the normative TypeScript-style shape and complete reason
 vocabulary.
 
