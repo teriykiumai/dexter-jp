@@ -13,6 +13,13 @@ export {
   type DividendSummarySourceRow,
 } from './dividend-summary.js';
 export {
+  analyzeDividendFiscalObservations,
+  type AdvancedDividendCoreUnavailableReason,
+  type DividendFiscalObservation,
+  type DividendFiscalResult,
+  type UnavailableAdvancedDividendCore,
+} from './advanced-dividend-engine.js';
+export {
   getInvestorTypeFlows,
   INVESTOR_TYPE_FLOWS_DESCRIPTION,
   INVESTOR_TYPE_SECTIONS,
