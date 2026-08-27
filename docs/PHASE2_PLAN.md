@@ -2153,6 +2153,8 @@ availability timestamps. Storage begins 2008-07-07. The current plan limits are 
 the two-year range excluding the latest twelve weeks, Light: five years, Standard:
 ten years, and Premium: twenty years. Plan/authentication/transport failures remain
 typed J-Quants errors and are never converted to zero dividend.
+These plan/history limits govern rows available to the runtime; they do not change the
+plan-independent `sourceEligibleDate` of a row that exists.
 
 The optional event-detail source is J-Quants V2
 [`GET /v2/fins/dividend`](https://jpx-jquants.com/ja/spec/fin-dividend). It preserves
@@ -2168,7 +2170,7 @@ an explicit `event_source_plan_unavailable` enrichment reason and does not inval
 an otherwise available financial-summary result. Other source failures are not
 swallowed.
 
-Historical source eligibility also uses J-Quants V2
+Historical canonical eligibility also uses J-Quants V2
 [`GET /v2/markets/calendar`](https://jpx-jquants.com/ja/spec/mkt-cal) with the merged
 `HolDiv = 1` or `2` business-day convention. Calendar access remains subject to the
 official plan/history range, including Free's delayed historical window. A missing or
@@ -2196,10 +2198,10 @@ dividend event notification:     PubDate + PubTime
 historical source eligibility:   sourceEligibleDate
 ```
 
-The initial boundary is date-only and source-oriented. `analysisAsOfDate`
-means "obtainable from the configured J-Quants source by the end of that date in Japan
-time", not merely "publicly disclosed by that date". Intraday historical availability
-is not claimed.
+The initial boundary is date-only and canonical. `analysisAsOfDate` is the inclusive
+cutoff for the plan-independent modelled source-eligibility rule below. It does not
+assert that the row was obtainable under the configured subscription by the end of
+that date in Japan time. Intraday historical availability is not claimed.
 
 J-Quants does not expose first-available timestamps or historical delivery vintages,
 and its update clocks are approximate. To avoid inferring delivery from those clocks,
@@ -2215,6 +2217,10 @@ use one conservative plan-independent rule for historical replay:
 eligible only when sourceEligibleDate <= analysisAsOfDate
 ```
 
+`sourceEligibleDate` is this canonical/modelled boundary only. It is neither the
+configured plan's actual first-delivery date nor evidence that a particular run
+observed the row.
+
 Resolve `sourceEligibleDate` as the first later J-Quants `/v2/markets/calendar` row
 whose `HolDiv` is `1` (business day) or `2` (TSE half-day session). The pure resolver
 receives official calendar rows explicitly and never substitutes calendar-day,
@@ -2223,11 +2229,27 @@ eligible row lacks sufficient calendar coverage, return
 `availability_calendar_unavailable`; do not assume same-day or next-day availability.
 
 This boundary deliberately delays even Premium rows that may actually arrive on the
-publication date so that historical output does not vary by configured plan. It is a
-conservative deterministic eligibility convention, not evidence of the row's exact
-first delivery time. Exact delivery-time reconstruction is impossible without a
-locally retained first-observed archive, which is outside this phase. Persisted
-Snapshots remain the evidence of what a particular run actually observed.
+publication date so that the canonical eligibility of the same returned row does not
+vary by configured plan. Runtime availability remains separate: every run obeys its
+configured plan/history coverage, uses only rows actually returned, and preserves
+existing typed `plan_unavailable` and other source errors. Exact delivery-time
+reconstruction is impossible without a locally retained first-observed archive,
+which is outside this phase. Persisted Snapshots remain the evidence of what a
+particular run actually observed.
+
+For the same `/v2/fins/summary` disclosure on date D with
+`analysisAsOfDate = D + 1 official business day`:
+
+- Premium, when the row and required calendar coverage are returned: the row is
+  canonically eligible
+- Free, while the row is excluded by the official latest-twelve-weeks delay: the
+  runtime result is `no_eligible_dividend_disclosure_data`; do not fabricate the row
+  or move its canonical `sourceEligibleDate`
+
+If a candidate row is returned but the configured plan does not return enough
+calendar coverage to resolve its boundary, use `availability_calendar_unavailable`.
+A successful empty response cannot prove whether no disclosure exists or plan/history
+coverage omitted it; it claims only that no usable returned row was available.
 
 - `DiscDate`/`DiscTime` and `PubDate`/`PubTime` remain the issuer/source publication or
   notification facts; neither pair is renamed to API availability
@@ -2237,8 +2259,8 @@ Snapshots remain the evidence of what a particular run actually observed.
 - a row on its `DiscDate`/`PubDate` is not yet source-eligible; it becomes eligible only
   on the fixed following official business day
 - live analysis may use only rows actually returned by J-Quants and must still apply
-  the conservative `sourceEligibleDate` filter; an approximate schedule never makes
-  an absent or same-day row eligible
+  the canonical `sourceEligibleDate` filter; an approximate schedule never makes an
+  absent or same-day row eligible
 - future disclosures, forecasts, corrections, and deletions are excluded before
   validation and selection
 - the current company forecast is never back-applied to an earlier historical as-of
@@ -2279,7 +2301,9 @@ source correction never rewrites an existing Snapshot.
 - a non-finite payout ratio is `invalid_data`; a finite source ratio is preserved
   without recalculation or capping, and negative/profit-distorted ratios must not be
   presented as a sustainability claim
-- no eligible core row is `no_eligible_dividend_disclosure_data`
+- no eligible core row is `no_eligible_dividend_disclosure_data`; this includes a
+  successful source response that omits recent rows under plan/history coverage and
+  does not identify the cause as no issuer disclosure
 - a selected row with no usable requested field is `missing_data`
 - no eligible event row is `no_eligible_dividend_event_data`, distinct from a zero
   amount
@@ -2451,7 +2475,10 @@ by P2-E2/P2-E3. It reuses the merged J-Quants calendar row convention without ch
 the Phase 2C Engine. Tests fix endpoint/parameters, field and ratio-unit mapping,
 pagination, plan/history/calendar boundaries, zero-versus-empty, invalid values,
 ordering, input non-mutation, and a disclosure on date D being ineligible on D but
-eligible on the following official business day.
+eligible on the following official business day. For that same row and D+1 boundary,
+tests also fix Premium returned-row eligibility versus Free latest-twelve-weeks
+runtime omission, while proving that the canonical `sourceEligibleDate` itself does
+not become plan-aware.
 
 P2-E2 adds the pure as-of selector and result core. Tests fix current/next fiscal-year
 mapping, actual/forecast separation, latest eligible disclosure, same-day ordering,

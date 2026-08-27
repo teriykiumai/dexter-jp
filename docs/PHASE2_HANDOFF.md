@@ -1020,14 +1020,23 @@ separate and map current/next fields to `CurFYEn`/`NxtFYEn` exactly.
 
 Keep publication and API availability separate. `DiscDate`/`DiscTime` and
 `PubDate`/`PubTime` are disclosure/notification facts, not J-Quants delivery
-timestamps. The initial date-only `analysisAsOfDate` claims source availability by
-Japan-time end of day. For both financial-summary and dividend-event rows, set
-`sourceEligibleDate` to the first later official `/v2/markets/calendar` business day
-(`HolDiv = 1` or `2`) and require `sourceEligibleDate <= analysisAsOfDate`. A row is
-not eligible on its disclosure/notification date. Do not infer availability from
-approximate update clocks, calendar days, or weekdays. A live run uses only returned
-rows and still applies this conservative boundary; insufficient calendar coverage is
-typed unavailable.
+timestamps. The initial date-only `analysisAsOfDate` is the inclusive cutoff for a
+plan-independent modelled boundary, not a claim that the configured subscription
+could obtain the row by Japan-time end of day. For both financial-summary and
+dividend-event rows, set `sourceEligibleDate` to the first later official
+`/v2/markets/calendar` business day (`HolDiv = 1` or `2`) and require
+`sourceEligibleDate <= analysisAsOfDate`. A row is not eligible on its disclosure/
+notification date. Do not infer availability from approximate update clocks,
+calendar days, or weekdays.
+
+Runtime availability is separate: use only rows actually returned under the
+configured plan/history coverage and preserve typed source errors. At D+1, a Premium
+response containing the disclosure may pass the canonical boundary; a Free response
+that omits the same recent row under its latest-twelve-weeks delay remains
+`no_eligible_dividend_disclosure_data`. Do not fabricate the row or change its
+canonical `sourceEligibleDate`. A returned candidate without sufficient official
+calendar coverage is `availability_calendar_unavailable`. Only persisted Snapshots
+prove what a particular run observed.
 
 Order eligible same-source-date rows by disclosure/notification time and source
 number, exclude future disclosures before selection, and never back-apply the current
