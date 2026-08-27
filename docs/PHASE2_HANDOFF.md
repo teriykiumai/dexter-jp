@@ -1,13 +1,15 @@
 # Phase 2 Handoff
 
-**Purpose:** Context handoff for a new Codex thread
+**Purpose:** Non-normative Phase 2 completion and context-recovery handoff
 **Repository:** `teriykiumai/dexter-jp`
 **Target:** Personal-use local Japanese-stock analysis AI
-**Date:** 2026-08-24
+**Date:** 2026-08-27
 
 ## 1. Read This First
 
-This document summarizes the implementation decisions that must be preserved when starting Phase 2 in a new Codex chat.
+This document summarizes the implemented Phase 2 decisions that may be needed when
+recovering context after Phase 2. It is not the starting prompt for a remaining Phase
+2 task.
 
 It is not a replacement for the repository source.
 
@@ -24,8 +26,11 @@ Use the current `main` branch and the following precedence:
 Merged code and tests define current implemented behavior. This handoff must not
 override `AGENTS.md`, `docs/SPEC.md`, or an existing tested contract.
 
-Before starting Phase 2A, ensure the Phase 1.5 V1–V5 PRs, `Usage.md`,
-`docs/PHASE2_PLAN.md`, and this handoff are merged to `main`.
+Phase 2A through Phase 2F are complete. Snapshot V9 is the current writer; immutable
+V1–V8 Snapshots remain readable and are not automatically migrated or rewritten.
+Unknown schema versions remain rejected. Before later work, verify current `main`,
+the repository Source of Truth, merged code, and tests instead of assuming this
+summary is current.
 
 ## 2. Project Goal
 
@@ -523,9 +528,9 @@ History snapshot ID must match `generatedAt`.
 
 Presentation only.
 
-## 15. Phase 2 Scope and Current Objective
+## 15. Completed Phase 2 Scope and Historical Objective
 
-The full Phase 2 scope remains:
+The completed Phase 2 scope is:
 
 ```text
 Phase 2A — Technical Expansion
@@ -536,9 +541,9 @@ Phase 2E — Advanced Dividend Analysis
 Phase 2F — Shikori / Volume Profile / POC / VAH / VAL
 ```
 
-Each Phase 2B–2F tranche requires its own detailed plan. Phase 2A and the core Phase
-2B/2C sequences are complete. P2-B5 is an approved later follow-up; Phase 2D begins
-with its docs-only P2-D0 design.
+Each Phase 2B–2F tranche received its own reviewed source, formula, availability,
+provenance, and test contract. Phase 2A–2F are complete. The former P2-B5 follow-up
+was implemented as P2-D5 after the authoritative sector context became available.
 
 The Phase 2A sequence below is retained as implemented historical context.
 
@@ -763,7 +768,7 @@ If prior conversation and repository code disagree, inspect the merged code and 
 
 The purpose of this handoff is to make the new Codex thread independent of the old conversation while preserving the actual implemented contracts.
 
-## 21. Active Phase 2B Handoff
+## 21. Completed / Historical Phase 2B Handoff
 
 Phase 2B begins with a docs-only P2-B0 source and contract design. The fixed
 sequence is:
@@ -867,7 +872,7 @@ See `docs/PHASE2_PLAN.md` for the full source mapping, result shape, step bounda
 and test requirements. P2-B0 changes documentation only; runtime, Snapshot, and
 Dashboard remain unchanged until their separately approved steps.
 
-## 22. Active Phase 2C Handoff
+## 22. Completed / Historical Phase 2C Handoff
 
 Phase 2C uses J-Quants V2 `GET /v2/equities/investor-types`. It is weekly
 market-section trading-value context in `thousand_JPY`, not issuer or sector flow.
@@ -939,7 +944,7 @@ P2-C0 Source / Contract Design
 P2-C0 is documentation only. See `docs/PHASE2_PLAN.md` for exact category meanings,
 typed shape, invariants, provenance, deferred scope, and per-step tests.
 
-## 23. Active Phase 2D Handoff
+## 23. Completed / Historical Phase 2D Handoff
 
 Phase 2D adds an as-of-safe TSE 33-sector price-index benchmark for issuer analysis.
 It does not create a sector rank, score, signal, or issuer-level sector flow.
@@ -989,8 +994,9 @@ P2-D5 adds daily sector short-selling-turnover context distinct from sector pric
 behavior. It reuses the same S33 resolver and availability boundary, preserves the
 three nullable JPY source components, and calculates only daily short-selling value,
 total-selling value, and their ratio. The collector verifies the result `issuerCode`
-against the locked ticker before persistence. Snapshot V7 is the writer while V1-V6
-remain readable and immutable. Dashboard and comprehensive analysis pass through the
+against the locked ticker before persistence. At P2-D5 completion Snapshot V7 was the
+writer while V1-V6 remained readable and immutable; Snapshot V9 is now the current
+writer. Dashboard and comprehensive analysis pass through the
 structured values without issuer attribution, historical aggregation, Browser/LLM
 calculation, cross-source combination, threshold, squeeze/crowding label, score, or
 signal.
@@ -1012,9 +1018,10 @@ and per-step tests.
 
 ## 24. Completed Phase 2E Handoff
 
-P2-E0 through P2-E5 are complete. Snapshot V8 is the current writer while V1-V7
-remain readable and immutable. Dashboard and comprehensive analysis present the
-structured result without recalculating dividend amounts, payout ratios, or events.
+P2-E0 through P2-E5 are complete. At Phase 2E completion, Snapshot V8 was the writer
+while V1-V7 remained readable and immutable. Snapshot V9 is now the current writer.
+Dashboard and comprehensive analysis present the structured result without
+recalculating dividend amounts, payout ratios, or events.
 
 Phase 2E adds as-of-safe dividend amount and payout context without replacing the
 existing deterministic dividend yield. Its core official source is J-Quants V2
@@ -1087,14 +1094,15 @@ P2-E0 Source / Contract Design
 P2-E0 changes docs only. See `docs/PHASE2_PLAN.md` for the authoritative source,
 availability, result, unavailable, formula, per-step test, and deferred contracts.
 
-## 25. Active Phase 2F Handoff
+## 25. Completed Phase 2F Handoff
 
 Phase 2F begins with a daily-OHLCV estimated volume-at-price distribution proxy. It
 does not measure actual holder cost basis, retained positions, true shikori, or
 overhead supply. POC, VAH, and VAL remain descriptive deterministic outputs and never
 become support/resistance, Entry/Stop/Target, a score, threshold, or Buy/Sell signal.
 
-Reuse J-Quants V2 `GET /v2/equities/bars/daily`, existing pagination, and JPX code
+P2-F0 through P2-F5 are complete. Reuse J-Quants V2
+`GET /v2/equities/bars/daily`, existing pagination, and JPX code
 normalization. Use `AdjO/AdjH/AdjL/AdjC/AdjVo` together only after establishing the
 source corporate-action basis, and retain both `AdjFactor` and `ExRT` in the typed
 source envelope and provenance. Never mix raw and adjusted fields. J-Quants does not
@@ -1102,8 +1110,12 @@ adjust volume for rights issues (`ExRT = 3`), its rights-issue price adjustment 
 foreign stocks and TOKYO PRO Market issues, and not every corporate action is source-
 supported. A canonical window containing a rights issue, or whose common basis cannot
 be proven, is `corporate_action_basis_unavailable`; no manual conversion is allowed.
-Generic `get_stock_price` OHLCV omits the required metadata and is not reusable basis
-proof. Daily OHLC is available on Free or higher subject to plan history and the Free
+Only `null`, `'1'`, `'2'`, and `'3'` are known `ExRT` metadata. Malformed values do
+not mean no ex-rights event. A null `AdjFactor` is known only on a source-returned
+no-sale row whose adjusted OHLCV fields are all null; malformed adjustment metadata
+is not repaired into that state. Unknown metadata makes the affected common basis
+unavailable. Generic `get_stock_price` OHLCV omits the required metadata and is not
+reusable basis proof. Daily OHLC is available on Free or higher subject to plan history and the Free
 latest-twelve-weeks delay. Use only rows actually returned. A successful empty response
 is unavailable, not zero; typed J-Quants source errors propagate unchanged.
 
@@ -1157,14 +1169,17 @@ exchange ticks. An all-same-price input uses one degenerate bin at that price.
 
 For non-flat bars, distribute adjusted volume uniformly over the observed adjusted
 low-high range in proportion to each bin's price overlap. Assign the floating-point
-residual to the final intersected bin. For flat bars, assign all volume to their one
-containing bin. Do not interpolate volume across gaps. Total conservation tolerance
+residual to the final intersected bin. For flat bars, select their one containing bin
+from the already-constructed lower-inclusive / upper-exclusive edges, with the final
+upper edge inclusive; do not calculate a separate arithmetic index. Do not interpolate
+volume across gaps. Total conservation tolerance
 is `max(1e-8, total adjusted volume * 1e-12)`; bin volume is
 `adjusted_shares` and volume share is a ratio.
 
-POC is the maximum-volume bin, with a lower-price tie-break inside the conservation
-tolerance. Value Area starts at POC and expands one adjacent bin at a time toward the
-higher-volume neighbor; an equal neighbor tie chooses lower first. Stop at or above
+POC first determines the global maximum allocated volume and then chooses the lowest-
+priced bin within the conservation tolerance of that global maximum. It does not use
+sequential pairwise tolerance comparisons. Value Area starts at POC and expands one
+adjacent bin at a time toward the higher-volume neighbor; an equal neighbor tie chooses lower first. Stop at or above
 the 0.70 target, include the final bin whole, and allow overshoot. POC uses the bin
 representative price, VAL the lowest included lower edge, and VAH the highest included
 upper edge. Preserve achieved volume share. Positive-volume one-bin input has POC,
@@ -1181,8 +1196,8 @@ as an issuer event. See
 `docs/PHASE2_PLAN.md` for the normative TypeScript-style shape and complete reason
 vocabulary.
 
-Snapshot is unchanged in P2-F0. P2-F4 will add Snapshot V9 and persist the bounded
-full bin distribution plus aggregates so the Dashboard never recalculates it. Raw
+P2-F0 left Snapshot unchanged. P2-F4 added Snapshot V9 and persists the bounded full
+bin distribution, POC, and Value Area so the Dashboard never recalculates them. Raw
 OHLCV is not duplicated solely for this metric. Minute/tick data is deferred as a
 separate add-on/source contract. Close/typical-price point allocation, equal touched-
 bin allocation, actual-holder claims, and Browser/LLM calculations or signals are
@@ -1199,5 +1214,25 @@ P2-F0 docs-only contract
   → P2-F5 Dashboard + comprehensive-analysis
 ```
 
-The next task is P2-F1 only. Do not implement POC/Value Area aggregation, Tool
-exposure, Snapshot V9, collector, Dashboard, or comprehensive-analysis in that PR.
+## 26. Phase 2 Closeout and Next Task
+
+Phase 2A–2F are complete. The current deterministic-result boundary includes the
+implemented Technical, Supply/Demand, market/sector comparison, reported short-
+position, investor-type, sector short-selling, Advanced Dividend, Strategy, and daily
+Volume Profile Engines. Standard Agent tool events feed the provider-neutral
+collector, Snapshot V9 persists structured results, and the local Dashboard and
+comprehensive-analysis only format or interpret those values.
+
+Representative deferred scope remains deferred: optional ADX and Supply/Demand
+Z-score; investor-flow rolling/cumulative statistics; historical source-vintage
+archives; split/special-aware dividend growth and streak metrics; DOE, policy and
+buyback lifecycle analysis; rights-issue price/volume conversion; and minute/tick
+Volume Profile. Unsupported composite scores, thresholds, issuer attribution,
+holder-cost or true-shikori claims, support/resistance derivation, and Buy/Sell signals
+remain rejected where specified by `docs/PHASE2_PLAN.md`.
+
+After the Phase 2 closeout and README synchronization PRs are reviewed and merged,
+start a new Codex thread with P3-0 — Source / Formula / Architecture Design as a
+docs-only task. Do not treat any earlier `Active` heading or archived Phase 2 prompt
+as the current next task. `docs/PHASE2_PLAN.md` remains normative for Phase 2; this
+handoff remains a non-normative summary.

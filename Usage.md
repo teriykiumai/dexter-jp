@@ -1,6 +1,7 @@
 # Dexter JP Usage Guide
 
-Dexter JP の日本株分析機能と、Phase 1.5 で追加した Local Web Visualization を利用するための操作手順です。
+Dexter JPの日本株総合分析、Canonical AnalysisSnapshot、Local Dashboard、
+Analysis Watchlistを利用するための操作手順です。
 
 このガイドでは、次の一連の流れを扱います。
 
@@ -18,15 +19,26 @@ Analysis Watchlist
 Single Stock Dashboard
 ```
 
-Phase 1.5 の構成は以下です。
+Phase 1.5ではSnapshot、JSON persistence、Read-only API、Single Stock Dashboard、
+Analysis Watchlistを順に追加しました。これは実装stepの呼称であり、現在の
+`schemaVersion`とは別です。
 
-| Version | 機能 |
-|---|---|
-| V1 | Canonical AnalysisSnapshot |
-| V2 | Local JSON Persistence |
-| V3 | Local Read-only Web API |
-| V4 | Single Stock Dashboard |
-| V5 | Analysis Portfolio / Watchlist |
+現在のSnapshot compatibilityは以下です。
+
+| Snapshot schema | 主な追加section | 状態 |
+|---|---|---|
+| V1 | Phase 1 deterministic analysis | read-only compatibility |
+| V2 | Advanced Technical | read-only compatibility |
+| V3 | Supply/Demand `mean4w` | read-only compatibility |
+| V4 | Reported Short Positions | read-only compatibility |
+| V5 | Investor Type Flows | read-only compatibility |
+| V6 | Sector Benchmark | read-only compatibility |
+| V7 | Sector Short-selling Flow | read-only compatibility |
+| V8 | Advanced Dividend | read-only compatibility |
+| V9 | Volume Profile | current writer / readable |
+
+V1〜V8は読み取り可能なimmutable historyとして維持され、自動migrationや
+rewriteは行われません。未知のschema versionは拒否されます。
 
 ---
 
@@ -95,7 +107,9 @@ JQUANTS_API_KEY=...
 
 LLM providerはOpenAI以外でも構いません。
 
-ただし、Phase 1.5 のSnapshot / Dashboardを含む日本株総合分析では、EDINET DBとJ-Quantsの両方を使用することを推奨します。
+Snapshot / Dashboardを含む日本株総合分析では、EDINET DBとJ-Quantsの両方を
+使用することを推奨します。J-Quantsの契約プラン、履歴範囲、データ提供状況に
+より、一部sourceが利用できない場合があります。利用不可は0として扱われません。
 
 J-Quantsが利用できない場合、以下のようなsectionが取得できず、Snapshotが`partial`になる可能性があります。
 
@@ -105,6 +119,13 @@ J-Quantsが利用できない場合、以下のようなsectionが取得でき�
 - Market Correlation
 - Strategy
 - Price History
+- Advanced Technical
+- Advanced Dividend
+- Volume Profile
+- Reported Short Positions
+- Investor Type Flows
+- Sector Benchmark
+- Sector Short-selling Flow
 
 ---
 
@@ -130,9 +151,10 @@ CLIで以下を入力します。
 
 ## Snapshot生成時の注意
 
-現在、Canonical AnalysisSnapshotの生成は **Standard Agent run** を対象としています。
+現在、Canonical AnalysisSnapshot V9の生成は **Standard Agent run** を対象としています。
 
-Claude Agent SDKモードでは分析自体を実行できますが、現在のPhase 1.5 Snapshot生成経路には接続されていません。
+Claude Agent SDKモードでは分析自体を実行できますが、現在のSnapshot生成経路には
+接続されていません。
 
 そのためDashboardへ保存する分析を行う場合は、Standard Agentを使用してください。
 
@@ -183,16 +205,26 @@ MarkdownからSnapshotを復元するfallbackは行いません。
 ```text
 Fundamental
 Valuation
+Advanced Dividend
 Peer Comparison
 Technical
+  └─ Advanced Technical companion
+Volume Profile
 Supply & Demand
+Reported Short Positions
+Investor Type Flows
 Market Correlation
-Strategy
-Price History
+Sector Benchmark
+Sector Short-selling Flow
+Entry / Stop / Target
 Bull / Base / Bear
 Risks
 Data Dates
 ```
+
+`comprehensive-analysis`の最終reportでは、Advanced Technicalは`Technical`
+sectionで解釈されます。Dashboardでは確認しやすいよう独立したAdvanced Technical
+cardとして表示されます。
 
 重要な金融指標はLLMではなくdeterministic engineが計算します。
 
@@ -208,6 +240,9 @@ AI interprets.
 # 6. AnalysisSnapshot
 
 Standard Agentによるcomprehensive analysisが正常終了すると、分析結果からCanonical AnalysisSnapshotが生成されます。
+
+新規保存は`schemaVersion = 9`です。Repositoryのread boundaryはV1〜V9を受け入れ、
+古いSnapshotを新versionへ自動変換しません。
 
 保存先:
 
@@ -285,7 +320,7 @@ partial
 
 ## complete
 
-V1で必要なdeterministic sectionがすべて取得できた状態です。
+Phase 1から継承したrequired deterministic sectionがすべて取得できた状態です。
 
 対象:
 
@@ -302,6 +337,10 @@ priceHistory
 ```
 
 一部metricが利用不可でも、そのsection自体が有効なら`complete`になる場合があります。
+
+Advanced Technical、Advanced Dividend、Volume Profileなどの後続optional sectionが
+未収集またはmetric-level unavailableであることだけでは、既存の`complete`を
+`partial`へ変更しません。
 
 例えばtick sizeが取得できずStrategyのexact entryが計算できない場合でも、
 
@@ -596,6 +635,37 @@ Dashboard
 
 です。
 
+## Phase 2 analysis cards
+
+Snapshot versionと収集結果に応じて、以下のstructured sectionも表示します。
+
+```text
+Advanced Technical
+Advanced Dividend
+Volume Profile
+Reported Short Positions
+Investor Type Flows
+Sector Benchmark
+Sector Short-selling Flow
+```
+
+V1〜V8など、そのsectionがまだ存在しないschemaでは`not_collected`として扱い、
+0とは表示しません。収集を試みた結果が利用不能だった場合はtyped `unavailable`、
+source/resultが実際に0だった場合はvalid zeroとして区別します。
+
+Advanced TechnicalはRSI14、MACD 12/26/9、Bollinger Bands 20/2σの最新値を表示します。
+Advanced Dividendはactual/forecast amount、source payout context、および利用可能な
+event情報を表示します。Reported Short Positionsはreporter/fund単位を維持し、
+Investor Type FlowsはTokyo/Nagoya市場全体のweekly contextとして表示します。
+Sector BenchmarkとSector Short-selling FlowはTSE 33-sector contextであり、個別銘柄
+自身のflowではありません。
+
+Volume Profileは日足OHLCVから作る推定出来高価格分布proxyです。実際の投資家取得
+単価、現在残る真のしこり玉、測定済みoverhead supplyを示すものではありません。
+POC / VAH / VALはdescriptive outputであり、自動的なsupport/resistanceや売買signal
+ではありません。計算・availability・corporate-action契約の詳細は
+`docs/PHASE2_PLAN.md`を参照してください。
+
 ---
 
 # 16. Peer Comparison
@@ -645,6 +715,7 @@ Market Cap Priorityも表示します。
 買残
 売残
 信用倍率
+4週平均
 52週Percentile
 消化日数
 ```
@@ -662,6 +733,7 @@ TOPIXとの相関を表示します。
 主に:
 
 ```text
+20日
 60日
 250日
 ```
@@ -728,13 +800,26 @@ Single Stock Dashboardではsectionごとのdata dateを確認できます。
 バリュエーション財務
 Peer比較
 テクニカル
+Advanced Technical
+Advanced Dividend
+Volume Profile
 需給
+公開空売り残高報告
+投資部門別
 市場相関
+Sector Benchmark
+Sector Short-selling Flow
 Strategy
 価格履歴
 ```
 
 異なるsourceが異なる日付を持つことは正常です。
+
+`Data Dates`では、sourceの情報利用可能日と、計算対象期間・参照日を混同しません。
+例えば公開空売り残高報告ではdisclosed dateとcalculated date、投資部門別では
+publication dateとtrading period、Advanced Dividendではdisclosure/notificationと
+source eligibility、Volume Profileではanalysis as-of、data date、window datesを
+区別します。
 
 ---
 
@@ -757,6 +842,16 @@ incomplete_peer_market_cap
 ```
 
 Missing dataをDashboard側で補完しません。
+
+状態の意味:
+
+```text
+not_collected  そのSnapshot version/runではsectionを収集していない
+unavailable    収集・計算したが、source/history/validation上の理由で利用できない
+0              sourceまたはdeterministic resultが返した有効な数値0
+```
+
+これらを相互に変換したり、missing observationをforward-fillしたりしません。
 
 ---
 
@@ -1241,15 +1336,13 @@ schemaVersion
 
 があります。
 
-現在のPhase 1.5実装は`schemaVersion = 1`をサポートし、未知のversionを
-unsupportedとして拒否します。unsupported versionはmalformed JSONとは別エラーです。
+現在のwriterは`schemaVersion = 9`です。RepositoryはvalidなV1〜V9 historyと
+`latest.json`を読み取れます。V1〜V8ファイルを自動的に書き換えず、新規saveだけを
+V9として保存します。
 
-Phase 2Aで`schemaVersion = 2`を導入する場合も、validなV1 historyと
-`latest.json`のread compatibilityを維持します。V1ファイルを自動的に書き換えず、
-V2 writer有効化後の新規SnapshotだけをV2として保存する計画です。
-
-V1 SnapshotにはPhase 2A indicatorが存在しないため、Dashboardはそれらを`0`とせず
-「未収集 / 利用不可」として扱います。未知のschemaVersionは引き続き拒否します。
+古いSnapshotに後続sectionが存在しない場合、Dashboardはそれを`0`ではなく
+`not_collected`として扱います。未知のschemaVersionはunsupportedとして拒否し、
+malformed JSONやschema validation failureとは区別します。
 
 ---
 
@@ -1269,7 +1362,7 @@ git diff --check
 
 # 33. Current Limitations
 
-現在のPhase 1.5では以下を行いません。
+現在も以下を行いません。
 
 ```text
 Realtime market data
@@ -1289,7 +1382,7 @@ GraphQL
 Browserからのanalysis実行
 ```
 
-また、以下も後続対応です。
+また、以下も後続検討です。
 
 ```text
 Structured Bull / Base / Bear capture
@@ -1297,19 +1390,11 @@ Structured Risks capture
 Historical indicator series
 Full SMA series
 Dated Swing markers
-RSI
-MACD
-Volume Profile
 Backtest
 ```
 
-Phase 2Aの計画では、recursiveなRSI/MACDは251本以上ある場合に最新251本の株価バーを
-固定sequenceとして使い、251本未満ではavailableな全barsに各指標のminimum historyを
-適用します。同じ最新251本に古いhistoryを追加してもlatest値は変わりません。
-`AdvancedTechnicalResult`はpure moduleとして追加し、既存`analyze_technical`から返すか
-別toolにするかはSnapshot V2 integration時に重複取得、collector compatibility、
-minimal diffを比較して決定します。現在のPhase 1.5 runtimeには、これらの指標やV2
-contractはまだ実装されていません。
+Phase 2のformula、source availability、no-look-ahead、Snapshot evolution、deferred/
+rejected scopeの詳細は`docs/PHASE2_PLAN.md`を参照してください。
 
 ---
 
