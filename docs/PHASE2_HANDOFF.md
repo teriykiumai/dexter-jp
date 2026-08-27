@@ -1010,7 +1010,11 @@ P2-D0 is documentation only. See `docs/PHASE2_PLAN.md` for official references,
 the complete mapping/result/as-of contracts, unavailable semantics, deferred scope,
 and per-step tests.
 
-## 24. Active Phase 2E Handoff
+## 24. Completed Phase 2E Handoff
+
+P2-E0 through P2-E5 are complete. Snapshot V8 is the current writer while V1-V7
+remain readable and immutable. Dashboard and comprehensive analysis present the
+structured result without recalculating dividend amounts, payout ratios, or events.
 
 Phase 2E adds as-of-safe dividend amount and payout context without replacing the
 existing deterministic dividend yield. Its core official source is J-Quants V2
@@ -1082,3 +1086,80 @@ P2-E0 Source / Contract Design
 
 P2-E0 changes docs only. See `docs/PHASE2_PLAN.md` for the authoritative source,
 availability, result, unavailable, formula, per-step test, and deferred contracts.
+
+## 25. Active Phase 2F Handoff
+
+Phase 2F begins with a daily-OHLCV estimated volume-at-price distribution proxy. It
+does not measure actual holder cost basis, retained positions, true shikori, or
+overhead supply. POC, VAH, and VAL remain descriptive deterministic outputs and never
+become support/resistance, Entry/Stop/Target, a score, threshold, or Buy/Sell signal.
+
+Reuse J-Quants V2 `GET /v2/equities/bars/daily`, existing pagination, and JPX code
+normalization. Use `AdjO/AdjH/AdjL/AdjC/AdjVo` together on the source corporate-action-
+adjusted basis and retain `AdjFactor` as source/method provenance. Never mix raw and
+adjusted fields. Daily OHLC is available on Free or higher subject to plan history and
+the Free latest-twelve-weeks delay. Use only rows actually returned. A successful
+empty response is unavailable, not zero.
+
+`analysisAsOfDate` is an inclusive date-only end-of-day boundary. Exclude future rows
+first; a same-day bar is eligible only if returned. Current adjusted history can be
+retroactively changed by later corporate actions, so a current API fetch cannot prove
+an earlier source vintage. Persisted Snapshot data, `collectedAt`, and exact source/
+method provenance preserve what a run observed; existing Snapshots are never
+rewritten. Mixed or unknown price/volume adjustment basis is
+`corporate_action_basis_unavailable`.
+
+The canonical sequence is every available eligible bar when 60-119 exist and exactly
+the latest 120 when at least 120 exist. Fewer than 60 is `insufficient_history`.
+Eligible dates must be unique and strictly chronological. Do not sort, skip, fill,
+interpolate, or restart. Validate price/volume values only after latest-120 selection,
+so older values outside the canonical window cannot change the result. Zero-volume
+bars are valid; all-zero total volume is explicitly unavailable.
+
+Use 50 equal linear bins across canonical adjusted low-to-high. Bins are lower-
+inclusive/upper-exclusive except for the final upper-inclusive bin; maximum price is
+always in the final bin and representative price is the midpoint. Do not round to
+exchange ticks. An all-same-price input uses one degenerate bin at that price.
+
+For non-flat bars, distribute adjusted volume uniformly over the observed adjusted
+low-high range in proportion to each bin's price overlap. Assign the floating-point
+residual to the final intersected bin. For flat bars, assign all volume to their one
+containing bin. Do not interpolate volume across gaps. Total conservation tolerance
+is `max(1e-8, total adjusted volume * 1e-12)`; bin volume is
+`adjusted_shares` and volume share is a ratio.
+
+POC is the maximum-volume bin, with a lower-price tie-break inside the conservation
+tolerance. Value Area starts at POC and expands one adjacent bin at a time toward the
+higher-volume neighbor; an equal neighbor tie chooses lower first. Stop at or above
+the 0.70 target, include the final bin whole, and allow overshoot. POC uses the bin
+representative price, VAL the lowest included lower edge, and VAH the highest included
+upper edge. Preserve achieved volume share. Positive-volume one-bin input has POC,
+VAL, and VAH at the same price and achieved share 1.
+
+The structured result preserves issuer/as-of/collection identity, canonical window
+dates and count, price/volume basis, versioned allocation and binning methods, full
+bins, POC, Value Area target/achieved share, scoped unavailable reasons, methodology
+identity, J-Quants/calculation provenance, and explicit units. See
+`docs/PHASE2_PLAN.md` for the normative TypeScript-style shape and complete reason
+vocabulary.
+
+Snapshot is unchanged in P2-F0. P2-F4 will add Snapshot V9 and persist the bounded
+full bin distribution plus aggregates so the Dashboard never recalculates it. Raw
+OHLCV is not duplicated solely for this metric. Minute/tick data is deferred as a
+separate add-on/source contract. Close/typical-price point allocation, equal touched-
+bin allocation, actual-holder claims, and Browser/LLM calculations or signals are
+rejected.
+
+The fixed sequence is:
+
+```text
+P2-F0 docs-only contract
+  → P2-F1 pure fixed-bin / uniform-range allocation helper
+  → P2-F2 deterministic canonical-window / POC / Value Area Engine
+  → P2-F3 structured analyze_volume_profile Tool
+  → P2-F4 Snapshot V9 + Standard Agent collector
+  → P2-F5 Dashboard + comprehensive-analysis
+```
+
+The next task is P2-F1 only. Do not implement POC/Value Area aggregation, Tool
+exposure, Snapshot V9, collector, Dashboard, or comprehensive-analysis in that PR.
