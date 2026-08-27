@@ -46,6 +46,7 @@ describe('comprehensive analysis skill', () => {
       'get_margin_data',
       'get_topix',
       'analyze_financial_metrics',
+      'analyze_advanced_dividend',
       'analyze_technical',
       'analyze_supply_demand',
       'analyze_reported_short_positions',
@@ -64,6 +65,7 @@ describe('comprehensive analysis skill', () => {
       '# Data Dates',
       '# Fundamental',
       '# Valuation',
+      '# Advanced Dividend',
       '# Peer Comparison',
       '# Technical',
       '# Supply & Demand',
@@ -135,6 +137,22 @@ describe('comprehensive analysis skill', () => {
     expect(skill?.instructions).toContain('literal provenance fields alone are never authentication');
     expect(skill?.instructions).toContain('Never construct or pass a bare classification');
     expect(skill?.instructions).toContain('change `issuerCode`');
+    expect(skill?.instructions).toContain('structured `analyze_advanced_dividend` result');
+    expect(skill?.instructions).toContain('actual and');
+    expect(skill?.instructions).toContain('company-forecast fiscal observations separate');
+    expect(skill?.instructions).toContain('sourceEligibleDate');
+    expect(skill?.instructions).toContain('source JPY-per-share amount');
+    expect(skill?.instructions).toContain('existing dividend yield');
+    expect(skill?.instructions).toContain('separate deterministic value');
+    expect(skill?.instructions).toContain('Do not calculate or repair payout ratio');
+    expect(skill?.instructions).toContain('sum events into an annual dividend');
+    expect(skill?.instructions).toContain('component_breakdown_unavailable');
+    expect(skill?.instructions).toContain('event_source_plan_unavailable');
+    expect(skill?.instructions).toContain('does not mean');
+    expect(skill?.instructions).toContain('ordinary-only');
+    expect(skill?.instructions).toContain('no dividend');
+    expect(skill?.instructions).toContain('payout policy, DOE');
+    expect(skill?.instructions).toContain('dividend claim from missing data');
 
     const invoked = await skillTool.invoke({
       skill: 'comprehensive-analysis',

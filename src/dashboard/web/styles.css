@@ -113,6 +113,9 @@ button { color: inherit; }
 .investor-flow-meta { max-width: 560px; margin-bottom: 22px; }
 .investor-flow-group + .investor-flow-group { margin-top: 22px; }
 .investor-flow-group h3 { margin: 0 0 10px; color: var(--blue); font: 600 12px/1 "SFMono-Regular", Consolas, monospace; letter-spacing: .04em; text-transform: uppercase; }
+.dividend-group + .dividend-group { margin-top: 22px; }
+.dividend-group h3 { margin: 0 0 10px; color: var(--blue); font: 600 12px/1 "SFMono-Regular", Consolas, monospace; letter-spacing: .04em; text-transform: uppercase; }
+.advanced-dividend-table th, .advanced-dividend-table td { min-width: 125px; }
 .investor-type-table th:first-child { min-width: 220px; }
 .investor-type-table th:not(:first-child), .investor-type-table td { min-width: 125px; }
 table { width: 100%; border-collapse: collapse; white-space: nowrap; }

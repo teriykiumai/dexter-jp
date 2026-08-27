@@ -16,9 +16,11 @@ import {
   type AnalysisSnapshotV5,
   type AnalysisSnapshotV6,
   type AnalysisSnapshotV7,
+  type AnalysisSnapshotV8,
   type AnalysisSnapshotInput,
 } from '../../analysis/snapshot/index.js';
 import {
+  ADVANCED_DIVIDEND_CONTEXT_NOTE,
   UNAVAILABLE_TEXT,
   INVESTOR_TYPE_FLOW_CONTEXT_NOTE,
   REPORTED_SHORT_POSITION_DISCLOSURE_NOTE,
@@ -34,7 +36,7 @@ import {
   sortWatchlistItems,
 } from './presentation.js';
 
-function v7Snapshot(): AnalysisSnapshotV7 {
+function v8Snapshot(): AnalysisSnapshotV8 {
   const input: AnalysisSnapshotInput = {
     identity: {
       canonicalTicker: '7203',
@@ -79,7 +81,11 @@ function v7Snapshot(): AnalysisSnapshotV7 {
     },
     additionalUnavailable: [],
   };
-  const v8 = buildAnalysisSnapshot(input);
+  return buildAnalysisSnapshot(input);
+}
+
+function v7Snapshot(): AnalysisSnapshotV7 {
+  const v8 = v8Snapshot();
   const {
     advancedDividend: _advancedDividend,
     dataDates: v8DataDates,
@@ -403,6 +409,87 @@ function watchlistSnapshot(
   };
 }
 
+function advancedDividendResult(): NonNullable<AnalysisSnapshotV8['advancedDividend']> {
+  return {
+    analysisAsOfDate: '2026-08-24',
+    collectedAt: '2026-08-24T03:04:05.000Z',
+    issuerCode: '72030',
+    dataDate: '2026-08-21',
+    observations: [
+      {
+        kind: 'actual',
+        fiscalYearEndDate: '2026-03-31',
+        disclosedDate: '2026-05-08',
+        disclosedTime: '15:00:00',
+        sourceEligibleDate: '2026-05-11',
+        disclosureNumber: 'summary-actual',
+        sourceField: 'DivAnn',
+        payoutRatioSourceField: 'PayoutRatioAnn',
+        annualDividendPerShare: 120,
+        payoutRatio: 0.321,
+      },
+      {
+        kind: 'company_forecast',
+        fiscalYearEndDate: '2027-03-31',
+        disclosedDate: '2026-08-20',
+        disclosedTime: null,
+        sourceEligibleDate: '2026-08-21',
+        disclosureNumber: 'summary-forecast',
+        sourceField: 'FDivAnn',
+        payoutRatioSourceField: 'FPayoutRatioAnn',
+        annualDividendPerShare: 0,
+        payoutRatio: 0,
+      },
+    ],
+    events: [
+      {
+        notifiedDate: '2021-05-10',
+        notifiedTime: '15:30',
+        sourceEligibleDate: '2021-05-11',
+        referenceNumber: 'event-pre-component',
+        corporateActionReferenceNumber: 'ca-pre-component',
+        kind: 'interim',
+        decision: 'forecast',
+        recordDateYearMonth: '2021-09',
+        dividendPerShare: 50,
+        ordinaryDividendPerShare: null,
+        commemorativeDividendPerShare: null,
+        specialDividendPerShare: null,
+        recordDate: '2021-09-30',
+        rightsRecordDate: null,
+        exDate: '2021-09-29',
+        paymentDate: null,
+      },
+      {
+        notifiedDate: '2026-08-21',
+        notifiedTime: null,
+        sourceEligibleDate: '2026-08-24',
+        referenceNumber: 'event-zero',
+        corporateActionReferenceNumber: 'ca-zero',
+        kind: 'fiscal_year_end',
+        decision: 'decided',
+        recordDateYearMonth: '2027-03',
+        dividendPerShare: 60,
+        ordinaryDividendPerShare: 40,
+        commemorativeDividendPerShare: 5,
+        specialDividendPerShare: 15,
+        recordDate: null,
+        rightsRecordDate: null,
+        exDate: null,
+        paymentDate: null,
+      },
+    ],
+    unavailable: [{ scope: 'component', reason: 'component_breakdown_unavailable' }],
+    provenance: {
+      financialSummary: { source: 'jquants', endpoint: '/v2/fins/summary' },
+      dividendEvents: { source: 'jquants', endpoint: '/v2/fins/dividend' },
+      availabilityCalendar: { source: 'jquants', endpoint: '/v2/markets/calendar' },
+      calculation: { source: 'advanced_dividend_engine' },
+    },
+    units: { dividendPerShare: 'JPY_per_share', payoutRatio: 'ratio' },
+  };
+}
+
 describe('dashboard presentation helpers', () => {
   test('keeps nullable values explicitly unavailable instead of displaying zero', () => {
     expect(formatMetric(null, 'JPY')).toEqual({ text: UNAVAILABLE_TEXT, available: false });
@@ -422,6 +509,7 @@ describe('dashboard presentation helpers', () => {
     expect(formatMetric(0.123, 'ratio', { ratioAsPercent: true }).text).toBe('12.3%');
     expect(formatMetric(62.345, 'index').text).toBe('62.35');
     expect(formatMetric(1_234, 'thousand_JPY').text).toBe('1,234 千円');
+    expect(formatMetric(120, 'JPY_per_share').text).toBe('¥120 / 株');
   });
 });
 
@@ -491,6 +579,138 @@ describe('snapshot presentation mapping', () => {
       'rsi14: missing data',
       'macd: insufficient history',
     ]);
+  });
+
+  test('presents V8 advanced dividend observations and events without recalculation or aggregation', () => {
+    const base = v8Snapshot();
+    const snapshot: AnalysisSnapshotV8 = {
+      ...base,
+      valuation: {
+        priceDataDate: '2026-08-21',
+        financialDataDate: '2026-08-21',
+        latestFiscalYear: 2026,
+        currentPrice: 3_000,
+        per: 12,
+        pbr: 1.1,
+        dividendYieldPercent: 2.5,
+        revenueCagrPercent: 4,
+        cagrStartFiscalYear: 2023,
+        cagrEndFiscalYear: 2026,
+        cagrPeriods: 3,
+        unavailable: [],
+      },
+      advancedDividend: advancedDividendResult(),
+      dataDates: { ...base.dataDates, advancedDividend: '2026-08-21' },
+      unavailable: base.unavailable.filter(item => item.section !== 'advancedDividend'),
+    };
+
+    const view = mapSnapshotToDashboard(snapshot).advancedDividend;
+
+    expect(view.state).toBe('available');
+    expect(view.analysisAsOfDate).toEqual({ text: '2026-08-24', available: true });
+    expect(view.dataDate).toEqual({ text: '2026-08-21', available: true });
+    expect(view.existingDividendYield).toEqual({ text: '2.5%', available: true });
+    expect(view.observations.map(observation => observation.kind)).toEqual([
+      'actual',
+      'company_forecast',
+    ]);
+    expect(view.observations[0]).toMatchObject({
+      fiscalYearEndDate: { text: '2026-03-31', available: true },
+      disclosedDate: { text: '2026-05-08', available: true },
+      sourceEligibleDate: { text: '2026-05-11', available: true },
+      annualDividendPerShare: { text: '¥120 / 株', available: true },
+      payoutRatio: { text: '32.1%', available: true },
+      sourceField: { text: 'DivAnn', available: true },
+    });
+    expect(view.observations[1]).toMatchObject({
+      annualDividendPerShare: { text: '¥0 / 株', available: true },
+      payoutRatio: { text: '0%', available: true },
+    });
+    expect(view.events).toHaveLength(2);
+    expect(view.events?.[0]).toMatchObject({
+      dividendPerShare: { text: '¥50 / 株', available: true },
+      ordinaryDividendPerShare: { text: UNAVAILABLE_TEXT, available: false },
+      commemorativeDividendPerShare: { text: UNAVAILABLE_TEXT, available: false },
+      specialDividendPerShare: { text: UNAVAILABLE_TEXT, available: false },
+    });
+    expect(view.events?.[1]).toMatchObject({
+      dividendPerShare: { text: '¥60 / 株', available: true },
+      ordinaryDividendPerShare: { text: '¥40 / 株', available: true },
+      commemorativeDividendPerShare: { text: '¥5 / 株', available: true },
+      specialDividendPerShare: { text: '¥15 / 株', available: true },
+    });
+    expect(view.unavailableReasons).toEqual([
+      'component: component breakdown unavailable',
+    ]);
+    expect(mapSnapshotToDashboard(snapshot).dataDates).toContainEqual({
+      label: 'Advanced Dividend',
+      value: { text: '2026-08-21', available: true },
+    });
+    expect(ADVANCED_DIVIDEND_CONTEXT_NOTE).toContain('Browserで再計算');
+    expect(ADVANCED_DIVIDEND_CONTEXT_NOTE).toContain('既存のdeterministic配当利回り');
+  });
+
+  test('keeps optional event-source unavailability separate from an available core result', () => {
+    const base = v8Snapshot();
+    const result = advancedDividendResult();
+    const snapshot: AnalysisSnapshotV8 = {
+      ...base,
+      advancedDividend: {
+        ...result,
+        events: null,
+        unavailable: [{ scope: 'event', reason: 'event_source_plan_unavailable' }],
+        provenance: { ...result.provenance, dividendEvents: null },
+      },
+      unavailable: base.unavailable.filter(item => item.section !== 'advancedDividend'),
+    };
+
+    const view = mapSnapshotToDashboard(snapshot).advancedDividend;
+
+    expect(view.state).toBe('available');
+    expect(view.observations).toHaveLength(2);
+    expect(view.events).toBeNull();
+    expect(view.unavailableReasons).toEqual(['event: event source plan unavailable']);
+  });
+
+  test('distinguishes structured advanced-dividend unavailability from zero and not-collected', () => {
+    const base = v8Snapshot();
+    const result = advancedDividendResult();
+    const unavailable: AnalysisSnapshotV8 = {
+      ...base,
+      advancedDividend: {
+        ...result,
+        dataDate: null,
+        observations: [],
+        events: null,
+        unavailable: [
+          { scope: 'core', reason: 'no_eligible_dividend_disclosure_data' },
+          { scope: 'event', reason: 'no_eligible_dividend_event_data' },
+        ],
+      },
+    };
+
+    const unavailableView = mapSnapshotToDashboard(unavailable).advancedDividend;
+    expect(unavailableView.state).toBe('unavailable');
+    expect(unavailableView.observations).toEqual([]);
+    expect(unavailableView.events).toBeNull();
+    expect(unavailableView.unavailableReasons).toEqual([
+      'core: no eligible dividend disclosure data',
+      'event: no eligible dividend event data',
+    ]);
+
+    for (const snapshot of [
+      v1Snapshot(), v2Snapshot(), v3Snapshot(), baseSnapshot(),
+      v5Snapshot(), v6Snapshot(), v7Snapshot(), v8Snapshot(),
+    ]) {
+      const view = mapSnapshotToDashboard(snapshot).advancedDividend;
+      expect(view.state).toBe('not_collected');
+      expect(view.observations).toEqual([]);
+      expect(view.events).toBeNull();
+      if (snapshot.schemaVersion !== 8) {
+        expect(mapSnapshotToDashboard(snapshot).dataDates.map(item => item.label))
+          .not.toContain('Advanced Dividend');
+      }
+    }
   });
 
   test('passes through V4 report rows and formats stored ratios without aggregation or delta calculation', () => {
