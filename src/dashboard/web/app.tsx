@@ -6,6 +6,7 @@ import type {
 } from '../../analysis/snapshot/index.js';
 import { LIGHTWEIGHT_CHARTS_NOTICE, PriceChart } from './chart.js';
 import {
+  ADVANCED_DIVIDEND_CONTEXT_NOTE,
   UNAVAILABLE_TEXT,
   INVESTOR_TYPE_FLOW_CONTEXT_NOTE,
   REPORTED_SHORT_POSITION_DISCLOSURE_NOTE,
@@ -233,6 +234,114 @@ function Dashboard({ snapshot, onBack }: { snapshot: AnalysisSnapshot; onBack: (
             : <div className="empty-state">需給データは利用できません。</div>}
         </Card>
       </div>
+
+      <Card title="Advanced Dividend" eyebrow="As-of deterministic dividend context">
+        <p className="disclosure-note">{ADVANCED_DIVIDEND_CONTEXT_NOTE}</p>
+        {view.advancedDividend.state !== 'not_collected' ? (
+          <>
+            <div className="investor-flow-meta">
+              <MetricGrid metrics={[
+                { label: 'Analysis as-of', value: view.advancedDividend.analysisAsOfDate },
+                { label: 'Data date', value: view.advancedDividend.dataDate },
+                { label: 'Collected at', value: view.advancedDividend.collectedAt },
+                {
+                  label: 'Existing dividend yield',
+                  value: view.advancedDividend.existingDividendYield,
+                  note: '既存analyze_financial_metricsのdeterministic value',
+                },
+              ]} />
+            </div>
+
+            <section className="dividend-group">
+              <h3>Fiscal observations</h3>
+              {view.advancedDividend.observations.length ? (
+                <div className="table-scroll">
+                  <table className="advanced-dividend-table">
+                    <thead>
+                      <tr>
+                        <th>Type</th><th>Fiscal year end</th><th>Disclosed</th>
+                        <th>Time</th><th>Source eligible</th><th>Annual DPS</th>
+                        <th>Payout ratio</th><th>Amount field</th>
+                        <th>Payout field</th><th>Disclosure no.</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {view.advancedDividend.observations.map(observation => (
+                        <tr key={`${observation.disclosureNumber.text}-${observation.sourceField.text}`}>
+                          <th>{observation.kind}</th>
+                          <td><Value value={observation.fiscalYearEndDate} /></td>
+                          <td><Value value={observation.disclosedDate} /></td>
+                          <td><Value value={observation.disclosedTime} /></td>
+                          <td><Value value={observation.sourceEligibleDate} /></td>
+                          <td><Value value={observation.annualDividendPerShare} /></td>
+                          <td><Value value={observation.payoutRatio} /></td>
+                          <td><Value value={observation.sourceField} /></td>
+                          <td><Value value={observation.payoutRatioSourceField} /></td>
+                          <td><Value value={observation.disclosureNumber} /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : <div className="empty-state">年間配当観測は利用できません。</div>}
+            </section>
+
+            <section className="dividend-group">
+              <h3>Dividend events</h3>
+              {view.advancedDividend.events === null ? (
+                <div className="empty-state">
+                  event-level配当内訳は利用できません。利用不可はordinary-onlyや0を意味しません。
+                </div>
+              ) : view.advancedDividend.events.length ? (
+                <div className="table-scroll">
+                  <table className="advanced-dividend-table">
+                    <thead>
+                      <tr>
+                        <th>Notified</th><th>Time</th><th>Source eligible</th>
+                        <th>Kind</th><th>Decision</th><th>Record month</th>
+                        <th>Total DPS</th><th>Ordinary DPS</th>
+                        <th>Commemorative DPS</th><th>Special DPS</th>
+                        <th>Record date</th><th>Rights record</th><th>Ex date</th>
+                        <th>Payment date</th><th>Reference no.</th><th>CA ref.</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {view.advancedDividend.events.map(event => (
+                        <tr key={`${event.referenceNumber.text}-${event.corporateActionReferenceNumber.text}`}>
+                          <td><Value value={event.notifiedDate} /></td>
+                          <td><Value value={event.notifiedTime} /></td>
+                          <td><Value value={event.sourceEligibleDate} /></td>
+                          <td><Value value={event.kind} /></td>
+                          <td><Value value={event.decision} /></td>
+                          <td><Value value={event.recordDateYearMonth} /></td>
+                          <td><Value value={event.dividendPerShare} /></td>
+                          <td><Value value={event.ordinaryDividendPerShare} /></td>
+                          <td><Value value={event.commemorativeDividendPerShare} /></td>
+                          <td><Value value={event.specialDividendPerShare} /></td>
+                          <td><Value value={event.recordDate} /></td>
+                          <td><Value value={event.rightsRecordDate} /></td>
+                          <td><Value value={event.exDate} /></td>
+                          <td><Value value={event.paymentDate} /></td>
+                          <td><Value value={event.referenceNumber} /></td>
+                          <td><Value value={event.corporateActionReferenceNumber} /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="empty-state">Snapshotのreplay後event rowsは0件です。</div>
+              )}
+            </section>
+
+            {view.advancedDividend.unavailableReasons.length ? (
+              <p className="reason-list">
+                {view.advancedDividend.unavailableReasons.join(' / ')}
+              </p>
+            ) : null}
+          </>
+        ) : <div className="empty-state">Advanced Dividendは未収集です。</div>}
+      </Card>
 
       <Card title="Public Short Position Reports" eyebrow="J-Quants disclosure ≥ 0.5%">
         <p className="disclosure-note">{REPORTED_SHORT_POSITION_DISCLOSURE_NOTE}</p>
