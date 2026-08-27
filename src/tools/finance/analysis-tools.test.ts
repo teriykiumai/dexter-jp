@@ -30,6 +30,7 @@ import {
   analyzeTechnicalTool,
   analyzeVolumeProfileTool,
   deterministicAnalysisTools,
+  executeVolumeProfileAnalysis,
 } from './analysis-tools.js';
 
 function toolData(value: unknown): unknown {
@@ -299,7 +300,7 @@ describe('deterministic analysis tools', () => {
     expect(advancedTechnical).toEqual(analyzeAdvancedTechnical(bars));
   });
 
-  test('uses complete raw or verified volume-profile sources without fetching', async () => {
+  test('keeps raw tool JSON and internal verified volume-profile reuse on the no-fetch path', async () => {
     const sourceInput = volumeProfileSourceInput();
     const verifiedSource = validateVolumeProfileSource(sourceInput);
     const analysisAsOfDate = dates(60).at(-1)!;
@@ -311,14 +312,23 @@ describe('deterministic analysis tools', () => {
     }) as unknown as typeof fetch;
 
     try {
-      for (const source of [sourceInput, verifiedSource]) {
-        const actual = toolData(await analyzeVolumeProfileTool.invoke({
-          ticker: '7203',
-          analysisAsOfDate,
-          source,
-        }));
-        expect(actual).toEqual(analyzeVolumeProfile(analysisAsOfDate, source));
-      }
+      const rawActual = toolData(await analyzeVolumeProfileTool.invoke({
+        ticker: '7203',
+        analysisAsOfDate,
+        source: {
+          ...sourceInput,
+          rows: [...sourceInput.rows],
+          calendar: [...sourceInput.calendar],
+        },
+      }));
+      expect(rawActual).toEqual(analyzeVolumeProfile(analysisAsOfDate, sourceInput));
+
+      const verifiedActual = toolData(await executeVolumeProfileAnalysis({
+        ticker: '7203',
+        analysisAsOfDate,
+        source: verifiedSource,
+      }));
+      expect(verifiedActual).toEqual(analyzeVolumeProfile(analysisAsOfDate, verifiedSource));
       expect(fetches).toBe(0);
     } finally {
       globalThis.fetch = originalFetch;
@@ -339,7 +349,7 @@ describe('deterministic analysis tools', () => {
           close: row.AdjC,
           volume: row.AdjVo,
         })),
-      },
+      } as never,
     })).rejects.toThrow();
   });
 

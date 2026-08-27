@@ -23,7 +23,6 @@ import { analyzeSupplyDemand } from './supply-demand-engine.js';
 import { analyzeTechnical } from './technical-engine.js';
 import {
   analyzeVolumeProfile,
-  isVerifiedVolumeProfileSource,
   type VolumeProfileSource,
   type VolumeProfileSourceInput,
 } from './volume-profile-engine.js';
@@ -44,9 +43,8 @@ import { getShortSaleReports } from './short-sale-report.js';
 import {
   getSectorIndex,
   resolveSectorClassification,
-  SECTOR_INDEX_CODE_BY_S33,
-  type Sector33Code,
-  type SectorIndexCode,
+  sector33CodeSchema,
+  sectorIndexCodeSchema,
 } from './sector-index.js';
 import {
   fetchSectorShortRatioSource,
@@ -194,11 +192,6 @@ const rawVolumeProfileSourceSchema = z.object({
   }).strict(),
 }).strict();
 
-const volumeProfileSourceSchema = z.union([
-  rawVolumeProfileSourceSchema,
-  z.custom<unknown>(isVerifiedVolumeProfileSource),
-]);
-
 interface JQuantsCalendarRow extends Record<string, unknown> {
   Date: string;
   HolDiv: string;
@@ -233,13 +226,6 @@ const marketPricePointSchema = z.object({
   close: nullableNumber,
 });
 
-const sectorIndexCodes = new Set<string>(Object.values(SECTOR_INDEX_CODE_BY_S33));
-const sector33CodeSchema = z.custom<Sector33Code>((value) => (
-  typeof value === 'string' && Object.hasOwn(SECTOR_INDEX_CODE_BY_S33, value)
-));
-const sectorIndexCodeSchema = z.custom<SectorIndexCode>((value) => (
-  typeof value === 'string' && sectorIndexCodes.has(value)
-));
 const sectorIndexUnavailableReasonSchema = z.enum([
   'sector_classification_unavailable',
   'unsupported_sector',
@@ -584,6 +570,48 @@ export const ANALYZE_VOLUME_PROFILE_DESCRIPTION = `
 Calculate a deterministic daily-OHLCV estimated volume-at-price distribution proxy with fixed 50-bin uniform range-overlap allocation, POC, and contiguous 70% Value Area. Direct mode fetches complete adjusted J-Quants rows and official calendar evidence through the collection horizon; generic get_stock_price rows are not accepted because they omit AdjFactor and ExRT. This is not actual holder cost basis or true shikori, and it does not create support/resistance, Entry/Stop/Target, a score, threshold, or signal.
 `.trim();
 
+interface ExecuteVolumeProfileAnalysisInput {
+  ticker?: string;
+  analysisAsOfDate: string;
+  from?: string;
+  source?: VolumeProfileSourceInput | VolumeProfileSource;
+}
+
+/** Execute the shared direct/raw/verified source path behind the JSON-facing tool. */
+export async function executeVolumeProfileAnalysis({
+  ticker,
+  analysisAsOfDate,
+  from,
+  source,
+}: ExecuteVolumeProfileAnalysisInput): Promise<string> {
+  const canonicalAsOfDate = normalizeVolumeProfileSourceDate(
+    analysisAsOfDate,
+    'analysisAsOfDate',
+  );
+  let resolvedSource = source;
+
+  if (!resolvedSource) {
+    if (!ticker || !from) {
+      throw new Error('analyze_volume_profile requires source or both ticker and from.');
+    }
+    const canonicalFrom = normalizeVolumeProfileSourceDate(from, 'from');
+    if (canonicalFrom > canonicalAsOfDate) {
+      throw new Error('from must be on or before analysisAsOfDate.');
+    }
+    resolvedSource = await fetchVolumeProfileSourceInput({ ticker, from: canonicalFrom });
+  } else if (ticker) {
+    const issuerCode = toJQuantsSecuritiesCode(ticker);
+    if (issuerCode !== resolvedSource.issuerCode) {
+      throw new Error('source issuerCode must match ticker.');
+    }
+  }
+
+  return formatToolResult(
+    analyzeVolumeProfile(canonicalAsOfDate, resolvedSource),
+    [],
+  );
+}
+
 export const analyzeVolumeProfileTool = new DynamicStructuredTool({
   name: 'analyze_volume_profile',
   description: ANALYZE_VOLUME_PROFILE_DESCRIPTION,
@@ -597,38 +625,11 @@ export const analyzeVolumeProfileTool = new DynamicStructuredTool({
     from: z.string().optional().describe(
       'History start date required in direct mode. Retrieval always continues through the collection horizon.',
     ),
-    source: volumeProfileSourceSchema.optional().describe(
-      'Complete typed J-Quants adjusted-OHLCV/calendar envelope. Generic get_stock_price rows are insufficient.',
+    source: rawVolumeProfileSourceSchema.optional().describe(
+      'Complete raw J-Quants adjusted-OHLCV/calendar envelope validated internally. Generic get_stock_price rows are insufficient.',
     ),
   }),
-  func: async ({ ticker, analysisAsOfDate, from, source }) => {
-    const canonicalAsOfDate = normalizeVolumeProfileSourceDate(
-      analysisAsOfDate,
-      'analysisAsOfDate',
-    );
-    let resolvedSource = source as VolumeProfileSourceInput | VolumeProfileSource | undefined;
-
-    if (!resolvedSource) {
-      if (!ticker || !from) {
-        throw new Error('analyze_volume_profile requires source or both ticker and from.');
-      }
-      const canonicalFrom = normalizeVolumeProfileSourceDate(from, 'from');
-      if (canonicalFrom > canonicalAsOfDate) {
-        throw new Error('from must be on or before analysisAsOfDate.');
-      }
-      resolvedSource = await fetchVolumeProfileSourceInput({ ticker, from: canonicalFrom });
-    } else if (ticker) {
-      const issuerCode = toJQuantsSecuritiesCode(ticker);
-      if (issuerCode !== resolvedSource.issuerCode) {
-        throw new Error('source issuerCode must match ticker.');
-      }
-    }
-
-    return formatToolResult(
-      analyzeVolumeProfile(canonicalAsOfDate, resolvedSource),
-      [],
-    );
-  },
+  func: async (input) => executeVolumeProfileAnalysis(input),
 });
 
 export const ANALYZE_SUPPLY_DEMAND_DESCRIPTION = `

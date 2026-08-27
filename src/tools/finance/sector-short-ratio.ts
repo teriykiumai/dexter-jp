@@ -7,14 +7,14 @@ import {
   resolveJQuantsCode,
 } from './jquants-client.js';
 import {
-  SECTOR_INDEX_CODE_BY_S33,
   normalizeSectorSourceDate,
   resolveSectorClassification,
+  sector33CodeSchema,
+  sectorIndexCodeSchema,
   validateSectorClassificationEnvelope,
   type Sector33Code,
   type SectorClassificationEnvelope,
   type SectorClassificationUnavailableReason,
-  type SectorIndexCode,
 } from './sector-index.js';
 
 export type SectorShortRatioSourceUnavailableReason =
@@ -89,14 +89,6 @@ Fetches daily TSE 33-sector selling-turnover components from J-Quants for one au
 This is sector-wide trading-flow data, not an issuer short position or outstanding balance. Source JPY values remain separate and are not combined with public short-position reports or margin balances. An existing classification may be supplied only through the structured sectorIdentity envelope returned by get_sector_index; its issuer-to-S33 binding is re-resolved from the official equity master before use, and a bare classification is not accepted. Empty/non-trading responses are unavailable, not zero. No ratio, threshold, squeeze label, score, or signal is calculated by this source tool.
 `.trim();
 
-const sectorCodes = new Set<string>(Object.keys(SECTOR_INDEX_CODE_BY_S33));
-const sector33CodeSchema = z.custom<Sector33Code>((value) => (
-  typeof value === 'string' && sectorCodes.has(value)
-));
-const sectorIndexCodes = new Set<string>(Object.values(SECTOR_INDEX_CODE_BY_S33));
-const sectorIndexCodeSchema = z.custom<SectorIndexCode>((value) => (
-  typeof value === 'string' && sectorIndexCodes.has(value)
-));
 const sectorIdentitySchema = z.object({
   analysisAsOfDate: z.string(),
   issuerCode: z.string(),
