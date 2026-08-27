@@ -181,6 +181,52 @@ export interface AdvancedDividendView {
   unavailableReasons: string[];
 }
 
+export interface VolumeProfileBinView {
+  index: number;
+  lowerPrice: DisplayValue;
+  upperPrice: DisplayValue;
+  representativePrice: DisplayValue;
+  allocatedVolume: DisplayValue;
+  volumeShare: DisplayValue;
+}
+
+export interface VolumeProfileView {
+  state: 'available' | 'unavailable' | 'not_collected';
+  analysisAsOfDate: DisplayValue;
+  collectedAt: DisplayValue;
+  dataDate: DisplayValue;
+  windowStartDate: DisplayValue;
+  windowEndDate: DisplayValue;
+  inputBarCount: DisplayValue;
+  priceBasis: DisplayValue;
+  volumeBasis: DisplayValue;
+  allocationMethod: DisplayValue;
+  binningMethod: DisplayValue;
+  requestedBinCount: DisplayValue;
+  effectiveBinCount: DisplayValue;
+  minPrice: DisplayValue;
+  maxPrice: DisplayValue;
+  poc: {
+    binIndex: number;
+    price: DisplayValue;
+    allocatedVolume: DisplayValue;
+    volumeShare: DisplayValue;
+  } | null;
+  valueArea: {
+    targetVolumeShare: DisplayValue;
+    achievedVolumeShare: DisplayValue;
+    val: DisplayValue;
+    vah: DisplayValue;
+    firstBinIndex: number;
+    lastBinIndex: number;
+  } | null;
+  bins: VolumeProfileBinView[];
+  methodology: DisplayValue;
+  approximation: DisplayValue;
+  corporateActionBasisStatus: DisplayValue;
+  unavailableReasons: string[];
+}
+
 export const REPORTED_SHORT_POSITION_DISCLOSURE_NOTE =
   'J-Quantsの0.5%以上の公開報告です。未収集・利用不可は、空売り残高0、空売り主体なし、0.5%未満のpositionなし、または買い戻し完了を意味しません。信用売残や市場全体のshort interestとは別データです。';
 
@@ -195,6 +241,9 @@ export const SECTOR_SHORT_RATIO_CONTEXT_NOTE =
 
 export const ADVANCED_DIVIDEND_CONTEXT_NOTE =
   'Snapshotに保存された年間1株配当、source-provided配当性向、event-level配当内訳をそのまま表示します。金額（JPY/株）、配当性向、既存のdeterministic配当利回りは別指標です。actualとcompany forecast、ordinary・special・commemorativeを区別し、Browserで再計算・年次集計・成長率推定を行いません。';
+
+export const VOLUME_PROFILE_CONTEXT_NOTE =
+  '日足の調整後OHLCVを一様レンジ配分した推定出来高価格分布proxyです。実際の価格別約定出来高、現在の保有株数、投資家の取得単価、真のしこり玉やoverhead supplyではありません。Snapshotのbin・POC・Value Areaをそのまま表示し、Browserで再計算せず、support/resistance、Entry/Stop/Target、score、threshold、Buy/Sell signalへ変換しません。';
 
 export interface DashboardViewModel {
   header: {
@@ -230,6 +279,7 @@ export interface DashboardViewModel {
   sectorBenchmark: SectorBenchmarkView;
   sectorShortRatio: SectorShortRatioView;
   advancedDividend: AdvancedDividendView;
+  volumeProfile: VolumeProfileView;
   dataDates: DashboardMetric[];
   scenarios: AnalysisSnapshot['scenarios'];
   risks: AnalysisSnapshot['risks'];
@@ -272,7 +322,7 @@ const numberFormatter = (maximumFractionDigits: number) => new Intl.NumberFormat
 export function formatMetric(
   value: number | null | undefined,
   unit: MetricUnit | 'index' | 'thousand_JPY' | 'index_points' | 'JPY_per_share'
-    | null | undefined,
+    | 'adjusted_shares' | null | undefined,
   options: FormatOptions = {},
 ): DisplayValue {
   if (value === null || value === undefined || !Number.isFinite(value)) {
@@ -297,6 +347,7 @@ export function formatMetric(
       case 'thousand_JPY': return `${formatted} 千円`;
       case 'index_points': return `${formatted} points`;
       case 'shares': return `${formatted} 株`;
+      case 'adjusted_shares': return `${formatted} 調整後株`;
       case 'percent': return `${formatted}%`;
       case 'multiple': return `${formatted}x`;
       case 'days': return `${formatted} 日`;
@@ -371,6 +422,7 @@ const dataDateLabels = {
   sectorBenchmark: '業種指数比較',
   sectorShortRatio: '業種別空売り比率',
   advancedDividend: 'Advanced Dividend',
+  volumeProfile: 'Volume Profile',
   strategy: 'Strategy',
   priceHistory: '価格履歴',
 } as const;
@@ -512,6 +564,12 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
     : null;
   const advancedDividendUnits = 'advancedDividend' in snapshot.units
     ? snapshot.units.advancedDividend
+    : null;
+  const volumeProfile = 'volumeProfile' in snapshot
+    ? snapshot.volumeProfile
+    : null;
+  const volumeProfileUnits = 'volumeProfile' in snapshot.units
+    ? snapshot.units.volumeProfile
     : null;
 
   const bars = (snapshot.priceHistory ?? []).flatMap(bar => (
@@ -990,6 +1048,99 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
     )) ?? [],
   };
 
+  const volumeProfileView: VolumeProfileView = {
+    state: !('volumeProfile' in snapshot) || volumeProfile === null
+      ? 'not_collected'
+      : volumeProfile.bins !== null
+          && volumeProfile.poc !== null
+          && volumeProfile.valueArea !== null
+        ? 'available'
+        : 'unavailable',
+    analysisAsOfDate: displayText(volumeProfile?.analysisAsOfDate),
+    collectedAt: volumeProfile
+      ? displayText(formatDateTime(volumeProfile.collectedAt))
+      : displayText(null),
+    dataDate: displayText(volumeProfile?.dataDate),
+    windowStartDate: displayText(volumeProfile?.windowStartDate),
+    windowEndDate: displayText(volumeProfile?.windowEndDate),
+    inputBarCount: formatMetric(volumeProfile?.inputBarCount, 'count'),
+    priceBasis: displayText(volumeProfile?.priceBasis),
+    volumeBasis: displayText(volumeProfile?.volumeBasis),
+    allocationMethod: displayText(volumeProfile?.allocationMethod),
+    binningMethod: displayText(volumeProfile?.binningMethod.id),
+    requestedBinCount: formatMetric(volumeProfile?.binningMethod.requestedBinCount, 'count'),
+    effectiveBinCount: formatMetric(volumeProfile?.binningMethod.effectiveBinCount, 'count'),
+    minPrice: formatMetric(
+      volumeProfile?.binningMethod.minPrice,
+      volumeProfileUnits?.price,
+    ),
+    maxPrice: formatMetric(
+      volumeProfile?.binningMethod.maxPrice,
+      volumeProfileUnits?.price,
+    ),
+    poc: volumeProfile?.poc && volumeProfileUnits
+      ? {
+          binIndex: volumeProfile.poc.binIndex,
+          price: formatMetric(volumeProfile.poc.price, volumeProfileUnits.price),
+          allocatedVolume: formatMetric(
+            volumeProfile.poc.allocatedVolume,
+            volumeProfileUnits.allocatedVolume,
+          ),
+          volumeShare: formatMetric(
+            volumeProfile.poc.volumeShare,
+            volumeProfileUnits.volumeShare,
+            { ratioAsPercent: true },
+          ),
+        }
+      : null,
+    valueArea: volumeProfile?.valueArea && volumeProfileUnits
+      ? {
+          targetVolumeShare: formatMetric(
+            volumeProfile.valueArea.targetVolumeShare,
+            volumeProfileUnits.volumeShare,
+            { ratioAsPercent: true },
+          ),
+          achievedVolumeShare: formatMetric(
+            volumeProfile.valueArea.achievedVolumeShare,
+            volumeProfileUnits.volumeShare,
+            { ratioAsPercent: true },
+          ),
+          val: formatMetric(volumeProfile.valueArea.val, volumeProfileUnits.price),
+          vah: formatMetric(volumeProfile.valueArea.vah, volumeProfileUnits.price),
+          firstBinIndex: volumeProfile.valueArea.firstBinIndex,
+          lastBinIndex: volumeProfile.valueArea.lastBinIndex,
+        }
+      : null,
+    bins: volumeProfile?.bins && volumeProfileUnits
+      ? volumeProfile.bins.map(bin => ({
+          index: bin.index,
+          lowerPrice: formatMetric(bin.lowerPrice, volumeProfileUnits.price),
+          upperPrice: formatMetric(bin.upperPrice, volumeProfileUnits.price),
+          representativePrice: formatMetric(
+            bin.representativePrice,
+            volumeProfileUnits.price,
+          ),
+          allocatedVolume: formatMetric(
+            bin.allocatedVolume,
+            volumeProfileUnits.allocatedVolume,
+          ),
+          volumeShare: formatMetric(
+            bin.volumeShare,
+            volumeProfileUnits.volumeShare,
+            { ratioAsPercent: true },
+          ),
+        }))
+      : [],
+    methodology: displayText(volumeProfile?.methodology.id),
+    approximation: displayText(volumeProfile?.methodology.approximation),
+    corporateActionBasisStatus: displayText(
+      volumeProfile?.provenance.corporateActionBasisStatus,
+    ),
+    unavailableReasons: volumeProfile?.unavailable.map(item => (
+      `${item.scope}: ${reasonText(item.reason)}`
+    )) ?? [],
+  };
+
   const dates = snapshot.dataDates;
   const dateEntries: Array<[keyof typeof dataDateLabels, string | null]> = [
     ['identity', dates.identity],
@@ -1023,6 +1174,9 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
   }
   if ('advancedDividend' in snapshot.dataDates) {
     dateEntries.push(['advancedDividend', snapshot.dataDates.advancedDividend]);
+  }
+  if ('volumeProfile' in snapshot.dataDates) {
+    dateEntries.push(['volumeProfile', snapshot.dataDates.volumeProfile]);
   }
 
   return {
@@ -1063,6 +1217,7 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
     sectorBenchmark: sectorBenchmarkView,
     sectorShortRatio: sectorShortRatioView,
     advancedDividend: advancedDividendView,
+    volumeProfile: volumeProfileView,
     dataDates: dateEntries.map(([key, value]) => ({
       label: dataDateLabels[key],
       value: displayText(value),

@@ -12,6 +12,7 @@ import {
   REPORTED_SHORT_POSITION_DISCLOSURE_NOTE,
   SECTOR_BENCHMARK_CONTEXT_NOTE,
   SECTOR_SHORT_RATIO_CONTEXT_NOTE,
+  VOLUME_PROFILE_CONTEXT_NOTE,
   WATCHLIST_STALE_AFTER_DAYS,
   buildDetailPath,
   mapSnapshotToDashboard,
@@ -144,6 +145,95 @@ function Dashboard({ snapshot, onBack }: { snapshot: AnalysisSnapshot; onBack: (
               : null}
           </>
         ) : <div className="empty-state">Advanced Technicalは未収集です。</div>}
+      </Card>
+
+      <Card title="Volume Profile" eyebrow="Daily OHLCV estimated distribution proxy">
+        <p className="disclosure-note">{VOLUME_PROFILE_CONTEXT_NOTE}</p>
+        {view.volumeProfile.state !== 'not_collected' ? (
+          <>
+            <MetricGrid metrics={[
+              { label: 'Analysis as-of', value: view.volumeProfile.analysisAsOfDate },
+              { label: 'Collected at', value: view.volumeProfile.collectedAt },
+              { label: 'Data date', value: view.volumeProfile.dataDate },
+              { label: 'Window start', value: view.volumeProfile.windowStartDate },
+              { label: 'Window end', value: view.volumeProfile.windowEndDate },
+              { label: 'Input bars', value: view.volumeProfile.inputBarCount },
+              { label: 'Price basis', value: view.volumeProfile.priceBasis },
+              { label: 'Volume basis', value: view.volumeProfile.volumeBasis },
+              { label: 'Allocation', value: view.volumeProfile.allocationMethod },
+              { label: 'Binning', value: view.volumeProfile.binningMethod },
+              { label: 'Requested bins', value: view.volumeProfile.requestedBinCount },
+              { label: 'Effective bins', value: view.volumeProfile.effectiveBinCount },
+              { label: 'Minimum price', value: view.volumeProfile.minPrice },
+              { label: 'Maximum price', value: view.volumeProfile.maxPrice },
+              { label: 'Methodology', value: view.volumeProfile.methodology },
+              { label: 'Approximation', value: view.volumeProfile.approximation },
+              {
+                label: 'Corporate-action basis',
+                value: view.volumeProfile.corporateActionBasisStatus,
+              },
+            ]} />
+            {view.volumeProfile.state === 'available'
+              && view.volumeProfile.poc
+              && view.volumeProfile.valueArea ? (
+                <>
+                  <div className="two-column">
+                    <article className="window-card">
+                      <h3>POC — stored deterministic value</h3>
+                      <MetricGrid metrics={[
+                        { label: 'Bin index', value: { text: String(view.volumeProfile.poc.binIndex), available: true } },
+                        { label: 'Price', value: view.volumeProfile.poc.price },
+                        { label: 'Allocated volume', value: view.volumeProfile.poc.allocatedVolume },
+                        { label: 'Volume share', value: view.volumeProfile.poc.volumeShare },
+                      ]} />
+                    </article>
+                    <article className="window-card">
+                      <h3>Value Area — stored contiguous 70% area</h3>
+                      <MetricGrid metrics={[
+                        { label: 'Target share', value: view.volumeProfile.valueArea.targetVolumeShare },
+                        { label: 'Achieved share', value: view.volumeProfile.valueArea.achievedVolumeShare },
+                        { label: 'VAL', value: view.volumeProfile.valueArea.val },
+                        { label: 'VAH', value: view.volumeProfile.valueArea.vah },
+                        { label: 'First bin index', value: { text: String(view.volumeProfile.valueArea.firstBinIndex), available: true } },
+                        { label: 'Last bin index', value: { text: String(view.volumeProfile.valueArea.lastBinIndex), available: true } },
+                      ]} />
+                    </article>
+                  </div>
+                  <div className="table-scroll">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Bin</th><th>Lower</th><th>Upper</th><th>Representative</th>
+                          <th>Allocated volume</th><th>Volume share</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {view.volumeProfile.bins.map(bin => (
+                          <tr key={bin.index}>
+                            <th>{bin.index}</th>
+                            <td><Value value={bin.lowerPrice} /></td>
+                            <td><Value value={bin.upperPrice} /></td>
+                            <td><Value value={bin.representativePrice} /></td>
+                            <td><Value value={bin.allocatedVolume} /></td>
+                            <td><Value value={bin.volumeShare} /></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : (
+                <div className="empty-state">
+                  出来高価格分布は利用できません。利用不可は0を意味しません。
+                </div>
+              )}
+            {view.volumeProfile.unavailableReasons.length ? (
+              <p className="reason-list">
+                {view.volumeProfile.unavailableReasons.join(' / ')}
+              </p>
+            ) : null}
+          </>
+        ) : <div className="empty-state">出来高価格分布は未収集です。</div>}
       </Card>
 
       <Card title="Sector Short-selling Flow" eyebrow="TSE 33-sector daily turnover">

@@ -5,7 +5,8 @@ description: >
   fundamentals, valuation, peers, technicals, margin supply-demand, public
   short-position reports, investor-type market context, TOPIX correlation,
   as-of TSE 33-sector benchmark comparison and short-selling flow context,
-  as-of advanced dividend context, deterministic Entry/Stop/Target,
+  as-of advanced dividend context, daily-OHLCV estimated volume-profile context,
+  deterministic Entry/Stop/Target,
   Bull/Base/Bear scenarios, and risks. Use for broad requests such as
   "7203を分析して", "この銘柄を総合分析",
   "full analysis", or "investment analysis" rather than a single metric.
@@ -32,6 +33,7 @@ Never call a tool name that is absent from the current tool list.
 - [ ] Peer comparison
 - [ ] Stock, margin, and TOPIX histories
 - [ ] Technical analysis
+- [ ] Daily-OHLCV estimated volume profile
 - [ ] Supply and demand analysis
 - [ ] Public short-position reports
 - [ ] Investor-type market context
@@ -88,14 +90,15 @@ Preserve dates and nulls. Do not forward-fill, interpolate, or silently remove m
 1. Pass the verified target `ticker`, latest adjusted close, and chronological annual financial rows to `analyze_financial_metrics`.
 2. Call `analyze_advanced_dividend` with the verified target `ticker` and an explicit `analysisAsOfDate`. For historical analysis, use the simulated as-of date. Otherwise use the current analysis date. Interpret only its as-of/correction-processed structured result.
 3. Pass adjusted OHLCV to `analyze_technical`; use its existing Technical fields and its structured `advancedTechnical` companion from the same call.
-4. Pass margin balances and stock volume to `analyze_supply_demand`.
-5. Call `analyze_reported_short_positions` with the verified target `ticker` and the same explicit `analysisAsOfDate`. Treat `disclosedDate` as the information-availability date and `calculatedDate` only as the position reference date.
-6. Call `analyze_investor_type_flows` with the verified target `ticker` and the same explicit `analysisAsOfDate`. Interpret only its correction/as-of-processed structured result.
-7. Pass stock and TOPIX closes to `analyze_market_correlation`.
-8. Call `get_sector_index` once with the verified target `ticker`, the same history start, and the explicit `analysisAsOfDate`. Pass its full structured source result to `analyze_sector_benchmark` and interpret only the deterministic result.
-9. Call `analyze_sector_short_ratio` with the verified target `ticker`, the same history start, and the explicit `analysisAsOfDate`. Supply only the structured `sectorIdentity` envelope returned by that `get_sector_index` call. Never construct or pass a bare classification. Caller-supplied provenance is not proof: the tool re-resolves the target and source boundary through the official resolver and requires every identity/classification field to match before use. Interpret only its structured deterministic result.
-10. Pass the verified target `ticker` plus `dataDate`, `latestSwingHigh`, `latestSwingLow`, and `atr14` from the Technical result to `analyze_strategy`.
-11. Supply Strategy `tickSize` or `resistanceLevels` only when a reliable source provided them; otherwise omit them. Without a sourced tick size, report the strictly-above trigger but no exact entry or 2R target.
+4. Call `analyze_volume_profile` once in direct ticker mode with the verified target `ticker`, the same history start, and the same explicit `analysisAsOfDate`. Its complete adjusted J-Quants source envelope and corporate-action audit metadata are required; generic `get_stock_price` rows are not a substitute.
+5. Pass margin balances and stock volume to `analyze_supply_demand`.
+6. Call `analyze_reported_short_positions` with the verified target `ticker` and the same explicit `analysisAsOfDate`. Treat `disclosedDate` as the information-availability date and `calculatedDate` only as the position reference date.
+7. Call `analyze_investor_type_flows` with the verified target `ticker` and the same explicit `analysisAsOfDate`. Interpret only its correction/as-of-processed structured result.
+8. Pass stock and TOPIX closes to `analyze_market_correlation`.
+9. Call `get_sector_index` once with the verified target `ticker`, the same history start, and the explicit `analysisAsOfDate`. Pass its full structured source result to `analyze_sector_benchmark` and interpret only the deterministic result.
+10. Call `analyze_sector_short_ratio` with the verified target `ticker`, the same history start, and the explicit `analysisAsOfDate`. Supply only the structured `sectorIdentity` envelope returned by that `get_sector_index` call. Never construct or pass a bare classification. Caller-supplied provenance is not proof: the tool re-resolves the target and source boundary through the official resolver and requires every identity/classification field to match before use. Interpret only its structured deterministic result.
+11. Pass the verified target `ticker` plus `dataDate`, `latestSwingHigh`, `latestSwingLow`, and `atr14` from the Technical result to `analyze_strategy`.
+12. Supply Strategy `tickSize` or `resistanceLevels` only when a reliable source provided them; otherwise omit them. Without a sourced tick size, report the strictly-above trigger but no exact entry or 2R target.
 
 Never reproduce or repair the Engine calculations in narrative reasoning. Carry every `unavailable` reason into the report.
 When `mean4w` is available, interpret it as the recent buying-balance baseline alongside
@@ -122,6 +125,24 @@ ordinary-only, no special dividend, or no dividend. Do not infer payout policy, 
 combined capital return, threshold, score, Entry/Stop/Target, or Buy/Sell signal.
 Carry every core, event, and component unavailable reason into the report and make no
 dividend claim from missing data.
+
+Interpret only the structured `analyze_volume_profile` result. It is a deterministic
+estimated volume-at-price distribution proxy from daily adjusted OHLCV with uniform
+daily-range allocation. It does not observe bar-internal price-level executions,
+current retained shares, investor cost basis, sold versus unsold positions, true
+shikori, or overhead supply. Use the Engine-provided full bins, POC, VAL, VAH, target
+and achieved Value Area shares, dates, method identity, basis status, units, and
+unavailable reasons without recalculating, repairing, aggregating, rounding into
+exchange ticks, or reconstructing them in the LLM. A valid zero-volume bin remains
+available; a missing or unavailable profile is not zero and supports no claim.
+
+Keep `analysisAsOfDate`, `dataDate`, `windowStartDate`, `windowEndDate`, and
+`collectedAt` distinct. Corporate-action `basisAuditRequiredThroughDate` and
+`basisAuditThroughDate` are provenance for source reproducibility only: audit-only
+future metadata must never be presented or interpreted as an issuer event or
+calculation observation. Do not forward-fill source rows. Do not turn POC, VAH, or VAL
+into support/resistance, Entry/Stop/Target, a score, threshold, ranking, or Buy/Sell
+signal.
 
 Interpret only the structured `analyze_sector_benchmark` result. This compares the
 issuer's adjusted returns with the single official TSE 33-sector price index resolved
@@ -193,6 +214,10 @@ This reuses the existing J-Quants tools inside each deterministic analysis tool
 and avoids re-serializing or accidentally shortening large histories.
 Use the same explicit `analysisAsOfDate` for `analyze_advanced_dividend` and preserve
 its structured source-availability result; do not substitute a fiscal or record date.
+Call `analyze_volume_profile` once with the original verified ticker, the same history
+start, and that explicit `analysisAsOfDate`. Do not pass generic `get_stock_price`
+rows, fabricate the required `AdjFactor`/`ExRT` evidence, or call the volume-profile
+source path a second time.
 Use the same direct ticker boundary for `analyze_reported_short_positions`, with the
 explicit `analysisAsOfDate`; do not substitute `calculatedDate` for that boundary.
 Use that explicit boundary for `analyze_investor_type_flows` as well; do not substitute
@@ -238,6 +263,7 @@ Use these headings exactly and in this order:
 # Advanced Dividend
 # Peer Comparison
 # Technical
+# Volume Profile
 # Supply & Demand
 # Reported Short Positions
 # Investor Type Flows
@@ -250,4 +276,4 @@ Use these headings exactly and in this order:
 # Conclusion
 ```
 
-Under `Data Dates`, list the basis date for company financials, earnings, stock prices, margin data, advanced dividend, public short-position reports, investor-type flows, TOPIX, sector benchmark, sector short-selling flow, and each Engine result when available. For advanced dividend, show `analysisAsOfDate`, `dataDate`, and each used `disclosedDate`/`notifiedDate` separately from `sourceEligibleDate`; do not present a fiscal, record, ex, or payment date as the information date. For public short-position reports, label `disclosedDate` as the information-availability date and do not present `calculatedDate` as the disclosure date. For investor-type flows, show `section = TokyoNagoya`, `publishedDate`, `periodStartDate`, and `periodEndDate` separately and identify the values as market context rather than issuer flow. For the sector benchmark, show `analysisAsOfDate`, `classificationDate`, sector code/name, index code, and `dataDate` separately. For sector short-selling flow, show `analysisAsOfDate`, `classificationDate`, sector code/name, and `dataDate` separately and identify the observations as sector-wide turnover rather than issuer data. Within the report, separate Fact, Interpretation, and Risk. The conclusion must summarize the evidence and limitations without inventing a recommendation or price.
+Under `Data Dates`, list the basis date for company financials, earnings, stock prices, margin data, advanced dividend, volume profile, public short-position reports, investor-type flows, TOPIX, sector benchmark, sector short-selling flow, and each Engine result when available. For advanced dividend, show `analysisAsOfDate`, `dataDate`, and each used `disclosedDate`/`notifiedDate` separately from `sourceEligibleDate`; do not present a fiscal, record, ex, or payment date as the information date. For volume profile, show `analysisAsOfDate`, `dataDate`, `windowStartDate`, and `windowEndDate` separately; do not present audit-only future metadata as an issuer event or calculation date. For public short-position reports, label `disclosedDate` as the information-availability date and do not present `calculatedDate` as the disclosure date. For investor-type flows, show `section = TokyoNagoya`, `publishedDate`, `periodStartDate`, and `periodEndDate` separately and identify the values as market context rather than issuer flow. For the sector benchmark, show `analysisAsOfDate`, `classificationDate`, sector code/name, index code, and `dataDate` separately. For sector short-selling flow, show `analysisAsOfDate`, `classificationDate`, sector code/name, and `dataDate` separately and identify the observations as sector-wide turnover rather than issuer data. Within the report, separate Fact, Interpretation, and Risk. The conclusion must summarize the evidence and limitations without inventing a recommendation or price.

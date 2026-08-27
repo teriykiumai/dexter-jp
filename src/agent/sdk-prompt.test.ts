@@ -15,6 +15,7 @@ describe('SDK comprehensive analysis prompt', () => {
     expect(prompt).toContain('analyze_investor_type_flows');
     expect(prompt).toContain('analyze_sector_benchmark');
     expect(prompt).toContain('analyze_sector_short_ratio');
+    expect(prompt).toContain('analyze_volume_profile');
     expect(prompt).toContain('0.5% or more');
     expect(prompt).toContain('neither total market short interest');
     expect(prompt).toContain('TokyoNagoya');
@@ -38,6 +39,10 @@ describe('SDK comprehensive analysis prompt', () => {
     expect(prompt).toContain('# Data Dates');
     expect(prompt).toContain('# Sector Benchmark');
     expect(prompt).toContain('# Sector Short-selling Flow');
+    expect(prompt).toContain('# Volume Profile');
+    expect(prompt).toContain('daily adjusted OHLCV');
+    expect(prompt).toContain('audit-only future metadata');
+    expect(prompt).toContain('support/resistance');
     expect(prompt).toContain('# Bull / Base / Bear');
     expect(prompt).toContain('may not create prices');
   });
