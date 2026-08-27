@@ -600,6 +600,23 @@ describe('analyzeVolumeProfile', () => {
     );
   });
 
+  test('returns invalid chronology for malformed source or calendar dates', () => {
+    const malformedSource = sourceRows(60);
+    malformedSource[10] = { ...malformedSource[10], Date: '2025-02-30' };
+    expectCoreUnavailable(
+      analyzeVolumeProfile(sourceDate(59), sourceInput(malformedSource)),
+      ['invalid_chronology'],
+    );
+
+    const malformedCalendar = sourceInput(sourceRows(60));
+    const calendar = [...malformedCalendar.calendar];
+    calendar[10] = { ...calendar[10], date: '2025-02-30' };
+    expectCoreUnavailable(
+      analyzeVolumeProfile(sourceDate(59), { ...malformedCalendar, calendar }),
+      ['invalid_chronology'],
+    );
+  });
+
   test('rejects rights issues inside the window and after the as-of date', () => {
     const inside = sourceRows(60);
     inside[30] = { ...inside[30], ExRT: '3', AdjFactor: 0.5 };
@@ -690,6 +707,40 @@ describe('analyzeVolumeProfile', () => {
       basisAuditThroughDate: sourceDate(59),
       corporateActionBasisStatus: 'unknown_basis_unavailable',
     });
+  });
+
+  test('does not establish a common basis from malformed audit metadata', () => {
+    const malformedRows: VolumeProfileSourceRow[][] = [
+      sourceRows(61),
+      sourceRows(61),
+      sourceRows(61),
+    ];
+    malformedRows[0][60] = {
+      ...malformedRows[0][60],
+      ExRT: 3,
+    } as unknown as VolumeProfileSourceRow;
+    malformedRows[1][60] = {
+      ...malformedRows[1][60],
+      ExRT: 'unknown',
+    } as unknown as VolumeProfileSourceRow;
+    malformedRows[2][60] = {
+      ...malformedRows[2][60],
+      AdjO: null,
+      AdjH: null,
+      AdjL: null,
+      AdjC: null,
+      AdjVo: null,
+      AdjFactor: '1',
+    } as unknown as VolumeProfileSourceRow;
+
+    for (const rows of malformedRows) {
+      const result = analyzeVolumeProfile(
+        sourceDate(59),
+        sourceInput(rows, { collectionDateIndex: 61 }),
+      );
+      expectCoreUnavailable(result, ['corporate_action_basis_unavailable']);
+      expect(result.provenance.corporateActionBasisStatus).toBe('unknown_basis_unavailable');
+    }
   });
 
   test('distinguishes successful empty data and all-zero volume from each other', () => {

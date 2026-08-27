@@ -265,7 +265,7 @@ export interface VolumeProfileSourceRow {
   AdjC: number | null;
   AdjVo: number | null;
   AdjFactor: number | null;
-  ExRT: string | null;
+  ExRT: '1' | '2' | '3' | null;
 }
 
 export interface VolumeProfileAvailabilityCalendarDay {
@@ -447,16 +447,21 @@ function invalidSource(
 }
 
 function validateStrictChronology(
-  dates: readonly string[],
+  dates: readonly unknown[],
   sourceName: string,
 ): void {
-  for (let index = 0; index < dates.length; index += 1) {
-    if (!isCanonicalDate(dates[index])) {
-      invalidSource('invalid_input', `${sourceName} contains an invalid date.`);
+  let previousDate: string | null = null;
+  for (const date of dates) {
+    if (typeof date !== 'string') {
+      invalidSource('invalid_input', `${sourceName} must retain its date field.`);
     }
-    if (index > 0 && dates[index] <= dates[index - 1]) {
+    if (!isCanonicalDate(date)) {
+      invalidSource('invalid_chronology', `${sourceName} contains an invalid date.`);
+    }
+    if (previousDate !== null && date <= previousDate) {
       invalidSource('invalid_chronology', `${sourceName} dates must be unique and chronological.`);
     }
+    previousDate = date;
   }
 }
 
@@ -481,26 +486,27 @@ function copySourceRow(
 
   const hasAdjustmentFactor = Object.hasOwn(row, 'AdjFactor');
   const hasExRightsType = Object.hasOwn(row, 'ExRT');
-  const adjustmentFactor = hasAdjustmentFactor
-    && (row.AdjFactor === null || typeof row.AdjFactor === 'number')
-    ? row.AdjFactor as number | null
-    : null;
-  const exRightsType = hasExRightsType
-    && (row.ExRT === null || typeof row.ExRT === 'string')
-    ? row.ExRT as string | null
-    : null;
   const isReturnedNoSaleRow = [row.AdjO, row.AdjH, row.AdjL, row.AdjC, row.AdjVo]
     .every((value) => value === null);
-  if (
-    !hasAdjustmentFactor
-    || (adjustmentFactor === null && !isReturnedNoSaleRow)
-    || (adjustmentFactor !== null
-      && (!Number.isFinite(adjustmentFactor) || adjustmentFactor <= 0))
-    || !hasExRightsType
-    || (exRightsType !== null && exRightsType.length === 0)
-  ) {
+  const adjustmentFactorKnown = hasAdjustmentFactor && (
+    (typeof row.AdjFactor === 'number'
+      && Number.isFinite(row.AdjFactor)
+      && row.AdjFactor > 0)
+    || (row.AdjFactor === null && isReturnedNoSaleRow)
+  );
+  const exRightsTypeKnown = hasExRightsType && (
+    row.ExRT === null
+    || row.ExRT === '1'
+    || row.ExRT === '2'
+    || row.ExRT === '3'
+  );
+  if (!adjustmentFactorKnown || !exRightsTypeKnown) {
     unknownMetadataDates.push(row.Date);
   }
+  const adjustmentFactor = typeof row.AdjFactor === 'number' ? row.AdjFactor : null;
+  const exRightsType = exRightsTypeKnown
+    ? row.ExRT as VolumeProfileSourceRow['ExRT']
+    : null;
 
   return Object.freeze({
     Date: row.Date,
