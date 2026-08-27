@@ -1,16 +1,17 @@
-# Phase 2A — Technical Expansion Plan
+# Phase 2 — Implementation Plan
 
-**Version:** 0.1
-**Status:** Design / Pre-implementation
+**Version:** 1.0
+**Status:** Complete
 **Target:** Personal / Local only
 **Base:** Phase 1 + Phase 1.5 completed
-**Date:** 2026-08-23
+**Date:** 2026-08-27
 
 ## 1. Purpose
 
-Phase 2 is an umbrella for the post-MVP capabilities already defined in `docs/SPEC.md`.
-This document is the implementation plan for its first tranche, **Phase 2A — Technical
-Expansion**, and does not remove or replace the remaining Phase 2 scope.
+Phase 2 is the completed umbrella for the post-MVP capabilities defined in
+`docs/SPEC.md`. This document began as the implementation plan for **Phase 2A —
+Technical Expansion** and was extended with the reviewed source, formula,
+availability, provenance, integration, and presentation contracts for Phase 2B–2F.
 
 The primary goal is to deepen technical and market-context analysis while preserving the project principle:
 
@@ -21,8 +22,9 @@ indicators and statistics must be produced by deterministic TypeScript code,
 represented by typed results, captured in the canonical `AnalysisSnapshot`, and only
 then interpreted or displayed.
 
-Phase 2A begins only after the Phase 1.5 V1–V5 implementation and the Phase 2 design
-documents are merged to `main`, and baseline validation is green.
+Phase 2 began after the Phase 1.5 V1–V5 implementation and the initial design
+documents were merged to `main`. Phase 2A–2F are now implemented and merged; the
+completion matrix in Section 5 records the resulting state.
 
 ## 2. Source of Truth
 
@@ -148,9 +150,24 @@ Phase 2E — Advanced Dividend Analysis
 Phase 2F — Shikori / Volume Profile / POC / VAH / VAL
 ```
 
-Phase 2B–2F require their own source, formula, availability, provenance, and test
-contracts before implementation. They are not part of the first Technical tranche,
-but they are not removed from Phase 2.
+Phase 2B–2F each received their own source, formula, availability, provenance, and
+test contracts before implementation. They remained separate from the first
+Technical tranche while completing the Phase 2 umbrella.
+
+### Phase 2 completion matrix
+
+| Tranche | Completed scope | Snapshot result | Status |
+| --- | --- | --- | --- |
+| Phase 2A — Technical Expansion | Task-aware LLM profiles; RSI14; MACD 12/26/9; Bollinger 20/2σ; Advanced Technical aggregation and presentation; Supply/Demand `mean4w`; 20-day market-correlation window | V2 Advanced Technical; V3 `mean4w`; existing market-correlation `windows[]` extended without a new schema | **Complete** |
+| Phase 2B — Short Selling | Public reported short-position source, deterministic report-level Engine, Snapshot and presentation; sector short-ratio evaluation completed and later implemented with Phase 2D context | V4 reported short positions | **Complete** |
+| Phase 2C — Investor Type Flows | Weekly Tokyo/Nagoya market-context source, as-of-safe deterministic Engine, Snapshot and presentation | V5 investor-type flows | **Complete** |
+| Phase 2D — Sector Indices | As-of-safe TSE 33-sector benchmark and sector short-selling turnover context, including source, deterministic Engines, Snapshot and presentation | V6 sector benchmark; V7 sector short-selling flow | **Complete** |
+| Phase 2E — Advanced Dividend Analysis | As-of-safe fiscal dividend observations, optional event replay, Snapshot and presentation | V8 advanced dividend | **Complete** |
+| Phase 2F — Daily OHLCV Volume Profile Proxy | P2-F0 source/contract design through P2-F5 Dashboard and comprehensive-analysis presentation | V9 full volume profile | **Complete** |
+
+Snapshot V9 is the current writer. The read boundary accepts immutable V1–V9
+Snapshots; existing V1–V8 files are neither migrated nor rewritten, and unknown
+schema versions remain rejected.
 
 Phase 2A is divided into three priority tiers.
 
@@ -2107,9 +2124,10 @@ sector short-selling-flow context under the contract above.
 
 ## 24. Phase 2E — Advanced Dividend Analysis
 
-P2-E0 through P2-E5 are complete. Snapshot V8 is the current writer, V1-V7 remain
-readable and immutable, and the Dashboard and comprehensive-analysis paths present
-the structured advanced-dividend result without recalculation.
+P2-E0 through P2-E5 are complete. At Phase 2E completion, Snapshot V8 was the writer
+while V1-V7 remained readable and immutable. Snapshot V9 is now the current writer.
+The Dashboard and comprehensive-analysis paths present the structured
+advanced-dividend result without recalculation.
 
 ### P2-E0 — Source / Contract Design
 
@@ -2570,7 +2588,15 @@ Primary references checked for P2-F0:
 - [JPXI Stock Prices dataset description](https://pro.jpx-jquants.com/datasets/9)
 - [J-Quants plan and history table](https://jpx-jquants.com/)
 
-The source is daily. Official dataset material describes stock prices before and
+The source is daily. Treat only `null`, `'1'`, `'2'`, and `'3'` as known `ExRT`
+metadata. Any other value, including numeric `3` or an arbitrary string, is unknown
+metadata and cannot be interpreted as the absence of an ex-rights event. A null
+`AdjFactor` is known only for a source-returned no-sale row whose complete adjusted
+OHLCV payload is null; malformed, non-finite, non-positive, or wrong-typed values do
+not become a valid no-sale null. Unknown or malformed corporate-action metadata makes
+the affected audit basis unavailable rather than being repaired or coerced.
+
+Official dataset material describes stock prices before and
 after corporate-action adjustment and states that adjusted prices are retroactively
 adjusted. The daily-bar specification also states that rights-issue price adjustment
 does not adjust `Vo` or `AdjVo`. Its rights-issue price-adjustment coverage excludes
@@ -2648,7 +2674,7 @@ type VolumeProfileSource = Readonly<{
     AdjC: number | null;
     AdjVo: number | null;
     AdjFactor: number | null;
-    ExRT: string | null;
+    ExRT: '1' | '2' | '3' | null;
   }>[];
   provenance: Readonly<{
     source: 'jquants';
@@ -2767,8 +2793,11 @@ formula amount to every intersected bin except the final one, then assign the fi
 bin the remaining `bar.adjustedVolume - alreadyAllocated` amount. This fixes binary
 floating-point residuals while conserving the source bar's full adjusted volume.
 
-For a flat bar (`high === low`), allocate all adjusted volume to the one bin that
-contains that price. A flat limit-move bar uses the same rule. Gaps between bars
+For a flat bar (`high === low`), allocate all adjusted volume to the one bin whose
+already-constructed edges contain that price under the lower-inclusive / upper-
+exclusive rule, with the final upper edge inclusive. Do not derive a separate
+arithmetic bin index, because its floating-point boundary can disagree with the
+constructed bin edges. A flat limit-move bar uses the same rule. Gaps between bars
 receive no inferred volume: volume is allocated only within each bar's own low-high
 interval. Open and close validate bar integrity but do not alter the uniform density;
 the daily source does not reveal an intraday path that would justify such weighting.
@@ -2821,9 +2850,11 @@ or proxy allocation. Bin `volumeShare` is a ratio from 0 to 1.
 
 #### POC, VAH, and VAL
 
-POC is the bin with maximum allocated volume. If multiple bins are within the fixed
-volume tolerance of the maximum, choose the lowest-priced bin. This tie-break is only
-deterministic ordering and carries no support/resistance interpretation.
+POC is the bin with maximum allocated volume. First determine the global maximum over
+all bins. Then select the lowest-priced bin whose allocated volume is within the fixed
+volume tolerance of that global maximum. Do not carry a tolerance-based winner through
+sequential pairwise comparisons. This tie-break is only deterministic ordering and
+carries no support/resistance interpretation.
 
 The Value Area target share is 0.70. Calculate one contiguous region as follows:
 
@@ -2975,9 +3006,9 @@ Before a valid profile exists, return `bins = null`, `poc = null`,
 request identity, retained corporate-action provenance, and any canonical dates/count
 already established. Never choose a substitute POC or preserve partial core metrics.
 
-P2-F0 does not change Snapshot schema. P2-F4 will persist the bounded full bin
-distribution as well as POC and Value Area. Saving only aggregates is rejected because
-the Dashboard could not display the distribution without Browser recalculation. Do
+P2-F0 did not change Snapshot schema. P2-F4 added Snapshot V9 and persists the bounded
+full bin distribution as well as POC and Value Area. Saving only aggregates is
+rejected because the Dashboard could not display the distribution without Browser recalculation. Do
 not duplicate the raw OHLCV payload solely for this metric; retain method identity,
 dates, units, and source/calculation provenance.
 
@@ -2991,7 +3022,7 @@ dates, units, and source/calculation provenance.
 | 120-bar maximum / 60-bar minimum | **IMPLEMENT** | Gives medium-term context without inheriting the unrelated 251-bar Technical contract. |
 | Collection-horizon rights-issue basis audit | **IMPLEMENT** | Detects later rights issues that can be retroactively reflected in pre-as-of adjusted prices without using future OHLCV numerically. |
 | POC and contiguous 70% Value Area | **IMPLEMENT** | Deterministic descriptive summary with fixed tie and overshoot behavior. |
-| Full 50-bin distribution in Snapshot V9 | **IMPLEMENT LATER** in P2-F4 | Required for pass-through visualization without Browser calculation. |
+| Full 50-bin distribution in Snapshot V9 | **IMPLEMENTED** in P2-F4 | Required for pass-through visualization without Browser calculation. |
 | Rights-issue-window common-basis conversion | **DEFER** | J-Quants adjusts rights-issue prices but not volume; v1 returns typed unavailability instead of inventing a conversion. |
 | Minute/tick profile | **DEFER** | Separate add-on, coverage, adjustment, and as-of contract; not needed for the initial daily proxy. |
 | Close/typical-price point allocation or equal touched-bin allocation | **REJECT** | Discards range information or introduces boundary distortion. |
@@ -3000,6 +3031,8 @@ dates, units, and source/calculation provenance.
 | LLM or Browser calculation | **REJECT** | Violates the canonical deterministic-result boundary. |
 
 #### Phase 2F implementation sequence and tests
+
+P2-F0 through P2-F5 are complete.
 
 ```text
 P2-F0 docs-only contract
@@ -3072,8 +3105,13 @@ threshold, or Buy/Sell instructions.
 
 ## 26. Recommended Next Codex Task
 
-Phase 2E P2-E0 through P2-E5 is complete and Snapshot V8 is the current writer. The
-next implementation step is P2-F1, limited to the pure fixed-bin and uniform-range
-volume-allocation helper defined above. Do not advance to POC/Value Area aggregation,
-Tool exposure, Snapshot V9, collector, Dashboard, or comprehensive-analysis in that
-PR.
+Phase 2A through Phase 2F are complete, and Snapshot V9 is the current writer. After
+the Phase 2 closeout and public overview documentation PRs are reviewed and merged,
+start a new Codex thread with **P3-0 — Source / Formula / Architecture Design** as a
+docs-only task. Re-read current `main`, the repository Source of Truth, merged code,
+and tests rather than relying on prior conversation.
+
+P3-0 must not implement runtime code, an Independent Evaluator, composite scores or
+weights, Snapshot V10, PDF generation, Radar charts, or past-analysis diff. This
+Phase 2 closeout does not decide Phase 3 formulas, score architecture, Radar axes, PDF
+structure, or diff semantics.
