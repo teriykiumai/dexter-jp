@@ -131,7 +131,7 @@ function rawDividendSummaryRow() {
   return {
     Code: '72030',
     DiscDate: '2026-08-19',
-    DiscTime: '15:00:00',
+    DiscTime: '15:00',
     DiscNo: '20260819000001',
     CurFYEn: '2027-03-31',
     NxtFYEn: '',

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import {
   getDividendSummary,
   resolveDividendSourceEligibleDate,
+  type DividendSummarySourceRow,
 } from './dividend-summary.js';
 
 const originalFetch = globalThis.fetch;
@@ -83,6 +84,22 @@ describe('getDividendSummary', () => {
       nextForecastAnnualDividendPerShare: 110,
       nextForecastPayoutRatio: 0.36,
     }]);
+  });
+
+  test('normalizes legacy HH:MM times and preserves canonical HH:MM:SS times', async () => {
+    process.env.JQUANTS_API_KEY = 'test-key';
+    globalThis.fetch = (async () => new Response(JSON.stringify({ data: [
+      sourceRow({ DiscTime: '15:30', DiscNo: '20260515000001' }),
+      sourceRow({ DiscTime: '16:00:45', DiscNo: '20260515000002' }),
+    ] }))) as unknown as typeof fetch;
+
+    const result = await getDividendSummary.invoke({ ticker: '7203' });
+    const rows = parseToolData(result) as DividendSummarySourceRow[];
+
+    expect(rows.map((row) => row.disclosedTime)).toEqual([
+      '15:30:00',
+      '16:00:45',
+    ]);
   });
 
   test('preserves zero and finite negative source values while mapping blanks to null', async () => {
@@ -172,6 +189,11 @@ describe('getDividendSummary', () => {
     process.env.JQUANTS_API_KEY = 'test-key';
     const invalidRows = [
       sourceRow({ DiscDate: '2026-02-30' }),
+      sourceRow({ DiscTime: '9:00' }),
+      sourceRow({ DiscTime: '24:00' }),
+      sourceRow({ DiscTime: '15:60' }),
+      sourceRow({ DiscTime: '15:30:60' }),
+      sourceRow({ DiscTime: '15:30:00.000' }),
       sourceRow({ DivAnn: 'not-a-number' }),
       sourceRow({ FDivAnn: 'Infinity' }),
       sourceRow({ Code: '67580' }),

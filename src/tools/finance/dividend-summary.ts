@@ -9,7 +9,7 @@ import {
 
 const ENDPOINT = '/fins/summary';
 const CANONICAL_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-const TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/;
+const TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/;
 const OFFICIAL_HOLIDAY_DIVISIONS = new Set(['0', '1', '2', '3']);
 const BUSINESS_HOLIDAY_DIVISIONS = new Set(['1', '2']);
 
@@ -94,9 +94,9 @@ function nullableSourceTime(row: Record<string, unknown>, field: string): string
   const value = row[field];
   if (value === null || value === '' || value === '-') return null;
   if (typeof value !== 'string' || !TIME_PATTERN.test(value)) {
-    return invalidResponse(`${field} must be a valid HH:MM:SS time or blank.`);
+    return invalidResponse(`${field} must be a valid HH:MM or HH:MM:SS time or blank.`);
   }
-  return value;
+  return value.length === 5 ? `${value}:00` : value;
 }
 
 function nullableSourceNumber(row: Record<string, unknown>, field: string): number | null {
