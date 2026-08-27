@@ -7,6 +7,7 @@ import type {
 import { LIGHTWEIGHT_CHARTS_NOTICE, PriceChart } from './chart.js';
 import {
   UNAVAILABLE_TEXT,
+  ADVANCED_DIVIDEND_CONTEXT_NOTE,
   INVESTOR_TYPE_FLOW_CONTEXT_NOTE,
   REPORTED_SHORT_POSITION_DISCLOSURE_NOTE,
   SECTOR_BENCHMARK_CONTEXT_NOTE,
@@ -143,6 +144,99 @@ function Dashboard({ snapshot, onBack }: { snapshot: AnalysisSnapshot; onBack: (
               : null}
           </>
         ) : <div className="empty-state">Advanced Technicalは未収集です。</div>}
+      </Card>
+
+      <Card title="Advanced Dividend" eyebrow="Source annual amount / payout ratio / event components">
+        <p className="disclosure-note">{ADVANCED_DIVIDEND_CONTEXT_NOTE}</p>
+        <MetricGrid metrics={[
+          {
+            label: '既存配当利回り（現在株価ベース）',
+            value: view.advancedDividend.existingDividendYield,
+          },
+          { label: 'Analysis as-of', value: view.advancedDividend.analysisAsOfDate },
+          { label: 'Data date', value: view.advancedDividend.dataDate },
+          { label: 'Collected', value: view.advancedDividend.collectedAt },
+        ]} />
+        {view.advancedDividend.state === 'not_collected' ? (
+          <div className="empty-state">Advanced Dividendは未収集です。</div>
+        ) : (
+          <>
+            <section className="investor-flow-group">
+              <h3>Fiscal observations</h3>
+              {view.advancedDividend.observations.length ? (
+                <div className="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>区分</th><th>Source field</th><th>対象期末</th>
+                        <th>年間配当額</th><th>Source payout ratio</th>
+                        <th>開示日</th><th>利用可能日</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {view.advancedDividend.observations.map(observation => (
+                        <tr key={`${observation.kind}-${observation.sourceField}-${observation.fiscalYearEndDate.text}-${observation.disclosedDate.text}`}>
+                          <td>{observation.kind === 'actual' ? '実績' : '会社予想'}</td>
+                          <td>{observation.sourceField}</td>
+                          <td><Value value={observation.fiscalYearEndDate} /></td>
+                          <td><Value value={observation.annualDividendPerShare} /></td>
+                          <td><Value value={observation.payoutRatio} /></td>
+                          <td><Value value={observation.disclosedDate} /></td>
+                          <td><Value value={observation.sourceEligibleDate} /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="empty-state">利用可能な年間配当観測はありません。</div>
+              )}
+            </section>
+            <section className="investor-flow-group">
+              <h3>Dividend events</h3>
+              {view.advancedDividend.eventState === 'available' ? (
+                <div className="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>区分</th><th>決定状態</th><th>基準年月</th><th>総額</th>
+                        <th>普通</th><th>記念</th><th>特別</th><th>通知日</th><th>利用可能日</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {view.advancedDividend.events.map(event => (
+                        <tr key={event.referenceNumber}>
+                          <td>{event.kind === 'interim' ? '中間' : '期末'}</td>
+                          <td>{event.decision === 'decided' ? '決定' : '予想'}</td>
+                          <td><Value value={event.recordDateYearMonth} /></td>
+                          <td><Value value={event.dividendPerShare} /></td>
+                          <td><Value value={event.ordinaryDividendPerShare} /></td>
+                          <td><Value value={event.commemorativeDividendPerShare} /></td>
+                          <td><Value value={event.specialDividendPerShare} /></td>
+                          <td><Value value={event.notifiedDate} /></td>
+                          <td><Value value={event.sourceEligibleDate} /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : view.advancedDividend.eventState === 'known_empty' ? (
+                <div className="empty-state">
+                  訂正・削除反映後に有効な配当イベントはありません。
+                </div>
+              ) : (
+                <div className="empty-state">
+                  配当イベント明細は利用できません。普通配当のみとは判断できません。
+                </div>
+              )}
+            </section>
+            {view.advancedDividend.unavailableReasons.length ? (
+              <p className="reason-list">
+                {view.advancedDividend.unavailableReasons.join(' / ')}
+              </p>
+            ) : null}
+          </>
+        )}
       </Card>
 
       <Card title="Sector Short-selling Flow" eyebrow="TSE 33-sector daily turnover">

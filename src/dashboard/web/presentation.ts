@@ -138,6 +138,41 @@ export interface SectorShortRatioView {
   unavailableReasons: string[];
 }
 
+export interface AdvancedDividendFiscalObservationView {
+  kind: 'actual' | 'company_forecast';
+  sourceField: 'DivAnn' | 'FDivAnn' | 'NxFDivAnn';
+  fiscalYearEndDate: DisplayValue;
+  annualDividendPerShare: DisplayValue;
+  payoutRatio: DisplayValue;
+  disclosedDate: DisplayValue;
+  sourceEligibleDate: DisplayValue;
+}
+
+export interface AdvancedDividendEventView {
+  referenceNumber: string;
+  kind: 'interim' | 'fiscal_year_end';
+  decision: 'decided' | 'forecast';
+  recordDateYearMonth: DisplayValue;
+  dividendPerShare: DisplayValue;
+  ordinaryDividendPerShare: DisplayValue;
+  commemorativeDividendPerShare: DisplayValue;
+  specialDividendPerShare: DisplayValue;
+  notifiedDate: DisplayValue;
+  sourceEligibleDate: DisplayValue;
+}
+
+export interface AdvancedDividendView {
+  state: 'available' | 'unavailable' | 'not_collected';
+  eventState: 'available' | 'known_empty' | 'unavailable' | 'not_collected';
+  existingDividendYield: DisplayValue;
+  analysisAsOfDate: DisplayValue;
+  collectedAt: DisplayValue;
+  dataDate: DisplayValue;
+  observations: AdvancedDividendFiscalObservationView[];
+  events: AdvancedDividendEventView[];
+  unavailableReasons: string[];
+}
+
 export const REPORTED_SHORT_POSITION_DISCLOSURE_NOTE =
   'J-Quantsの0.5%以上の公開報告です。未収集・利用不可は、空売り残高0、空売り主体なし、0.5%未満のpositionなし、または買い戻し完了を意味しません。信用売残や市場全体のshort interestとは別データです。';
 
@@ -149,6 +184,9 @@ export const SECTOR_BENCHMARK_CONTEXT_NOTE =
 
 export const SECTOR_SHORT_RATIO_CONTEXT_NOTE =
   '東証33業種単位の日次売買代金flowです。個別銘柄のshort position、残高、信用売残ではありません。Snapshotのsource値とdeterministic ratioだけを表示し、業種指数・公開空売り残高報告・信用残との合算、forward fill、threshold・squeeze・Buy/Sell signalは行いません。';
+
+export const ADVANCED_DIVIDEND_CONTEXT_NOTE =
+  '年間配当額（円/株）、J-Quants提供の配当性向、既存の現在株価ベース配当利回りを別の指標として表示します。actualと会社予想、普通・記念・特別配当も分離し、イベントの年額集計や欠損内訳の推定、score・threshold・Buy/Sell signalは行いません。イベント詳細が利用不可でも普通配当のみとは判断できません。';
 
 export interface DashboardViewModel {
   header: {
@@ -179,6 +217,7 @@ export interface DashboardViewModel {
     metrics: DashboardMetric[];
     unavailableReasons: string[];
   } | null;
+  advancedDividend: AdvancedDividendView;
   reportedShortPositions: ReportedShortPositionsView;
   investorTypeFlows: InvestorTypeFlowsView;
   sectorBenchmark: SectorBenchmarkView;
@@ -224,7 +263,7 @@ const numberFormatter = (maximumFractionDigits: number) => new Intl.NumberFormat
 
 export function formatMetric(
   value: number | null | undefined,
-  unit: MetricUnit | 'index' | 'thousand_JPY' | 'index_points' | null | undefined,
+  unit: MetricUnit | 'index' | 'thousand_JPY' | 'index_points' | 'JPY_per_share' | null | undefined,
   options: FormatOptions = {},
 ): DisplayValue {
   if (value === null || value === undefined || !Number.isFinite(value)) {
@@ -245,6 +284,7 @@ export function formatMetric(
   const text = (() => {
     switch (unit) {
       case 'JPY': return `¥${formatted}`;
+      case 'JPY_per_share': return `¥${formatted} / 株`;
       case 'thousand_JPY': return `${formatted} 千円`;
       case 'index_points': return `${formatted} points`;
       case 'shares': return `${formatted} 株`;
@@ -321,6 +361,7 @@ const dataDateLabels = {
   marketCorrelation: '市場相関',
   sectorBenchmark: '業種指数比較',
   sectorShortRatio: '業種別空売り比率',
+  advancedDividend: 'Advanced Dividend',
   strategy: 'Strategy',
   priceHistory: '価格履歴',
 } as const;
@@ -456,6 +497,13 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
     : null;
   const sectorShortRatioUnits = 'sectorShortRatio' in snapshot.units
     ? snapshot.units.sectorShortRatio
+    : null;
+  const hasAdvancedDividendSection = 'advancedDividend' in snapshot;
+  const advancedDividend = hasAdvancedDividendSection
+    ? snapshot.advancedDividend
+    : null;
+  const advancedDividendUnits = 'advancedDividend' in snapshot.units
+    ? snapshot.units.advancedDividend
     : null;
 
   const bars = (snapshot.priceHistory ?? []).flatMap(bar => (
@@ -857,6 +905,77 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
     unavailableReasons: sectorShortRatio?.unavailable.map(item => reasonText(item.reason)) ?? [],
   };
 
+  const advancedDividendView: AdvancedDividendView = {
+    state: !hasAdvancedDividendSection || advancedDividend === null
+      ? 'not_collected'
+      : advancedDividend.observations.length > 0 || advancedDividend.events !== null
+        ? 'available'
+        : 'unavailable',
+    eventState: !hasAdvancedDividendSection || advancedDividend === null
+      ? 'not_collected'
+      : advancedDividend.events === null
+        ? 'unavailable'
+        : advancedDividend.events.length === 0
+          ? 'known_empty'
+          : 'available',
+    existingDividendYield: formatMetric(
+      snapshot.valuation?.dividendYieldPercent,
+      valuationUnits.dividendYieldPercent,
+    ),
+    analysisAsOfDate: displayText(advancedDividend?.analysisAsOfDate),
+    collectedAt: displayText(
+      advancedDividend ? formatDateTime(advancedDividend.collectedAt) : null,
+    ),
+    dataDate: displayText(advancedDividend?.dataDate),
+    observations: advancedDividend && advancedDividendUnits
+      ? advancedDividend.observations.map(observation => ({
+          kind: observation.kind,
+          sourceField: observation.sourceField,
+          fiscalYearEndDate: displayText(observation.fiscalYearEndDate),
+          annualDividendPerShare: formatMetric(
+            observation.annualDividendPerShare,
+            advancedDividendUnits.dividendPerShare,
+          ),
+          payoutRatio: formatMetric(
+            observation.payoutRatio,
+            advancedDividendUnits.payoutRatio,
+            { ratioAsPercent: true },
+          ),
+          disclosedDate: displayText(observation.disclosedDate),
+          sourceEligibleDate: displayText(observation.sourceEligibleDate),
+        }))
+      : [],
+    events: advancedDividend?.events && advancedDividendUnits
+      ? advancedDividend.events.map(event => ({
+          referenceNumber: event.referenceNumber,
+          kind: event.kind,
+          decision: event.decision,
+          recordDateYearMonth: displayText(event.recordDateYearMonth),
+          dividendPerShare: formatMetric(
+            event.dividendPerShare,
+            advancedDividendUnits.dividendPerShare,
+          ),
+          ordinaryDividendPerShare: formatMetric(
+            event.ordinaryDividendPerShare,
+            advancedDividendUnits.dividendPerShare,
+          ),
+          commemorativeDividendPerShare: formatMetric(
+            event.commemorativeDividendPerShare,
+            advancedDividendUnits.dividendPerShare,
+          ),
+          specialDividendPerShare: formatMetric(
+            event.specialDividendPerShare,
+            advancedDividendUnits.dividendPerShare,
+          ),
+          notifiedDate: displayText(event.notifiedDate),
+          sourceEligibleDate: displayText(event.sourceEligibleDate),
+        }))
+      : [],
+    unavailableReasons: advancedDividend?.unavailable.map(item => (
+      `${item.scope}: ${reasonText(item.reason)}`
+    )) ?? [],
+  };
+
   const dates = snapshot.dataDates;
   const dateEntries: Array<[keyof typeof dataDateLabels, string | null]> = [
     ['identity', dates.identity],
@@ -887,6 +1006,9 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
   }
   if ('sectorShortRatio' in snapshot.dataDates) {
     dateEntries.push(['sectorShortRatio', snapshot.dataDates.sectorShortRatio]);
+  }
+  if ('advancedDividend' in snapshot.dataDates) {
+    dateEntries.push(['advancedDividend', snapshot.dataDates.advancedDividend]);
   }
 
   return {
@@ -922,6 +1044,7 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
     correlations,
     strategy: strategyView,
     advancedTechnical: advancedTechnicalView,
+    advancedDividend: advancedDividendView,
     reportedShortPositions: reportedShortPositionsView,
     investorTypeFlows: investorTypeFlowsView,
     sectorBenchmark: sectorBenchmarkView,
