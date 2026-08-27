@@ -1,15 +1,16 @@
 import {
   ANALYSIS_SNAPSHOT_SCHEMA_VERSION,
+  type AdvancedDividendProvenance,
   AnalysisSnapshotInputSchema,
-  AnalysisSnapshotV7Schema,
-  type AnalysisSnapshotV7,
+  AnalysisSnapshotV8Schema,
+  type AnalysisSnapshotV8,
   type AnalysisSnapshotInput,
   type InvestorTypeFlowProvenance,
   type ReportedShortPositionProvenance,
   type SectorShortRatioProvenance,
   type SnapshotProvenance,
   type SnapshotSection,
-  type SnapshotUnavailableV7,
+  type SnapshotUnavailableV8,
 } from './schema.js';
 
 export const REQUIRED_ANALYSIS_SNAPSHOT_SECTIONS = [
@@ -130,6 +131,10 @@ const UNITS = {
     totalSellingValue: 'JPY',
     shortSellingRatio: 'ratio',
   },
+  advancedDividend: {
+    dividendPerShare: 'JPY_per_share',
+    payoutRatio: 'ratio',
+  },
   strategy: {
     triggerPrice: 'JPY',
     price: 'JPY',
@@ -182,6 +187,15 @@ function sectorShortRatioProvenance(
   asOfDate: string | null,
   endpoint: SectorShortRatioProvenance['endpoint'],
 ): SectorShortRatioProvenance[] {
+  return [{ source, role, asOfDate, endpoint, sourceUrls: [] }];
+}
+
+function advancedDividendProvenance(
+  source: AdvancedDividendProvenance['source'],
+  role: AdvancedDividendProvenance['role'],
+  asOfDate: string | null,
+  endpoint: AdvancedDividendProvenance['endpoint'],
+): AdvancedDividendProvenance[] {
   return [{ source, role, asOfDate, endpoint, sourceUrls: [] }];
 }
 
@@ -254,8 +268,8 @@ function peerComparisonState(input: AnalysisSnapshotInput) {
   };
 }
 
-function aggregateUnavailable(input: AnalysisSnapshotInput): SnapshotUnavailableV7[] {
-  const unavailable: SnapshotUnavailableV7[] = missingSections(input).map(section => ({
+function aggregateUnavailable(input: AnalysisSnapshotInput): SnapshotUnavailableV8[] {
+  const unavailable: SnapshotUnavailableV8[] = missingSections(input).map(section => ({
     section,
     reason: 'missing_required_section',
   }));
@@ -338,6 +352,17 @@ function aggregateUnavailable(input: AnalysisSnapshotInput): SnapshotUnavailable
       }
     }
   }
+  if (input.advancedDividend === null) {
+    unavailable.push({ section: 'advancedDividend', reason: 'not_collected' });
+  } else {
+    for (const item of input.advancedDividend.unavailable) {
+      unavailable.push({
+        section: 'advancedDividend',
+        metric: item.scope,
+        reason: item.reason,
+      });
+    }
+  }
   for (const item of input.strategy?.unavailable ?? []) {
     unavailable.push({ section: 'strategy', metric: item.candidate, reason: item.reason });
   }
@@ -352,14 +377,14 @@ function aggregateUnavailable(input: AnalysisSnapshotInput): SnapshotUnavailable
   return [...unavailable, ...input.additionalUnavailable];
 }
 
-export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): AnalysisSnapshotV7 {
+export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): AnalysisSnapshotV8 {
   const input = AnalysisSnapshotInputSchema.parse(rawInput);
   const fundamentalDate = latestFundamentalDate(input);
   const peerDate = latestPeerDate(input);
   const priceDate = latestPriceDate(input);
   const missing = missingSections(input);
 
-  return AnalysisSnapshotV7Schema.parse({
+  return AnalysisSnapshotV8Schema.parse({
     schemaVersion: ANALYSIS_SNAPSHOT_SCHEMA_VERSION,
     status: missing.length === 0 ? 'complete' : 'partial',
     canonicalTicker: input.identity.canonicalTicker,
@@ -381,6 +406,7 @@ export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): Analysis
       marketCorrelation: input.marketCorrelation?.dataDate ?? null,
       sectorBenchmark: input.sectorBenchmark?.dataDate ?? null,
       sectorShortRatio: input.sectorShortRatio?.dataDate ?? null,
+      advancedDividend: input.advancedDividend?.dataDate ?? null,
       strategy: input.strategy?.dataDate ?? null,
       priceHistory: priceDate,
     },
@@ -561,6 +587,36 @@ export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): Analysis
               : []),
           ]
         : [],
+      advancedDividend: input.advancedDividend
+        ? [
+            ...advancedDividendProvenance(
+              'advanced_dividend_engine',
+              'calculation',
+              input.advancedDividend.dataDate,
+              null,
+            ),
+            ...advancedDividendProvenance(
+              'jquants',
+              'dividend_financial_summary_data',
+              input.advancedDividend.dataDate,
+              '/v2/fins/summary',
+            ),
+            ...(input.advancedDividend.provenance.dividendEvents
+              ? advancedDividendProvenance(
+                  'jquants',
+                  'dividend_event_data',
+                  input.advancedDividend.dataDate,
+                  '/v2/fins/dividend',
+                )
+              : []),
+            ...advancedDividendProvenance(
+              'jquants',
+              'market_calendar_data',
+              null,
+              '/v2/markets/calendar',
+            ),
+          ]
+        : [],
       strategy: input.strategy
         ? provenance('strategy_engine', 'calculation', input.strategy.dataDate)
         : [],
@@ -582,6 +638,7 @@ export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): Analysis
     marketCorrelation: input.marketCorrelation,
     sectorBenchmark: input.sectorBenchmark,
     sectorShortRatio: input.sectorShortRatio,
+    advancedDividend: input.advancedDividend,
     strategy: input.strategy,
     priceHistory: input.priceHistory,
     scenarios: input.scenarios,

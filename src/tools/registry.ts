@@ -1,5 +1,6 @@
 import { StructuredToolInterface } from '@langchain/core/tools';
 import {
+  ANALYZE_ADVANCED_DIVIDEND_DESCRIPTION,
   ANALYZE_FINANCIAL_METRICS_DESCRIPTION,
   ANALYZE_INVESTOR_TYPE_FLOWS_DESCRIPTION,
   ANALYZE_MARKET_CORRELATION_DESCRIPTION,
@@ -10,6 +11,7 @@ import {
   ANALYZE_STRATEGY_DESCRIPTION,
   ANALYZE_SUPPLY_DEMAND_DESCRIPTION,
   ANALYZE_TECHNICAL_DESCRIPTION,
+  analyzeAdvancedDividendTool,
   analyzeFinancialMetricsTool,
   analyzeInvestorTypeFlowsTool,
   analyzeMarketCorrelationTool,
@@ -144,6 +146,13 @@ export function getToolRegistry(model: string): RegisteredTool[] {
       tool: analyzeSupplyDemandTool,
       description: ANALYZE_SUPPLY_DEMAND_DESCRIPTION,
       compactDescription: 'Deterministic Japanese margin-balance statistics and digestion days from margin and volume histories.',
+      concurrencySafe: true,
+    },
+    {
+      name: 'analyze_advanced_dividend',
+      tool: analyzeAdvancedDividendTool,
+      description: ANALYZE_ADVANCED_DIVIDEND_DESCRIPTION,
+      compactDescription: 'Deterministic as-of annual dividend and optional event-level special/commemorative analysis.',
       concurrencySafe: true,
     },
     {

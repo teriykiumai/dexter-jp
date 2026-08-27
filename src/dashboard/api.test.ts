@@ -45,6 +45,7 @@ function partialSnapshot(
     marketCorrelation: null,
     sectorBenchmark: null,
     sectorShortRatio: null,
+    advancedDividend: null,
     strategy: null,
     priceHistory: null,
     scenarios: null,
@@ -114,7 +115,7 @@ describe('dashboard request handler', () => {
 
     const latestResponse = await handleDashboardRequest(request('/api/analyses/7203'), repository);
     expect(await responseJson(latestResponse)).toMatchObject({
-      schemaVersion: 7,
+      schemaVersion: 8,
       canonicalTicker: '7203',
       generatedAt: latest.generatedAt,
       finalReportMarkdown: '# Analysis',

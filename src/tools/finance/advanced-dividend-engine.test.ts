@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   analyzeDividendFiscalObservations,
+  buildAdvancedDividendResult,
   replayDividendEvents,
   type DividendFiscalObservation,
 } from './advanced-dividend-engine.js';
@@ -738,5 +739,85 @@ describe('replayDividendEvents', () => {
     expect(() => replayDividendEvents(
       '72030', [], calendar, '2026-02-30',
     )).toThrow(RangeError);
+  });
+});
+
+describe('buildAdvancedDividendResult', () => {
+  test('combines fiscal and event results without aggregating their values', () => {
+    const rows = [sourceRow()];
+    const eventRows = [eventRow({ notifiedDate: '2026-05-19' })];
+    const fiscal = analyzeDividendFiscalObservations('72030', rows, calendar, '2026-05-20');
+    const event = replayDividendEvents('72030', eventRows, calendar, '2026-05-20');
+    const result = buildAdvancedDividendResult(
+      fiscal,
+      event,
+      '2026-05-20T03:00:00.000Z',
+    );
+
+    expect(result).toMatchObject({
+      analysisAsOfDate: '2026-05-20',
+      collectedAt: '2026-05-20T03:00:00.000Z',
+      issuerCode: '72030',
+      dataDate: '2026-05-19',
+      observations: fiscal.observations,
+      events: event.events,
+      unavailable: [],
+      provenance: {
+        financialSummary: { source: 'jquants', endpoint: '/v2/fins/summary' },
+        dividendEvents: { source: 'jquants', endpoint: '/v2/fins/dividend' },
+        availabilityCalendar: { source: 'jquants', endpoint: '/v2/markets/calendar' },
+        calculation: { source: 'advanced_dividend_engine' },
+      },
+      units: { dividendPerShare: 'JPY_per_share', payoutRatio: 'ratio' },
+    });
+  });
+
+  test('preserves an optional event plan restriction without erasing core data', () => {
+    const fiscal = analyzeDividendFiscalObservations(
+      '72030', [sourceRow()], calendar, '2026-05-18',
+    );
+    const result = buildAdvancedDividendResult(
+      fiscal,
+      { reason: 'event_source_plan_unavailable' },
+      '2026-05-18T09:00:00.000Z',
+    );
+
+    expect(result.observations).toHaveLength(3);
+    expect(result.events).toBeNull();
+    expect(result.provenance.dividendEvents).toBeNull();
+    expect(result.unavailable).toContainEqual({
+      scope: 'event',
+      reason: 'event_source_plan_unavailable',
+    });
+  });
+
+  test('rejects mismatched result identity and invalid collection timestamps', () => {
+    const fiscal = analyzeDividendFiscalObservations(
+      '72030', [sourceRow()], calendar, '2026-05-18',
+    );
+    const mismatchedEvent = replayDividendEvents(
+      '130A0', [eventRow({ issuerCode: '130A0' })], calendar, '2026-05-18',
+    );
+
+    expect(() => buildAdvancedDividendResult(
+      fiscal, mismatchedEvent, '2026-05-18T09:00:00.000Z',
+    )).toThrow(RangeError);
+    expect(() => buildAdvancedDividendResult(
+      fiscal, { reason: 'event_source_plan_unavailable' }, '2026-05-18T09:00:00+09:00',
+    )).toThrow(RangeError);
+  });
+
+  test('does not mutate either deterministic input result', () => {
+    const fiscal = analyzeDividendFiscalObservations(
+      '72030', [sourceRow()], calendar, '2026-05-18',
+    );
+    const event = replayDividendEvents('72030', [eventRow()], calendar, '2026-05-18');
+    const beforeFiscal = structuredClone(fiscal);
+    const beforeEvent = structuredClone(event);
+
+    buildAdvancedDividendResult(fiscal, event, '2026-05-18T09:00:00.000Z');
+
+    expect(fiscal).toEqual(beforeFiscal);
+    expect(event).toEqual(beforeEvent);
   });
 });

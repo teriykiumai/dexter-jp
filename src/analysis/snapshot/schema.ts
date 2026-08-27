@@ -17,7 +17,8 @@ export const ANALYSIS_SNAPSHOT_V3_SCHEMA_VERSION = 3 as const;
 export const ANALYSIS_SNAPSHOT_V4_SCHEMA_VERSION = 4 as const;
 export const ANALYSIS_SNAPSHOT_V5_SCHEMA_VERSION = 5 as const;
 export const ANALYSIS_SNAPSHOT_V6_SCHEMA_VERSION = 6 as const;
-export const ANALYSIS_SNAPSHOT_SCHEMA_VERSION = 7 as const;
+export const ANALYSIS_SNAPSHOT_V7_SCHEMA_VERSION = 7 as const;
+export const ANALYSIS_SNAPSHOT_SCHEMA_VERSION = 8 as const;
 
 export const CanonicalTickerSchema = z.string().regex(JAPANESE_SECURITIES_CODE_PATTERN, {
   message: 'canonicalTicker must be a valid four-character Japanese securities code.',
@@ -64,6 +65,11 @@ export const MetricUnitV6Schema = z.union([
   z.literal('index_points'),
 ]);
 
+export const MetricUnitV8Schema = z.union([
+  MetricUnitV6Schema,
+  z.literal('JPY_per_share'),
+]);
+
 export const SnapshotSectionSchema = z.enum([
   'identity',
   'fundamental',
@@ -103,6 +109,11 @@ export const SnapshotSectionV6Schema = z.union([
 export const SnapshotSectionV7Schema = z.union([
   SnapshotSectionV6Schema,
   z.literal('sectorShortRatio'),
+]);
+
+export const SnapshotSectionV8Schema = z.union([
+  SnapshotSectionV7Schema,
+  z.literal('advancedDividend'),
 ]);
 
 export const SnapshotProvenanceSchema = z.object({
@@ -205,6 +216,29 @@ export const SnapshotProvenanceRecordV7Schema = SnapshotProvenanceRecordV6Schema
   sectorShortRatio: z.array(SectorShortRatioProvenanceSchema),
 });
 
+export const AdvancedDividendProvenanceSchema = SnapshotProvenanceSchema.extend({
+  source: z.enum(['jquants', 'advanced_dividend_engine']),
+  role: z.enum([
+    'dividend_financial_summary_data',
+    'dividend_event_data',
+    'market_calendar_data',
+    'calculation',
+  ]),
+  endpoint: z.enum([
+    '/v2/fins/summary',
+    '/v2/fins/dividend',
+    '/v2/markets/calendar',
+  ]).nullable(),
+});
+
+export type AdvancedDividendProvenance = z.infer<
+  typeof AdvancedDividendProvenanceSchema
+>;
+
+export const SnapshotProvenanceRecordV8Schema = SnapshotProvenanceRecordV7Schema.extend({
+  advancedDividend: z.array(AdvancedDividendProvenanceSchema),
+});
+
 const unitMap = z.record(z.string().min(1), MetricUnitSchema);
 
 export const SnapshotUnitsSchema = z.object({
@@ -250,6 +284,12 @@ export const SnapshotUnitsV6Schema = SnapshotUnitsV5Schema.extend({
 
 export const SnapshotUnitsV7Schema = SnapshotUnitsV6Schema.extend({
   sectorShortRatio: unitMapV6,
+});
+
+const unitMapV8 = z.record(z.string().min(1), MetricUnitV8Schema);
+
+export const SnapshotUnitsV8Schema = SnapshotUnitsV7Schema.extend({
+  advancedDividend: unitMapV8,
 });
 
 export const SnapshotUnavailableSchema = z.object({
@@ -305,7 +345,16 @@ export const SnapshotUnavailableV7Schema = z.object({
 });
 
 export type SnapshotUnavailableV7 = z.infer<typeof SnapshotUnavailableV7Schema>;
-export type SnapshotUnavailable = SnapshotUnavailableV7;
+
+export const SnapshotUnavailableV8Schema = z.object({
+  section: SnapshotSectionV8Schema,
+  metric: z.string().min(1).optional(),
+  reason: z.string().min(1),
+  detail: z.string().min(1).optional(),
+});
+
+export type SnapshotUnavailableV8 = z.infer<typeof SnapshotUnavailableV8Schema>;
+export type SnapshotUnavailable = SnapshotUnavailableV8;
 
 export const CompanyIdentitySchema = z.object({
   canonicalTicker: CanonicalTickerSchema,
@@ -563,6 +612,101 @@ export const InvestorTypeFlowResultSchema = z.object({
 
 export type SnapshotInvestorTypeFlowResult = z.infer<
   typeof InvestorTypeFlowResultSchema
+>;
+
+const dividendFiscalObservationSchema = z.object({
+  kind: z.enum(['actual', 'company_forecast']),
+  fiscalYearEndDate: z.string().min(1),
+  disclosedDate: z.string().min(1),
+  disclosedTime: z.string().nullable(),
+  sourceEligibleDate: z.string().min(1),
+  disclosureNumber: z.string().min(1),
+  sourceField: z.enum(['DivAnn', 'FDivAnn', 'NxFDivAnn']),
+  payoutRatioSourceField: z.enum([
+    'PayoutRatioAnn',
+    'FPayoutRatioAnn',
+    'NxFPayoutRatioAnn',
+  ]),
+  annualDividendPerShare: finiteNumber.nonnegative().nullable(),
+  payoutRatio: nullableFiniteNumber,
+});
+
+const dividendEventSchema = z.object({
+  notifiedDate: z.string().min(1),
+  notifiedTime: z.string().nullable(),
+  sourceEligibleDate: z.string().min(1),
+  referenceNumber: z.string().min(1),
+  corporateActionReferenceNumber: z.string().min(1),
+  kind: z.enum(['interim', 'fiscal_year_end']),
+  decision: z.enum(['decided', 'forecast']),
+  recordDateYearMonth: z.string().min(1),
+  dividendPerShare: finiteNumber.nonnegative().nullable(),
+  ordinaryDividendPerShare: finiteNumber.nonnegative().nullable(),
+  commemorativeDividendPerShare: finiteNumber.nonnegative().nullable(),
+  specialDividendPerShare: finiteNumber.nonnegative().nullable(),
+  recordDate: nullableDate,
+  rightsRecordDate: nullableDate,
+  exDate: nullableDate,
+  paymentDate: nullableDate,
+});
+
+const advancedDividendUnavailableSchema = z.discriminatedUnion('scope', [
+  z.object({
+    scope: z.literal('core'),
+    reason: z.enum([
+      'no_eligible_dividend_disclosure_data',
+      'availability_calendar_unavailable',
+      'missing_data',
+      'invalid_data',
+    ]),
+  }),
+  z.object({
+    scope: z.literal('event'),
+    reason: z.enum([
+      'no_eligible_dividend_event_data',
+      'event_source_plan_unavailable',
+      'availability_calendar_unavailable',
+      'missing_data',
+      'invalid_data',
+    ]),
+  }),
+  z.object({
+    scope: z.literal('component'),
+    reason: z.literal('component_breakdown_unavailable'),
+  }),
+]);
+
+export const AdvancedDividendResultSchema = z.object({
+  analysisAsOfDate: z.string().min(1),
+  collectedAt: utcIsoDateTime,
+  issuerCode: JQuantsIssuerCodeSchema,
+  dataDate: nullableDate,
+  observations: z.array(dividendFiscalObservationSchema),
+  events: z.array(dividendEventSchema).nullable(),
+  unavailable: z.array(advancedDividendUnavailableSchema),
+  provenance: z.object({
+    financialSummary: z.object({
+      source: z.literal('jquants'),
+      endpoint: z.literal('/v2/fins/summary'),
+    }),
+    dividendEvents: z.object({
+      source: z.literal('jquants'),
+      endpoint: z.literal('/v2/fins/dividend'),
+    }).nullable(),
+    availabilityCalendar: z.object({
+      source: z.literal('jquants'),
+      endpoint: z.literal('/v2/markets/calendar'),
+    }),
+    calculation: z.object({ source: z.literal('advanced_dividend_engine') }),
+  }),
+  units: z.object({
+    dividendPerShare: z.literal('JPY_per_share'),
+    payoutRatio: z.literal('ratio'),
+  }),
+});
+
+export type SnapshotAdvancedDividendResult = z.infer<
+  typeof AdvancedDividendResultSchema
 >;
 
 const peerMetric = z.enum([
@@ -917,6 +1061,10 @@ export const SnapshotDataDatesV7Schema = SnapshotDataDatesV6Schema.extend({
   sectorShortRatio: nullableDate,
 });
 
+export const SnapshotDataDatesV8Schema = SnapshotDataDatesV7Schema.extend({
+  advancedDividend: nullableDate,
+});
+
 export const AnalysisSnapshotV1Schema = z.object({
   schemaVersion: z.literal(ANALYSIS_SNAPSHOT_V1_SCHEMA_VERSION),
   status: z.enum(['complete', 'partial']),
@@ -982,12 +1130,21 @@ export const AnalysisSnapshotV6Schema = AnalysisSnapshotV5Schema.extend({
 });
 
 export const AnalysisSnapshotV7Schema = AnalysisSnapshotV6Schema.extend({
-  schemaVersion: z.literal(ANALYSIS_SNAPSHOT_SCHEMA_VERSION),
+  schemaVersion: z.literal(ANALYSIS_SNAPSHOT_V7_SCHEMA_VERSION),
   dataDates: SnapshotDataDatesV7Schema,
   provenance: SnapshotProvenanceRecordV7Schema,
   units: SnapshotUnitsV7Schema,
   sectorShortRatio: SectorShortRatioResultSchema.nullable(),
   unavailable: z.array(SnapshotUnavailableV7Schema),
+});
+
+export const AnalysisSnapshotV8Schema = AnalysisSnapshotV7Schema.extend({
+  schemaVersion: z.literal(ANALYSIS_SNAPSHOT_SCHEMA_VERSION),
+  dataDates: SnapshotDataDatesV8Schema,
+  provenance: SnapshotProvenanceRecordV8Schema,
+  units: SnapshotUnitsV8Schema,
+  advancedDividend: AdvancedDividendResultSchema.nullable(),
+  unavailable: z.array(SnapshotUnavailableV8Schema),
 });
 
 export const AnalysisSnapshotSchema = z.discriminatedUnion('schemaVersion', [
@@ -998,6 +1155,7 @@ export const AnalysisSnapshotSchema = z.discriminatedUnion('schemaVersion', [
   AnalysisSnapshotV5Schema,
   AnalysisSnapshotV6Schema,
   AnalysisSnapshotV7Schema,
+  AnalysisSnapshotV8Schema,
 ]);
 
 export type AnalysisSnapshotV1 = z.infer<typeof AnalysisSnapshotV1Schema>;
@@ -1007,6 +1165,7 @@ export type AnalysisSnapshotV4 = z.infer<typeof AnalysisSnapshotV4Schema>;
 export type AnalysisSnapshotV5 = z.infer<typeof AnalysisSnapshotV5Schema>;
 export type AnalysisSnapshotV6 = z.infer<typeof AnalysisSnapshotV6Schema>;
 export type AnalysisSnapshotV7 = z.infer<typeof AnalysisSnapshotV7Schema>;
+export type AnalysisSnapshotV8 = z.infer<typeof AnalysisSnapshotV8Schema>;
 export type AnalysisSnapshot = z.infer<typeof AnalysisSnapshotSchema>;
 
 export const AnalysisSnapshotInputSchema = z.object({
@@ -1024,6 +1183,7 @@ export const AnalysisSnapshotInputSchema = z.object({
   marketCorrelation: MarketCorrelationResultSchema.nullable(),
   sectorBenchmark: SectorBenchmarkResultSchema.nullable(),
   sectorShortRatio: SectorShortRatioResultSchema.nullable(),
+  advancedDividend: AdvancedDividendResultSchema.nullable(),
   strategy: StrategyResultSchema.nullable(),
   priceHistory: PriceHistorySchema.nullable(),
   scenarios: ScenariosSchema.nullable(),
@@ -1060,7 +1220,7 @@ export const AnalysisSnapshotInputSchema = z.object({
       stockFromJQuants: z.boolean(),
     }),
   }),
-  additionalUnavailable: z.array(SnapshotUnavailableV7Schema),
+  additionalUnavailable: z.array(SnapshotUnavailableV8Schema),
 });
 
 export type AnalysisSnapshotInput = z.infer<typeof AnalysisSnapshotInputSchema>;

@@ -6,6 +6,7 @@ import {
   AnalysisSnapshotV4Schema,
   AnalysisSnapshotV5Schema,
   AnalysisSnapshotV6Schema,
+  AnalysisSnapshotV7Schema,
   buildAnalysisSnapshot,
   buildAnalysisSnapshotLatestItem,
   type AnalysisSnapshot,
@@ -57,6 +58,7 @@ function v7Snapshot(): AnalysisSnapshotV7 {
     marketCorrelation: null,
     sectorBenchmark: null,
     sectorShortRatio: null,
+    advancedDividend: null,
     strategy: null,
     priceHistory: null,
     scenarios: null,
@@ -77,7 +79,26 @@ function v7Snapshot(): AnalysisSnapshotV7 {
     },
     additionalUnavailable: [],
   };
-  return buildAnalysisSnapshot(input);
+  const v8 = buildAnalysisSnapshot(input);
+  const {
+    advancedDividend: _advancedDividend,
+    dataDates: v8DataDates,
+    provenance: v8Provenance,
+    units: v8Units,
+    unavailable: v8Unavailable,
+    ...common
+  } = v8;
+  const { advancedDividend: _advancedDividendDate, ...dataDates } = v8DataDates;
+  const { advancedDividend: _advancedDividendProvenance, ...provenance } = v8Provenance;
+  const { advancedDividend: _advancedDividendUnits, ...units } = v8Units;
+  return AnalysisSnapshotV7Schema.parse({
+    ...common,
+    schemaVersion: 7,
+    dataDates,
+    provenance,
+    units,
+    unavailable: v8Unavailable.filter(item => item.section !== 'advancedDividend'),
+  });
 }
 
 function v6Snapshot(): AnalysisSnapshotV6 {

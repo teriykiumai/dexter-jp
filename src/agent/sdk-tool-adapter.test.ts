@@ -19,6 +19,7 @@ const CORE_TOOL_NAMES = [
   'screen_companies',
   'analyze_technical',
   'analyze_supply_demand',
+  'analyze_advanced_dividend',
   'analyze_reported_short_positions',
   'analyze_investor_type_flows',
   'analyze_peer_comparison',

@@ -182,6 +182,39 @@ function sectorShortRatioResult() {
   };
 }
 
+function advancedDividendResult(issuerCode = '72030') {
+  return {
+    analysisAsOfDate: '2026-08-21',
+    collectedAt: '2026-08-21T10:00:00.000Z',
+    issuerCode,
+    dataDate: '2026-08-20',
+    observations: [{
+      kind: 'company_forecast' as const,
+      fiscalYearEndDate: '2027-03-31',
+      disclosedDate: '2026-08-20',
+      disclosedTime: '15:00:00',
+      sourceEligibleDate: '2026-08-21',
+      disclosureNumber: '20260820000001',
+      sourceField: 'FDivAnn' as const,
+      payoutRatioSourceField: 'FPayoutRatioAnn' as const,
+      annualDividendPerShare: 100,
+      payoutRatio: 0.35,
+    }],
+    events: null,
+    unavailable: [{
+      scope: 'event' as const,
+      reason: 'event_source_plan_unavailable' as const,
+    }],
+    provenance: {
+      financialSummary: { source: 'jquants' as const, endpoint: '/v2/fins/summary' as const },
+      dividendEvents: null,
+      availabilityCalendar: { source: 'jquants' as const, endpoint: '/v2/markets/calendar' as const },
+      calculation: { source: 'advanced_dividend_engine' as const },
+    },
+    units: { dividendPerShare: 'JPY_per_share' as const, payoutRatio: 'ratio' as const },
+  };
+}
+
 describe('StandardAgentSnapshotCollector', () => {
   test('preserves deterministic Advanced Technical values from tool result to Snapshot', async () => {
     const collector = new StandardAgentSnapshotCollector();
@@ -395,7 +428,7 @@ describe('StandardAgentSnapshotCollector', () => {
     const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
     expect(snapshot?.advancedTechnical).toEqual(advancedTechnical);
     expect(snapshot?.supplyDemand?.mean4w).toBe(950);
-    expect(snapshot?.schemaVersion).toBe(7);
+    expect(snapshot?.schemaVersion).toBe(8);
     expect(snapshot?.marketCorrelation?.windows).toEqual([{
       period: 20,
       startDate: '2026-07-24',
@@ -454,7 +487,7 @@ describe('StandardAgentSnapshotCollector', () => {
 
     const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
 
-    expect(snapshot?.schemaVersion).toBe(7);
+    expect(snapshot?.schemaVersion).toBe(8);
     expect(snapshot?.status).toBe('partial');
     expect(snapshot?.reportedShortPositions?.reports[0]).toEqual({
       disclosedDate: '2026-08-20',
@@ -495,7 +528,7 @@ describe('StandardAgentSnapshotCollector', () => {
 
     const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
 
-    expect(snapshot?.schemaVersion).toBe(7);
+    expect(snapshot?.schemaVersion).toBe(8);
     expect(snapshot?.sectorBenchmark).toEqual(sectorBenchmarkResult());
     expect(snapshot?.dataDates.sectorBenchmark).toBe('2026-08-20');
     expect(snapshot?.units.sectorBenchmark.indexLevel).toBe('index_points');
@@ -524,7 +557,7 @@ describe('StandardAgentSnapshotCollector', () => {
 
     const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
 
-    expect(snapshot?.schemaVersion).toBe(7);
+    expect(snapshot?.schemaVersion).toBe(8);
     expect(snapshot?.sectorShortRatio).toEqual(sectorShortRatioResult());
     expect(snapshot?.dataDates.sectorShortRatio).toBe('2026-08-20');
     expect(snapshot?.provenance.sectorShortRatio).toEqual(expect.arrayContaining([
@@ -752,7 +785,7 @@ describe('StandardAgentSnapshotCollector', () => {
 
     const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
 
-    expect(snapshot?.schemaVersion).toBe(7);
+    expect(snapshot?.schemaVersion).toBe(8);
     expect(snapshot?.investorTypeFlows).toEqual({
       dataDate: '2026-08-20',
       section: 'TokyoNagoya',
@@ -822,6 +855,94 @@ describe('StandardAgentSnapshotCollector', () => {
       expect.objectContaining({ source: 'investor_type_flow_engine' }),
     ]);
     expect(JSON.stringify(snapshot)).not.toContain('source-arg-must-not-survive');
+  });
+
+  test('collects only the structured advanced dividend result into Snapshot V8', () => {
+    const collector = new StandardAgentSnapshotCollector();
+    invokeSkill(collector);
+    lockToyota(collector);
+    start(collector, 'analyze_advanced_dividend', 'dividend-1', {
+      ticker: '7203',
+      analysisAsOfDate: '2026-08-21',
+      summaryRows: [{ marker: 'source-arg-must-not-survive' }],
+    });
+    end(collector, 'analyze_advanced_dividend', 'dividend-1', {
+      ...advancedDividendResult(),
+      rawSourceRows: 'must-not-survive',
+    });
+
+    const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
+
+    expect(snapshot?.schemaVersion).toBe(8);
+    expect(snapshot?.advancedDividend).toEqual(advancedDividendResult());
+    expect(snapshot?.dataDates.advancedDividend).toBe('2026-08-20');
+    expect(snapshot?.units.advancedDividend).toEqual({
+      dividendPerShare: 'JPY_per_share',
+      payoutRatio: 'ratio',
+    });
+    expect(snapshot?.provenance.advancedDividend).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'advanced_dividend_engine', role: 'calculation' }),
+      expect.objectContaining({
+        source: 'jquants',
+        role: 'dividend_financial_summary_data',
+        endpoint: '/v2/fins/summary',
+      }),
+      expect.objectContaining({
+        source: 'jquants', role: 'market_calendar_data', endpoint: '/v2/markets/calendar',
+      }),
+    ]));
+    expect(snapshot?.provenance.advancedDividend).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: 'dividend_event_data' }),
+    ]));
+    expect(snapshot?.unavailable).toContainEqual({
+      section: 'advancedDividend',
+      metric: 'event',
+      reason: 'event_source_plan_unavailable',
+    });
+    expect(JSON.stringify(snapshot)).not.toContain('must-not-survive');
+    expect(JSON.stringify(snapshot)).not.toContain('source-arg-must-not-survive');
+  });
+
+  test('rejects an advanced dividend result for another issuer', () => {
+    const collector = new StandardAgentSnapshotCollector();
+    invokeSkill(collector);
+    lockToyota(collector);
+    start(collector, 'analyze_advanced_dividend', 'dividend-mismatch', {
+      ticker: '7203',
+      analysisAsOfDate: '2026-08-21',
+    });
+    end(
+      collector,
+      'analyze_advanced_dividend',
+      'dividend-mismatch',
+      advancedDividendResult('67580'),
+    );
+
+    const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
+
+    expect(snapshot?.advancedDividend).toBeNull();
+    expect(snapshot?.provenance.advancedDividend).toEqual([]);
+    expect(snapshot?.unavailable).toContainEqual({
+      section: 'advancedDividend',
+      reason: 'locked_ticker_mismatch',
+    });
+  });
+
+  test('does not reconstruct advanced dividend values from final Markdown', () => {
+    const collector = new StandardAgentSnapshotCollector();
+    invokeSkill(collector);
+    lockToyota(collector);
+
+    const snapshot = collector.finalize(
+      '# Report\nForecast annual dividend: 100 JPY / payout ratio: 35%',
+      '2026-08-23T01:02:03.000Z',
+    );
+
+    expect(snapshot?.advancedDividend).toBeNull();
+    expect(snapshot?.unavailable).toContainEqual({
+      section: 'advancedDividend',
+      reason: 'not_collected',
+    });
   });
 
   test('does not reconstruct an absent Advanced Technical companion from Markdown', () => {
