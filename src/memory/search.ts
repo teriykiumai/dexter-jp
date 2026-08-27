@@ -5,6 +5,7 @@ import { applyMMRToHybridResults } from './mmr.js';
 import type { MemoryDatabase } from './database.js';
 import type {
   MemoryEmbeddingClient,
+  MemorySearchOutcome,
   MemorySearchOptions,
   MemorySearchResult,
   TemporalDecayConfig,
@@ -41,12 +42,32 @@ export async function hybridSearch(params: {
   };
   temporalDecay?: TemporalDecayConfig;
   mmr?: MMRConfig;
-}): Promise<MemorySearchResult[]> {
+  embeddingUnavailable?: boolean;
+  onEmbeddingUnavailable?: () => void;
+}): Promise<MemorySearchOutcome> {
   const maxResults = Math.max(1, params.options?.maxResults ?? params.defaults.maxResults);
   const minScore = params.options?.minScore ?? params.defaults.minScore;
   const candidateCount = maxResults * 4;
 
-  const queryEmbedding = await embedSingleQuery(params.embeddingClient, params.query);
+  let embeddingUnavailable = params.embeddingUnavailable ?? false;
+  let queryEmbedding: number[] | null = null;
+  const markEmbeddingUnavailable = () => {
+    if (!embeddingUnavailable) {
+      params.onEmbeddingUnavailable?.();
+    }
+    embeddingUnavailable = true;
+    queryEmbedding = null;
+  };
+  if (params.embeddingClient && !embeddingUnavailable) {
+    try {
+      queryEmbedding = await embedSingleQuery(params.embeddingClient, params.query);
+      if (!queryEmbedding || queryEmbedding.length === 0 || !queryEmbedding.every(Number.isFinite)) {
+        markEmbeddingUnavailable();
+      }
+    } catch {
+      markEmbeddingUnavailable();
+    }
+  }
   const vectorCandidates = queryEmbedding ? params.db.searchVector(queryEmbedding, candidateCount) : [];
   const keywordCandidates = params.db.searchKeyword(params.query, candidateCount);
 
@@ -141,5 +162,11 @@ export async function hybridSearch(params: {
   }
 
   // Stage 5: Final top-K selection.
-  return results.slice(0, maxResults);
+  return {
+    results: results.slice(0, maxResults),
+    searchMode: params.embeddingClient && !embeddingUnavailable ? 'hybrid' : 'keyword_only',
+    ...(embeddingUnavailable
+      ? { degraded: { reason: 'embedding_unavailable' as const } }
+      : {}),
+  };
 }

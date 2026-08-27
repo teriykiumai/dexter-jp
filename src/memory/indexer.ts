@@ -24,8 +24,15 @@ export class MemoryIndexer {
       watchDebounceMs: number;
       embeddingClient: MemoryEmbeddingClient | null;
       indexSessions: boolean;
+      onEmbeddingUnavailable?: () => void;
     },
   ) {}
+
+  private embeddingDisabled = false;
+
+  disableEmbeddings(): void {
+    this.embeddingDisabled = true;
+  }
 
   markDirty(): void {
     this.dirty = true;
@@ -201,8 +208,23 @@ export class MemoryIndexer {
   ): Promise<{ indexed: number; updated: number }> {
     const uncached = chunks.filter((chunk) => !this.db.getCachedEmbedding(chunk.contentHash));
     let uncachedVectors: number[][] = [];
-    if (uncached.length > 0 && this.options.embeddingClient) {
-      uncachedVectors = await this.options.embeddingClient.embed(uncached.map((chunk) => chunk.content));
+    if (uncached.length > 0 && this.options.embeddingClient && !this.embeddingDisabled) {
+      try {
+        const embedded = await this.options.embeddingClient.embed(
+          uncached.map((chunk) => chunk.content),
+        );
+        const valid = embedded.length === uncached.length
+          && embedded.every((vector) => vector.length > 0 && vector.every(Number.isFinite));
+        if (valid) {
+          uncachedVectors = embedded;
+        } else {
+          this.disableEmbeddings();
+          this.options.onEmbeddingUnavailable?.();
+        }
+      } catch {
+        this.disableEmbeddings();
+        this.options.onEmbeddingUnavailable?.();
+      }
     }
 
     const uncachedMap = new Map<string, number[]>();
@@ -230,8 +252,8 @@ export class MemoryIndexer {
       const result = this.db.upsertChunk({
         chunk,
         embedding,
-        provider: this.options.embeddingClient?.provider,
-        model: this.options.embeddingClient?.model,
+        provider: embedding ? this.options.embeddingClient?.provider : undefined,
+        model: embedding ? this.options.embeddingClient?.model : undefined,
         source,
       });
       indexed += 1;
