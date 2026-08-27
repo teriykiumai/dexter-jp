@@ -2,15 +2,16 @@ import {
   ANALYSIS_SNAPSHOT_SCHEMA_VERSION,
   type AdvancedDividendProvenance,
   AnalysisSnapshotInputSchema,
-  AnalysisSnapshotV8Schema,
-  type AnalysisSnapshotV8,
+  AnalysisSnapshotV9Schema,
+  type AnalysisSnapshotV9,
   type AnalysisSnapshotInput,
   type InvestorTypeFlowProvenance,
   type ReportedShortPositionProvenance,
   type SectorShortRatioProvenance,
   type SnapshotProvenance,
   type SnapshotSection,
-  type SnapshotUnavailableV8,
+  type SnapshotUnavailableV9,
+  type VolumeProfileProvenance,
 } from './schema.js';
 
 export const REQUIRED_ANALYSIS_SNAPSHOT_SECTIONS = [
@@ -135,6 +136,11 @@ const UNITS = {
     dividendPerShare: 'JPY_per_share',
     payoutRatio: 'ratio',
   },
+  volumeProfile: {
+    price: 'JPY',
+    allocatedVolume: 'adjusted_shares',
+    volumeShare: 'ratio',
+  },
   strategy: {
     triggerPrice: 'JPY',
     price: 'JPY',
@@ -196,6 +202,15 @@ function advancedDividendProvenance(
   asOfDate: string | null,
   endpoint: AdvancedDividendProvenance['endpoint'],
 ): AdvancedDividendProvenance[] {
+  return [{ source, role, asOfDate, endpoint, sourceUrls: [] }];
+}
+
+function volumeProfileProvenance(
+  source: VolumeProfileProvenance['source'],
+  role: VolumeProfileProvenance['role'],
+  asOfDate: string | null,
+  endpoint: VolumeProfileProvenance['endpoint'],
+): VolumeProfileProvenance[] {
   return [{ source, role, asOfDate, endpoint, sourceUrls: [] }];
 }
 
@@ -268,8 +283,8 @@ function peerComparisonState(input: AnalysisSnapshotInput) {
   };
 }
 
-function aggregateUnavailable(input: AnalysisSnapshotInput): SnapshotUnavailableV8[] {
-  const unavailable: SnapshotUnavailableV8[] = missingSections(input).map(section => ({
+function aggregateUnavailable(input: AnalysisSnapshotInput): SnapshotUnavailableV9[] {
+  const unavailable: SnapshotUnavailableV9[] = missingSections(input).map(section => ({
     section,
     reason: 'missing_required_section',
   }));
@@ -363,6 +378,17 @@ function aggregateUnavailable(input: AnalysisSnapshotInput): SnapshotUnavailable
       });
     }
   }
+  if (input.volumeProfile === null) {
+    unavailable.push({ section: 'volumeProfile', reason: 'not_collected' });
+  } else {
+    for (const item of input.volumeProfile.unavailable) {
+      unavailable.push({
+        section: 'volumeProfile',
+        metric: item.scope,
+        reason: item.reason,
+      });
+    }
+  }
   for (const item of input.strategy?.unavailable ?? []) {
     unavailable.push({ section: 'strategy', metric: item.candidate, reason: item.reason });
   }
@@ -377,14 +403,14 @@ function aggregateUnavailable(input: AnalysisSnapshotInput): SnapshotUnavailable
   return [...unavailable, ...input.additionalUnavailable];
 }
 
-export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): AnalysisSnapshotV8 {
+export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): AnalysisSnapshotV9 {
   const input = AnalysisSnapshotInputSchema.parse(rawInput);
   const fundamentalDate = latestFundamentalDate(input);
   const peerDate = latestPeerDate(input);
   const priceDate = latestPriceDate(input);
   const missing = missingSections(input);
 
-  return AnalysisSnapshotV8Schema.parse({
+  return AnalysisSnapshotV9Schema.parse({
     schemaVersion: ANALYSIS_SNAPSHOT_SCHEMA_VERSION,
     status: missing.length === 0 ? 'complete' : 'partial',
     canonicalTicker: input.identity.canonicalTicker,
@@ -407,6 +433,7 @@ export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): Analysis
       sectorBenchmark: input.sectorBenchmark?.dataDate ?? null,
       sectorShortRatio: input.sectorShortRatio?.dataDate ?? null,
       advancedDividend: input.advancedDividend?.dataDate ?? null,
+      volumeProfile: input.volumeProfile?.dataDate ?? null,
       strategy: input.strategy?.dataDate ?? null,
       priceHistory: priceDate,
     },
@@ -617,6 +644,28 @@ export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): Analysis
             ),
           ]
         : [],
+      volumeProfile: input.volumeProfile
+        ? [
+            ...volumeProfileProvenance(
+              'volume_profile_engine',
+              'calculation',
+              input.volumeProfile.dataDate,
+              null,
+            ),
+            ...volumeProfileProvenance(
+              'jquants',
+              'price_data',
+              input.volumeProfile.dataDate,
+              '/v2/equities/bars/daily',
+            ),
+            ...volumeProfileProvenance(
+              'jquants',
+              'market_calendar_data',
+              null,
+              '/v2/markets/calendar',
+            ),
+          ]
+        : [],
       strategy: input.strategy
         ? provenance('strategy_engine', 'calculation', input.strategy.dataDate)
         : [],
@@ -639,6 +688,7 @@ export function buildAnalysisSnapshot(rawInput: AnalysisSnapshotInput): Analysis
     sectorBenchmark: input.sectorBenchmark,
     sectorShortRatio: input.sectorShortRatio,
     advancedDividend: input.advancedDividend,
+    volumeProfile: input.volumeProfile,
     strategy: input.strategy,
     priceHistory: input.priceHistory,
     scenarios: input.scenarios,

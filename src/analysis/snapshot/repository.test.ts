@@ -16,6 +16,7 @@ import {
   AnalysisSnapshotV5Schema,
   AnalysisSnapshotV6Schema,
   AnalysisSnapshotV7Schema,
+  AnalysisSnapshotV8Schema,
   type AnalysisSnapshotInput,
   type AnalysisSnapshotV1,
   type AnalysisSnapshotV2,
@@ -25,6 +26,7 @@ import {
   type AnalysisSnapshotV6,
   type AnalysisSnapshotV7,
   type AnalysisSnapshotV8,
+  type AnalysisSnapshotV9,
 } from './schema.js';
 
 const temporaryDirectories: string[] = [];
@@ -160,6 +162,70 @@ function advancedDividendResult(issuerCode = '72030') {
   };
 }
 
+function volumeProfileResult(issuerCode = '72030') {
+  const bins = Array.from({ length: 50 }, (_, index) => ({
+    index,
+    lowerPrice: 3_000 + index,
+    upperPrice: 3_001 + index,
+    representativePrice: 3_000.5 + index,
+    allocatedVolume: 240,
+    volumeShare: 0.02,
+  }));
+  return {
+    analysisAsOfDate: '2026-08-21',
+    collectedAt: '2026-08-23T01:00:00.000Z',
+    issuerCode,
+    dataDate: '2026-08-21',
+    windowStartDate: '2026-03-06',
+    windowEndDate: '2026-08-21',
+    inputBarCount: 120,
+    priceBasis: 'jquants_corporate_action_adjusted' as const,
+    volumeBasis: 'jquants_corporate_action_adjusted' as const,
+    allocationMethod: 'uniform_range_overlap_v1' as const,
+    binningMethod: {
+      id: 'fixed_count_linear_v1' as const,
+      requestedBinCount: 50 as const,
+      effectiveBinCount: 50,
+      minPrice: 3_000,
+      maxPrice: 3_050,
+    },
+    bins,
+    poc: { binIndex: 0, price: 3_000.5, allocatedVolume: 240, volumeShare: 0.02 },
+    valueArea: {
+      targetVolumeShare: 0.7 as const,
+      achievedVolumeShare: 0.7,
+      val: 3_000,
+      vah: 3_035,
+      firstBinIndex: 0,
+      lastBinIndex: 34,
+    },
+    unavailable: [],
+    methodology: {
+      id: 'daily_ohlcv_volume_profile_proxy_v1' as const,
+      approximation: 'uniform_daily_range' as const,
+      actualHolderCostBasis: false as const,
+    },
+    provenance: {
+      source: 'jquants' as const,
+      endpoint: '/v2/equities/bars/daily' as const,
+      availabilityCalendarEndpoint: '/v2/markets/calendar' as const,
+      sourceMapping: 'jquants_adjusted_ohlcv_with_corporate_actions_v1' as const,
+      adjustmentFactorField: 'AdjFactor' as const,
+      exRightsField: 'ExRT' as const,
+      basisAudit: 'collection_horizon_rights_audit_v1' as const,
+      basisAuditRequiredThroughDate: '2026-08-22',
+      basisAuditThroughDate: '2026-08-22',
+      corporateActionBasisStatus: 'supported_common_basis_established' as const,
+      calculation: 'volume_profile_engine' as const,
+    },
+    units: {
+      price: 'JPY' as const,
+      allocatedVolume: 'adjusted_shares' as const,
+      volumeShare: 'ratio' as const,
+    },
+  };
+}
+
 async function createRepository(): Promise<{ repository: AnalysisSnapshotRepository; root: string }> {
   const root = await mkdtemp(join(tmpdir(), 'dexter-analysis-'));
   temporaryDirectories.push(root);
@@ -169,7 +235,7 @@ async function createRepository(): Promise<{ repository: AnalysisSnapshotReposit
 function partialSnapshot(
   generatedAt = '2026-08-23T01:02:03.000Z',
   canonicalTicker = '7203',
-): AnalysisSnapshotV8 {
+): AnalysisSnapshotV9 {
   const input: AnalysisSnapshotInput = {
     identity: {
       canonicalTicker,
@@ -230,6 +296,7 @@ function partialSnapshot(
     sectorBenchmark: sectorBenchmarkResult(),
     sectorShortRatio: sectorShortRatioResult(),
     advancedDividend: advancedDividendResult(`${canonicalTicker}0`),
+    volumeProfile: volumeProfileResult(`${canonicalTicker}0`),
     strategy: null,
     priceHistory: null,
     scenarios: null,
@@ -253,11 +320,37 @@ function partialSnapshot(
   return buildAnalysisSnapshot(input);
 }
 
+function v8Snapshot(
+  generatedAt = '2026-08-23T01:02:03.000Z',
+  canonicalTicker = '7203',
+): AnalysisSnapshotV8 {
+  const v9 = partialSnapshot(generatedAt, canonicalTicker);
+  const {
+    volumeProfile: _volumeProfile,
+    dataDates: v9DataDates,
+    provenance: v9Provenance,
+    units: v9Units,
+    unavailable: v9Unavailable,
+    ...common
+  } = v9;
+  const { volumeProfile: _volumeProfileDate, ...dataDates } = v9DataDates;
+  const { volumeProfile: _volumeProfileProvenance, ...provenance } = v9Provenance;
+  const { volumeProfile: _volumeProfileUnits, ...units } = v9Units;
+  return AnalysisSnapshotV8Schema.parse({
+    ...common,
+    schemaVersion: 8,
+    dataDates,
+    provenance,
+    units,
+    unavailable: v9Unavailable.filter(item => item.section !== 'volumeProfile'),
+  });
+}
+
 function v7Snapshot(
   generatedAt = '2026-08-23T01:02:03.000Z',
   canonicalTicker = '7203',
 ): AnalysisSnapshotV7 {
-  const v8 = partialSnapshot(generatedAt, canonicalTicker);
+  const v8 = v8Snapshot(generatedAt, canonicalTicker);
   const {
     advancedDividend: _advancedDividend,
     dataDates: v8DataDates,
@@ -453,7 +546,7 @@ afterEach(async () => {
 });
 
 describe('AnalysisSnapshotRepository', () => {
-  test('saves validated V8 history and latest JSON atomically and loads both', async () => {
+  test('saves validated V9 history and latest JSON atomically and loads both', async () => {
     const { repository, root } = await createRepository();
     const snapshot = partialSnapshot();
 
@@ -468,14 +561,15 @@ describe('AnalysisSnapshotRepository', () => {
     });
     expect(history).toEqual(snapshot);
     expect(latest).toEqual(snapshot);
-    expect(latest.schemaVersion).toBe(8);
-    if (latest.schemaVersion !== 8) throw new Error('Expected Snapshot V8.');
+    expect(latest.schemaVersion).toBe(9);
+    if (latest.schemaVersion !== 9) throw new Error('Expected Snapshot V9.');
     expect(latest.supplyDemand?.mean4w).toBe(950);
     expect(latest.reportedShortPositions?.reports[0]?.ratioDelta).toBe(0.001);
     expect(latest.investorTypeFlows).toEqual(investorTypeFlowResult());
     expect(latest.sectorBenchmark).toEqual(sectorBenchmarkResult());
     expect(latest.sectorShortRatio).toEqual(sectorShortRatioResult());
     expect(latest.advancedDividend).toEqual(advancedDividendResult());
+    expect(latest.volumeProfile).toEqual(volumeProfileResult());
     expect(filenames.sort()).toEqual([
       '2026-08-23T01-02-03-000Z.json',
       'latest.json',
@@ -618,7 +712,25 @@ describe('AnalysisSnapshotRepository', () => {
     expect(await readFile(latestPath, 'utf8')).toBe(originalJson);
   });
 
-  test('rejects V1 through V7 at the V8-only save boundary', async () => {
+  test('reads existing V8 history and latest JSON without rewriting either file', async () => {
+    const { repository, root } = await createRepository();
+    const snapshot = v8Snapshot();
+    const snapshotId = createSnapshotId(snapshot.generatedAt);
+    const tickerDirectory = join(root, '7203');
+    const historyPath = join(tickerDirectory, `${snapshotId}.json`);
+    const latestPath = join(tickerDirectory, 'latest.json');
+    const originalJson = `${JSON.stringify(snapshot, null, 2)}\n`;
+    await mkdir(tickerDirectory, { recursive: true });
+    await writeFile(historyPath, originalJson, 'utf8');
+    await writeFile(latestPath, originalJson, 'utf8');
+
+    expect(await repository.loadHistory('7203', snapshotId)).toEqual(snapshot);
+    expect(await repository.loadLatest('7203')).toEqual(snapshot);
+    expect(await readFile(historyPath, 'utf8')).toBe(originalJson);
+    expect(await readFile(latestPath, 'utf8')).toBe(originalJson);
+  });
+
+  test('rejects V1 through V8 at the V9-only save boundary', async () => {
     const { repository } = await createRepository();
 
     await expectPersistenceError(repository.save(v1Snapshot()), 'schema_validation_failed');
@@ -628,6 +740,7 @@ describe('AnalysisSnapshotRepository', () => {
     await expectPersistenceError(repository.save(v5Snapshot()), 'schema_validation_failed');
     await expectPersistenceError(repository.save(v6Snapshot()), 'schema_validation_failed');
     await expectPersistenceError(repository.save(v7Snapshot()), 'schema_validation_failed');
+    await expectPersistenceError(repository.save(v8Snapshot()), 'schema_validation_failed');
   });
 
   test('lists history metadata in descending generatedAt order', async () => {
@@ -710,7 +823,7 @@ describe('AnalysisSnapshotRepository', () => {
     await writeFile(join(tickerDirectory, 'latest.json'), JSON.stringify({ schemaVersion: 1 }), 'utf8');
     await expectPersistenceError(repository.loadLatest('7203'), 'schema_validation_failed');
 
-    await writeFile(join(tickerDirectory, 'latest.json'), JSON.stringify({ schemaVersion: 9 }), 'utf8');
+    await writeFile(join(tickerDirectory, 'latest.json'), JSON.stringify({ schemaVersion: 10 }), 'utf8');
     await expectPersistenceError(repository.loadLatest('7203'), 'unsupported_schema_version');
   });
 

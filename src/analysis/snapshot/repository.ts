@@ -13,8 +13,9 @@ import {
   ANALYSIS_SNAPSHOT_V5_SCHEMA_VERSION,
   ANALYSIS_SNAPSHOT_V6_SCHEMA_VERSION,
   ANALYSIS_SNAPSHOT_V7_SCHEMA_VERSION,
+  ANALYSIS_SNAPSHOT_V8_SCHEMA_VERSION,
   AnalysisSnapshotSchema,
-  AnalysisSnapshotV8Schema,
+  AnalysisSnapshotV9Schema,
   CanonicalTickerSchema,
   type AnalysisSnapshot,
 } from './schema.js';
@@ -93,6 +94,7 @@ function latestSourceDataDate(snapshot: AnalysisSnapshot): string | null {
     ...('sectorBenchmark' in dates ? [dates.sectorBenchmark] : []),
     ...('sectorShortRatio' in dates ? [dates.sectorShortRatio] : []),
     ...('advancedDividend' in dates ? [dates.advancedDividend] : []),
+    ...('volumeProfile' in dates ? [dates.volumeProfile] : []),
   ].filter((date): date is string => date !== null).sort().at(-1) ?? null;
 }
 
@@ -198,6 +200,8 @@ function parseSnapshotJson(contents: string, source: string): AnalysisSnapshot {
     && (raw as { schemaVersion?: unknown }).schemaVersion
       !== ANALYSIS_SNAPSHOT_V7_SCHEMA_VERSION
     && (raw as { schemaVersion?: unknown }).schemaVersion
+      !== ANALYSIS_SNAPSHOT_V8_SCHEMA_VERSION
+    && (raw as { schemaVersion?: unknown }).schemaVersion
       !== ANALYSIS_SNAPSHOT_SCHEMA_VERSION
   ) {
     throw new AnalysisSnapshotPersistenceError(
@@ -225,11 +229,11 @@ export class AnalysisSnapshotRepository {
   }
 
   async save(rawSnapshot: unknown): Promise<SavedAnalysisSnapshot> {
-    const parsed = AnalysisSnapshotV8Schema.safeParse(rawSnapshot);
+    const parsed = AnalysisSnapshotV9Schema.safeParse(rawSnapshot);
     if (!parsed.success) {
       throw new AnalysisSnapshotPersistenceError(
         'schema_validation_failed',
-        'Only a valid canonical AnalysisSnapshot V8 can be saved.',
+        'Only a valid canonical AnalysisSnapshot V9 can be saved.',
         parsed.error,
       );
     }

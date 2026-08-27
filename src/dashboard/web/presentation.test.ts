@@ -7,6 +7,7 @@ import {
   AnalysisSnapshotV5Schema,
   AnalysisSnapshotV6Schema,
   AnalysisSnapshotV7Schema,
+  AnalysisSnapshotV8Schema,
   buildAnalysisSnapshot,
   buildAnalysisSnapshotLatestItem,
   type AnalysisSnapshot,
@@ -61,6 +62,7 @@ function v8Snapshot(): AnalysisSnapshotV8 {
     sectorBenchmark: null,
     sectorShortRatio: null,
     advancedDividend: null,
+    volumeProfile: null,
     strategy: null,
     priceHistory: null,
     scenarios: null,
@@ -81,7 +83,26 @@ function v8Snapshot(): AnalysisSnapshotV8 {
     },
     additionalUnavailable: [],
   };
-  return buildAnalysisSnapshot(input);
+  const v9 = buildAnalysisSnapshot(input);
+  const {
+    volumeProfile: _volumeProfile,
+    dataDates: v9DataDates,
+    provenance: v9Provenance,
+    units: v9Units,
+    unavailable: v9Unavailable,
+    ...common
+  } = v9;
+  const { volumeProfile: _volumeProfileDate, ...dataDates } = v9DataDates;
+  const { volumeProfile: _volumeProfileProvenance, ...provenance } = v9Provenance;
+  const { volumeProfile: _volumeProfileUnits, ...units } = v9Units;
+  return AnalysisSnapshotV8Schema.parse({
+    ...common,
+    schemaVersion: 8,
+    dataDates,
+    provenance,
+    units,
+    unavailable: v9Unavailable.filter(item => item.section !== 'volumeProfile'),
+  });
 }
 
 function v7Snapshot(): AnalysisSnapshotV7 {

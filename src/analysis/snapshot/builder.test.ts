@@ -2,6 +2,70 @@ import { describe, expect, test } from 'bun:test';
 import { buildAnalysisSnapshot, REQUIRED_ANALYSIS_SNAPSHOT_SECTIONS } from './builder.js';
 import { normalizeCanonicalTicker, type AnalysisSnapshotInput } from './schema.js';
 
+function volumeProfileResult(issuerCode = '72030') {
+  const bins = Array.from({ length: 50 }, (_, index) => ({
+    index,
+    lowerPrice: 3_000 + index,
+    upperPrice: 3_001 + index,
+    representativePrice: 3_000.5 + index,
+    allocatedVolume: 240,
+    volumeShare: 0.02,
+  }));
+  return {
+    analysisAsOfDate: '2026-08-21',
+    collectedAt: '2026-08-23T01:00:00.000Z',
+    issuerCode,
+    dataDate: '2026-08-21',
+    windowStartDate: '2026-03-06',
+    windowEndDate: '2026-08-21',
+    inputBarCount: 120,
+    priceBasis: 'jquants_corporate_action_adjusted' as const,
+    volumeBasis: 'jquants_corporate_action_adjusted' as const,
+    allocationMethod: 'uniform_range_overlap_v1' as const,
+    binningMethod: {
+      id: 'fixed_count_linear_v1' as const,
+      requestedBinCount: 50 as const,
+      effectiveBinCount: 50,
+      minPrice: 3_000,
+      maxPrice: 3_050,
+    },
+    bins,
+    poc: { binIndex: 0, price: 3_000.5, allocatedVolume: 240, volumeShare: 0.02 },
+    valueArea: {
+      targetVolumeShare: 0.7 as const,
+      achievedVolumeShare: 0.7,
+      val: 3_000,
+      vah: 3_035,
+      firstBinIndex: 0,
+      lastBinIndex: 34,
+    },
+    unavailable: [],
+    methodology: {
+      id: 'daily_ohlcv_volume_profile_proxy_v1' as const,
+      approximation: 'uniform_daily_range' as const,
+      actualHolderCostBasis: false as const,
+    },
+    provenance: {
+      source: 'jquants' as const,
+      endpoint: '/v2/equities/bars/daily' as const,
+      availabilityCalendarEndpoint: '/v2/markets/calendar' as const,
+      sourceMapping: 'jquants_adjusted_ohlcv_with_corporate_actions_v1' as const,
+      adjustmentFactorField: 'AdjFactor' as const,
+      exRightsField: 'ExRT' as const,
+      basisAudit: 'collection_horizon_rights_audit_v1' as const,
+      basisAuditRequiredThroughDate: '2026-08-22',
+      basisAuditThroughDate: '2026-08-22',
+      corporateActionBasisStatus: 'supported_common_basis_established' as const,
+      calculation: 'volume_profile_engine' as const,
+    },
+    units: {
+      price: 'JPY' as const,
+      allocatedVolume: 'adjusted_shares' as const,
+      volumeShare: 'ratio' as const,
+    },
+  };
+}
+
 function completeInput(): AnalysisSnapshotInput {
   const position = (metric: 'per' | 'pbr' | 'roe' | 'roic' | 'operatingMargin' | 'revenueGrowth' | 'dividendYield') => ({
     metric,
@@ -285,6 +349,7 @@ function completeInput(): AnalysisSnapshotInput {
       },
       units: { dividendPerShare: 'JPY_per_share', payoutRatio: 'ratio' },
     },
+    volumeProfile: volumeProfileResult(),
     strategy: {
       dataDate: '2026-08-21',
       entry: {
@@ -325,7 +390,7 @@ describe('buildAnalysisSnapshot', () => {
   test('uses an explicit required-section contract and remains complete for metric-level unavailable states', () => {
     const snapshot = buildAnalysisSnapshot(completeInput());
 
-    expect(snapshot.schemaVersion).toBe(8);
+    expect(snapshot.schemaVersion).toBe(9);
     expect(REQUIRED_ANALYSIS_SNAPSHOT_SECTIONS).toEqual([
       'identity',
       'fundamental',
@@ -431,6 +496,17 @@ describe('buildAnalysisSnapshot', () => {
         source: 'jquants', role: 'market_calendar_data', endpoint: '/v2/markets/calendar',
       }),
     ]));
+    expect(snapshot.provenance.volumeProfile).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        source: 'volume_profile_engine', role: 'calculation', endpoint: null,
+      }),
+      expect.objectContaining({
+        source: 'jquants', role: 'price_data', endpoint: '/v2/equities/bars/daily',
+      }),
+      expect.objectContaining({
+        source: 'jquants', role: 'market_calendar_data', endpoint: '/v2/markets/calendar',
+      }),
+    ]));
     expect(snapshot.units.valuation.per).toBe('multiple');
     expect(snapshot.units.peerComparison.percentile).toBe('ratio');
     expect(snapshot.units.supplyDemand.percentile52w).toBe('ratio');
@@ -480,6 +556,11 @@ describe('buildAnalysisSnapshot', () => {
       dividendPerShare: 'JPY_per_share',
       payoutRatio: 'ratio',
     });
+    expect(snapshot.units.volumeProfile).toEqual({
+      price: 'JPY',
+      allocatedVolume: 'adjusted_shares',
+      volumeShare: 'ratio',
+    });
     expect(snapshot.dataDates.advancedTechnical).toBe('2026-08-21');
     expect(snapshot.advancedTechnical).toEqual(completeInput().advancedTechnical);
     expect(snapshot.dataDates.reportedShortPositions).toBe('2026-08-20');
@@ -492,6 +573,77 @@ describe('buildAnalysisSnapshot', () => {
     expect(snapshot.sectorShortRatio).toEqual(completeInput().sectorShortRatio);
     expect(snapshot.dataDates.advancedDividend).toBe('2026-08-20');
     expect(snapshot.advancedDividend).toEqual(completeInput().advancedDividend);
+    expect(snapshot.dataDates.volumeProfile).toBe('2026-08-21');
+    expect(snapshot.volumeProfile).toEqual(volumeProfileResult());
+    expect(snapshot.volumeProfile?.bins).toHaveLength(50);
+    expect(snapshot.volumeProfile?.methodology.actualHolderCostBasis).toBeFalse();
+  });
+
+  test('preserves volume-profile unavailable state without changing complete status', () => {
+    const input = completeInput();
+    input.volumeProfile = {
+      ...volumeProfileResult(),
+      dataDate: null,
+      windowStartDate: null,
+      windowEndDate: null,
+      inputBarCount: 0,
+      priceBasis: null,
+      volumeBasis: null,
+      binningMethod: {
+        ...volumeProfileResult().binningMethod,
+        effectiveBinCount: 0,
+        minPrice: null,
+        maxPrice: null,
+      },
+      bins: null,
+      poc: null,
+      valueArea: null,
+      unavailable: [{ scope: 'profile', reason: 'no_price_data' }],
+      provenance: {
+        ...volumeProfileResult().provenance,
+        basisAuditRequiredThroughDate: null,
+        basisAuditThroughDate: null,
+        corporateActionBasisStatus: 'not_evaluated',
+      },
+    };
+
+    const snapshot = buildAnalysisSnapshot(input);
+
+    expect(snapshot.status).toBe('complete');
+    expect(snapshot.volumeProfile).toEqual(input.volumeProfile);
+    expect(snapshot.unavailable).toContainEqual({
+      section: 'volumeProfile',
+      metric: 'profile',
+      reason: 'no_price_data',
+    });
+  });
+
+  test('treats an uncollected volume profile as optional and not zero', () => {
+    const input = completeInput();
+    input.volumeProfile = null;
+
+    const snapshot = buildAnalysisSnapshot(input);
+
+    expect(snapshot.status).toBe('complete');
+    expect(snapshot.volumeProfile).toBeNull();
+    expect(snapshot.dataDates.volumeProfile).toBeNull();
+    expect(snapshot.provenance.volumeProfile).toEqual([]);
+    expect(snapshot.unavailable).toContainEqual({
+      section: 'volumeProfile',
+      reason: 'not_collected',
+    });
+  });
+
+  test('rejects a partial volume-profile aggregate instead of persisting it', () => {
+    const input = completeInput();
+    input.volumeProfile = {
+      ...volumeProfileResult(),
+      poc: null,
+    };
+
+    expect(() => buildAnalysisSnapshot(input)).toThrow(
+      'bins, poc, and valueArea must be available or unavailable together.',
+    );
   });
 
   test('keeps optional advanced dividend unavailable states distinct without changing status', () => {
