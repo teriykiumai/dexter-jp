@@ -22,6 +22,7 @@ import {
   getEarnings,
   getShareholders,
   getTextBlocks,
+  getDividendSummary,
   getInvestorTypeFlows,
   getMarginData,
   getShortSaleReports,
@@ -150,6 +151,7 @@ export function buildDexterSdkTools(): ReturnType<typeof adaptLangChainTool>[] {
     rawTools.push(
       getStockPrice,
       getMarginData,
+      getDividendSummary,
       getInvestorTypeFlows,
       getShortSaleReports,
       getSectorIndex,
