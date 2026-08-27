@@ -761,6 +761,18 @@ describe('analyzeVolumeProfile', () => {
     ).toBe(10);
   });
 
+  test('applies POC tolerance against the global maximum', () => {
+    const rows = flatProfileRows([
+      { price: 110.5, volume: 100 },
+      { price: 120.5, volume: 100 + 0.75e-8 },
+      { price: 130.5, volume: 100 + 1.5e-8 },
+    ]);
+
+    expect(
+      analyzeVolumeProfile(sourceDate(59), sourceInput(rows)).poc?.binIndex,
+    ).toBe(20);
+  });
+
   test('expands Value Area lower first on a tie and stops at the exact target', () => {
     const rows = flatProfileRows([
       { price: 125.5, volume: 40 },

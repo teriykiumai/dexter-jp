@@ -789,10 +789,13 @@ function selectPoc(
   totalVolume: number,
 ): NonNullable<VolumeProfileResult['poc']> {
   const tolerance = volumeProfileConservationTolerance(totalVolume);
-  let selected = bins[0];
+  let maxAllocatedVolume = bins[0].allocatedVolume;
   for (const bin of bins.slice(1)) {
-    if (bin.allocatedVolume > selected.allocatedVolume + tolerance) selected = bin;
+    maxAllocatedVolume = Math.max(maxAllocatedVolume, bin.allocatedVolume);
   }
+  const selected = bins.find(
+    (bin) => maxAllocatedVolume - bin.allocatedVolume <= tolerance,
+  ) ?? bins[0];
   return {
     binIndex: selected.index,
     price: selected.representativePrice,
