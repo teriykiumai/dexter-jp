@@ -149,13 +149,16 @@ function createBins(minPrice: number, maxPrice: number): VolumeProfileAllocation
 
 function findContainingBinIndex(
   price: number,
-  minPrice: number,
-  maxPrice: number,
-  binWidth: number,
+  bins: readonly VolumeProfileAllocationBin[],
 ): number {
-  if (price === maxPrice) return VOLUME_PROFILE_BIN_COUNT - 1;
-  const calculatedIndex = Math.floor((price - minPrice) / binWidth);
-  return Math.min(VOLUME_PROFILE_BIN_COUNT - 1, Math.max(0, calculatedIndex));
+  const binIndex = bins.findIndex((bin, index) => (
+    price >= bin.lowerPrice
+    && (index === bins.length - 1 ? price <= bin.upperPrice : price < bin.upperPrice)
+  ));
+  if (binIndex === -1) {
+    throw new Error('Flat-bar price is outside the constructed volume-profile bins.');
+  }
+  return binIndex;
 }
 
 function addAllocation(bin: VolumeProfileAllocationBin, volume: number): void {
@@ -165,16 +168,13 @@ function addAllocation(bin: VolumeProfileAllocationBin, volume: number): void {
 function allocateBar(
   bar: Readonly<ValidatedVolumeProfileAllocationBar>,
   bins: VolumeProfileAllocationBin[],
-  minPrice: number,
-  maxPrice: number,
-  binWidth: number,
 ): void {
   if (bar.volume === 0) return;
 
   if (bar.high === bar.low) {
     const binIndex = bins.length === 1
       ? 0
-      : findContainingBinIndex(bar.low, minPrice, maxPrice, binWidth);
+      : findContainingBinIndex(bar.low, bins);
     addAllocation(bins[binIndex], bar.volume);
     return;
   }
@@ -223,7 +223,7 @@ export function allocateVolumeProfile(
   const totalInputVolume = validBars.reduce((sum, bar) => sum + bar.volume, 0);
 
   for (const bar of validBars) {
-    allocateBar(bar, bins, minPrice, maxPrice, binWidth);
+    allocateBar(bar, bins);
   }
 
   const totalAllocatedVolume = bins.reduce((sum, bin) => sum + bin.allocatedVolume, 0);

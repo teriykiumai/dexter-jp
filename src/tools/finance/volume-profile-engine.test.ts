@@ -96,6 +96,27 @@ describe('allocateVolumeProfile', () => {
     expect(result.bins[49].upperPrice).toBe(150);
   });
 
+  test('uses constructed decimal edges for flat bars on internal boundaries', () => {
+    const regression = allocateVolumeProfile([
+      bar(0.01, 0.11, 0),
+      bar(0.022, 0.022, 10),
+    ]);
+
+    expect(regression.bins[5].allocatedVolume).toBe(0);
+    expect(regression.bins[6].allocatedVolume).toBe(10);
+
+    for (const boundaryIndex of [1, 6, 17, 31, 49]) {
+      const boundaryPrice = 0.01 + boundaryIndex * 0.002;
+      const result = allocateVolumeProfile([
+        bar(0.01, 0.11, 0),
+        bar(boundaryPrice, boundaryPrice, 10),
+      ]);
+
+      expect(result.bins[boundaryIndex - 1].allocatedVolume).toBe(0);
+      expect(result.bins[boundaryIndex].allocatedVolume).toBe(10);
+    }
+  });
+
   test('allocates a flat limit-move bar to one containing bin', () => {
     const result = allocateVolumeProfile([
       bar(100, 150, 0),
