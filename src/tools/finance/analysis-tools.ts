@@ -436,21 +436,32 @@ function parseDividendSummaryRows(result: unknown): z.infer<
   );
 }
 
-function parseDividendEventRows(result: unknown): z.infer<
-  typeof dividendEventSourceRowSchema
->[] {
+function parseDividendEventRows(result: unknown): {
+  rows: z.infer<typeof dividendEventSourceRowSchema>[];
+  planUnavailable: boolean;
+} {
   const parsed = JSON.parse(
     typeof result === 'string' ? result : JSON.stringify(result),
   ) as { data?: unknown };
   if (Array.isArray(parsed.data)) {
-    return z.array(dividendEventSourceRowSchema).parse(parsed.data);
+    return {
+      rows: z.array(dividendEventSourceRowSchema).parse(parsed.data),
+      planUnavailable: false,
+    };
   }
   if (
     parsed.data
     && typeof parsed.data === 'object'
     && (parsed.data as { reason?: unknown }).reason === 'no_eligible_dividend_event_data'
   ) {
-    return [];
+    return { rows: [], planUnavailable: false };
+  }
+  if (
+    parsed.data
+    && typeof parsed.data === 'object'
+    && (parsed.data as { reason?: unknown }).reason === 'event_source_plan_unavailable'
+  ) {
+    return { rows: [], planUnavailable: true };
   }
   const error = parsed.data && typeof parsed.data === 'object'
     ? (parsed.data as { error?: unknown }).error
@@ -707,9 +718,11 @@ export const analyzeAdvancedDividendTool = new DynamicStructuredTool({
     let eventSourcePlanUnavailable = false;
     if (eventRows === undefined) {
       try {
-        eventRows = parseDividendEventRows(await getDividendEvents.invoke({
+        const eventSource = parseDividendEventRows(await getDividendEvents.invoke({
           ticker: issuerCode,
         }));
+        eventRows = eventSource.rows;
+        eventSourcePlanUnavailable = eventSource.planUnavailable;
       } catch (error) {
         if (error instanceof JQuantsApiError && error.kind === 'plan_unavailable') {
           eventSourcePlanUnavailable = true;

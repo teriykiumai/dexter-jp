@@ -140,6 +140,12 @@ describe('comprehensive analysis skill', () => {
     expect(skill?.instructions).toContain('Never construct or pass a bare classification');
     expect(skill?.instructions).toContain('change `issuerCode`');
     expect(skill?.instructions).toContain('structured `analyze_advanced_dividend` result');
+    expect(skill?.instructions).toContain('do not call `get_dividend_summary`');
+    expect(skill?.instructions).toContain('or `get_dividend_events`');
+    expect(skill?.instructions).toContain('avoids duplicate source requests');
+    expect(skill?.instructions).toContain('Do not call `get_sector_short_ratio` separately');
+    expect(skill?.instructions).toContain('fetches');
+    expect(skill?.instructions).toContain('source once from the verified `sectorIdentity`');
     expect(skill?.instructions).toContain('actual and');
     expect(skill?.instructions).toContain('company-forecast fiscal observations separate');
     expect(skill?.instructions).toContain('sourceEligibleDate');
