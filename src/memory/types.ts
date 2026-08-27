@@ -65,6 +65,16 @@ export interface MemorySearchOptions {
   minScore?: number;
 }
 
+export type MemorySearchMode = 'hybrid' | 'keyword_only';
+
+export interface MemorySearchOutcome {
+  results: MemorySearchResult[];
+  searchMode: MemorySearchMode;
+  degraded?: {
+    reason: 'embedding_unavailable';
+  };
+}
+
 export interface MemoryReadOptions {
   path: string;
   from?: number;

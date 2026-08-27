@@ -38,9 +38,7 @@ export const memorySearchTool = new DynamicStructuredTool({
       });
     }
 
-    const results = await manager.search(input.query);
-    return formatToolResult({
-      results,
-    });
+    const outcome = await manager.search(input.query);
+    return formatToolResult(outcome);
   },
 });

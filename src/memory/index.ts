@@ -8,7 +8,7 @@ import type {
   MemoryReadResult,
   MemoryRuntimeConfig,
   MemorySearchOptions,
-  MemorySearchResult,
+  MemorySearchOutcome,
   MemorySessionContext,
   TemporalDecayConfig,
   MMRConfig,
@@ -68,6 +68,7 @@ export class MemoryManager {
   private db: MemoryDatabase | null = null;
   private indexer: MemoryIndexer | null = null;
   private initError: string | null = null;
+  private embeddingUnavailable = false;
 
   private constructor(private readonly config: MemoryRuntimeConfig) {}
 
@@ -99,6 +100,7 @@ export class MemoryManager {
         watchDebounceMs: this.config.watchDebounceMs,
         embeddingClient: client,
         indexSessions: this.config.indexSessions,
+        onEmbeddingUnavailable: () => this.markEmbeddingUnavailable(),
       });
       this.indexer.startWatching();
       await this.indexer.sync({ force: false });
@@ -128,19 +130,21 @@ export class MemoryManager {
     await this.indexer.sync(options);
   }
 
-  async search(query: string, options?: MemorySearchOptions): Promise<MemorySearchResult[]> {
+  async search(query: string, options?: MemorySearchOptions): Promise<MemorySearchOutcome> {
     await this.initialize();
     if (!this.db || !this.indexer) {
-      return [];
+      return { results: [], searchMode: 'keyword_only' };
     }
     if (this.indexer.isDirty()) {
       await this.indexer.sync();
     }
 
-    const client = createEmbeddingClient({
-      provider: this.config.embeddingProvider,
-      model: this.config.embeddingModel,
-    });
+    const client = this.embeddingUnavailable
+      ? null
+      : createEmbeddingClient({
+          provider: this.config.embeddingProvider,
+          model: this.config.embeddingModel,
+        });
     return hybridSearch({
       db: this.db,
       embeddingClient: client,
@@ -154,7 +158,14 @@ export class MemoryManager {
       },
       temporalDecay: this.config.temporalDecay,
       mmr: this.config.mmr,
+      embeddingUnavailable: this.embeddingUnavailable,
+      onEmbeddingUnavailable: () => this.markEmbeddingUnavailable(),
     });
+  }
+
+  private markEmbeddingUnavailable(): void {
+    this.embeddingUnavailable = true;
+    this.indexer?.disableEmbeddings();
   }
 
   async get(options: MemoryReadOptions): Promise<MemoryReadResult> {
