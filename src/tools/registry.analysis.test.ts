@@ -1,4 +1,10 @@
 import { describe, expect, test } from 'bun:test';
+import { z } from 'zod';
+import {
+  configureLlmRunnable,
+  getChatModel,
+  resolveLlmRuntime,
+} from '../model/llm.js';
 import { getToolRegistry } from './registry.js';
 
 const ANALYSIS_TOOL_NAMES = [
@@ -45,6 +51,32 @@ describe('analysis tool registry', () => {
       } else {
         process.env.JQUANTS_API_KEY = originalApiKey;
       }
+    }
+  });
+
+  test('converts and binds every configured tool schema for the default CLI model', () => {
+    const originalJQuantsApiKey = process.env.JQUANTS_API_KEY;
+    const originalOpenAiApiKey = process.env.OPENAI_API_KEY;
+    process.env.JQUANTS_API_KEY = 'test-jquants-key';
+    process.env.OPENAI_API_KEY = 'test-openai-key';
+
+    try {
+      const runtime = resolveLlmRuntime('gpt-5.6-terra', 'deep_analysis');
+      const tools = getToolRegistry(runtime.model).map(({ tool }) => tool);
+
+      for (const tool of tools) {
+        expect(() => z.toJSONSchema(tool.schema as z.ZodType)).not.toThrow();
+      }
+      expect(() => configureLlmRunnable(
+        getChatModel(runtime, true),
+        undefined,
+        tools,
+      )).not.toThrow();
+    } finally {
+      if (originalJQuantsApiKey === undefined) delete process.env.JQUANTS_API_KEY;
+      else process.env.JQUANTS_API_KEY = originalJQuantsApiKey;
+      if (originalOpenAiApiKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = originalOpenAiApiKey;
     }
   });
 });

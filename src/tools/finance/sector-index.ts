@@ -49,6 +49,13 @@ export const SECTOR_INDEX_CODE_BY_S33 = {
 export type Sector33Code = keyof typeof SECTOR_INDEX_CODE_BY_S33;
 export type SectorIndexCode = typeof SECTOR_INDEX_CODE_BY_S33[Sector33Code];
 
+export const sector33CodeSchema = z.enum(
+  Object.keys(SECTOR_INDEX_CODE_BY_S33) as [Sector33Code, ...Sector33Code[]],
+);
+export const sectorIndexCodeSchema = z.enum(
+  Object.values(SECTOR_INDEX_CODE_BY_S33) as [SectorIndexCode, ...SectorIndexCode[]],
+);
+
 export type SectorIndexSourceUnavailableReason =
   | 'sector_classification_unavailable'
   | 'unsupported_sector'
