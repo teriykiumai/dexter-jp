@@ -2107,6 +2107,10 @@ sector short-selling-flow context under the contract above.
 
 ## 24. Phase 2E — Advanced Dividend Analysis
 
+P2-E0 through P2-E5 are complete. Snapshot V8 is the current writer, V1-V7 remain
+readable and immutable, and the Dashboard and comprehensive-analysis paths present
+the structured advanced-dividend result without recalculation.
+
 ### P2-E0 — Source / Contract Design
 
 P2-E0 is documentation only. It fixes the minimum source, availability, result, and
@@ -2520,9 +2524,556 @@ or create a threshold, score, Entry/Stop/Target, or Buy/Sell signal.
 - treating blank, `-`, empty responses, or unavailable Premium data as zero — rejected
 - LLM/Browser financial calculation, composite scores, thresholds, and signals — rejected
 
-## 25. Recommended Next Codex Task
+## 25. Phase 2F — Daily OHLCV Volume Profile Proxy
 
-Phase 2D P2-D0 through P2-D5 are implemented as separate reviewable steps. Phase 2E
-begins with the docs-only P2-E0 contract above. The next implementation step is P2-E1,
-limited to the J-Quants financial-summary dividend source; do not advance to the
-Engine, Premium dividend events, Snapshot V8, or presentation in that PR.
+### P2-F0 — Source / Contract Design
+
+P2-F0 is documentation only. It fixes the source, approximation, calculation,
+availability, result, and implementation-step contracts before any runtime, Tool,
+Snapshot V9, collector, Dashboard, or comprehensive-analysis change.
+
+The initial feature is a **daily-OHLCV estimated volume-at-price distribution proxy**.
+Daily bars do not expose executed volume at each price, current holder quantities,
+investor cost bases, or whether a position remains open. Therefore this result is not
+actual holder cost basis, true `shikori`, or measured overhead supply. POC, VAH, and
+VAL are descriptive outputs of the fixed proxy methodology only. They must not be
+converted automatically into support, resistance, Entry, Stop, Target, a score,
+threshold, or Buy/Sell signal.
+
+#### Official source and source limitations
+
+Reuse the existing J-Quants V2 client and ticker normalization with:
+
+```text
+GET /v2/equities/bars/daily
+parameters: code, from, to, pagination_key
+
+GET /v2/markets/calendar
+parameters: from, to
+```
+
+The official J-Quants schema provides `Date`, `Code`, raw `O/H/L/C/Vo`,
+`AdjFactor`, adjusted `AdjO/AdjH/AdjL/AdjC/AdjVo`, and `ExRT`. `ExRT = 3` identifies
+a rights issue. The initial profile uses adjusted OHLC and adjusted volume together
+only when the source envelope establishes a common basis. It never combines raw
+prices with adjusted volume, adjusted prices with raw volume, or independently
+reconstructs the adjustment. `AdjFactor` and `ExRT` remain source metadata used to
+establish methodology and provenance; neither is a new calculation input.
+
+Primary references checked for P2-F0:
+
+- [J-Quants API data specification](https://jpx-jquants.com/spec/data-spec)
+- [J-Quants adjusted-price calculation](https://jpx-jquants.com/ja/spec/eq-bars-daily/adj)
+- [J-Quants daily-bar specification](https://jpx-jquants.com/ja/spec/eq-bars-daily)
+- [official J-Quants CLI daily-bar schema](https://github.com/J-Quants/jquants-cli/blob/main/src/schema.rs)
+- [official J-Quants API client](https://github.com/J-Quants/jquants-api-client-python)
+- [JPXI Stock Prices dataset description](https://pro.jpx-jquants.com/datasets/9)
+- [J-Quants plan and history table](https://jpx-jquants.com/)
+
+The source is daily. Official dataset material describes stock prices before and
+after corporate-action adjustment and states that adjusted prices are retroactively
+adjusted. The daily-bar specification also states that rights-issue price adjustment
+does not adjust `Vo` or `AdjVo`. Its rights-issue price-adjustment coverage excludes
+foreign stocks and TOKYO PRO Market issues, and the source does not support every
+possible corporate action. Therefore the `Adj*` prefix alone does not prove a common
+adjusted price/volume basis.
+
+J-Quants calculates an older adjusted price by accumulating `AdjFactor` values from
+newer dates. A rights issue after `analysisAsOfDate` can therefore be reflected
+retroactively in the selected adjusted prices even though its row is excluded from
+the calculation window, while `AdjVo` remains unadjusted for that event. Inspecting
+only canonical `ExRT` values cannot establish a common basis.
+
+Adopt `collection_horizon_rights_audit_v1`. For a direct source call, retrieve the
+complete paginated issuer series needed for the calculation **and** corporate-action
+basis audit through the latest daily-bar horizon available to that call at
+`collectedAt`; do not cap source retrieval at `analysisAsOfDate`. After selecting the
+canonical window, audit `AdjFactor` and `ExRT` from `windowStartDate` through
+`basisAuditThroughDate`, inclusive. `basisAuditThroughDate` is the latest row date in
+the complete source envelope and can be later than `analysisAsOfDate`.
+
+Make audit completeness mechanical with the existing official J-Quants calendar.
+`basisAuditRequiredThroughDate` is the latest full or half trading date strictly before
+the Asia/Tokyo calendar date of `collectedAt`; if a same-date issuer row is actually
+returned, use that later date instead. A listed issuer's daily endpoint returns a row
+with null OHLCV on an issue-specific no-sale date, so absence of the required row is
+not silently treated as no event. The audit is complete only when the fully paginated
+issuer response covers `basisAuditRequiredThroughDate`, every row retains `AdjFactor`
+and `ExRT`, and there is no unexplained gap in the official full/half trading dates.
+Do not infer weekdays or forward-fill calendar or issuer rows.
+
+If any audited row has `ExRT = 3`, including a row after `analysisAsOfDate`, return
+`corporate_action_basis_unavailable` with no bins, POC, or Value Area. Apply the same
+reason when the audit horizon is truncated or delayed in a way that cannot establish
+which adjustments the returned `Adj*` values incorporate, or when an unsupported
+corporate action, mixed basis, missing metadata, or another source condition prevents
+the common price/volume basis from being established. This means endpoint access on
+Free or another delayed plan does not by itself make the profile available; inability
+to prove a complete adjustment horizon is typed basis unavailability. Do not derive a
+volume conversion or fall back to raw or apparently adjusted fields.
+
+Rows after `analysisAsOfDate` are source-integrity metadata only. Their OHLCV values
+must never enter canonical selection, validation, bins, POC, Value Area, `dataDate`,
+or any investment interpretation. Do not expose their event dates or values as an
+analysis claim. A pre-canonical rights-issue row is irrelevant only when the complete
+audit proves that it predates `windowStartDate`; a post-as-of rights issue is never
+ignored merely because it lies outside the latest-120 calculation window.
+
+P2-F2 must define one typed source envelope that retains `AdjFactor` and `ExRT` for
+every supplied row and records the exact J-Quants field mapping in provenance. P2-F3
+must make its direct source mapper produce that envelope. The existing range-mode
+`get_stock_price` result maps adjusted OHLCV to generic fields and omits both metadata
+fields; generic supplied OHLCV rows therefore cannot prove the basis and must not be
+accepted as reusable volume-profile source input. Supplied-row mode may avoid a
+duplicate fetch only when it receives and validates the complete typed envelope from
+that mapping path; a bare generic row array or `priceBasis` literal is insufficient.
+
+The minimum reusable source boundary is:
+
+```ts
+declare const verifiedVolumeProfileSource: unique symbol;
+
+type VolumeProfileSource = Readonly<{
+  readonly [verifiedVolumeProfileSource]: true;
+  issuerCode: string;
+  collectedAt: string;
+  basisAuditRequiredThroughDate: string | null;
+  basisAuditThroughDate: string | null;
+  rows: readonly Readonly<{
+    Date: string;
+    Code: string;
+    AdjO: number | null;
+    AdjH: number | null;
+    AdjL: number | null;
+    AdjC: number | null;
+    AdjVo: number | null;
+    AdjFactor: number | null;
+    ExRT: string | null;
+  }>[];
+  provenance: Readonly<{
+    source: 'jquants';
+    endpoint: '/v2/equities/bars/daily';
+    availabilityCalendarEndpoint: '/v2/markets/calendar';
+    mapping: 'jquants_adjusted_ohlcv_with_corporate_actions_v1';
+    basisAudit: 'collection_horizon_rights_audit_v1';
+  }>;
+}>;
+```
+
+This envelope is evidence of source identity and retained metadata, not proof that a
+rights-issue window is usable; the Engine still applies the canonical-window basis
+audit above. The brand is internal and non-serializable. A pure source validator adds
+it only after checking issuer identity, official calendar coverage, row chronology,
+retained fields, pagination completeness, and both audit dates; Tool JSON cannot
+self-attest a boolean or construct the verified type. P2-F3 direct mode maps fetched
+rows through this validator. Any supplied raw mode must pass the same validator with
+the complete official calendar and source provenance before the Engine receives it;
+generic OHLCV remains insufficient. Source metadata still cannot prove
+the absence of a corporate action that J-Quants does not support or identify. A valid
+profile therefore establishes the common basis only for the source-supported and
+identified adjustment scope; it is not a claim that every possible historical event
+was observable. If an unsupported event is otherwise known or the mapping cannot
+establish its scope, return `corporate_action_basis_unavailable`.
+
+The current personal plans expose daily OHLC on Free or higher: Free has two years
+with a latest-twelve-weeks delay, Light five years, Standard ten years, and Premium
+the offered history up to twenty years. Runtime uses only rows actually returned for
+the configured plan and follows every `pagination_key`. An empty successful response
+is `no_price_data`; it is not zero volume.
+
+Published update times are operational schedules, not historical-vintage evidence or
+a guarantee that a row was available at a particular instant. `analysisAsOfDate` is
+an inclusive date-only end-of-day boundary. A same-day daily bar is usable only when
+J-Quants actually returned it. Intraday analysis must not fabricate the current daily
+bar or treat an incomplete session as a completed bar.
+
+Because adjusted historical rows can be retroactively changed by later corporate
+actions, a fresh current API response cannot reproduce every earlier source vintage.
+The Engine guarantees row-date no-look-ahead for numerical inputs and separately
+audits later metadata only to reject a basis that the current response cannot support.
+`collectedAt`, `basisAuditThroughDate`, the exact source/method identity, and an
+immutable persisted Snapshot are evidence of what a run observed. A later source
+adjustment must not rewrite an existing Snapshot. When supplied input cannot establish
+the same complete audit and common J-Quants adjusted basis, return
+`corporate_action_basis_unavailable`; do not fall back to raw or mixed values.
+
+Minute OHLC and tick data are deferred. The official client identifies minute bars as
+a separate Minute Bar add-on path, with different access/history and adjustment
+questions. Adding it would introduce a second source contract and still would not
+prove current holdings or investor cost basis. Phase 2F v1 remains a daily proxy.
+
+#### Canonical window and validation order
+
+Use at most the latest 120 eligible trading bars and require at least 60 bars:
+
+```text
+calculationEligible = source rows where Date <= analysisAsOfDate
+require calculationEligible dates to be unique and strictly chronological
+canonical = latest min(calculationEligible.length, 120) rows
+require canonical.length >= 60
+require a complete basis audit from canonical[0].Date through basisAuditThroughDate
+reject any ExRT = 3 in that audit range, including Date > analysisAsOfDate
+validate prices, volume, and bar geometry only inside canonical
+```
+
+The latest 120 trading bars provide an approximately six-month medium-term profile
+while bounding output size and avoiding an automatic one-year carryover from the
+Technical 251-bar contract. The existing generic comprehensive-analysis price result
+does not satisfy the source-envelope requirement and does not make 251 bars part of
+this metric's meaning. With 60-119 eligible bars, use every available bar. With 120 or
+more, use exactly the latest 120.
+
+Exclude future rows from every numerical calculation before validation. Appending
+future OHLCV cannot change a previously valid numeric profile; the only permitted
+historical effect is changing the result to basis-unavailable when audit-only metadata
+reveals a rights issue or incomplete basis. Do not sort, deduplicate, skip, forward-
+fill, interpolate, or restart a sequence. Duplicate, malformed, or non-ascending dates
+in the calculation or audit range are `invalid_chronology`. Value validation occurs
+after canonical selection, so missing or invalid observations before the latest 120
+do not affect the result. Exchange-closed dates are absent and do not count toward the
+60/120 bars. By contrast, an issue-specific no-sale day returned by J-Quants is an
+observation and does count when it is calculation-eligible; it must not be dropped.
+Its null OHLC and volume produce `missing_price_data` and `missing_volume_data` when
+the row is inside the canonical window, rather than zero volume or a shorter sequence.
+Future audit-only rows are not subject to OHLCV value validation.
+
+For every canonical bar:
+
+- adjusted open/high/low/close must be present, finite, and greater than zero
+- adjusted volume must be present, finite, and non-negative
+- high must be greater than or equal to low
+- open and close must be within the inclusive low-high range
+- a zero-volume bar is a valid observation and contributes zero
+- missing or invalid observations invalidate the profile; none are skipped
+
+If every canonical bar has zero adjusted volume, return `zero_total_volume` and do
+not create POC, VAH, or VAL.
+
+#### Adopted volume-allocation method
+
+Adopt `uniform_range_overlap_v1`. For a non-flat bar, model volume density as uniform
+over its observed adjusted low-high interval and allocate to each intersected bin by
+price overlap:
+
+```text
+overlap(bar, bin) = max(0, min(bar.high, bin.upper) - max(bar.low, bin.lower))
+
+allocatedVolume(bar, bin)
+  = bar.adjustedVolume * overlap(bar, bin) / (bar.high - bar.low)
+```
+
+For each non-flat bar, compute intersected bins in ascending order. Allocate the
+formula amount to every intersected bin except the final one, then assign the final
+bin the remaining `bar.adjustedVolume - alreadyAllocated` amount. This fixes binary
+floating-point residuals while conserving the source bar's full adjusted volume.
+
+For a flat bar (`high === low`), allocate all adjusted volume to the one bin that
+contains that price. A flat limit-move bar uses the same rule. Gaps between bars
+receive no inferred volume: volume is allocated only within each bar's own low-high
+interval. Open and close validate bar integrity but do not alter the uniform density;
+the daily source does not reveal an intraday path that would justify such weighting.
+
+Rejected initial alternatives:
+
+- all volume at close — rejects the observed daily range and creates a point mass at
+  one non-price-level-volume observation
+- all volume at typical price — introduces a derived point estimate while still
+  discarding the range
+- equal volume per touched bin — overweights bins touched by an arbitrarily small
+  boundary overlap
+- intraday-path or holder-cost reconstruction — not observable from daily OHLCV
+
+#### Fixed price bins and numerical rules
+
+Adopt `fixed_count_linear_v1` with 50 equal-width bins over the canonical adjusted
+range:
+
+```text
+minPrice = min(canonical adjusted lows)
+maxPrice = max(canonical adjusted highs)
+binWidth = (maxPrice - minPrice) / 50
+```
+
+- bins 0-48 are `[lowerPrice, upperPrice)`
+- bin 49 is `[lowerPrice, upperPrice]`, so `maxPrice` always belongs to the last bin
+- `representativePrice = (lowerPrice + upperPrice) / 2`
+- use JavaScript `number` calculations without exchange-tick or presentation rounding
+- derive boundaries as `minPrice + index * binWidth`; set the final upper edge exactly
+  to source `maxPrice`
+- clamp a calculated bin index to `[0, 49]` to contain binary boundary drift
+- normalize negative zero on public numeric output; otherwise preserve calculation
+  values rather than applying financial rounding
+
+If `minPrice === maxPrice`, create one effective degenerate bin rather than fifty
+zero-width bins. Its lower, upper, and representative prices all equal the source
+price, and every positive volume observation is allocated to it.
+
+The profile conserves adjusted volume when:
+
+```text
+abs(sum(bin.allocatedVolume) - sum(bar.adjustedVolume))
+  <= max(1e-8, sum(bar.adjustedVolume) * 1e-12)
+```
+
+Use the same tolerance when deciding whether two allocated volumes are tied. Bin
+volume is stored as `adjusted_shares`; it may be fractional after source adjustment
+or proxy allocation. Bin `volumeShare` is a ratio from 0 to 1.
+
+#### POC, VAH, and VAL
+
+POC is the bin with maximum allocated volume. If multiple bins are within the fixed
+volume tolerance of the maximum, choose the lowest-priced bin. This tie-break is only
+deterministic ordering and carries no support/resistance interpretation.
+
+The Value Area target share is 0.70. Calculate one contiguous region as follows:
+
+```text
+included = { POC bin }
+accumulated = POC allocated volume
+
+while accumulated / totalVolume < 0.70:
+  lower = unused bin immediately below included range, if any
+  upper = unused bin immediately above included range, if any
+  add the neighbor with greater allocated volume
+  if tied within tolerance, add lower first
+  if only one neighbor exists, add it
+  add the selected bin's full volume
+```
+
+Stop immediately at an exact target. Never split the final bin; include it in full
+and allow target overshoot. Return:
+
+- POC price as the POC bin representative price
+- `VAL` as the lower edge of the lowest included bin
+- `VAH` as the upper edge of the highest included bin
+- `achievedVolumeShare = includedVolume / totalVolume`
+
+If the POC bin alone reaches the target, it is the complete Value Area. A positive-
+volume one-bin or all-same-price profile is valid: POC, VAL, and VAH equal the one
+source price and achieved share is 1. Zero total volume is unavailable rather than a
+50-way POC tie.
+
+#### Minimum result and unavailable contract
+
+Exact module placement follows merged conventions. The structured boundary must
+preserve at least:
+
+```ts
+type VolumeProfileUnavailableReason =
+  | 'insufficient_history'
+  | 'missing_price_data'
+  | 'missing_volume_data'
+  | 'invalid_price_data'
+  | 'invalid_volume_data'
+  | 'invalid_bar_geometry'
+  | 'invalid_chronology'
+  | 'zero_total_volume'
+  | 'no_price_data'
+  | 'corporate_action_basis_unavailable'
+  | 'invalid_input';
+
+interface VolumeProfileBin {
+  index: number;
+  lowerPrice: number;
+  upperPrice: number;
+  representativePrice: number;
+  allocatedVolume: number;
+  volumeShare: number;
+}
+
+interface VolumeProfileResult {
+  analysisAsOfDate: string;
+  collectedAt: string;
+  issuerCode: string;
+  dataDate: string | null;
+  windowStartDate: string | null;
+  windowEndDate: string | null;
+  inputBarCount: number;
+  priceBasis: 'jquants_corporate_action_adjusted' | null;
+  volumeBasis: 'jquants_corporate_action_adjusted' | null;
+  allocationMethod: 'uniform_range_overlap_v1';
+  binningMethod: {
+    id: 'fixed_count_linear_v1';
+    requestedBinCount: 50;
+    effectiveBinCount: number;
+    minPrice: number | null;
+    maxPrice: number | null;
+  };
+  bins: readonly VolumeProfileBin[] | null;
+  poc: {
+    binIndex: number;
+    price: number;
+    allocatedVolume: number;
+    volumeShare: number;
+  } | null;
+  valueArea: {
+    targetVolumeShare: 0.7;
+    achievedVolumeShare: number;
+    val: number;
+    vah: number;
+    firstBinIndex: number;
+    lastBinIndex: number;
+  } | null;
+  unavailable: readonly {
+    scope: 'profile';
+    reason: VolumeProfileUnavailableReason;
+  }[];
+  methodology: {
+    id: 'daily_ohlcv_volume_profile_proxy_v1';
+    approximation: 'uniform_daily_range';
+    actualHolderCostBasis: false;
+  };
+  provenance: {
+    source: 'jquants';
+    endpoint: '/v2/equities/bars/daily';
+    availabilityCalendarEndpoint: '/v2/markets/calendar';
+    sourceMapping: 'jquants_adjusted_ohlcv_with_corporate_actions_v1';
+    adjustmentFactorField: 'AdjFactor';
+    exRightsField: 'ExRT';
+    basisAudit: 'collection_horizon_rights_audit_v1';
+    basisAuditRequiredThroughDate: string | null;
+    basisAuditThroughDate: string | null;
+    corporateActionBasisStatus:
+      | 'not_evaluated'
+      | 'supported_common_basis_established'
+      | 'rights_issue_unavailable'
+      | 'unknown_basis_unavailable';
+    calculation: 'volume_profile_engine';
+  };
+  units: {
+    price: 'JPY';
+    allocatedVolume: 'adjusted_shares';
+    volumeShare: 'ratio';
+  };
+}
+```
+
+`dataDate`, `windowStartDate`, and `windowEndDate` are dates from the canonical rows
+actually used, never the request date or a plan-implied date. `inputBarCount` is the
+canonical bar count, at most 120. `collectedAt` is the UTC collection timestamp.
+`priceBasis` and `volumeBasis` use the adjusted literal only when the common source
+basis was established; they are null for source/basis unavailability. Missing price
+and missing volume remain separate. `corporateActionBasisStatus = 'not_evaluated'`
+applies when no canonical basis check occurred, such as successful empty data or
+insufficient history. `basisAuditRequiredThroughDate` and `basisAuditThroughDate` are
+provenance for audit completeness and source reproducibility, not calculation data
+dates or investment facts, and Dashboard/LLM must not interpret audit-only future
+metadata.
+Non-finite or non-positive prices, non-finite or negative volume, and invalid bar
+geometry remain distinct invalid reasons. Zero volume is not missing.
+
+Every validated positive-volume profile must produce bins, POC, and Value Area
+together. Failure after those preconditions is an implementation invariant violation,
+not data unavailability; throw an explicit internal error and do not emit or persist a
+partial successful result. Source/auth/plan/network/HTTP/response failures remain the
+existing typed `JQuantsApiError` and propagate unchanged. They are not members of
+`VolumeProfileUnavailableReason`, are not serialized as deterministic result
+unavailability, and are never relabelled as an empty or zero profile.
+
+Before a valid profile exists, return `bins = null`, `poc = null`,
+`valueArea = null`, `effectiveBinCount = 0`, and null min/max prices. Preserve known
+request identity, retained corporate-action provenance, and any canonical dates/count
+already established. Never choose a substitute POC or preserve partial core metrics.
+
+P2-F0 does not change Snapshot schema. P2-F4 will persist the bounded full bin
+distribution as well as POC and Value Area. Saving only aggregates is rejected because
+the Dashboard could not display the distribution without Browser recalculation. Do
+not duplicate the raw OHLCV payload solely for this metric; retain method identity,
+dates, units, and source/calculation provenance.
+
+#### Adopted, deferred, and rejected
+
+| Candidate | Decision | Reason |
+| --- | --- | --- |
+| Daily adjusted-OHLCV price-distribution proxy | **IMPLEMENT** | Reuses the authoritative source and makes the approximation explicit. |
+| Uniform low-high overlap allocation | **IMPLEMENT** | Uses the observed daily range, preserves volume, and makes the one unobservable density assumption explicit. |
+| Fixed 50-bin linear range | **IMPLEMENT** | Bounds Snapshot/UI size and avoids issuer-price- and historical-tick-specific widths. |
+| 120-bar maximum / 60-bar minimum | **IMPLEMENT** | Gives medium-term context without inheriting the unrelated 251-bar Technical contract. |
+| Collection-horizon rights-issue basis audit | **IMPLEMENT** | Detects later rights issues that can be retroactively reflected in pre-as-of adjusted prices without using future OHLCV numerically. |
+| POC and contiguous 70% Value Area | **IMPLEMENT** | Deterministic descriptive summary with fixed tie and overshoot behavior. |
+| Full 50-bin distribution in Snapshot V9 | **IMPLEMENT LATER** in P2-F4 | Required for pass-through visualization without Browser calculation. |
+| Rights-issue-window common-basis conversion | **DEFER** | J-Quants adjusts rights-issue prices but not volume; v1 returns typed unavailability instead of inventing a conversion. |
+| Minute/tick profile | **DEFER** | Separate add-on, coverage, adjustment, and as-of contract; not needed for the initial daily proxy. |
+| Close/typical-price point allocation or equal touched-bin allocation | **REJECT** | Discards range information or introduces boundary distortion. |
+| Actual holder cost basis, retained-position amount, or true shikori | **REJECT** | Not observable from daily OHLCV. |
+| Support/resistance, Entry/Stop/Target, score, threshold, or Buy/Sell derivation | **REJECT** | Adds unsupported interpretation to an approximate descriptive distribution. |
+| LLM or Browser calculation | **REJECT** | Violates the canonical deterministic-result boundary. |
+
+#### Phase 2F implementation sequence and tests
+
+```text
+P2-F0 docs-only contract
+  → P2-F1 pure fixed-bin / uniform-range allocation helper
+  → P2-F2 deterministic canonical-window / POC / Value Area Engine
+  → P2-F3 structured analyze_volume_profile Tool
+  → P2-F4 Snapshot V9 + Standard Agent collector
+  → P2-F5 Dashboard + comprehensive-analysis
+```
+
+P2-F1 adds only the narrow pure binning and per-bar allocation helper. It does not add
+the aggregate Engine, Tool, Snapshot, collector, Dashboard, or skill. Tests fix a
+hand-verifiable normal profile, per-bar and total volume conservation, exact bin
+edges, the maximum-price bin, prices on boundaries, flat/limit bars, all-same-price
+input, gaps, zero volume, missing/invalid prices and volume, invalid high-low/open/
+close geometry, non-mutation, and the floating-point tolerance/residual rule.
+
+P2-F2 adds canonical selection, validation, POC, Value Area, result metadata, units,
+and typed unavailable semantics. Tests fix 59 unavailable / 60 available bars,
+60-119 all-history behavior, exactly latest 120 bars, canonical-window-old-row
+invariance, future OHLCV exclusion, duplicate/non-chronological calculation or audit
+dates, POC ties, Value Area lower tie, exact target, whole-bin overshoot, one-bin
+behavior, zero total volume, and returned no-sale rows as counted missing observations.
+Corporate-action cases fix a rights issue inside the canonical window, the documented
+foreign-stock/TOKYO PRO Market exceptions, a pre-canonical rights issue as irrelevant,
+mixed/unknown or incomplete adjustment basis, pure source-validator branding, rejection
+of a caller-asserted completeness flag, and the required regression:
+
+```text
+canonical window end = analysisAsOfDate D
+later audit row D+n has ExRT = 3
+current source has retroactively adjusted pre-D prices
+→ corporate_action_basis_unavailable
+```
+
+A future non-rights row or future invalid OHLCV must not change the valid historical
+numbers. Tests also fix all-or-nothing bins/POC/Value Area invariants, basis-audit
+provenance, and non-mutation.
+
+P2-F3 exposes a separate `analyze_volume_profile` structured tool so the existing
+Phase 1 `TechnicalResult` and `analyze_technical` semantics remain unchanged. It
+reuses already-fetched data only through the typed `VolumeProfileSource` envelope and
+uses the existing J-Quants client for direct ticker mode. Generic `get_stock_price`
+OHLCV is not reusable basis proof. It must not fetch the same price history twice in
+one path. Tests fix pagination, numeric and alphanumeric JPX codes, retention of
+`AdjFactor`/`ExRT`, exact source field/basis mapping, rejection of bare generic OHLCV,
+unchanged typed `JQuantsApiError` propagation for plan/auth/network/HTTP/invalid-
+response failures, successful empty data, and corporate-action-basis unavailability.
+Direct-mode tests also fix retrieval through the collection-time source horizon rather
+than `analysisAsOfDate`, pagination of post-as-of audit metadata, incomplete/delayed
+audit-horizon rejection, official full/half trading-day coverage without weekday
+inference or forward fill, a returned null no-sale row versus a missing required row,
+later `ExRT = 3` detection, no numerical use or exposure of future OHLCV, no duplicate
+fetch when the complete typed envelope is supplied, and structured-only output.
+
+P2-F4 adds the minimum Snapshot V9 and collector integration. V1-V8 remain immutable
+and readable, new saves become V9, existing files are not migrated or rewritten, and
+unknown versions remain rejected. Full bins, aggregate metrics, method identity,
+units, calculation dates, basis-audit method/horizon, corporate-action basis status,
+and provenance pass through from the structured result. Volume-profile
+unavailability alone does not change existing complete/partial semantics. The
+collector locks issuer identity and never reconstructs values from Markdown.
+
+P2-F5 presents only Snapshot V9 values and updates comprehensive-analysis to interpret
+only the structured result. Tests fix full-bin/POC/VA pass-through, unavailable and
+valid-zero distinction, V1-V8 `not_collected`, no Browser or LLM recalculation, the
+daily-proxy limitation, audit-only future metadata never being presented or interpreted
+as an issuer event, and absence of support/resistance, Entry/Stop/Target, score,
+threshold, or Buy/Sell instructions.
+
+## 26. Recommended Next Codex Task
+
+Phase 2E P2-E0 through P2-E5 is complete and Snapshot V8 is the current writer. The
+next implementation step is P2-F1, limited to the pure fixed-bin and uniform-range
+volume-allocation helper defined above. Do not advance to POC/Value Area aggregation,
+Tool exposure, Snapshot V9, collector, Dashboard, or comprehensive-analysis in that
+PR.
