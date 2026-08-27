@@ -68,8 +68,9 @@ describe('task-aware LLM runtime profiles', () => {
 
   test('uses provider fastModel and filters capability after model selection', () => {
     expect(resolveLlmRuntime('gpt-5.6-terra', 'fast_structured')).toEqual({
-      model: 'gpt-5.4-mini',
+      model: 'gpt-5.6-luna',
       providerId: 'openai',
+      reasoningEffort: 'low',
     });
     expect(resolveLlmRuntime('claude-sonnet-4-6', 'fast_structured')).toEqual({
       model: 'claude-haiku-4-5',
