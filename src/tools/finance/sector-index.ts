@@ -9,6 +9,9 @@ import {
 } from './jquants-client.js';
 
 export const SECTOR_INDEX_SOURCE_START_DATE = '2008-05-07';
+// Bound the source request without inferring business days; official calendar rows
+// still decide the classification date and an uncovered closure stays unavailable.
+const SECTOR_CLASSIFICATION_CALENDAR_LOOKBACK_DAYS = 31;
 
 export const SECTOR_INDEX_CODE_BY_S33 = {
   '0050': '0040',
@@ -314,8 +317,16 @@ function mapCalendarRows(
 }
 
 async function fetchClassificationDate(analysisAsOfDate: string): Promise<string | null> {
+  const calendarFromDate = new Date(`${analysisAsOfDate}T00:00:00Z`);
+  calendarFromDate.setUTCDate(
+    calendarFromDate.getUTCDate() - SECTOR_CLASSIFICATION_CALENDAR_LOOKBACK_DAYS,
+  );
+  const calendarFrom = [
+    SECTOR_INDEX_SOURCE_START_DATE,
+    calendarFromDate.toISOString().slice(0, 10),
+  ].sort().at(-1)!;
   const rows = await jquantsGetAll<Record<string, unknown>>('/markets/calendar', {
-    from: SECTOR_INDEX_SOURCE_START_DATE,
+    from: calendarFrom,
     to: analysisAsOfDate,
   });
   return selectSectorClassificationDate(

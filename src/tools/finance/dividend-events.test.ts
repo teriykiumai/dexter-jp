@@ -51,6 +51,7 @@ describe('getDividendEvents', () => {
     expect(getDividendEvents.description).toContain('2022-06-06');
     expect(getDividendEvents.description).toContain('does not replay updates');
     expect(getDividendEvents.description).toContain('aggregate annual amounts');
+    expect(getDividendEvents.description).toContain('event_source_plan_unavailable');
     expect(getDividendEvents.description).toContain('unavailable, not zero');
   });
 
@@ -205,22 +206,17 @@ describe('getDividendEvents', () => {
     }
   });
 
-  test('preserves Premium plan errors without exposing the API key', async () => {
+  test('returns typed Premium plan unavailability without exposing the API key', async () => {
     process.env.JQUANTS_API_KEY = 'secret-test-key';
     globalThis.fetch = (async () => new Response(JSON.stringify({
       message: 'This API is not available on your subscription.',
     }), { status: 403 })) as unknown as typeof fetch;
 
-    try {
-      await getDividendEvents.invoke({ ticker: '7203' });
-      throw new Error('Expected request to fail');
-    } catch (error) {
-      expect(error).toMatchObject({
-        name: 'JQuantsApiError',
-        kind: 'plan_unavailable',
-        status: 403,
-      });
-      expect((error as Error).message).not.toContain('secret-test-key');
-    }
+    const result = await getDividendEvents.invoke({ ticker: '7203' });
+    expect(parseToolData(result)).toEqual({
+      error: 'Dividend-event data is unavailable for the current J-Quants plan.',
+      reason: 'event_source_plan_unavailable',
+    });
+    expect(String(result)).not.toContain('secret-test-key');
   });
 });

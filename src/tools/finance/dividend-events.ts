@@ -40,7 +40,7 @@ export interface DividendEventSourceRow {
 export const DIVIDEND_EVENTS_DESCRIPTION = `
 Fetches report-level dividend notifications from the Premium-only J-Quants dividend endpoint for TSE-listed issues.
 
-The source preserves notification and corporate-action reference identity, new/correction/deletion status, interim/fiscal-year-end and decided/forecast codes, source JPY-per-share amounts, record dates, and explicit commemorative/special components. Component amounts are available only from 2022-06-06. The tool does not replay updates, calculate ordinary dividends, aggregate annual amounts, split-adjust values, or calculate yield or growth. Blank fields and an empty response are unavailable, not zero.
+The source preserves notification and corporate-action reference identity, new/correction/deletion status, interim/fiscal-year-end and decided/forecast codes, source JPY-per-share amounts, record dates, and explicit commemorative/special components. Component amounts are available only from 2022-06-06. The tool does not replay updates, calculate ordinary dividends, aggregate annual amounts, split-adjust values, or calculate yield or growth. A plan restriction is returned as typed event_source_plan_unavailable; blank fields and an empty response are unavailable, not zero.
 `.trim();
 
 const DividendEventsInputSchema = z.object({
@@ -179,9 +179,20 @@ export const getDividendEvents = new DynamicStructuredTool({
   schema: DividendEventsInputSchema,
   func: async ({ ticker }) => {
     const issuerCode = await resolveJQuantsCode(ticker);
-    const rows = await jquantsGetAll<Record<string, unknown>>(ENDPOINT, {
-      code: issuerCode,
-    });
+    let rows: Record<string, unknown>[];
+    try {
+      rows = await jquantsGetAll<Record<string, unknown>>(ENDPOINT, {
+        code: issuerCode,
+      });
+    } catch (error) {
+      if (error instanceof JQuantsApiError && error.kind === 'plan_unavailable') {
+        return formatToolResult({
+          error: 'Dividend-event data is unavailable for the current J-Quants plan.',
+          reason: 'event_source_plan_unavailable',
+        }, []);
+      }
+      throw error;
+    }
 
     if (rows.length === 0) {
       return formatToolResult({

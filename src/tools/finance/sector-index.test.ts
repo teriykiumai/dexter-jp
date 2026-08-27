@@ -161,7 +161,7 @@ describe('getSectorIndex', () => {
     const calendarRequest = requests.find(({ url }) => url.pathname.endsWith('/markets/calendar'))!;
     const masterRequest = requests.find(({ url }) => url.pathname.endsWith('/equities/master'))!;
     const indexRequests = requests.filter(({ url }) => url.pathname.endsWith('/indices/bars/daily'));
-    expect(calendarRequest.url.searchParams.get('from')).toBe(SECTOR_INDEX_SOURCE_START_DATE);
+    expect(calendarRequest.url.searchParams.get('from')).toBe('2026-04-19');
     expect(calendarRequest.url.searchParams.get('to')).toBe('2026-05-20');
     expect(masterRequest.url.searchParams.get('code')).toBe('72030');
     expect(masterRequest.url.searchParams.get('date')).toBe('2026-05-20');
@@ -241,6 +241,35 @@ describe('getSectorIndex', () => {
     const indexRequest = requests.find(({ pathname }) => pathname.endsWith('/indices/bars/daily'))!;
     expect(masterRequest.searchParams.get('date')).toBe('2026-05-15');
     expect(indexRequest.searchParams.get('to')).toBe('2026-05-17');
+  });
+
+  test('does not request irrelevant pre-plan calendar history for a current classification', async () => {
+    process.env.JQUANTS_API_KEY = 'test-key';
+    const calendarFrom: string[] = [];
+    globalThis.fetch = (async (input: FetchInput) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith('/markets/calendar')) {
+        const from = url.searchParams.get('from')!;
+        calendarFrom.push(from);
+        if (from < '2016-08-27') {
+          return new Response(JSON.stringify({
+            message: 'Your subscription covers the following dates: 2016-08-27 ~ .',
+          }), { status: 403 });
+        }
+        return response([{ Date: '2026-05-20', HolDiv: '1' }]);
+      }
+      if (url.pathname.endsWith('/equities/master')) return response([masterRow()]);
+      return response([indexRow()]);
+    }) as unknown as typeof fetch;
+
+    const result = parseToolResult(await getSectorIndex.invoke({
+      ticker: '7203',
+      analysisAsOfDate: '2026-05-20',
+      from: '2025-05-20',
+    })) as { classification: { classificationDate: string } };
+
+    expect(result.classification.classificationDate).toBe('2026-05-20');
+    expect(calendarFrom).toEqual(['2026-04-19']);
   });
 
   test('resolves historical sector changes independently without stitching index codes', async () => {

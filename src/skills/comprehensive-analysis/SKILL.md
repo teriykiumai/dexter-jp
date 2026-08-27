@@ -22,6 +22,13 @@ Run the complete MVP workflow for one company. Reuse retrieved datasets between 
 - Claude Agent SDK: use the available leaf tools `get_company_info`, `get_financial_statements`, `get_key_ratios`, and `get_earnings`; use `screen_companies` for the candidate set.
 - Both modes: use `read_filings`, `get_stock_price`, `get_margin_data`, `get_topix`, and the available `analyze_*` tools.
 
+In this workflow, do not call `get_dividend_summary` or `get_dividend_events`
+separately. `analyze_advanced_dividend` retrieves both sources in direct ticker mode,
+keeps Premium event-plan unavailability typed, and avoids duplicate source requests.
+Do not call `get_sector_short_ratio` separately; `analyze_sector_short_ratio` fetches
+the source once from the verified `sectorIdentity` and performs the deterministic
+calculation.
+
 Never call a tool name that is absent from the current tool list.
 
 ## Progress checklist
