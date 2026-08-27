@@ -18,6 +18,7 @@ import {
   type AnalysisSnapshotV6,
   type AnalysisSnapshotV7,
   type AnalysisSnapshotV8,
+  type AnalysisSnapshotV9,
   type AnalysisSnapshotInput,
 } from '../../analysis/snapshot/index.js';
 import {
@@ -27,6 +28,7 @@ import {
   REPORTED_SHORT_POSITION_DISCLOSURE_NOTE,
   SECTOR_BENCHMARK_CONTEXT_NOTE,
   SECTOR_SHORT_RATIO_CONTEXT_NOTE,
+  VOLUME_PROFILE_CONTEXT_NOTE,
   WATCHLIST_STALE_AFTER_DAYS,
   buildDetailPath,
   displayText,
@@ -37,8 +39,10 @@ import {
   sortWatchlistItems,
 } from './presentation.js';
 
-function v8Snapshot(): AnalysisSnapshotV8 {
-  const input: AnalysisSnapshotInput = {
+function snapshotInput(
+  volumeProfile: AnalysisSnapshotInput['volumeProfile'] = null,
+): AnalysisSnapshotInput {
+  return {
     identity: {
       canonicalTicker: '7203',
       companyName: 'トヨタ自動車株式会社',
@@ -62,7 +66,7 @@ function v8Snapshot(): AnalysisSnapshotV8 {
     sectorBenchmark: null,
     sectorShortRatio: null,
     advancedDividend: null,
-    volumeProfile: null,
+    volumeProfile,
     strategy: null,
     priceHistory: null,
     scenarios: null,
@@ -83,7 +87,16 @@ function v8Snapshot(): AnalysisSnapshotV8 {
     },
     additionalUnavailable: [],
   };
-  const v9 = buildAnalysisSnapshot(input);
+}
+
+function v9Snapshot(
+  volumeProfile: AnalysisSnapshotInput['volumeProfile'] = null,
+): AnalysisSnapshotV9 {
+  return buildAnalysisSnapshot(snapshotInput(volumeProfile));
+}
+
+function v8Snapshot(): AnalysisSnapshotV8 {
+  const v9 = v9Snapshot();
   const {
     volumeProfile: _volumeProfile,
     dataDates: v9DataDates,
@@ -511,6 +524,81 @@ function advancedDividendResult(): NonNullable<AnalysisSnapshotV8['advancedDivid
   };
 }
 
+function volumeProfileResult(): NonNullable<AnalysisSnapshotV9['volumeProfile']> {
+  const totalVolume = 12_250;
+  const bins = Array.from({ length: 50 }, (_, index) => {
+    const allocatedVolume = index * 10;
+    return {
+      index,
+      lowerPrice: 1_000 + index * 10,
+      upperPrice: 1_010 + index * 10,
+      representativePrice: 1_005 + index * 10,
+      allocatedVolume,
+      volumeShare: allocatedVolume / totalVolume,
+    };
+  });
+
+  return {
+    analysisAsOfDate: '2026-08-21',
+    collectedAt: '2026-08-28T03:04:05.000Z',
+    issuerCode: '72030',
+    dataDate: '2026-08-21',
+    windowStartDate: '2026-03-03',
+    windowEndDate: '2026-08-21',
+    inputBarCount: 120,
+    priceBasis: 'jquants_corporate_action_adjusted',
+    volumeBasis: 'jquants_corporate_action_adjusted',
+    allocationMethod: 'uniform_range_overlap_v1',
+    binningMethod: {
+      id: 'fixed_count_linear_v1',
+      requestedBinCount: 50,
+      effectiveBinCount: 50,
+      minPrice: 1_000,
+      maxPrice: 1_500,
+    },
+    bins,
+    // Presentation sentinels intentionally differ from bin-derived values.
+    poc: {
+      binIndex: 7,
+      price: 1_234.56,
+      allocatedVolume: 487.5,
+      volumeShare: 0.0398,
+    },
+    valueArea: {
+      targetVolumeShare: 0.7,
+      achievedVolumeShare: 0.7654,
+      val: 1_039.25,
+      vah: 1_121.75,
+      firstBinIndex: 4,
+      lastBinIndex: 11,
+    },
+    unavailable: [],
+    methodology: {
+      id: 'daily_ohlcv_volume_profile_proxy_v1',
+      approximation: 'uniform_daily_range',
+      actualHolderCostBasis: false,
+    },
+    provenance: {
+      source: 'jquants',
+      endpoint: '/v2/equities/bars/daily',
+      availabilityCalendarEndpoint: '/v2/markets/calendar',
+      sourceMapping: 'jquants_adjusted_ohlcv_with_corporate_actions_v1',
+      adjustmentFactorField: 'AdjFactor',
+      exRightsField: 'ExRT',
+      basisAudit: 'collection_horizon_rights_audit_v1',
+      basisAuditRequiredThroughDate: '2026-08-26',
+      basisAuditThroughDate: '2026-08-27',
+      corporateActionBasisStatus: 'supported_common_basis_established',
+      calculation: 'volume_profile_engine',
+    },
+    units: {
+      price: 'JPY',
+      allocatedVolume: 'adjusted_shares',
+      volumeShare: 'ratio',
+    },
+  };
+}
+
 describe('dashboard presentation helpers', () => {
   test('keeps nullable values explicitly unavailable instead of displaying zero', () => {
     expect(formatMetric(null, 'JPY')).toEqual({ text: UNAVAILABLE_TEXT, available: false });
@@ -531,6 +619,7 @@ describe('dashboard presentation helpers', () => {
     expect(formatMetric(62.345, 'index').text).toBe('62.35');
     expect(formatMetric(1_234, 'thousand_JPY').text).toBe('1,234 千円');
     expect(formatMetric(120, 'JPY_per_share').text).toBe('¥120 / 株');
+    expect(formatMetric(1_234.5, 'adjusted_shares').text).toBe('1,234.5 調整後株');
   });
 });
 
@@ -730,6 +819,114 @@ describe('snapshot presentation mapping', () => {
       if (snapshot.schemaVersion !== 8) {
         expect(mapSnapshotToDashboard(snapshot).dataDates.map(item => item.label))
           .not.toContain('Advanced Dividend');
+      }
+    }
+  });
+
+  test('passes through every V9 volume-profile bin, POC, and Value Area value', () => {
+    const snapshot = v9Snapshot(volumeProfileResult());
+    const dashboard = mapSnapshotToDashboard(snapshot);
+    const view = dashboard.volumeProfile;
+
+    expect(view.state).toBe('available');
+    expect(view.analysisAsOfDate).toEqual({ text: '2026-08-21', available: true });
+    expect(view.windowStartDate).toEqual({ text: '2026-03-03', available: true });
+    expect(view.windowEndDate).toEqual({ text: '2026-08-21', available: true });
+    expect(view.inputBarCount).toEqual({ text: '120', available: true });
+    expect(view.bins).toHaveLength(50);
+    expect(view.bins.map(bin => bin.index)).toEqual(Array.from({ length: 50 }, (_, i) => i));
+    expect(view.bins[0]).toEqual({
+      index: 0,
+      lowerPrice: { text: '¥1,000', available: true },
+      upperPrice: { text: '¥1,010', available: true },
+      representativePrice: { text: '¥1,005', available: true },
+      allocatedVolume: { text: '0 調整後株', available: true },
+      volumeShare: { text: '0%', available: true },
+    });
+    expect(view.bins[49]).toMatchObject({
+      index: 49,
+      representativePrice: { text: '¥1,495', available: true },
+      allocatedVolume: { text: '490 調整後株', available: true },
+      volumeShare: { text: '4%', available: true },
+    });
+    expect(view.poc).toEqual({
+      binIndex: 7,
+      price: { text: '¥1,234.56', available: true },
+      allocatedVolume: { text: '487.5 調整後株', available: true },
+      volumeShare: { text: '3.98%', available: true },
+    });
+    expect(view.valueArea).toEqual({
+      targetVolumeShare: { text: '70%', available: true },
+      achievedVolumeShare: { text: '76.54%', available: true },
+      val: { text: '¥1,039.25', available: true },
+      vah: { text: '¥1,121.75', available: true },
+      firstBinIndex: 4,
+      lastBinIndex: 11,
+    });
+    expect(dashboard.dataDates).toContainEqual({
+      label: 'Volume Profile',
+      value: { text: '2026-08-21', available: true },
+    });
+    expect(JSON.stringify(view)).not.toContain('2026-08-26');
+    expect(JSON.stringify(view)).not.toContain('2026-08-27');
+    expect(JSON.stringify(view)).not.toContain('basisAuditThroughDate');
+    expect(VOLUME_PROFILE_CONTEXT_NOTE).toContain('推定出来高価格分布proxy');
+    expect(VOLUME_PROFILE_CONTEXT_NOTE).toContain('Browserで再計算せず');
+    expect(VOLUME_PROFILE_CONTEXT_NOTE).toContain('真のしこり玉');
+    expect(VOLUME_PROFILE_CONTEXT_NOTE).toContain('support/resistance');
+    expect(VOLUME_PROFILE_CONTEXT_NOTE).toContain('Buy/Sell signal');
+  });
+
+  test('distinguishes volume-profile unavailability and valid zero from not-collected', () => {
+    const result = volumeProfileResult();
+    const unavailable = v9Snapshot({
+      ...result,
+      dataDate: null,
+      windowStartDate: null,
+      windowEndDate: null,
+      inputBarCount: 59,
+      priceBasis: null,
+      volumeBasis: null,
+      binningMethod: {
+        ...result.binningMethod,
+        effectiveBinCount: 0,
+        minPrice: null,
+        maxPrice: null,
+      },
+      bins: null,
+      poc: null,
+      valueArea: null,
+      unavailable: [{ scope: 'profile', reason: 'insufficient_history' }],
+      provenance: {
+        ...result.provenance,
+        basisAuditRequiredThroughDate: null,
+        basisAuditThroughDate: null,
+        corporateActionBasisStatus: 'not_evaluated',
+      },
+    });
+
+    const unavailableView = mapSnapshotToDashboard(unavailable).volumeProfile;
+    expect(unavailableView.state).toBe('unavailable');
+    expect(unavailableView.bins).toEqual([]);
+    expect(unavailableView.poc).toBeNull();
+    expect(unavailableView.valueArea).toBeNull();
+    expect(unavailableView.dataDate).toEqual({ text: UNAVAILABLE_TEXT, available: false });
+    expect(unavailableView.unavailableReasons).toEqual([
+      'profile: insufficient history',
+    ]);
+
+    for (const snapshot of [
+      v1Snapshot(), v2Snapshot(), v3Snapshot(), baseSnapshot(),
+      v5Snapshot(), v6Snapshot(), v7Snapshot(), v8Snapshot(), v9Snapshot(),
+    ]) {
+      const view = mapSnapshotToDashboard(snapshot).volumeProfile;
+      expect(view.state).toBe('not_collected');
+      expect(view.bins).toEqual([]);
+      expect(view.poc).toBeNull();
+      expect(view.valueArea).toBeNull();
+      if (snapshot.schemaVersion !== 9) {
+        expect(mapSnapshotToDashboard(snapshot).dataDates.map(item => item.label))
+          .not.toContain('Volume Profile');
       }
     }
   });

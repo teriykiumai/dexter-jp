@@ -47,6 +47,7 @@ describe('comprehensive analysis skill', () => {
       'get_topix',
       'analyze_financial_metrics',
       'analyze_advanced_dividend',
+      'analyze_volume_profile',
       'analyze_technical',
       'analyze_supply_demand',
       'analyze_reported_short_positions',
@@ -68,6 +69,7 @@ describe('comprehensive analysis skill', () => {
       '# Advanced Dividend',
       '# Peer Comparison',
       '# Technical',
+      '# Volume Profile',
       '# Supply & Demand',
       '# Reported Short Positions',
       '# Investor Type Flows',
@@ -153,6 +155,25 @@ describe('comprehensive analysis skill', () => {
     expect(skill?.instructions).toContain('no dividend');
     expect(skill?.instructions).toContain('payout policy, DOE');
     expect(skill?.instructions).toContain('dividend claim from missing data');
+    expect(skill?.instructions).toContain('structured `analyze_volume_profile` result');
+    expect(skill?.instructions).toContain('daily adjusted OHLCV');
+    expect(skill?.instructions).toContain('bar-internal price-level executions');
+    expect(skill?.instructions).toContain('investor cost basis');
+    expect(skill?.instructions).toContain('true');
+    expect(skill?.instructions).toContain('shikori');
+    expect(skill?.instructions).toContain('Engine-provided full bins, POC, VAL, VAH');
+    expect(skill?.instructions).toContain('without recalculating');
+    expect(skill?.instructions).toContain('valid zero-volume bin');
+    expect(skill?.instructions).toContain('unavailable profile is not zero');
+    expect(skill?.instructions).toContain('audit-only future metadata');
+    expect(skill?.instructions).toContain('basisAuditRequiredThroughDate');
+    expect(skill?.instructions).toContain('basisAuditThroughDate');
+    expect(skill?.instructions).toContain('never be presented or interpreted');
+    expect(skill?.instructions).toContain('support/resistance');
+    expect(skill?.instructions).toContain('Entry/Stop/Target');
+    expect(skill?.instructions).toContain('ranking');
+    expect(skill?.instructions).toContain('generic `get_stock_price` rows');
+    expect(skill?.instructions).toContain('source path a second time');
 
     const invoked = await skillTool.invoke({
       skill: 'comprehensive-analysis',
