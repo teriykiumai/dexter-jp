@@ -1,3 +1,4 @@
+import { toJQuantsSecuritiesCode } from '../../utils/japanese-securities-code.js';
 import {
   resolveDividendSourceEligibleDate,
   type DividendAvailabilityCalendarDay,
@@ -6,7 +7,6 @@ import {
 
 const CANONICAL_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/;
-const ISSUER_CODE_PATTERN = /^\d{5}$/;
 
 export type AdvancedDividendCoreUnavailableReason =
   | 'no_eligible_dividend_disclosure_data'
@@ -61,6 +61,14 @@ function isCanonicalDate(value: string): boolean {
   if (!CANONICAL_DATE_PATTERN.test(value)) return false;
   const date = new Date(`${value}T00:00:00Z`);
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function isNormalizedJQuantsIssuerCode(value: string): boolean {
+  try {
+    return toJQuantsSecuritiesCode(value) === value;
+  } catch {
+    return false;
+  }
 }
 
 function result(
@@ -186,7 +194,7 @@ export function analyzeDividendFiscalObservations(
   officialCalendar: readonly DividendAvailabilityCalendarDay[],
   analysisAsOfDate: string,
 ): DividendFiscalResult {
-  if (!ISSUER_CODE_PATTERN.test(issuerCode)) {
+  if (!isNormalizedJQuantsIssuerCode(issuerCode)) {
     throw new RangeError('Dividend issuerCode must be a normalized five-digit JPX code.');
   }
   if (!isCanonicalDate(analysisAsOfDate)) {

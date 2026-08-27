@@ -334,6 +334,22 @@ describe('analyzeDividendFiscalObservations', () => {
     });
   });
 
+  test('accepts a normalized alphanumeric J-Quants issuer code', () => {
+    const result = analyzeDividendFiscalObservations(
+      '130A0',
+      [sourceRow({ issuerCode: '130A0' })],
+      calendar,
+      '2026-05-18',
+    );
+
+    expect(result).toMatchObject({
+      issuerCode: '130A0',
+      dataDate: '2026-05-15',
+      unavailable: [],
+    });
+    expect(result.observations).toHaveLength(3);
+  });
+
   test('returns invalid_data for an eligible issuer mismatch or duplicate disclosure identity', () => {
     const mismatched = sourceRow({ issuerCode: '67580' });
     const duplicate = sourceRow();
@@ -367,6 +383,9 @@ describe('analyzeDividendFiscalObservations', () => {
   test('rejects invalid boundary identity inputs', () => {
     expect(() => analyzeDividendFiscalObservations(
       '7203', [], calendar, '2026-05-18',
+    )).toThrow(RangeError);
+    expect(() => analyzeDividendFiscalObservations(
+      '130A', [], calendar, '2026-05-18',
     )).toThrow(RangeError);
     expect(() => analyzeDividendFiscalObservations(
       '72030', [], calendar, '2026-02-30',
