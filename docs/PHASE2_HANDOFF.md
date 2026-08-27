@@ -1107,23 +1107,48 @@ proof. Daily OHLC is available on Free or higher subject to plan history and the
 latest-twelve-weeks delay. Use only rows actually returned. A successful empty response
 is unavailable, not zero; typed J-Quants source errors propagate unchanged.
 
-`analysisAsOfDate` is an inclusive date-only end-of-day boundary. Exclude future rows
-first; a same-day bar is eligible only if returned. Current adjusted history can be
-retroactively changed by later corporate actions, so a current API fetch cannot prove
-an earlier source vintage. Persisted Snapshot data, `collectedAt`, and exact source/
-method provenance preserve what a run observed; existing Snapshots are never
-rewritten. Mixed or unknown price/volume adjustment basis is
+J-Quants adjusted prices accumulate newer `AdjFactor` values, so a rights issue after
+`analysisAsOfDate` can already be reflected in pre-as-of adjusted prices while volume
+is not adjusted. Direct mode therefore retrieves a complete paginated source envelope
+through the collection-time daily-bar horizon and applies
+`collection_horizon_rights_audit_v1` from canonical `windowStartDate` through that
+horizon. Any audited `ExRT = 3`, including a post-as-of row, is
+`corporate_action_basis_unavailable`. A delayed/truncated or caller-asserted audit
+horizon is also unavailable. Free endpoint access alone does not prove the required
+basis when its latest-data delay prevents a complete adjustment audit.
+
+Audit completeness reuses J-Quants `GET /v2/markets/calendar` rather than weekday
+inference. Require issuer rows through the latest official full/half trading date
+strictly before the Asia/Tokyo collection date, or through a later same-date row when
+one is actually returned. A missing required row or unexplained official trading-date
+gap is basis-unavailable; do not forward-fill it. The source-provided null row for an
+issue-specific no-sale date satisfies date coverage but remains missing OHLCV if it is
+inside the calculation window.
+
+Only the pure source validator can add the internal, non-serializable verified-source
+brand after checking identity, calendar coverage, chronology, retained metadata, and
+pagination completeness. Tool JSON cannot assert audit completeness. Direct and any
+raw supplied path must use the same validator; generic `get_stock_price` rows remain
+insufficient.
+
+`analysisAsOfDate` is an inclusive date-only end-of-day calculation boundary; a same-
+day bar is eligible only if returned. Rows after it are used only as source-integrity
+metadata and their OHLCV never enters calculation, dates, or interpretation. Persisted
+Snapshot data, `collectedAt`, audit method/horizon, and exact source provenance preserve
+what a run observed; existing Snapshots are never rewritten. Future event dates or
+values are not analysis claims. Mixed or unknown price/volume adjustment basis is
 `corporate_action_basis_unavailable`.
 
 The canonical sequence is every available eligible bar when 60-119 exist and exactly
 the latest 120 when at least 120 exist. Fewer than 60 is `insufficient_history`.
 Eligible dates must be unique and strictly chronological. Do not sort, skip, fill,
 interpolate, or restart. Validate price/volume values only after latest-120 selection,
-so older values or corporate-action flags outside the canonical window cannot change
-the result. Exchange-closed dates are absent and do not count. A returned issue-
-specific no-sale row does count and its null OHLC/volume is missing data; never drop it
-or convert it to zero. Zero-volume bars with otherwise valid fields are valid; all-zero
-total volume is explicitly unavailable.
+so older values before `windowStartDate` cannot change the result. Future OHLCV cannot
+change a valid historical number, but audit-only metadata may conservatively change it
+to basis-unavailable. Exchange-closed dates are absent and do not count. A returned
+issue-specific no-sale row does count when calculation-eligible and its null OHLC/
+volume is missing data; never drop it or convert it to zero. Zero-volume bars with
+otherwise valid fields are valid; all-zero total volume is explicitly unavailable.
 
 Use 50 equal linear bins across canonical adjusted low-to-high. Bins are lower-
 inclusive/upper-exclusive except for the final upper-inclusive bin; maximum price is
@@ -1148,9 +1173,11 @@ VAL, and VAH at the same price and achieved share 1.
 The structured result preserves issuer/as-of/collection identity, canonical window
 dates and count, price/volume basis, versioned allocation and binning methods, full
 bins, POC, Value Area target/achieved share, scoped unavailable reasons, methodology
-identity, retained corporate-action basis status, J-Quants/calculation provenance, and
-explicit units. Valid positive-volume bins, POC, and Value Area succeed together; an
-impossible later failure is an internal error, not partial metric unavailability. See
+identity, basis-audit method/horizon, retained corporate-action basis status, J-Quants/
+calculation provenance, and explicit units. Valid positive-volume bins, POC, and Value
+Area succeed together; an impossible later failure is an internal error, not partial
+metric unavailability. Audit-only future metadata is never presented or interpreted
+as an issuer event. See
 `docs/PHASE2_PLAN.md` for the normative TypeScript-style shape and complete reason
 vocabulary.
 

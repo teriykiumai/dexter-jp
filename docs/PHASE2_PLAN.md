@@ -2547,6 +2547,9 @@ Reuse the existing J-Quants V2 client and ticker normalization with:
 ```text
 GET /v2/equities/bars/daily
 parameters: code, from, to, pagination_key
+
+GET /v2/markets/calendar
+parameters: from, to
 ```
 
 The official J-Quants schema provides `Date`, `Code`, raw `O/H/L/C/Vo`,
@@ -2560,6 +2563,8 @@ establish methodology and provenance; neither is a new calculation input.
 Primary references checked for P2-F0:
 
 - [J-Quants API data specification](https://jpx-jquants.com/spec/data-spec)
+- [J-Quants adjusted-price calculation](https://jpx-jquants.com/ja/spec/eq-bars-daily/adj)
+- [J-Quants daily-bar specification](https://jpx-jquants.com/ja/spec/eq-bars-daily)
 - [official J-Quants CLI daily-bar schema](https://github.com/J-Quants/jquants-cli/blob/main/src/schema.rs)
 - [official J-Quants API client](https://github.com/J-Quants/jquants-api-client-python)
 - [JPXI Stock Prices dataset description](https://pro.jpx-jquants.com/datasets/9)
@@ -2573,13 +2578,46 @@ foreign stocks and TOKYO PRO Market issues, and the source does not support ever
 possible corporate action. Therefore the `Adj*` prefix alone does not prove a common
 adjusted price/volume basis.
 
-If the canonical window contains `ExRT = 3`, return
-`corporate_action_basis_unavailable` with no bins, POC, or Value Area. Do not derive a
-volume conversion or use the apparent adjusted fields as proof. Use the same reason
-when an unsupported corporate action, mixed basis, missing basis metadata, or another
-source condition prevents the common price/volume basis from being established.
-Rights-issue or unknown-basis rows outside the canonical latest-120 window do not
-affect the result because canonical selection precedes basis validation.
+J-Quants calculates an older adjusted price by accumulating `AdjFactor` values from
+newer dates. A rights issue after `analysisAsOfDate` can therefore be reflected
+retroactively in the selected adjusted prices even though its row is excluded from
+the calculation window, while `AdjVo` remains unadjusted for that event. Inspecting
+only canonical `ExRT` values cannot establish a common basis.
+
+Adopt `collection_horizon_rights_audit_v1`. For a direct source call, retrieve the
+complete paginated issuer series needed for the calculation **and** corporate-action
+basis audit through the latest daily-bar horizon available to that call at
+`collectedAt`; do not cap source retrieval at `analysisAsOfDate`. After selecting the
+canonical window, audit `AdjFactor` and `ExRT` from `windowStartDate` through
+`basisAuditThroughDate`, inclusive. `basisAuditThroughDate` is the latest row date in
+the complete source envelope and can be later than `analysisAsOfDate`.
+
+Make audit completeness mechanical with the existing official J-Quants calendar.
+`basisAuditRequiredThroughDate` is the latest full or half trading date strictly before
+the Asia/Tokyo calendar date of `collectedAt`; if a same-date issuer row is actually
+returned, use that later date instead. A listed issuer's daily endpoint returns a row
+with null OHLCV on an issue-specific no-sale date, so absence of the required row is
+not silently treated as no event. The audit is complete only when the fully paginated
+issuer response covers `basisAuditRequiredThroughDate`, every row retains `AdjFactor`
+and `ExRT`, and there is no unexplained gap in the official full/half trading dates.
+Do not infer weekdays or forward-fill calendar or issuer rows.
+
+If any audited row has `ExRT = 3`, including a row after `analysisAsOfDate`, return
+`corporate_action_basis_unavailable` with no bins, POC, or Value Area. Apply the same
+reason when the audit horizon is truncated or delayed in a way that cannot establish
+which adjustments the returned `Adj*` values incorporate, or when an unsupported
+corporate action, mixed basis, missing metadata, or another source condition prevents
+the common price/volume basis from being established. This means endpoint access on
+Free or another delayed plan does not by itself make the profile available; inability
+to prove a complete adjustment horizon is typed basis unavailability. Do not derive a
+volume conversion or fall back to raw or apparently adjusted fields.
+
+Rows after `analysisAsOfDate` are source-integrity metadata only. Their OHLCV values
+must never enter canonical selection, validation, bins, POC, Value Area, `dataDate`,
+or any investment interpretation. Do not expose their event dates or values as an
+analysis claim. A pre-canonical rights-issue row is irrelevant only when the complete
+audit proves that it predates `windowStartDate`; a post-as-of rights issue is never
+ignored merely because it lies outside the latest-120 calculation window.
 
 P2-F2 must define one typed source envelope that retains `AdjFactor` and `ExRT` for
 every supplied row and records the exact J-Quants field mapping in provenance. P2-F3
@@ -2593,8 +2631,14 @@ that mapping path; a bare generic row array or `priceBasis` literal is insuffici
 The minimum reusable source boundary is:
 
 ```ts
+declare const verifiedVolumeProfileSource: unique symbol;
+
 type VolumeProfileSource = Readonly<{
+  readonly [verifiedVolumeProfileSource]: true;
   issuerCode: string;
+  collectedAt: string;
+  basisAuditRequiredThroughDate: string | null;
+  basisAuditThroughDate: string | null;
   rows: readonly Readonly<{
     Date: string;
     Code: string;
@@ -2609,19 +2653,27 @@ type VolumeProfileSource = Readonly<{
   provenance: Readonly<{
     source: 'jquants';
     endpoint: '/v2/equities/bars/daily';
+    availabilityCalendarEndpoint: '/v2/markets/calendar';
     mapping: 'jquants_adjusted_ohlcv_with_corporate_actions_v1';
+    basisAudit: 'collection_horizon_rights_audit_v1';
   }>;
 }>;
 ```
 
 This envelope is evidence of source identity and retained metadata, not proof that a
 rights-issue window is usable; the Engine still applies the canonical-window basis
-rule above. Source metadata cannot prove the absence of a corporate action that
-J-Quants does not support or identify. A valid profile therefore establishes the
-common basis only for the source-supported and identified adjustment scope; it is not
-a claim that every possible historical event was observable. If an unsupported event
-is otherwise known or the mapping cannot establish its scope, return
-`corporate_action_basis_unavailable`.
+audit above. The brand is internal and non-serializable. A pure source validator adds
+it only after checking issuer identity, official calendar coverage, row chronology,
+retained fields, pagination completeness, and both audit dates; Tool JSON cannot
+self-attest a boolean or construct the verified type. P2-F3 direct mode maps fetched
+rows through this validator. Any supplied raw mode must pass the same validator with
+the complete official calendar and source provenance before the Engine receives it;
+generic OHLCV remains insufficient. Source metadata still cannot prove
+the absence of a corporate action that J-Quants does not support or identify. A valid
+profile therefore establishes the common basis only for the source-supported and
+identified adjustment scope; it is not a claim that every possible historical event
+was observable. If an unsupported event is otherwise known or the mapping cannot
+establish its scope, return `corporate_action_basis_unavailable`.
 
 The current personal plans expose daily OHLC on Free or higher: Free has two years
 with a latest-twelve-weeks delay, Light five years, Standard ten years, and Premium
@@ -2637,11 +2689,12 @@ bar or treat an incomplete session as a completed bar.
 
 Because adjusted historical rows can be retroactively changed by later corporate
 actions, a fresh current API response cannot reproduce every earlier source vintage.
-The Engine guarantees row-date no-look-ahead, not unavailable historical API
-vintages. `collectedAt`, the exact source/method identity, and an immutable persisted
-Snapshot are evidence of what a run observed. A later source adjustment must not
-rewrite an existing Snapshot. When a supplied input cannot establish that price and
-volume use the same J-Quants adjusted basis, return
+The Engine guarantees row-date no-look-ahead for numerical inputs and separately
+audits later metadata only to reject a basis that the current response cannot support.
+`collectedAt`, `basisAuditThroughDate`, the exact source/method identity, and an
+immutable persisted Snapshot are evidence of what a run observed. A later source
+adjustment must not rewrite an existing Snapshot. When supplied input cannot establish
+the same complete audit and common J-Quants adjusted basis, return
 `corporate_action_basis_unavailable`; do not fall back to raw or mixed values.
 
 Minute OHLC and tick data are deferred. The official client identifies minute bars as
@@ -2654,11 +2707,12 @@ prove current holdings or investor cost basis. Phase 2F v1 remains a daily proxy
 Use at most the latest 120 eligible trading bars and require at least 60 bars:
 
 ```text
-eligible = rows where Date <= analysisAsOfDate
-require eligible dates to be unique and strictly chronological
-canonical = latest min(eligible.length, 120) rows
+calculationEligible = source rows where Date <= analysisAsOfDate
+require calculationEligible dates to be unique and strictly chronological
+canonical = latest min(calculationEligible.length, 120) rows
 require canonical.length >= 60
-validate corporate-action price/volume basis only inside canonical
+require a complete basis audit from canonical[0].Date through basisAuditThroughDate
+reject any ExRT = 3 in that audit range, including Date > analysisAsOfDate
 validate prices, volume, and bar geometry only inside canonical
 ```
 
@@ -2669,16 +2723,19 @@ does not satisfy the source-envelope requirement and does not make 251 bars part
 this metric's meaning. With 60-119 eligible bars, use every available bar. With 120 or
 more, use exactly the latest 120.
 
-Filter future rows before validation so a later appended row cannot change an
-historical result. Do not sort, deduplicate, skip, forward-fill, interpolate, or
-restart a sequence. Duplicate, malformed, or non-ascending eligible dates are
-`invalid_chronology`. Value validation occurs after canonical selection, so missing
-or invalid observations before the latest 120 do not affect the result. Exchange-
-closed dates are absent and do not count toward the 60/120 bars. By contrast, an
-issue-specific no-sale day returned by J-Quants is an observation and does count; it
-must not be dropped. Its null OHLC and volume produce `missing_price_data` and
-`missing_volume_data` when the row is inside the canonical window, rather than zero
-volume or a shorter sequence.
+Exclude future rows from every numerical calculation before validation. Appending
+future OHLCV cannot change a previously valid numeric profile; the only permitted
+historical effect is changing the result to basis-unavailable when audit-only metadata
+reveals a rights issue or incomplete basis. Do not sort, deduplicate, skip, forward-
+fill, interpolate, or restart a sequence. Duplicate, malformed, or non-ascending dates
+in the calculation or audit range are `invalid_chronology`. Value validation occurs
+after canonical selection, so missing or invalid observations before the latest 120
+do not affect the result. Exchange-closed dates are absent and do not count toward the
+60/120 bars. By contrast, an issue-specific no-sale day returned by J-Quants is an
+observation and does count when it is calculation-eligible; it must not be dropped.
+Its null OHLC and volume produce `missing_price_data` and `missing_volume_data` when
+the row is inside the canonical window, rather than zero volume or a shorter sequence.
+Future audit-only rows are not subject to OHLCV value validation.
 
 For every canonical bar:
 
@@ -2869,10 +2926,13 @@ interface VolumeProfileResult {
   provenance: {
     source: 'jquants';
     endpoint: '/v2/equities/bars/daily';
+    availabilityCalendarEndpoint: '/v2/markets/calendar';
     sourceMapping: 'jquants_adjusted_ohlcv_with_corporate_actions_v1';
     adjustmentFactorField: 'AdjFactor';
     exRightsField: 'ExRT';
-    observedExRightsTypes: readonly string[];
+    basisAudit: 'collection_horizon_rights_audit_v1';
+    basisAuditRequiredThroughDate: string | null;
+    basisAuditThroughDate: string | null;
     corporateActionBasisStatus:
       | 'not_evaluated'
       | 'supported_common_basis_established'
@@ -2895,8 +2955,10 @@ canonical bar count, at most 120. `collectedAt` is the UTC collection timestamp.
 basis was established; they are null for source/basis unavailability. Missing price
 and missing volume remain separate. `corporateActionBasisStatus = 'not_evaluated'`
 applies when no canonical basis check occurred, such as successful empty data or
-insufficient history; an empty `observedExRightsTypes` must not be treated as proof of
-no corporate action.
+insufficient history. `basisAuditRequiredThroughDate` and `basisAuditThroughDate` are
+provenance for audit completeness and source reproducibility, not calculation data
+dates or investment facts, and Dashboard/LLM must not interpret audit-only future
+metadata.
 Non-finite or non-positive prices, non-finite or negative volume, and invalid bar
 geometry remain distinct invalid reasons. Zero volume is not missing.
 
@@ -2927,6 +2989,7 @@ dates, units, and source/calculation provenance.
 | Uniform low-high overlap allocation | **IMPLEMENT** | Uses the observed daily range, preserves volume, and makes the one unobservable density assumption explicit. |
 | Fixed 50-bin linear range | **IMPLEMENT** | Bounds Snapshot/UI size and avoids issuer-price- and historical-tick-specific widths. |
 | 120-bar maximum / 60-bar minimum | **IMPLEMENT** | Gives medium-term context without inheriting the unrelated 251-bar Technical contract. |
+| Collection-horizon rights-issue basis audit | **IMPLEMENT** | Detects later rights issues that can be retroactively reflected in pre-as-of adjusted prices without using future OHLCV numerically. |
 | POC and contiguous 70% Value Area | **IMPLEMENT** | Deterministic descriptive summary with fixed tie and overshoot behavior. |
 | Full 50-bin distribution in Snapshot V9 | **IMPLEMENT LATER** in P2-F4 | Required for pass-through visualization without Browser calculation. |
 | Rights-issue-window common-basis conversion | **DEFER** | J-Quants adjusts rights-issue prices but not volume; v1 returns typed unavailability instead of inventing a conversion. |
@@ -2957,13 +3020,24 @@ close geometry, non-mutation, and the floating-point tolerance/residual rule.
 P2-F2 adds canonical selection, validation, POC, Value Area, result metadata, units,
 and typed unavailable semantics. Tests fix 59 unavailable / 60 available bars,
 60-119 all-history behavior, exactly latest 120 bars, canonical-window-old-row
-invariance, future-row historical invariance, duplicate/non-chronological dates, POC
-ties, Value Area lower tie, exact target, whole-bin overshoot, one-bin behavior, zero
-total volume, returned no-sale rows as counted missing observations, a rights issue
-inside the canonical window as `corporate_action_basis_unavailable` including the
-documented foreign-stock/TOKYO PRO Market exceptions, rights-issue and invalid metadata
-outside the latest 120 as irrelevant, mixed/unknown adjustment basis, all-or-nothing
-bins/POC/Value Area invariants, provenance, and non-mutation.
+invariance, future OHLCV exclusion, duplicate/non-chronological calculation or audit
+dates, POC ties, Value Area lower tie, exact target, whole-bin overshoot, one-bin
+behavior, zero total volume, and returned no-sale rows as counted missing observations.
+Corporate-action cases fix a rights issue inside the canonical window, the documented
+foreign-stock/TOKYO PRO Market exceptions, a pre-canonical rights issue as irrelevant,
+mixed/unknown or incomplete adjustment basis, pure source-validator branding, rejection
+of a caller-asserted completeness flag, and the required regression:
+
+```text
+canonical window end = analysisAsOfDate D
+later audit row D+n has ExRT = 3
+current source has retroactively adjusted pre-D prices
+→ corporate_action_basis_unavailable
+```
+
+A future non-rights row or future invalid OHLCV must not change the valid historical
+numbers. Tests also fix all-or-nothing bins/POC/Value Area invariants, basis-audit
+provenance, and non-mutation.
 
 P2-F3 exposes a separate `analyze_volume_profile` structured tool so the existing
 Phase 1 `TechnicalResult` and `analyze_technical` semantics remain unchanged. It
@@ -2973,21 +3047,27 @@ OHLCV is not reusable basis proof. It must not fetch the same price history twic
 one path. Tests fix pagination, numeric and alphanumeric JPX codes, retention of
 `AdjFactor`/`ExRT`, exact source field/basis mapping, rejection of bare generic OHLCV,
 unchanged typed `JQuantsApiError` propagation for plan/auth/network/HTTP/invalid-
-response failures, successful empty data, corporate-action-basis unavailability, no
-duplicate fetch when the typed envelope is supplied, and structured-only output.
+response failures, successful empty data, and corporate-action-basis unavailability.
+Direct-mode tests also fix retrieval through the collection-time source horizon rather
+than `analysisAsOfDate`, pagination of post-as-of audit metadata, incomplete/delayed
+audit-horizon rejection, official full/half trading-day coverage without weekday
+inference or forward fill, a returned null no-sale row versus a missing required row,
+later `ExRT = 3` detection, no numerical use or exposure of future OHLCV, no duplicate
+fetch when the complete typed envelope is supplied, and structured-only output.
 
 P2-F4 adds the minimum Snapshot V9 and collector integration. V1-V8 remain immutable
 and readable, new saves become V9, existing files are not migrated or rewritten, and
 unknown versions remain rejected. Full bins, aggregate metrics, method identity,
-units, dates, corporate-action basis status, and provenance pass through from the
-structured result. Volume-profile
+units, calculation dates, basis-audit method/horizon, corporate-action basis status,
+and provenance pass through from the structured result. Volume-profile
 unavailability alone does not change existing complete/partial semantics. The
 collector locks issuer identity and never reconstructs values from Markdown.
 
 P2-F5 presents only Snapshot V9 values and updates comprehensive-analysis to interpret
 only the structured result. Tests fix full-bin/POC/VA pass-through, unavailable and
 valid-zero distinction, V1-V8 `not_collected`, no Browser or LLM recalculation, the
-daily-proxy limitation, and absence of support/resistance, Entry/Stop/Target, score,
+daily-proxy limitation, audit-only future metadata never being presented or interpreted
+as an issuer event, and absence of support/resistance, Entry/Stop/Target, score,
 threshold, or Buy/Sell instructions.
 
 ## 26. Recommended Next Codex Task
