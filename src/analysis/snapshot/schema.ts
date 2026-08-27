@@ -3,6 +3,7 @@ import {
   JAPANESE_SECURITIES_CODE_PATTERN,
   normalizeJapaneseSecuritiesCode,
 } from '../../utils/japanese-securities-code.js';
+import type { VolumeProfileResult } from '../../tools/finance/volume-profile-engine.js';
 
 const finiteNumber = z.number().finite();
 const nullableFiniteNumber = finiteNumber.nullable();
@@ -18,7 +19,8 @@ export const ANALYSIS_SNAPSHOT_V4_SCHEMA_VERSION = 4 as const;
 export const ANALYSIS_SNAPSHOT_V5_SCHEMA_VERSION = 5 as const;
 export const ANALYSIS_SNAPSHOT_V6_SCHEMA_VERSION = 6 as const;
 export const ANALYSIS_SNAPSHOT_V7_SCHEMA_VERSION = 7 as const;
-export const ANALYSIS_SNAPSHOT_SCHEMA_VERSION = 8 as const;
+export const ANALYSIS_SNAPSHOT_V8_SCHEMA_VERSION = 8 as const;
+export const ANALYSIS_SNAPSHOT_SCHEMA_VERSION = 9 as const;
 
 export const CanonicalTickerSchema = z.string().regex(JAPANESE_SECURITIES_CODE_PATTERN, {
   message: 'canonicalTicker must be a valid four-character Japanese securities code.',
@@ -70,6 +72,11 @@ export const MetricUnitV8Schema = z.union([
   z.literal('JPY_per_share'),
 ]);
 
+export const MetricUnitV9Schema = z.union([
+  MetricUnitV8Schema,
+  z.literal('adjusted_shares'),
+]);
+
 export const SnapshotSectionSchema = z.enum([
   'identity',
   'fundamental',
@@ -114,6 +121,11 @@ export const SnapshotSectionV7Schema = z.union([
 export const SnapshotSectionV8Schema = z.union([
   SnapshotSectionV7Schema,
   z.literal('advancedDividend'),
+]);
+
+export const SnapshotSectionV9Schema = z.union([
+  SnapshotSectionV8Schema,
+  z.literal('volumeProfile'),
 ]);
 
 export const SnapshotProvenanceSchema = z.object({
@@ -239,6 +251,21 @@ export const SnapshotProvenanceRecordV8Schema = SnapshotProvenanceRecordV7Schema
   advancedDividend: z.array(AdvancedDividendProvenanceSchema),
 });
 
+export const VolumeProfileProvenanceSchema = SnapshotProvenanceSchema.extend({
+  source: z.enum(['jquants', 'volume_profile_engine']),
+  role: z.enum(['price_data', 'market_calendar_data', 'calculation']),
+  endpoint: z.enum([
+    '/v2/equities/bars/daily',
+    '/v2/markets/calendar',
+  ]).nullable(),
+});
+
+export type VolumeProfileProvenance = z.infer<typeof VolumeProfileProvenanceSchema>;
+
+export const SnapshotProvenanceRecordV9Schema = SnapshotProvenanceRecordV8Schema.extend({
+  volumeProfile: z.array(VolumeProfileProvenanceSchema),
+});
+
 const unitMap = z.record(z.string().min(1), MetricUnitSchema);
 
 export const SnapshotUnitsSchema = z.object({
@@ -290,6 +317,12 @@ const unitMapV8 = z.record(z.string().min(1), MetricUnitV8Schema);
 
 export const SnapshotUnitsV8Schema = SnapshotUnitsV7Schema.extend({
   advancedDividend: unitMapV8,
+});
+
+const unitMapV9 = z.record(z.string().min(1), MetricUnitV9Schema);
+
+export const SnapshotUnitsV9Schema = SnapshotUnitsV8Schema.extend({
+  volumeProfile: unitMapV9,
 });
 
 export const SnapshotUnavailableSchema = z.object({
@@ -354,7 +387,16 @@ export const SnapshotUnavailableV8Schema = z.object({
 });
 
 export type SnapshotUnavailableV8 = z.infer<typeof SnapshotUnavailableV8Schema>;
-export type SnapshotUnavailable = SnapshotUnavailableV8;
+
+export const SnapshotUnavailableV9Schema = z.object({
+  section: SnapshotSectionV9Schema,
+  metric: z.string().min(1).optional(),
+  reason: z.string().min(1),
+  detail: z.string().min(1).optional(),
+});
+
+export type SnapshotUnavailableV9 = z.infer<typeof SnapshotUnavailableV9Schema>;
+export type SnapshotUnavailable = SnapshotUnavailableV9;
 
 export const CompanyIdentitySchema = z.object({
   canonicalTicker: CanonicalTickerSchema,
@@ -708,6 +750,133 @@ export const AdvancedDividendResultSchema = z.object({
 export type SnapshotAdvancedDividendResult = z.infer<
   typeof AdvancedDividendResultSchema
 >;
+
+const volumeProfileUnavailableReasonSchema = z.enum([
+  'insufficient_history',
+  'missing_price_data',
+  'missing_volume_data',
+  'invalid_price_data',
+  'invalid_volume_data',
+  'invalid_bar_geometry',
+  'invalid_chronology',
+  'zero_total_volume',
+  'no_price_data',
+  'corporate_action_basis_unavailable',
+  'invalid_input',
+]);
+
+const volumeProfileBinSchema = z.object({
+  index: z.number().int().min(0).max(49),
+  lowerPrice: finiteNumber.positive(),
+  upperPrice: finiteNumber.positive(),
+  representativePrice: finiteNumber.positive(),
+  allocatedVolume: finiteNumber.nonnegative(),
+  volumeShare: finiteNumber.nonnegative(),
+});
+
+export const VolumeProfileResultSchema: z.ZodType<VolumeProfileResult> = z.object({
+  analysisAsOfDate: z.string().min(1),
+  collectedAt: utcIsoDateTime,
+  issuerCode: JQuantsIssuerCodeSchema,
+  dataDate: nullableDate,
+  windowStartDate: nullableDate,
+  windowEndDate: nullableDate,
+  inputBarCount: z.number().int().min(0).max(120),
+  priceBasis: z.literal('jquants_corporate_action_adjusted').nullable(),
+  volumeBasis: z.literal('jquants_corporate_action_adjusted').nullable(),
+  allocationMethod: z.literal('uniform_range_overlap_v1'),
+  binningMethod: z.object({
+    id: z.literal('fixed_count_linear_v1'),
+    requestedBinCount: z.literal(50),
+    effectiveBinCount: z.number().int().min(0).max(50),
+    minPrice: nullableFiniteNumber,
+    maxPrice: nullableFiniteNumber,
+  }),
+  bins: z.array(volumeProfileBinSchema).max(50).nullable(),
+  poc: z.object({
+    binIndex: z.number().int().min(0).max(49),
+    price: finiteNumber.positive(),
+    allocatedVolume: finiteNumber.nonnegative(),
+    volumeShare: finiteNumber.nonnegative(),
+  }).nullable(),
+  valueArea: z.object({
+    targetVolumeShare: z.literal(0.7),
+    achievedVolumeShare: finiteNumber.nonnegative(),
+    val: finiteNumber.positive(),
+    vah: finiteNumber.positive(),
+    firstBinIndex: z.number().int().min(0).max(49),
+    lastBinIndex: z.number().int().min(0).max(49),
+  }).nullable(),
+  unavailable: z.array(z.object({
+    scope: z.literal('profile'),
+    reason: volumeProfileUnavailableReasonSchema,
+  })),
+  methodology: z.object({
+    id: z.literal('daily_ohlcv_volume_profile_proxy_v1'),
+    approximation: z.literal('uniform_daily_range'),
+    actualHolderCostBasis: z.literal(false),
+  }),
+  provenance: z.object({
+    source: z.literal('jquants'),
+    endpoint: z.literal('/v2/equities/bars/daily'),
+    availabilityCalendarEndpoint: z.literal('/v2/markets/calendar'),
+    sourceMapping: z.literal('jquants_adjusted_ohlcv_with_corporate_actions_v1'),
+    adjustmentFactorField: z.literal('AdjFactor'),
+    exRightsField: z.literal('ExRT'),
+    basisAudit: z.literal('collection_horizon_rights_audit_v1'),
+    basisAuditRequiredThroughDate: nullableDate,
+    basisAuditThroughDate: nullableDate,
+    corporateActionBasisStatus: z.enum([
+      'not_evaluated',
+      'supported_common_basis_established',
+      'rights_issue_unavailable',
+      'unknown_basis_unavailable',
+    ]),
+    calculation: z.literal('volume_profile_engine'),
+  }),
+  units: z.object({
+    price: z.literal('JPY'),
+    allocatedVolume: z.literal('adjusted_shares'),
+    volumeShare: z.literal('ratio'),
+  }),
+}).superRefine((value, context) => {
+  const profileParts = [value.bins, value.poc, value.valueArea];
+  const presentPartCount = profileParts.filter(part => part !== null).length;
+  const completeProfile = presentPartCount === profileParts.length;
+  const unavailableProfile = presentPartCount === 0;
+  if (!completeProfile && !unavailableProfile) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'bins, poc, and valueArea must be available or unavailable together.',
+    });
+  }
+  if (value.unavailable.length === 0 && !completeProfile) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'An available volume profile requires bins, poc, and valueArea.',
+    });
+  }
+  if (completeProfile && value.bins?.length === 0) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'An available volume profile requires at least one bin.',
+    });
+  }
+  if (value.unavailable.length > 0 && !unavailableProfile) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'An unavailable volume profile must not retain bins, poc, or valueArea.',
+    });
+  }
+  if (value.bins !== null && value.bins.length !== value.binningMethod.effectiveBinCount) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'effectiveBinCount must equal the persisted bin count.',
+    });
+  }
+});
+
+export type SnapshotVolumeProfileResult = z.infer<typeof VolumeProfileResultSchema>;
 
 const peerMetric = z.enum([
   'per',
@@ -1065,6 +1234,10 @@ export const SnapshotDataDatesV8Schema = SnapshotDataDatesV7Schema.extend({
   advancedDividend: nullableDate,
 });
 
+export const SnapshotDataDatesV9Schema = SnapshotDataDatesV8Schema.extend({
+  volumeProfile: nullableDate,
+});
+
 export const AnalysisSnapshotV1Schema = z.object({
   schemaVersion: z.literal(ANALYSIS_SNAPSHOT_V1_SCHEMA_VERSION),
   status: z.enum(['complete', 'partial']),
@@ -1139,12 +1312,21 @@ export const AnalysisSnapshotV7Schema = AnalysisSnapshotV6Schema.extend({
 });
 
 export const AnalysisSnapshotV8Schema = AnalysisSnapshotV7Schema.extend({
-  schemaVersion: z.literal(ANALYSIS_SNAPSHOT_SCHEMA_VERSION),
+  schemaVersion: z.literal(ANALYSIS_SNAPSHOT_V8_SCHEMA_VERSION),
   dataDates: SnapshotDataDatesV8Schema,
   provenance: SnapshotProvenanceRecordV8Schema,
   units: SnapshotUnitsV8Schema,
   advancedDividend: AdvancedDividendResultSchema.nullable(),
   unavailable: z.array(SnapshotUnavailableV8Schema),
+});
+
+export const AnalysisSnapshotV9Schema = AnalysisSnapshotV8Schema.extend({
+  schemaVersion: z.literal(ANALYSIS_SNAPSHOT_SCHEMA_VERSION),
+  dataDates: SnapshotDataDatesV9Schema,
+  provenance: SnapshotProvenanceRecordV9Schema,
+  units: SnapshotUnitsV9Schema,
+  volumeProfile: VolumeProfileResultSchema.nullable(),
+  unavailable: z.array(SnapshotUnavailableV9Schema),
 });
 
 export const AnalysisSnapshotSchema = z.discriminatedUnion('schemaVersion', [
@@ -1156,6 +1338,7 @@ export const AnalysisSnapshotSchema = z.discriminatedUnion('schemaVersion', [
   AnalysisSnapshotV6Schema,
   AnalysisSnapshotV7Schema,
   AnalysisSnapshotV8Schema,
+  AnalysisSnapshotV9Schema,
 ]);
 
 export type AnalysisSnapshotV1 = z.infer<typeof AnalysisSnapshotV1Schema>;
@@ -1166,6 +1349,7 @@ export type AnalysisSnapshotV5 = z.infer<typeof AnalysisSnapshotV5Schema>;
 export type AnalysisSnapshotV6 = z.infer<typeof AnalysisSnapshotV6Schema>;
 export type AnalysisSnapshotV7 = z.infer<typeof AnalysisSnapshotV7Schema>;
 export type AnalysisSnapshotV8 = z.infer<typeof AnalysisSnapshotV8Schema>;
+export type AnalysisSnapshotV9 = z.infer<typeof AnalysisSnapshotV9Schema>;
 export type AnalysisSnapshot = z.infer<typeof AnalysisSnapshotSchema>;
 
 export const AnalysisSnapshotInputSchema = z.object({
@@ -1184,6 +1368,7 @@ export const AnalysisSnapshotInputSchema = z.object({
   sectorBenchmark: SectorBenchmarkResultSchema.nullable(),
   sectorShortRatio: SectorShortRatioResultSchema.nullable(),
   advancedDividend: AdvancedDividendResultSchema.nullable(),
+  volumeProfile: VolumeProfileResultSchema.nullable(),
   strategy: StrategyResultSchema.nullable(),
   priceHistory: PriceHistorySchema.nullable(),
   scenarios: ScenariosSchema.nullable(),
@@ -1220,7 +1405,7 @@ export const AnalysisSnapshotInputSchema = z.object({
       stockFromJQuants: z.boolean(),
     }),
   }),
-  additionalUnavailable: z.array(SnapshotUnavailableV8Schema),
+  additionalUnavailable: z.array(SnapshotUnavailableV9Schema),
 });
 
 export type AnalysisSnapshotInput = z.infer<typeof AnalysisSnapshotInputSchema>;

@@ -22,12 +22,13 @@ import {
   StrategyResultSchema,
   SupplyDemandResultV3Schema,
   TechnicalResultSchema,
+  VolumeProfileResultSchema,
   normalizeCanonicalTicker,
-  type AnalysisSnapshotV8,
+  type AnalysisSnapshotV9,
   type AnalysisSnapshotInput,
   type CompanyIdentity,
   type FundamentalSnapshot,
-  type SnapshotUnavailableV8,
+  type SnapshotUnavailableV9,
 } from './schema.js';
 
 const trackedToolNames = [
@@ -37,6 +38,7 @@ const trackedToolNames = [
   'get_stock_price',
   'analyze_financial_metrics',
   'analyze_technical',
+  'analyze_volume_profile',
   'analyze_supply_demand',
   'analyze_advanced_dividend',
   'analyze_reported_short_positions',
@@ -63,6 +65,10 @@ const startArgsSchemas: Record<TrackedToolName, z.ZodType<Record<string, unknown
   get_stock_price: tickerArgsSchema,
   analyze_financial_metrics: tickerArgsSchema,
   analyze_technical: tickerArgsSchema,
+  analyze_volume_profile: z.object({
+    ticker: z.string().min(1).optional(),
+    analysisAsOfDate: z.string().min(1),
+  }).passthrough(),
   analyze_supply_demand: tickerArgsSchema,
   analyze_advanced_dividend: z.object({
     ticker: z.string().min(1),
@@ -207,6 +213,7 @@ export class StandardAgentSnapshotCollector {
   private advancedTechnical: AnalysisSnapshotInput['advancedTechnical'] = null;
   private supplyDemand: AnalysisSnapshotInput['supplyDemand'] = null;
   private advancedDividend: AnalysisSnapshotInput['advancedDividend'] = null;
+  private volumeProfile: AnalysisSnapshotInput['volumeProfile'] = null;
   private reportedShortPositions: AnalysisSnapshotInput['reportedShortPositions'] = null;
   private investorTypeFlows: AnalysisSnapshotInput['investorTypeFlows'] = null;
   private marketCorrelation: AnalysisSnapshotInput['marketCorrelation'] = null;
@@ -228,7 +235,7 @@ export class StandardAgentSnapshotCollector {
   private correlationBenchmarkUsesDirectJQuants = false;
   private sectorBenchmarkStockDataUsed = false;
   private sectorBenchmarkStockUsesDirectJQuants = false;
-  private readonly additionalUnavailable: SnapshotUnavailableV8[] = [];
+  private readonly additionalUnavailable: SnapshotUnavailableV9[] = [];
 
   get canonicalTicker(): string | null {
     return this.identity?.canonicalTicker ?? null;
@@ -294,7 +301,7 @@ export class StandardAgentSnapshotCollector {
     if (event.toolCallId) this.pendingCalls.delete(event.toolCallId);
   }
 
-  finalize(finalReportMarkdown: string, generatedAt = new Date().toISOString()): AnalysisSnapshotV8 | null {
+  finalize(finalReportMarkdown: string, generatedAt = new Date().toISOString()): AnalysisSnapshotV9 | null {
     if (!this.comprehensiveAnalysisObserved || !this.identity || finalReportMarkdown.length === 0) {
       return null;
     }
@@ -310,6 +317,7 @@ export class StandardAgentSnapshotCollector {
       advancedTechnical: this.advancedTechnical,
       supplyDemand: this.supplyDemand,
       advancedDividend: this.advancedDividend,
+      volumeProfile: this.volumeProfile,
       reportedShortPositions: this.reportedShortPositions,
       investorTypeFlows: this.investorTypeFlows,
       marketCorrelation: this.marketCorrelation,
@@ -438,6 +446,11 @@ export class StandardAgentSnapshotCollector {
 
   private acceptTargetCall(call: ValidatedToolCall): void {
     if (!this.identity) return;
+
+    if (call.tool === 'analyze_volume_profile') {
+      this.acceptVolumeProfile(call);
+      return;
+    }
 
     let rawTicker: unknown;
     if (call.tool === 'analyze_peer_comparison') {
@@ -615,7 +628,47 @@ export class StandardAgentSnapshotCollector {
     }
   }
 
-  private sectionForTool(tool: TrackedToolName): SnapshotUnavailableV8['section'] {
+  private acceptVolumeProfile(call: ValidatedToolCall): void {
+    if (!this.identity) return;
+    const rawTicker = call.validatedArgs.ticker;
+    if (rawTicker !== undefined) {
+      let toolTicker: string;
+      try {
+        toolTicker = normalizeCanonicalTicker(String(rawTicker));
+      } catch {
+        this.reject(null, call.tool, 'invalid_target_ticker');
+        return;
+      }
+      if (toolTicker !== this.identity.canonicalTicker) {
+        this.reject(null, call.tool, 'locked_ticker_mismatch');
+        this.additionalUnavailable.push({
+          section: 'volumeProfile',
+          reason: 'locked_ticker_mismatch',
+        });
+        return;
+      }
+    }
+
+    const result = VolumeProfileResultSchema.parse(call.validatedResult);
+    let resultTicker: string;
+    try {
+      resultTicker = normalizeCanonicalTicker(result.issuerCode);
+    } catch {
+      this.reject(null, call.tool, 'invalid_result_target_ticker');
+      return;
+    }
+    if (resultTicker !== this.identity.canonicalTicker) {
+      this.reject(null, call.tool, 'locked_ticker_mismatch');
+      this.additionalUnavailable.push({
+        section: 'volumeProfile',
+        reason: 'locked_ticker_mismatch',
+      });
+      return;
+    }
+    this.volumeProfile ??= result;
+  }
+
+  private sectionForTool(tool: TrackedToolName): SnapshotUnavailableV9['section'] {
     switch (tool) {
       case 'get_financials': return 'identity';
       case 'company_screener': return 'peerComparison';
@@ -623,6 +676,7 @@ export class StandardAgentSnapshotCollector {
       case 'analyze_financial_metrics': return 'valuation';
       case 'analyze_peer_comparison': return 'peerComparison';
       case 'analyze_technical': return 'technical';
+      case 'analyze_volume_profile': return 'volumeProfile';
       case 'analyze_supply_demand': return 'supplyDemand';
       case 'analyze_advanced_dividend': return 'advancedDividend';
       case 'analyze_reported_short_positions': return 'reportedShortPositions';

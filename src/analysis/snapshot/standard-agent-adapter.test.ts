@@ -215,6 +215,70 @@ function advancedDividendResult(issuerCode = '72030') {
   };
 }
 
+function volumeProfileResult(issuerCode = '72030') {
+  const bins = Array.from({ length: 50 }, (_, index) => ({
+    index,
+    lowerPrice: 3_000 + index,
+    upperPrice: 3_001 + index,
+    representativePrice: 3_000.5 + index,
+    allocatedVolume: 240,
+    volumeShare: 0.02,
+  }));
+  return {
+    analysisAsOfDate: '2026-08-21',
+    collectedAt: '2026-08-23T01:00:00.000Z',
+    issuerCode,
+    dataDate: '2026-08-21',
+    windowStartDate: '2026-03-06',
+    windowEndDate: '2026-08-21',
+    inputBarCount: 120,
+    priceBasis: 'jquants_corporate_action_adjusted' as const,
+    volumeBasis: 'jquants_corporate_action_adjusted' as const,
+    allocationMethod: 'uniform_range_overlap_v1' as const,
+    binningMethod: {
+      id: 'fixed_count_linear_v1' as const,
+      requestedBinCount: 50 as const,
+      effectiveBinCount: 50,
+      minPrice: 3_000,
+      maxPrice: 3_050,
+    },
+    bins,
+    poc: { binIndex: 0, price: 3_000.5, allocatedVolume: 240, volumeShare: 0.02 },
+    valueArea: {
+      targetVolumeShare: 0.7 as const,
+      achievedVolumeShare: 0.7,
+      val: 3_000,
+      vah: 3_035,
+      firstBinIndex: 0,
+      lastBinIndex: 34,
+    },
+    unavailable: [],
+    methodology: {
+      id: 'daily_ohlcv_volume_profile_proxy_v1' as const,
+      approximation: 'uniform_daily_range' as const,
+      actualHolderCostBasis: false as const,
+    },
+    provenance: {
+      source: 'jquants' as const,
+      endpoint: '/v2/equities/bars/daily' as const,
+      availabilityCalendarEndpoint: '/v2/markets/calendar' as const,
+      sourceMapping: 'jquants_adjusted_ohlcv_with_corporate_actions_v1' as const,
+      adjustmentFactorField: 'AdjFactor' as const,
+      exRightsField: 'ExRT' as const,
+      basisAudit: 'collection_horizon_rights_audit_v1' as const,
+      basisAuditRequiredThroughDate: '2026-08-22',
+      basisAuditThroughDate: '2026-08-22',
+      corporateActionBasisStatus: 'supported_common_basis_established' as const,
+      calculation: 'volume_profile_engine' as const,
+    },
+    units: {
+      price: 'JPY' as const,
+      allocatedVolume: 'adjusted_shares' as const,
+      volumeShare: 'ratio' as const,
+    },
+  };
+}
+
 describe('StandardAgentSnapshotCollector', () => {
   test('preserves deterministic Advanced Technical values from tool result to Snapshot', async () => {
     const collector = new StandardAgentSnapshotCollector();
@@ -428,7 +492,7 @@ describe('StandardAgentSnapshotCollector', () => {
     const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
     expect(snapshot?.advancedTechnical).toEqual(advancedTechnical);
     expect(snapshot?.supplyDemand?.mean4w).toBe(950);
-    expect(snapshot?.schemaVersion).toBe(8);
+    expect(snapshot?.schemaVersion).toBe(9);
     expect(snapshot?.marketCorrelation?.windows).toEqual([{
       period: 20,
       startDate: '2026-07-24',
@@ -487,7 +551,7 @@ describe('StandardAgentSnapshotCollector', () => {
 
     const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
 
-    expect(snapshot?.schemaVersion).toBe(8);
+    expect(snapshot?.schemaVersion).toBe(9);
     expect(snapshot?.status).toBe('partial');
     expect(snapshot?.reportedShortPositions?.reports[0]).toEqual({
       disclosedDate: '2026-08-20',
@@ -528,7 +592,7 @@ describe('StandardAgentSnapshotCollector', () => {
 
     const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
 
-    expect(snapshot?.schemaVersion).toBe(8);
+    expect(snapshot?.schemaVersion).toBe(9);
     expect(snapshot?.sectorBenchmark).toEqual(sectorBenchmarkResult());
     expect(snapshot?.dataDates.sectorBenchmark).toBe('2026-08-20');
     expect(snapshot?.units.sectorBenchmark.indexLevel).toBe('index_points');
@@ -557,7 +621,7 @@ describe('StandardAgentSnapshotCollector', () => {
 
     const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
 
-    expect(snapshot?.schemaVersion).toBe(8);
+    expect(snapshot?.schemaVersion).toBe(9);
     expect(snapshot?.sectorShortRatio).toEqual(sectorShortRatioResult());
     expect(snapshot?.dataDates.sectorShortRatio).toBe('2026-08-20');
     expect(snapshot?.provenance.sectorShortRatio).toEqual(expect.arrayContaining([
@@ -785,7 +849,7 @@ describe('StandardAgentSnapshotCollector', () => {
 
     const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
 
-    expect(snapshot?.schemaVersion).toBe(8);
+    expect(snapshot?.schemaVersion).toBe(9);
     expect(snapshot?.investorTypeFlows).toEqual({
       dataDate: '2026-08-20',
       section: 'TokyoNagoya',
@@ -857,7 +921,7 @@ describe('StandardAgentSnapshotCollector', () => {
     expect(JSON.stringify(snapshot)).not.toContain('source-arg-must-not-survive');
   });
 
-  test('collects only the structured advanced dividend result into Snapshot V8', () => {
+  test('collects only the structured advanced dividend result into Snapshot V9', () => {
     const collector = new StandardAgentSnapshotCollector();
     invokeSkill(collector);
     lockToyota(collector);
@@ -873,7 +937,7 @@ describe('StandardAgentSnapshotCollector', () => {
 
     const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
 
-    expect(snapshot?.schemaVersion).toBe(8);
+    expect(snapshot?.schemaVersion).toBe(9);
     expect(snapshot?.advancedDividend).toEqual(advancedDividendResult());
     expect(snapshot?.dataDates.advancedDividend).toBe('2026-08-20');
     expect(snapshot?.units.advancedDividend).toEqual({
@@ -941,6 +1005,137 @@ describe('StandardAgentSnapshotCollector', () => {
     expect(snapshot?.advancedDividend).toBeNull();
     expect(snapshot?.unavailable).toContainEqual({
       section: 'advancedDividend',
+      reason: 'not_collected',
+    });
+  });
+
+  test('collects only the structured volume-profile result into Snapshot V9', () => {
+    const collector = new StandardAgentSnapshotCollector();
+    invokeSkill(collector);
+    lockToyota(collector);
+    start(collector, 'analyze_volume_profile', 'volume-profile-1', {
+      analysisAsOfDate: '2026-08-21',
+      source: { marker: 'source-envelope-must-not-survive' },
+    });
+    end(collector, 'analyze_volume_profile', 'volume-profile-1', {
+      ...volumeProfileResult(),
+      rawSourceRows: 'must-not-survive',
+    });
+
+    const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
+
+    expect(snapshot?.schemaVersion).toBe(9);
+    expect(snapshot?.volumeProfile).toEqual(volumeProfileResult());
+    expect(snapshot?.dataDates.volumeProfile).toBe('2026-08-21');
+    expect(snapshot?.units.volumeProfile).toEqual({
+      price: 'JPY',
+      allocatedVolume: 'adjusted_shares',
+      volumeShare: 'ratio',
+    });
+    expect(snapshot?.provenance.volumeProfile).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        source: 'volume_profile_engine', role: 'calculation', endpoint: null,
+      }),
+      expect.objectContaining({
+        source: 'jquants', role: 'price_data', endpoint: '/v2/equities/bars/daily',
+      }),
+      expect.objectContaining({
+        source: 'jquants', role: 'market_calendar_data', endpoint: '/v2/markets/calendar',
+      }),
+    ]));
+    expect(snapshot?.volumeProfile?.provenance).toMatchObject({
+      basisAuditRequiredThroughDate: '2026-08-22',
+      basisAuditThroughDate: '2026-08-22',
+      corporateActionBasisStatus: 'supported_common_basis_established',
+    });
+    expect(JSON.stringify(snapshot)).not.toContain('must-not-survive');
+    expect(JSON.stringify(snapshot)).not.toContain('source-envelope-must-not-survive');
+  });
+
+  test('preserves typed unavailable volume profile instead of converting it to zero', () => {
+    const collector = new StandardAgentSnapshotCollector();
+    invokeSkill(collector);
+    lockToyota(collector);
+    start(collector, 'analyze_volume_profile', 'volume-profile-empty', {
+      ticker: '7203',
+      analysisAsOfDate: '2026-08-21',
+    });
+    end(collector, 'analyze_volume_profile', 'volume-profile-empty', {
+      ...volumeProfileResult(),
+      dataDate: null,
+      windowStartDate: null,
+      windowEndDate: null,
+      inputBarCount: 0,
+      priceBasis: null,
+      volumeBasis: null,
+      binningMethod: {
+        ...volumeProfileResult().binningMethod,
+        effectiveBinCount: 0,
+        minPrice: null,
+        maxPrice: null,
+      },
+      bins: null,
+      poc: null,
+      valueArea: null,
+      unavailable: [{ scope: 'profile', reason: 'no_price_data' }],
+      provenance: {
+        ...volumeProfileResult().provenance,
+        basisAuditRequiredThroughDate: null,
+        basisAuditThroughDate: null,
+        corporateActionBasisStatus: 'not_evaluated',
+      },
+    });
+
+    const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
+
+    expect(snapshot?.volumeProfile?.bins).toBeNull();
+    expect(snapshot?.volumeProfile?.poc).toBeNull();
+    expect(snapshot?.volumeProfile?.valueArea).toBeNull();
+    expect(snapshot?.unavailable).toContainEqual({
+      section: 'volumeProfile',
+      metric: 'profile',
+      reason: 'no_price_data',
+    });
+  });
+
+  test('rejects a volume-profile result for another issuer', () => {
+    const collector = new StandardAgentSnapshotCollector();
+    invokeSkill(collector);
+    lockToyota(collector);
+    start(collector, 'analyze_volume_profile', 'volume-profile-mismatch', {
+      analysisAsOfDate: '2026-08-21',
+      source: {},
+    });
+    end(
+      collector,
+      'analyze_volume_profile',
+      'volume-profile-mismatch',
+      volumeProfileResult('67580'),
+    );
+
+    const snapshot = collector.finalize('# Report', '2026-08-23T01:02:03.000Z');
+
+    expect(snapshot?.volumeProfile).toBeNull();
+    expect(snapshot?.provenance.volumeProfile).toEqual([]);
+    expect(snapshot?.unavailable).toContainEqual({
+      section: 'volumeProfile',
+      reason: 'locked_ticker_mismatch',
+    });
+  });
+
+  test('does not reconstruct volume-profile values from final Markdown', () => {
+    const collector = new StandardAgentSnapshotCollector();
+    invokeSkill(collector);
+    lockToyota(collector);
+
+    const snapshot = collector.finalize(
+      '# Report\nPOC: 3000 / VAL: 2900 / VAH: 3100',
+      '2026-08-23T01:02:03.000Z',
+    );
+
+    expect(snapshot?.volumeProfile).toBeNull();
+    expect(snapshot?.unavailable).toContainEqual({
+      section: 'volumeProfile',
       reason: 'not_collected',
     });
   });
