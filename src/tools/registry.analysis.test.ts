@@ -4,6 +4,7 @@ import { getToolRegistry } from './registry.js';
 const ANALYSIS_TOOL_NAMES = [
   'analyze_financial_metrics',
   'analyze_technical',
+  'analyze_volume_profile',
   'analyze_supply_demand',
   'analyze_advanced_dividend',
   'analyze_reported_short_positions',

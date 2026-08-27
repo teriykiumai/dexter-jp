@@ -10,7 +10,10 @@ import {
   analyzeStrategy,
   analyzeSupplyDemand,
   analyzeTechnical,
+  analyzeVolumeProfile,
+  validateVolumeProfileSource,
   type PeerCompany,
+  type VolumeProfileSourceInput,
 } from './index.js';
 import { analyzeAdvancedTechnical } from './advanced-technical-engine.js';
 import {
@@ -25,6 +28,7 @@ import {
   analyzeStrategyTool,
   analyzeSupplyDemandTool,
   analyzeTechnicalTool,
+  analyzeVolumeProfileTool,
   deterministicAnalysisTools,
 } from './analysis-tools.js';
 
@@ -161,12 +165,80 @@ function rawDividendEventRow() {
   };
 }
 
+function shiftDate(date: string, days: number): string {
+  return new Date(Date.parse(`${date}T00:00:00Z`) + days * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
+}
+
+function currentCollectionDateInJapan(): string {
+  return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function volumeProfileSourceInput(issuerCode = '72030'): VolumeProfileSourceInput {
+  const sourceDates = dates(61);
+  return {
+    issuerCode,
+    collectedAt: `${sourceDates[60]}T00:00:00.000Z`,
+    rows: sourceDates.slice(0, 60).map((date, index) => ({
+      Date: date,
+      Code: issuerCode,
+      AdjO: 100 + index,
+      AdjH: 101 + index,
+      AdjL: 99 + index,
+      AdjC: 100.5 + index,
+      AdjVo: 1_000 + index,
+      AdjFactor: 1,
+      ExRT: null,
+    })),
+    calendar: sourceDates.map((date) => ({ date, holidayDivision: '1' })),
+    provenance: {
+      source: 'jquants',
+      endpoint: '/v2/equities/bars/daily',
+      availabilityCalendarEndpoint: '/v2/markets/calendar',
+      mapping: 'jquants_adjusted_ohlcv_with_corporate_actions_v1',
+      basisAudit: 'collection_horizon_rights_audit_v1',
+    },
+  };
+}
+
+function directVolumeProfileRows(
+  from: string,
+  to: string,
+  issuerCode = '72030',
+): Array<Record<string, unknown>> {
+  const rows: Array<Record<string, unknown>> = [];
+  for (let date = from, index = 0; date <= to; date = shiftDate(date, 1), index += 1) {
+    rows.push({
+      Date: date,
+      Code: issuerCode,
+      AdjO: 100 + index,
+      AdjH: 101 + index,
+      AdjL: 99 + index,
+      AdjC: 100.5 + index,
+      AdjVo: 1_000 + index,
+      AdjFactor: 1,
+      ExRT: null,
+    });
+  }
+  return rows;
+}
+
+function directVolumeProfileCalendar(from: string, to: string) {
+  const rows: Array<{ Date: string; HolDiv: string }> = [];
+  for (let date = from; date <= to; date = shiftDate(date, 1)) {
+    rows.push({ Date: date, HolDiv: '2' });
+  }
+  return rows;
+}
+
 describe('deterministic analysis tools', () => {
   test('have stable unique names', () => {
     const names = deterministicAnalysisTools.map((tool) => tool.name);
     expect(names).toEqual([
       'analyze_financial_metrics',
       'analyze_technical',
+      'analyze_volume_profile',
       'analyze_supply_demand',
       'analyze_advanced_dividend',
       'analyze_reported_short_positions',
@@ -225,6 +297,215 @@ describe('deterministic analysis tools', () => {
 
     expect(technical).toEqual(analyzeTechnical(bars));
     expect(advancedTechnical).toEqual(analyzeAdvancedTechnical(bars));
+  });
+
+  test('uses complete raw or verified volume-profile sources without fetching', async () => {
+    const sourceInput = volumeProfileSourceInput();
+    const verifiedSource = validateVolumeProfileSource(sourceInput);
+    const analysisAsOfDate = dates(60).at(-1)!;
+    const originalFetch = globalThis.fetch;
+    let fetches = 0;
+    globalThis.fetch = (async () => {
+      fetches += 1;
+      throw new Error('Unexpected fetch');
+    }) as unknown as typeof fetch;
+
+    try {
+      for (const source of [sourceInput, verifiedSource]) {
+        const actual = toolData(await analyzeVolumeProfileTool.invoke({
+          ticker: '7203',
+          analysisAsOfDate,
+          source,
+        }));
+        expect(actual).toEqual(analyzeVolumeProfile(analysisAsOfDate, source));
+      }
+      expect(fetches).toBe(0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('rejects generic get_stock_price rows as volume-profile basis proof', async () => {
+    const sourceInput = volumeProfileSourceInput();
+    await expect(analyzeVolumeProfileTool.invoke({
+      analysisAsOfDate: dates(60).at(-1)!,
+      source: {
+        ...sourceInput,
+        rows: sourceInput.rows.map((row) => ({
+          date: row.Date,
+          open: row.AdjO,
+          high: row.AdjH,
+          low: row.AdjL,
+          close: row.AdjC,
+          volume: row.AdjVo,
+        })),
+      },
+    })).rejects.toThrow();
+  });
+
+  test('fetches one collection-horizon price source and calendar in direct mode', async () => {
+    const originalFetch = globalThis.fetch;
+    const previousApiKey = process.env.JQUANTS_API_KEY;
+    process.env.JQUANTS_API_KEY = 'test-jquants-key';
+    const collectionDate = currentCollectionDateInJapan();
+    const analysisAsOfDate = shiftDate(collectionDate, -1);
+    const from = shiftDate(collectionDate, -60);
+    const prices = directVolumeProfileRows(from, collectionDate);
+    prices[60] = {
+      ...prices[60],
+      AdjO: 1_000_000,
+      AdjH: 1_000_001,
+      AdjL: 999_999,
+      AdjC: 1_000_000.5,
+      AdjVo: 999_999_999,
+    };
+    const calendar = directVolumeProfileCalendar(from, collectionDate);
+    const requests: URL[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      requests.push(url);
+      return new Response(JSON.stringify({
+        data: url.pathname.endsWith('/equities/bars/daily') ? prices : calendar,
+      }));
+    }) as typeof fetch;
+
+    try {
+      const actual = toolData(await analyzeVolumeProfileTool.invoke({
+        ticker: '7203',
+        analysisAsOfDate,
+        from,
+      })) as Record<string, unknown> & {
+        dataDate: string;
+        inputBarCount: number;
+        binningMethod: { maxPrice: number };
+        unavailable: unknown[];
+      };
+
+      expect(actual).toMatchObject({
+        analysisAsOfDate,
+        issuerCode: '72030',
+        dataDate: analysisAsOfDate,
+        windowEndDate: analysisAsOfDate,
+        inputBarCount: 60,
+        unavailable: [],
+      });
+      expect(actual.binningMethod.maxPrice).toBeLessThan(1_000_000);
+      expect(actual).not.toHaveProperty('rows');
+      expect(actual).not.toHaveProperty('calendar');
+      expect(requests.filter((url) => url.pathname.endsWith('/equities/bars/daily')))
+        .toHaveLength(1);
+      expect(requests.filter((url) => url.pathname.endsWith('/markets/calendar')))
+        .toHaveLength(1);
+      expect(requests.every((url) => url.searchParams.get('to') === collectionDate)).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (previousApiKey === undefined) delete process.env.JQUANTS_API_KEY;
+      else process.env.JQUANTS_API_KEY = previousApiKey;
+    }
+  });
+
+  test('keeps post-as-of rights issues and incomplete audits typed unavailable', async () => {
+    const originalFetch = globalThis.fetch;
+    const previousApiKey = process.env.JQUANTS_API_KEY;
+    process.env.JQUANTS_API_KEY = 'test-jquants-key';
+    const collectionDate = currentCollectionDateInJapan();
+    const analysisAsOfDate = shiftDate(collectionDate, -1);
+    const from = shiftDate(collectionDate, -61);
+    const calendar = directVolumeProfileCalendar(from, collectionDate);
+
+    try {
+      for (const mode of ['future_rights', 'missing_required_row'] as const) {
+        const prices = directVolumeProfileRows(from, collectionDate);
+        if (mode === 'future_rights') {
+          prices[prices.length - 1] = {
+            ...prices[prices.length - 1],
+            ExRT: '3',
+            AdjFactor: 0.5,
+          };
+        } else {
+          prices.splice(30, 1);
+        }
+        globalThis.fetch = (async (input: RequestInfo | URL) => {
+          const url = new URL(input instanceof Request ? input.url : String(input));
+          return new Response(JSON.stringify({
+            data: url.pathname.endsWith('/equities/bars/daily') ? prices : calendar,
+          }));
+        }) as typeof fetch;
+
+        const actual = toolData(await analyzeVolumeProfileTool.invoke({
+          ticker: '7203',
+          analysisAsOfDate,
+          from,
+        })) as {
+          dataDate: string;
+          bins: unknown;
+          unavailable: Array<{ scope: string; reason: string }>;
+          provenance: { corporateActionBasisStatus: string };
+        };
+        expect(actual.bins).toBeNull();
+        expect(actual.unavailable).toEqual([
+          { scope: 'profile', reason: 'corporate_action_basis_unavailable' },
+        ]);
+        expect(actual.provenance.corporateActionBasisStatus).toBe(
+          mode === 'future_rights' ? 'rights_issue_unavailable' : 'unknown_basis_unavailable',
+        );
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (previousApiKey === undefined) delete process.env.JQUANTS_API_KEY;
+      else process.env.JQUANTS_API_KEY = previousApiKey;
+    }
+  });
+
+  test('keeps a returned no-sale row as missing data and an empty response as no data', async () => {
+    const originalFetch = globalThis.fetch;
+    const previousApiKey = process.env.JQUANTS_API_KEY;
+    process.env.JQUANTS_API_KEY = 'test-jquants-key';
+    const collectionDate = currentCollectionDateInJapan();
+    const analysisAsOfDate = shiftDate(collectionDate, -1);
+    const from = shiftDate(collectionDate, -60);
+    const calendar = directVolumeProfileCalendar(from, collectionDate);
+
+    try {
+      for (const mode of ['no_sale', 'empty'] as const) {
+        const prices = mode === 'empty'
+          ? []
+          : directVolumeProfileRows(from, collectionDate);
+        if (mode === 'no_sale') {
+          prices[20] = {
+            ...prices[20],
+            AdjO: null,
+            AdjH: null,
+            AdjL: null,
+            AdjC: null,
+            AdjVo: null,
+            AdjFactor: null,
+          };
+        }
+        globalThis.fetch = (async (input: RequestInfo | URL) => {
+          const url = new URL(input instanceof Request ? input.url : String(input));
+          return new Response(JSON.stringify({
+            data: url.pathname.endsWith('/equities/bars/daily') ? prices : calendar,
+          }));
+        }) as typeof fetch;
+
+        const actual = toolData(await analyzeVolumeProfileTool.invoke({
+          ticker: '7203',
+          analysisAsOfDate,
+          from,
+        })) as { inputBarCount: number; unavailable: Array<{ reason: string }> };
+        expect(actual.unavailable.map(({ reason }) => reason)).toEqual(
+          mode === 'empty'
+            ? ['no_price_data']
+            : ['missing_price_data', 'missing_volume_data'],
+        );
+        expect(actual.inputBarCount).toBe(mode === 'empty' ? 0 : 60);
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (previousApiKey === undefined) delete process.env.JQUANTS_API_KEY;
+      else process.env.JQUANTS_API_KEY = previousApiKey;
+    }
   });
 
   test('delegates margin and volume calculations to the Supply-Demand Engine', async () => {

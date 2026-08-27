@@ -18,6 +18,7 @@ const CORE_TOOL_NAMES = [
   'read_filings',
   'screen_companies',
   'analyze_technical',
+  'analyze_volume_profile',
   'analyze_supply_demand',
   'analyze_advanced_dividend',
   'analyze_reported_short_positions',

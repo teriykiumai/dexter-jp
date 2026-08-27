@@ -21,6 +21,16 @@ import { analyzeSectorShortRatio } from './sector-short-ratio-engine.js';
 import { analyzeStrategy } from './strategy-engine.js';
 import { analyzeSupplyDemand } from './supply-demand-engine.js';
 import { analyzeTechnical } from './technical-engine.js';
+import {
+  analyzeVolumeProfile,
+  isVerifiedVolumeProfileSource,
+  type VolumeProfileSource,
+  type VolumeProfileSourceInput,
+} from './volume-profile-engine.js';
+import {
+  fetchVolumeProfileSourceInput,
+  normalizeVolumeProfileSourceDate,
+} from './volume-profile-source.js';
 import { getMarginData } from './margin-data.js';
 import { getDividendEvents } from './dividend-events.js';
 import { getDividendSummary } from './dividend-summary.js';
@@ -154,6 +164,40 @@ const dividendEventSourceRowSchema = z.object({
   commemorativeDividendPerShare: nullableNumber,
   specialDividendPerShare: nullableNumber,
 });
+
+const volumeProfileSourceRowSchema = z.object({
+  Date: z.string(),
+  Code: z.string(),
+  AdjO: nullableNumber,
+  AdjH: nullableNumber,
+  AdjL: nullableNumber,
+  AdjC: nullableNumber,
+  AdjVo: nullableNumber,
+  AdjFactor: z.unknown().optional(),
+  ExRT: z.unknown().optional(),
+}).strict();
+
+const rawVolumeProfileSourceSchema = z.object({
+  issuerCode: z.string(),
+  collectedAt: z.string(),
+  rows: z.array(volumeProfileSourceRowSchema),
+  calendar: z.array(z.object({
+    date: z.string(),
+    holidayDivision: z.string(),
+  }).strict()),
+  provenance: z.object({
+    source: z.literal('jquants'),
+    endpoint: z.literal('/v2/equities/bars/daily'),
+    availabilityCalendarEndpoint: z.literal('/v2/markets/calendar'),
+    mapping: z.literal('jquants_adjusted_ohlcv_with_corporate_actions_v1'),
+    basisAudit: z.literal('collection_horizon_rights_audit_v1'),
+  }).strict(),
+}).strict();
+
+const volumeProfileSourceSchema = z.union([
+  rawVolumeProfileSourceSchema,
+  z.custom<unknown>(isVerifiedVolumeProfileSource),
+]);
 
 interface JQuantsCalendarRow extends Record<string, unknown> {
   Date: string;
@@ -533,6 +577,57 @@ export const analyzeTechnicalTool = new DynamicStructuredTool({
       ...analyzeTechnical(bars),
       advancedTechnical: analyzeAdvancedTechnical(bars),
     }, []);
+  },
+});
+
+export const ANALYZE_VOLUME_PROFILE_DESCRIPTION = `
+Calculate a deterministic daily-OHLCV estimated volume-at-price distribution proxy with fixed 50-bin uniform range-overlap allocation, POC, and contiguous 70% Value Area. Direct mode fetches complete adjusted J-Quants rows and official calendar evidence through the collection horizon; generic get_stock_price rows are not accepted because they omit AdjFactor and ExRT. This is not actual holder cost basis or true shikori, and it does not create support/resistance, Entry/Stop/Target, a score, threshold, or signal.
+`.trim();
+
+export const analyzeVolumeProfileTool = new DynamicStructuredTool({
+  name: 'analyze_volume_profile',
+  description: ANALYZE_VOLUME_PROFILE_DESCRIPTION,
+  schema: z.object({
+    ticker: z.string().optional().describe(
+      'Ticker for direct J-Quants mode, or a numeric/alphanumeric JPX code for an optional supplied-source identity check.',
+    ),
+    analysisAsOfDate: z.string().describe(
+      'Inclusive date-only end-of-day calculation boundary (YYYY-MM-DD or YYYYMMDD).',
+    ),
+    from: z.string().optional().describe(
+      'History start date required in direct mode. Retrieval always continues through the collection horizon.',
+    ),
+    source: volumeProfileSourceSchema.optional().describe(
+      'Complete typed J-Quants adjusted-OHLCV/calendar envelope. Generic get_stock_price rows are insufficient.',
+    ),
+  }),
+  func: async ({ ticker, analysisAsOfDate, from, source }) => {
+    const canonicalAsOfDate = normalizeVolumeProfileSourceDate(
+      analysisAsOfDate,
+      'analysisAsOfDate',
+    );
+    let resolvedSource = source as VolumeProfileSourceInput | VolumeProfileSource | undefined;
+
+    if (!resolvedSource) {
+      if (!ticker || !from) {
+        throw new Error('analyze_volume_profile requires source or both ticker and from.');
+      }
+      const canonicalFrom = normalizeVolumeProfileSourceDate(from, 'from');
+      if (canonicalFrom > canonicalAsOfDate) {
+        throw new Error('from must be on or before analysisAsOfDate.');
+      }
+      resolvedSource = await fetchVolumeProfileSourceInput({ ticker, from: canonicalFrom });
+    } else if (ticker) {
+      const issuerCode = toJQuantsSecuritiesCode(ticker);
+      if (issuerCode !== resolvedSource.issuerCode) {
+        throw new Error('source issuerCode must match ticker.');
+      }
+    }
+
+    return formatToolResult(
+      analyzeVolumeProfile(canonicalAsOfDate, resolvedSource),
+      [],
+    );
   },
 });
 
@@ -1007,6 +1102,7 @@ export const analyzeFinancialMetricsTool = new DynamicStructuredTool({
 export const deterministicAnalysisTools = [
   analyzeFinancialMetricsTool,
   analyzeTechnicalTool,
+  analyzeVolumeProfileTool,
   analyzeSupplyDemandTool,
   analyzeAdvancedDividendTool,
   analyzeReportedShortPositionsTool,
