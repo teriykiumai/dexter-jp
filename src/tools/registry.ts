@@ -23,7 +23,9 @@ import {
   createGetFinancials,
   createReadFilings,
   createScreenCompanies,
+  DIVIDEND_EVENTS_DESCRIPTION,
   DIVIDEND_SUMMARY_DESCRIPTION,
+  getDividendEvents,
   getDividendSummary,
   getInvestorTypeFlows,
   getMarginData,
@@ -293,6 +295,13 @@ export function getToolRegistry(model: string): RegisteredTool[] {
         tool: getDividendSummary,
         description: DIVIDEND_SUMMARY_DESCRIPTION,
         compactDescription: 'Actual and forecast annual dividend amounts and source payout ratios from J-Quants financial summaries.',
+        concurrencySafe: true,
+      },
+      {
+        name: 'get_dividend_events',
+        tool: getDividendEvents,
+        description: DIVIDEND_EVENTS_DESCRIPTION,
+        compactDescription: 'Premium J-Quants report-level dividend notifications with correction/deletion and special-component identity.',
         concurrencySafe: true,
       },
       {

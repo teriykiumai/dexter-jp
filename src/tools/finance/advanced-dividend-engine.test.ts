@@ -1,12 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import {
   analyzeDividendFiscalObservations,
+  replayDividendEvents,
   type DividendFiscalObservation,
 } from './advanced-dividend-engine.js';
 import type {
   DividendAvailabilityCalendarDay,
   DividendSummarySourceRow,
 } from './dividend-summary.js';
+import type { DividendEventSourceRow } from './dividend-events.js';
 
 function sourceRow(
   overrides: Partial<DividendSummarySourceRow> = {},
@@ -388,6 +390,352 @@ describe('analyzeDividendFiscalObservations', () => {
       '130A', [], calendar, '2026-05-18',
     )).toThrow(RangeError);
     expect(() => analyzeDividendFiscalObservations(
+      '72030', [], calendar, '2026-02-30',
+    )).toThrow(RangeError);
+  });
+});
+
+function eventRow(
+  overrides: Partial<DividendEventSourceRow> = {},
+): DividendEventSourceRow {
+  return {
+    notifiedDate: '2026-05-15',
+    notifiedTime: '15:30',
+    issuerCode: '72030',
+    referenceNumber: 'event-1',
+    statusCode: '1',
+    kindCode: '1',
+    decisionCode: '2',
+    recordDateYearMonth: '2026-09',
+    dividendPerShare: 50,
+    recordDate: '2026-09-30',
+    exDate: '2026-09-29',
+    rightsRecordDate: '2026-09-30',
+    paymentDate: '2026-12-01',
+    corporateActionReferenceNumber: 'event-1',
+    componentCode: '0',
+    commemorativeDividendPerShare: null,
+    specialDividendPerShare: null,
+    ...overrides,
+  };
+}
+
+describe('replayDividendEvents', () => {
+  test('derives ordinary components only for complete source component codes', () => {
+    const rows = [
+      eventRow({ referenceNumber: 'ordinary', corporateActionReferenceNumber: 'ordinary' }),
+      eventRow({
+        referenceNumber: 'commemorative',
+        corporateActionReferenceNumber: 'commemorative',
+        componentCode: '1',
+        commemorativeDividendPerShare: 5,
+      }),
+      eventRow({
+        referenceNumber: 'special',
+        corporateActionReferenceNumber: 'special',
+        componentCode: '2',
+        specialDividendPerShare: 10,
+      }),
+      eventRow({
+        referenceNumber: 'both',
+        corporateActionReferenceNumber: 'both',
+        componentCode: '3',
+        commemorativeDividendPerShare: 5,
+        specialDividendPerShare: 10,
+      }),
+    ];
+
+    const result = replayDividendEvents('72030', rows, calendar, '2026-05-18');
+
+    expect(result.unavailable).toEqual([]);
+    expect(result.events?.map((event) => ({
+      referenceNumber: event.referenceNumber,
+      ordinaryDividendPerShare: event.ordinaryDividendPerShare,
+    }))).toEqual([
+      { referenceNumber: 'both', ordinaryDividendPerShare: 35 },
+      { referenceNumber: 'commemorative', ordinaryDividendPerShare: 45 },
+      { referenceNumber: 'ordinary', ordinaryDividendPerShare: 50 },
+      { referenceNumber: 'special', ordinaryDividendPerShare: 40 },
+    ]);
+    expect(result.units).toEqual({ dividendPerShare: 'JPY_per_share' });
+  });
+
+  test('replays a correction through CARefNo instead of keeping both notifications', () => {
+    const original = eventRow({
+      notifiedDate: '2026-05-14',
+      notifiedTime: '10:00',
+      referenceNumber: 'original',
+      corporateActionReferenceNumber: 'original',
+      dividendPerShare: 40,
+    });
+    const correction = eventRow({
+      notifiedDate: '2026-05-18',
+      notifiedTime: '09:00',
+      referenceNumber: 'correction',
+      corporateActionReferenceNumber: 'original',
+      statusCode: '2',
+      dividendPerShare: 45,
+    });
+
+    const result = replayDividendEvents(
+      '72030',
+      [correction, original],
+      calendar,
+      '2026-05-19',
+    );
+
+    expect(result.dataDate).toBe('2026-05-18');
+    expect(result.events).toEqual([expect.objectContaining({
+      referenceNumber: 'correction',
+      corporateActionReferenceNumber: 'original',
+      dividendPerShare: 45,
+      ordinaryDividendPerShare: 45,
+    })]);
+  });
+
+  test('does not apply a future correction to an earlier as-of result', () => {
+    const original = eventRow({
+      notifiedDate: '2026-05-14',
+      referenceNumber: 'original',
+      corporateActionReferenceNumber: 'original',
+      dividendPerShare: 40,
+    });
+    const futureCorrection = eventRow({
+      notifiedDate: '2026-05-20',
+      referenceNumber: 'future-correction',
+      corporateActionReferenceNumber: 'original',
+      statusCode: '2',
+      dividendPerShare: -1,
+    });
+
+    const baseline = replayDividendEvents('72030', [original], calendar, '2026-05-20');
+    const withFuture = replayDividendEvents(
+      '72030',
+      [original, futureCorrection],
+      calendar,
+      '2026-05-20',
+    );
+
+    expect(withFuture).toEqual(baseline);
+    expect(withFuture.events?.[0].dividendPerShare).toBe(40);
+  });
+
+  test('applies an eligible deletion and retains its notification as dataDate', () => {
+    const original = eventRow({
+      notifiedDate: '2026-05-14',
+      referenceNumber: 'original',
+      corporateActionReferenceNumber: 'original',
+    });
+    const deletion = eventRow({
+      notifiedDate: '2026-05-20',
+      referenceNumber: 'deletion',
+      corporateActionReferenceNumber: 'original',
+      statusCode: '3',
+      dividendPerShare: null,
+      recordDate: null,
+      exDate: null,
+      rightsRecordDate: null,
+      paymentDate: null,
+    });
+
+    const beforeDeletion = replayDividendEvents(
+      '72030', [original, deletion], calendar, '2026-05-20',
+    );
+    const afterDeletion = replayDividendEvents(
+      '72030', [deletion, original], calendar, '2026-05-21',
+    );
+
+    expect(beforeDeletion.events).toHaveLength(1);
+    expect(afterDeletion).toMatchObject({
+      dataDate: '2026-05-20',
+      events: [],
+      unavailable: [],
+    });
+  });
+
+  test('keeps an event ineligible on notification date and eligible on the next business day', () => {
+    const onNotificationDate = replayDividendEvents(
+      '72030', [eventRow()], calendar, '2026-05-15',
+    );
+    const onFollowingBusinessDay = replayDividendEvents(
+      '72030', [eventRow()], calendar, '2026-05-18',
+    );
+
+    expect(onNotificationDate).toMatchObject({
+      dataDate: null,
+      events: null,
+      unavailable: [{ scope: 'event', reason: 'no_eligible_dividend_event_data' }],
+    });
+    expect(onFollowingBusinessDay.events?.[0]).toMatchObject({
+      notifiedDate: '2026-05-15',
+      sourceEligibleDate: '2026-05-18',
+    });
+  });
+
+  test('returns typed calendar unavailability instead of using weekday arithmetic', () => {
+    expect(replayDividendEvents('72030', [eventRow()], [
+      { date: '2026-05-15', holidayDivision: '1' },
+      { date: '2026-05-16', holidayDivision: '0' },
+    ], '2026-05-18')).toMatchObject({
+      dataDate: null,
+      events: null,
+      unavailable: [{ scope: 'event', reason: 'availability_calendar_unavailable' }],
+    });
+  });
+
+  test('keeps missing pre-2022 component detail unavailable rather than zero', () => {
+    const pre2022 = eventRow({
+      notifiedDate: '2021-06-04',
+      referenceNumber: 'pre-2022',
+      corporateActionReferenceNumber: 'pre-2022',
+      componentCode: '1',
+      commemorativeDividendPerShare: null,
+    });
+    const pre2022Calendar = [
+      { date: '2021-06-04', holidayDivision: '1' },
+      { date: '2021-06-05', holidayDivision: '0' },
+      { date: '2021-06-06', holidayDivision: '0' },
+      { date: '2021-06-07', holidayDivision: '1' },
+    ];
+
+    const result = replayDividendEvents(
+      '72030', [pre2022], pre2022Calendar, '2021-06-07',
+    );
+
+    expect(result.events?.[0]).toMatchObject({
+      dividendPerShare: 50,
+      ordinaryDividendPerShare: null,
+      commemorativeDividendPerShare: null,
+    });
+    expect(result.unavailable).toEqual([{
+      scope: 'component',
+      reason: 'component_breakdown_unavailable',
+    }]);
+  });
+
+  test('distinguishes an empty result, missing amount, and valid zero', () => {
+    const empty = replayDividendEvents('72030', [], calendar, '2026-05-18');
+    const missing = replayDividendEvents('72030', [eventRow({
+      dividendPerShare: null,
+    })], calendar, '2026-05-18');
+    const zero = replayDividendEvents('72030', [eventRow({
+      dividendPerShare: 0,
+    })], calendar, '2026-05-18');
+
+    expect(empty).toMatchObject({
+      events: null,
+      unavailable: [{ scope: 'event', reason: 'no_eligible_dividend_event_data' }],
+    });
+    expect(missing.events?.[0]).toMatchObject({
+      dividendPerShare: null,
+      ordinaryDividendPerShare: null,
+    });
+    expect(missing.unavailable).toContainEqual({ scope: 'event', reason: 'missing_data' });
+    expect(zero.events?.[0]).toMatchObject({
+      dividendPerShare: 0,
+      ordinaryDividendPerShare: 0,
+    });
+    expect(zero.unavailable).toEqual([]);
+  });
+
+  test('keeps interim and year-end events separate without annual aggregation', () => {
+    const interim = eventRow({
+      referenceNumber: 'interim',
+      corporateActionReferenceNumber: 'interim',
+      kindCode: '1',
+      decisionCode: '1',
+      dividendPerShare: 20,
+    });
+    const yearEnd = eventRow({
+      referenceNumber: 'year-end',
+      corporateActionReferenceNumber: 'year-end',
+      kindCode: '2',
+      decisionCode: '2',
+      dividendPerShare: 30,
+    });
+
+    const result = replayDividendEvents(
+      '72030', [yearEnd, interim], calendar, '2026-05-18',
+    );
+
+    expect(result.events).toEqual([
+      expect.objectContaining({ referenceNumber: 'interim', kind: 'interim', decision: 'decided', dividendPerShare: 20 }),
+      expect.objectContaining({ referenceNumber: 'year-end', kind: 'fiscal_year_end', decision: 'forecast', dividendPerShare: 30 }),
+    ]);
+    expect(result.events).toHaveLength(2);
+  });
+
+  test('preserves distinct IFTerm, RecDate, and ActRecDate meanings', () => {
+    const result = replayDividendEvents('72030', [eventRow({
+      recordDateYearMonth: '2026-09',
+      recordDate: '2026-09-28',
+      rightsRecordDate: '2026-09-30',
+      exDate: '2026-09-29',
+      paymentDate: '2026-12-01',
+    })], calendar, '2026-05-18');
+
+    expect(result.events?.[0]).toMatchObject({
+      recordDateYearMonth: '2026-09',
+      recordDate: '2026-09-28',
+      rightsRecordDate: '2026-09-30',
+      exDate: '2026-09-29',
+      paymentDate: '2026-12-01',
+    });
+  });
+
+  test('rejects invalid values, negative ordinary amounts, and broken replay identity', () => {
+    const invalidInputs: DividendEventSourceRow[][] = [
+      [eventRow({ dividendPerShare: -1 })],
+      [eventRow({ dividendPerShare: Number.NaN })],
+      [eventRow({
+        componentCode: '1',
+        dividendPerShare: 5,
+        commemorativeDividendPerShare: 10,
+      })],
+      [eventRow({
+        referenceNumber: 'orphan-correction',
+        corporateActionReferenceNumber: 'missing',
+        statusCode: '2',
+      })],
+      [eventRow(), structuredClone(eventRow())],
+      [eventRow({ issuerCode: '67580' })],
+    ];
+
+    for (const rows of invalidInputs) {
+      expect(replayDividendEvents('72030', rows, calendar, '2026-05-18'))
+        .toMatchObject({
+          events: null,
+          unavailable: [{ scope: 'event', reason: 'invalid_data' }],
+        });
+    }
+  });
+
+  test('supports normalized alphanumeric issuer identity', () => {
+    const result = replayDividendEvents('130A0', [eventRow({
+      issuerCode: '130A0',
+    })], calendar, '2026-05-18');
+
+    expect(result).toMatchObject({ issuerCode: '130A0', unavailable: [] });
+    expect(result.events).toHaveLength(1);
+  });
+
+  test('does not mutate event rows or official calendar rows', () => {
+    const rows = [eventRow()];
+    const mutableCalendar = [...calendar];
+    const rowsBefore = structuredClone(rows);
+    const calendarBefore = structuredClone(mutableCalendar);
+
+    replayDividendEvents('72030', rows, mutableCalendar, '2026-05-18');
+
+    expect(rows).toEqual(rowsBefore);
+    expect(mutableCalendar).toEqual(calendarBefore);
+  });
+
+  test('rejects non-normalized issuer and invalid as-of boundary inputs', () => {
+    expect(() => replayDividendEvents(
+      '7203', [], calendar, '2026-05-18',
+    )).toThrow(RangeError);
+    expect(() => replayDividendEvents(
       '72030', [], calendar, '2026-02-30',
     )).toThrow(RangeError);
   });

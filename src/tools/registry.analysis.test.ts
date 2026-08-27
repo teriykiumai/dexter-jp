@@ -25,15 +25,18 @@ describe('analysis tool registry', () => {
     }
   });
 
-  test('exposes the dividend-summary source only when J-Quants is configured', () => {
+  test('exposes the dividend raw sources only when J-Quants is configured', () => {
     const originalApiKey = process.env.JQUANTS_API_KEY;
     process.env.JQUANTS_API_KEY = 'test-key';
     try {
       const registry = getToolRegistry('gpt-5.5');
-      const entry = registry.find(({ name }) => name === 'get_dividend_summary');
+      const summary = registry.find(({ name }) => name === 'get_dividend_summary');
+      const events = registry.find(({ name }) => name === 'get_dividend_events');
 
-      expect(entry?.concurrencySafe).toBe(true);
-      expect(entry?.tool.name).toBe('get_dividend_summary');
+      expect(summary?.concurrencySafe).toBe(true);
+      expect(summary?.tool.name).toBe('get_dividend_summary');
+      expect(events?.concurrencySafe).toBe(true);
+      expect(events?.tool.name).toBe('get_dividend_events');
     } finally {
       if (originalApiKey === undefined) {
         delete process.env.JQUANTS_API_KEY;

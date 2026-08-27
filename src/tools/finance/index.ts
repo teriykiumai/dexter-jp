@@ -13,11 +13,25 @@ export {
   type DividendSummarySourceRow,
 } from './dividend-summary.js';
 export {
+  DIVIDEND_EVENTS_DESCRIPTION,
+  getDividendEvents,
+  type DividendComponentCode,
+  type DividendEventDecisionCode,
+  type DividendEventKindCode,
+  type DividendEventSourceRow,
+  type DividendEventStatusCode,
+} from './dividend-events.js';
+export {
   analyzeDividendFiscalObservations,
+  replayDividendEvents,
   type AdvancedDividendCoreUnavailableReason,
+  type DividendEvent,
+  type DividendEventReplayResult,
+  type DividendEventUnavailableReason,
   type DividendFiscalObservation,
   type DividendFiscalResult,
   type UnavailableAdvancedDividendCore,
+  type UnavailableDividendEvent,
 } from './advanced-dividend-engine.js';
 export {
   getInvestorTypeFlows,
