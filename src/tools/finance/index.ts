@@ -6,6 +6,13 @@ export { getShareholders } from './shareholders.js';
 export { getStockPrice, isJQuantsAvailable, STOCK_PRICE_DESCRIPTION } from './stock-price.js';
 export { getMarginData, MARGIN_DATA_DESCRIPTION } from './margin-data.js';
 export {
+  DIVIDEND_SUMMARY_DESCRIPTION,
+  getDividendSummary,
+  resolveDividendSourceEligibleDate,
+  type DividendAvailabilityCalendarDay,
+  type DividendSummarySourceRow,
+} from './dividend-summary.js';
+export {
   getInvestorTypeFlows,
   INVESTOR_TYPE_FLOWS_DESCRIPTION,
   INVESTOR_TYPE_SECTIONS,

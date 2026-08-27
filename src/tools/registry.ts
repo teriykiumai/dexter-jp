@@ -23,6 +23,8 @@ import {
   createGetFinancials,
   createReadFilings,
   createScreenCompanies,
+  DIVIDEND_SUMMARY_DESCRIPTION,
+  getDividendSummary,
   getInvestorTypeFlows,
   getMarginData,
   getShortSaleReports,
@@ -284,6 +286,13 @@ export function getToolRegistry(model: string): RegisteredTool[] {
         tool: getMarginData,
         description: MARGIN_DATA_DESCRIPTION,
         compactDescription: 'Weekly Japanese stock margin trading balances from J-Quants (Standard plan or higher).',
+        concurrencySafe: true,
+      },
+      {
+        name: 'get_dividend_summary',
+        tool: getDividendSummary,
+        description: DIVIDEND_SUMMARY_DESCRIPTION,
+        compactDescription: 'Actual and forecast annual dividend amounts and source payout ratios from J-Quants financial summaries.',
         concurrencySafe: true,
       },
       {
