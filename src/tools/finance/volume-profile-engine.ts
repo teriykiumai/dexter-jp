@@ -268,6 +268,14 @@ export interface VolumeProfileSourceRow {
   ExRT: '1' | '2' | '3' | null;
 }
 
+export interface VolumeProfileSourceInputRow extends Omit<
+  VolumeProfileSourceRow,
+  'AdjFactor' | 'ExRT'
+> {
+  AdjFactor?: unknown;
+  ExRT?: unknown;
+}
+
 export interface VolumeProfileAvailabilityCalendarDay {
   date: string;
   holidayDivision: string;
@@ -276,7 +284,7 @@ export interface VolumeProfileAvailabilityCalendarDay {
 export interface VolumeProfileSourceInput {
   issuerCode: string;
   collectedAt: string;
-  rows: readonly VolumeProfileSourceRow[];
+  rows: readonly VolumeProfileSourceInputRow[];
   calendar: readonly VolumeProfileAvailabilityCalendarDay[];
   provenance: {
     source: 'jquants';
@@ -471,7 +479,7 @@ function sourceNumberOrNull(value: unknown, fieldName: string): number | null {
 }
 
 function copySourceRow(
-  input: VolumeProfileSourceRow,
+  input: VolumeProfileSourceInputRow,
   issuerCode: string,
   collectionDate: string,
   unknownMetadataDates: string[],

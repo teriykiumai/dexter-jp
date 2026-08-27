@@ -33,6 +33,7 @@ import {
   getTopix,
   analyzeAdvancedDividendTool,
   analyzeTechnicalTool,
+  analyzeVolumeProfileTool,
   analyzeSupplyDemandTool,
   analyzeReportedShortPositionsTool,
   analyzeInvestorTypeFlowsTool,
@@ -138,6 +139,7 @@ export function buildDexterSdkTools(): ReturnType<typeof adaptLangChainTool>[] {
     createRawScreener(),
     // Pure deterministic engines — calculate from sourced structured inputs.
     analyzeTechnicalTool,
+    analyzeVolumeProfileTool,
     analyzeSupplyDemandTool,
     analyzeAdvancedDividendTool,
     analyzeReportedShortPositionsTool,
