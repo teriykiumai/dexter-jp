@@ -1009,3 +1009,76 @@ P2-D0 Source / Contract Design
 P2-D0 is documentation only. See `docs/PHASE2_PLAN.md` for official references,
 the complete mapping/result/as-of contracts, unavailable semantics, deferred scope,
 and per-step tests.
+
+## 24. Active Phase 2E Handoff
+
+Phase 2E adds as-of-safe dividend amount and payout context without replacing the
+existing deterministic dividend yield. Its core official source is J-Quants V2
+`GET /v2/fins/summary`: actual `DivAnn`, company forecast `FDivAnn`, next-year forecast
+`NxFDivAnn`, and their source-provided payout ratios. Keep actual and forecast values
+separate and map current/next fields to `CurFYEn`/`NxtFYEn` exactly.
+
+Keep publication and API availability separate. `DiscDate`/`DiscTime` and
+`PubDate`/`PubTime` are disclosure/notification facts, not J-Quants delivery
+timestamps. The initial date-only `analysisAsOfDate` is the inclusive cutoff for a
+plan-independent modelled boundary, not a claim that the configured subscription
+could obtain the row by Japan-time end of day. For both financial-summary and
+dividend-event rows, set `sourceEligibleDate` to the first later official
+`/v2/markets/calendar` business day (`HolDiv = 1` or `2`) and require
+`sourceEligibleDate <= analysisAsOfDate`. A row is not eligible on its disclosure/
+notification date. Do not infer availability from approximate update clocks,
+calendar days, or weekdays.
+
+Runtime availability is separate: use only rows actually returned under the
+configured plan/history coverage and preserve typed source errors. At D+1, a Premium
+response containing the disclosure may pass the canonical boundary; a Free response
+that omits the same recent row under its latest-twelve-weeks delay remains
+`no_eligible_dividend_disclosure_data`. Do not fabricate the row or change its
+canonical `sourceEligibleDate`. A returned candidate without sufficient official
+calendar coverage is `availability_calendar_unavailable`. Only persisted Snapshots
+prove what a particular run observed.
+
+Order eligible same-source-date rows by disclosure/notification time and source
+number, exclude future disclosures before selection, and never back-apply the current
+forecast. A blank selected value is unavailable, not zero and not permission to
+forward-fill.
+J-Quants payout ratios are stored as ratios (`0.321` means 32.1%), while dividend
+amounts are `JPY_per_share`. Preserve source values; do not reimplement payout ratio
+or the existing dividend-yield formula. Amounts remain on their disclosed per-share
+basis; no initial growth comparison or retroactive split adjustment is performed.
+
+The optional Premium enrichment is `GET /v2/fins/dividend`. It keeps report-level
+notification identity and replays `StatCode` new/correction/deletion through
+`CARefNo` only after the notification's `sourceEligibleDate` is within the analysis
+boundary. Explicit commemorative/special component amounts start 2022-06-06. Missing
+component detail is unavailable, not zero.
+Keep dividend events separate; do not aggregate them into an annual amount or merge
+them with the financial-summary annual value. A Premium plan restriction is a typed
+event-enrichment reason and does not erase an available core result.
+
+Preserve event-date meanings exactly: `IFTerm` is the record-date year/month,
+`RecDate` is the record date, and `ActRecDate` is the rights record date. `dataDate` is
+the latest eligible publication/notification date consumed by fiscal selection or
+event replay, including an applied correction or deletion even when no final event
+row remains. It is not `sourceEligibleDate` or a fiscal, record, ex, or payment date.
+
+The implemented candidate set is intentionally narrow: actual/forecast annual DPS,
+source payout ratio, and optional event-level special/commemorative classification.
+Do not add a second dividend yield. Split/special-aware CAGR and increase/cut streak,
+DOE, payout-policy extraction, forecast yield/revision metrics, and buyback/capital-
+return integration are deferred. Scores, thresholds, and Buy/Sell or Entry/Stop/Target
+signals are rejected.
+
+The fixed sequence is:
+
+```text
+P2-E0 Source / Contract Design
+  → P2-E1 J-Quants financial-summary dividend source
+  → P2-E2 deterministic fiscal observation Engine
+  → P2-E3 optional dividend-event source and event replay
+  → P2-E4 Tool exposure + Snapshot V8
+  → P2-E5 Dashboard + comprehensive-analysis
+```
+
+P2-E0 changes docs only. See `docs/PHASE2_PLAN.md` for the authoritative source,
+availability, result, unavailable, formula, per-step test, and deferred contracts.
