@@ -23,14 +23,19 @@ export {
 } from './dividend-events.js';
 export {
   analyzeDividendFiscalObservations,
+  buildAdvancedDividendResult,
   replayDividendEvents,
+  type AdvancedDividendResult,
+  type AdvancedDividendUnavailableReason,
   type AdvancedDividendCoreUnavailableReason,
+  type DividendEventSourcePlanUnavailable,
   type DividendEvent,
   type DividendEventReplayResult,
   type DividendEventUnavailableReason,
   type DividendFiscalObservation,
   type DividendFiscalResult,
   type UnavailableAdvancedDividendCore,
+  type UnavailableAdvancedDividend,
   type UnavailableDividendEvent,
 } from './advanced-dividend-engine.js';
 export {
@@ -97,6 +102,7 @@ export {
   type SectorShortRatioUnavailableReason,
 } from './sector-short-ratio-engine.js';
 export {
+  ANALYZE_ADVANCED_DIVIDEND_DESCRIPTION,
   ANALYZE_FINANCIAL_METRICS_DESCRIPTION,
   ANALYZE_INVESTOR_TYPE_FLOWS_DESCRIPTION,
   ANALYZE_MARKET_CORRELATION_DESCRIPTION,
@@ -107,6 +113,7 @@ export {
   ANALYZE_STRATEGY_DESCRIPTION,
   ANALYZE_SUPPLY_DEMAND_DESCRIPTION,
   ANALYZE_TECHNICAL_DESCRIPTION,
+  analyzeAdvancedDividendTool,
   analyzeFinancialMetricsTool,
   analyzeInvestorTypeFlowsTool,
   analyzeMarketCorrelationTool,

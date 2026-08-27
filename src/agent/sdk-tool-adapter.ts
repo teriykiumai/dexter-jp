@@ -31,6 +31,7 @@ import {
   getSectorShortRatio,
   getStockPrice,
   getTopix,
+  analyzeAdvancedDividendTool,
   analyzeTechnicalTool,
   analyzeSupplyDemandTool,
   analyzeReportedShortPositionsTool,
@@ -138,6 +139,7 @@ export function buildDexterSdkTools(): ReturnType<typeof adaptLangChainTool>[] {
     // Pure deterministic engines — calculate from sourced structured inputs.
     analyzeTechnicalTool,
     analyzeSupplyDemandTool,
+    analyzeAdvancedDividendTool,
     analyzeReportedShortPositionsTool,
     analyzeInvestorTypeFlowsTool,
     analyzePeerComparisonTool,

@@ -241,6 +241,50 @@ function completeInput(): AnalysisSnapshotInput {
         shortSellingRatio: 'ratio',
       },
     },
+    advancedDividend: {
+      analysisAsOfDate: '2026-08-21',
+      collectedAt: '2026-08-21T10:00:00.000Z',
+      issuerCode: '72030',
+      dataDate: '2026-08-20',
+      observations: [{
+        kind: 'company_forecast',
+        fiscalYearEndDate: '2027-03-31',
+        disclosedDate: '2026-08-20',
+        disclosedTime: '15:00:00',
+        sourceEligibleDate: '2026-08-21',
+        disclosureNumber: '20260820000001',
+        sourceField: 'FDivAnn',
+        payoutRatioSourceField: 'FPayoutRatioAnn',
+        annualDividendPerShare: 100,
+        payoutRatio: 0.35,
+      }],
+      events: [{
+        notifiedDate: '2026-08-20',
+        notifiedTime: '15:00',
+        sourceEligibleDate: '2026-08-21',
+        referenceNumber: 'event-1',
+        corporateActionReferenceNumber: 'event-1',
+        kind: 'fiscal_year_end',
+        decision: 'forecast',
+        recordDateYearMonth: '2027-03',
+        dividendPerShare: 50,
+        ordinaryDividendPerShare: 45,
+        commemorativeDividendPerShare: 5,
+        specialDividendPerShare: null,
+        recordDate: '2027-03-31',
+        rightsRecordDate: '2027-03-31',
+        exDate: '2027-03-30',
+        paymentDate: null,
+      }],
+      unavailable: [],
+      provenance: {
+        financialSummary: { source: 'jquants', endpoint: '/v2/fins/summary' },
+        dividendEvents: { source: 'jquants', endpoint: '/v2/fins/dividend' },
+        availabilityCalendar: { source: 'jquants', endpoint: '/v2/markets/calendar' },
+        calculation: { source: 'advanced_dividend_engine' },
+      },
+      units: { dividendPerShare: 'JPY_per_share', payoutRatio: 'ratio' },
+    },
     strategy: {
       dataDate: '2026-08-21',
       entry: {
@@ -281,7 +325,7 @@ describe('buildAnalysisSnapshot', () => {
   test('uses an explicit required-section contract and remains complete for metric-level unavailable states', () => {
     const snapshot = buildAnalysisSnapshot(completeInput());
 
-    expect(snapshot.schemaVersion).toBe(7);
+    expect(snapshot.schemaVersion).toBe(8);
     expect(REQUIRED_ANALYSIS_SNAPSHOT_SECTIONS).toEqual([
       'identity',
       'fundamental',
@@ -371,6 +415,22 @@ describe('buildAnalysisSnapshot', () => {
         endpoint: '/v2/markets/short-ratio',
       }),
     ]));
+    expect(snapshot.provenance.advancedDividend).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        source: 'advanced_dividend_engine', role: 'calculation', endpoint: null,
+      }),
+      expect.objectContaining({
+        source: 'jquants',
+        role: 'dividend_financial_summary_data',
+        endpoint: '/v2/fins/summary',
+      }),
+      expect.objectContaining({
+        source: 'jquants', role: 'dividend_event_data', endpoint: '/v2/fins/dividend',
+      }),
+      expect.objectContaining({
+        source: 'jquants', role: 'market_calendar_data', endpoint: '/v2/markets/calendar',
+      }),
+    ]));
     expect(snapshot.units.valuation.per).toBe('multiple');
     expect(snapshot.units.peerComparison.percentile).toBe('ratio');
     expect(snapshot.units.supplyDemand.percentile52w).toBe('ratio');
@@ -416,6 +476,10 @@ describe('buildAnalysisSnapshot', () => {
       totalSellingValue: 'JPY',
       shortSellingRatio: 'ratio',
     });
+    expect(snapshot.units.advancedDividend).toEqual({
+      dividendPerShare: 'JPY_per_share',
+      payoutRatio: 'ratio',
+    });
     expect(snapshot.dataDates.advancedTechnical).toBe('2026-08-21');
     expect(snapshot.advancedTechnical).toEqual(completeInput().advancedTechnical);
     expect(snapshot.dataDates.reportedShortPositions).toBe('2026-08-20');
@@ -426,6 +490,61 @@ describe('buildAnalysisSnapshot', () => {
     expect(snapshot.sectorBenchmark).toEqual(completeInput().sectorBenchmark);
     expect(snapshot.dataDates.sectorShortRatio).toBe('2026-08-21');
     expect(snapshot.sectorShortRatio).toEqual(completeInput().sectorShortRatio);
+    expect(snapshot.dataDates.advancedDividend).toBe('2026-08-20');
+    expect(snapshot.advancedDividend).toEqual(completeInput().advancedDividend);
+  });
+
+  test('keeps optional advanced dividend unavailable states distinct without changing status', () => {
+    const input = completeInput();
+    input.advancedDividend = {
+      ...input.advancedDividend!,
+      dataDate: null,
+      observations: [],
+      events: null,
+      unavailable: [
+        { scope: 'core', reason: 'no_eligible_dividend_disclosure_data' },
+        { scope: 'event', reason: 'event_source_plan_unavailable' },
+      ],
+      provenance: {
+        ...input.advancedDividend!.provenance,
+        dividendEvents: null,
+      },
+    };
+
+    const snapshot = buildAnalysisSnapshot(input);
+
+    expect(snapshot.status).toBe('complete');
+    expect(snapshot.advancedDividend).toEqual(input.advancedDividend);
+    expect(snapshot.unavailable).toEqual(expect.arrayContaining([
+      {
+        section: 'advancedDividend',
+        metric: 'core',
+        reason: 'no_eligible_dividend_disclosure_data',
+      },
+      {
+        section: 'advancedDividend',
+        metric: 'event',
+        reason: 'event_source_plan_unavailable',
+      },
+    ]));
+    expect(snapshot.provenance.advancedDividend).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: 'dividend_event_data' }),
+    ]));
+  });
+
+  test('treats uncollected advanced dividend as optional and not zero', () => {
+    const input = completeInput();
+    input.advancedDividend = null;
+
+    const snapshot = buildAnalysisSnapshot(input);
+
+    expect(snapshot.status).toBe('complete');
+    expect(snapshot.advancedDividend).toBeNull();
+    expect(snapshot.dataDates.advancedDividend).toBeNull();
+    expect(snapshot.unavailable).toContainEqual({
+      section: 'advancedDividend',
+      reason: 'not_collected',
+    });
   });
 
   test('preserves sector unavailable states without changing complete status', () => {

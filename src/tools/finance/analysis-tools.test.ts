@@ -14,6 +14,7 @@ import {
 } from './index.js';
 import { analyzeAdvancedTechnical } from './advanced-technical-engine.js';
 import {
+  analyzeAdvancedDividendTool,
   analyzeFinancialMetricsTool,
   analyzeInvestorTypeFlowsTool,
   analyzeMarketCorrelationTool,
@@ -82,6 +83,84 @@ function rawInvestorTypeRow() {
   };
 }
 
+function dividendSummarySourceRow() {
+  return {
+    issuerCode: '72030',
+    disclosedDate: '2026-08-19',
+    disclosedTime: '15:00:00',
+    disclosureNumber: '20260819000001',
+    currentFiscalYearEndDate: '2027-03-31',
+    nextFiscalYearEndDate: null,
+    actualAnnualDividendPerShare: 90,
+    actualPayoutRatio: 0.32,
+    forecastAnnualDividendPerShare: 100,
+    forecastPayoutRatio: 0.35,
+    nextForecastAnnualDividendPerShare: null,
+    nextForecastPayoutRatio: null,
+  };
+}
+
+function dividendEventSourceRow() {
+  return {
+    notifiedDate: '2026-08-19',
+    notifiedTime: '15:00',
+    issuerCode: '72030',
+    referenceNumber: 'event-1',
+    statusCode: '1' as const,
+    kindCode: '2' as const,
+    decisionCode: '2' as const,
+    recordDateYearMonth: '2027-03',
+    dividendPerShare: 50,
+    recordDate: '2027-03-31',
+    exDate: '2027-03-30',
+    rightsRecordDate: '2027-03-31',
+    paymentDate: null,
+    corporateActionReferenceNumber: 'event-1',
+    componentCode: '1' as const,
+    commemorativeDividendPerShare: 5,
+    specialDividendPerShare: null,
+  };
+}
+
+function rawDividendSummaryRow() {
+  return {
+    Code: '72030',
+    DiscDate: '2026-08-19',
+    DiscTime: '15:00:00',
+    DiscNo: '20260819000001',
+    CurFYEn: '2027-03-31',
+    NxtFYEn: '',
+    DivAnn: 90,
+    PayoutRatioAnn: 0.32,
+    FDivAnn: 100,
+    FPayoutRatioAnn: 0.35,
+    NxFDivAnn: '',
+    NxFPayoutRatioAnn: '',
+  };
+}
+
+function rawDividendEventRow() {
+  return {
+    PubDate: '2026-08-19',
+    PubTime: '15:00',
+    Code: '72030',
+    RefNo: 'event-1',
+    StatCode: '1',
+    IFCode: '2',
+    FRCode: '2',
+    IFTerm: '2027-03',
+    DivRate: 50,
+    RecDate: '2027-03-31',
+    ExDate: '2027-03-30',
+    ActRecDate: '2027-03-31',
+    PayDate: '',
+    CARefNo: 'event-1',
+    CommSpecCode: '1',
+    CommDivRate: 5,
+    SpecDivRate: '',
+  };
+}
+
 describe('deterministic analysis tools', () => {
   test('have stable unique names', () => {
     const names = deterministicAnalysisTools.map((tool) => tool.name);
@@ -89,6 +168,7 @@ describe('deterministic analysis tools', () => {
       'analyze_financial_metrics',
       'analyze_technical',
       'analyze_supply_demand',
+      'analyze_advanced_dividend',
       'analyze_reported_short_positions',
       'analyze_investor_type_flows',
       'analyze_peer_comparison',
@@ -160,6 +240,231 @@ describe('deterministic analysis tools', () => {
       volumeHistory,
     }));
     expect(actual).toEqual(analyzeSupplyDemand(marginHistory, volumeHistory));
+  });
+
+  test('combines supplied dividend sources without fetching or aggregating events', async () => {
+    const originalFetch = globalThis.fetch;
+    let fetches = 0;
+    globalThis.fetch = (async () => {
+      fetches += 1;
+      throw new Error('Unexpected fetch');
+    }) as unknown as typeof fetch;
+
+    try {
+      const actual = toolData(await analyzeAdvancedDividendTool.invoke({
+        ticker: '7203',
+        analysisAsOfDate: '2026-08-20',
+        summaryRows: [dividendSummarySourceRow()],
+        eventRows: [dividendEventSourceRow()],
+        officialCalendar: [{ date: '2026-08-20', holidayDivision: '1' }],
+      })) as Record<string, unknown> & {
+        observations: unknown[];
+        events: Array<{ ordinaryDividendPerShare: number | null }>;
+        unavailable: unknown[];
+      };
+
+      expect(actual).toMatchObject({
+        analysisAsOfDate: '2026-08-20',
+        issuerCode: '72030',
+        dataDate: '2026-08-19',
+        unavailable: [],
+        units: { dividendPerShare: 'JPY_per_share', payoutRatio: 'ratio' },
+      });
+      expect(actual.collectedAt).toBeString();
+      expect(actual.observations).toHaveLength(2);
+      expect(actual.events).toHaveLength(1);
+      expect(actual.events[0]?.ordinaryDividendPerShare).toBe(45);
+      expect(fetches).toBe(0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('fetches each dividend source and one shared official calendar in direct mode', async () => {
+    const originalFetch = globalThis.fetch;
+    const previousApiKey = process.env.JQUANTS_API_KEY;
+    process.env.JQUANTS_API_KEY = 'test-jquants-key';
+    const paths: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const href = input instanceof URL
+        ? input.href
+        : typeof input === 'string'
+          ? input
+          : input.url;
+      const url = new URL(href);
+      paths.push(url.pathname);
+      if (url.pathname.endsWith('/fins/summary')) {
+        return new Response(JSON.stringify({ data: [rawDividendSummaryRow()] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.pathname.endsWith('/fins/dividend')) {
+        return new Response(JSON.stringify({ data: [rawDividendEventRow()] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.pathname.endsWith('/markets/calendar')) {
+        expect(url.searchParams.get('from')).toBe('2026-08-19');
+        return new Response(JSON.stringify({
+          data: [{ Date: '2026-08-20', HolDiv: '1' }],
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      throw new Error(`Unexpected URL: ${url.href}`);
+    }) as typeof fetch;
+
+    try {
+      const actual = toolData(await analyzeAdvancedDividendTool.invoke({
+        ticker: '7203',
+        analysisAsOfDate: '2026-08-20',
+      })) as { observations: unknown[]; events: unknown[]; unavailable: unknown[] };
+
+      expect(actual.observations).toHaveLength(2);
+      expect(actual.events).toHaveLength(1);
+      expect(actual.unavailable).toEqual([]);
+      expect(paths.filter(path => path.endsWith('/fins/summary'))).toHaveLength(1);
+      expect(paths.filter(path => path.endsWith('/fins/dividend'))).toHaveLength(1);
+      expect(paths.filter(path => path.endsWith('/markets/calendar'))).toHaveLength(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (previousApiKey === undefined) delete process.env.JQUANTS_API_KEY;
+      else process.env.JQUANTS_API_KEY = previousApiKey;
+    }
+  });
+
+  test('keeps core dividend data when the optional event endpoint is plan-unavailable', async () => {
+    const originalFetch = globalThis.fetch;
+    const previousApiKey = process.env.JQUANTS_API_KEY;
+    process.env.JQUANTS_API_KEY = 'test-jquants-key';
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const href = input instanceof URL
+        ? input.href
+        : typeof input === 'string'
+          ? input
+          : input.url;
+      const url = new URL(href);
+      if (url.pathname.endsWith('/fins/summary')) {
+        return new Response(JSON.stringify({ data: [rawDividendSummaryRow()] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.pathname.endsWith('/fins/dividend')) {
+        return new Response(JSON.stringify({ message: 'Premium plan required' }), {
+          status: 403,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({
+        data: [{ Date: '2026-08-20', HolDiv: '1' }],
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    try {
+      const actual = toolData(await analyzeAdvancedDividendTool.invoke({
+        ticker: '7203',
+        analysisAsOfDate: '2026-08-20',
+      })) as {
+        observations: unknown[];
+        events: unknown[] | null;
+        unavailable: unknown[];
+        provenance: { dividendEvents: unknown };
+      };
+
+      expect(actual.observations).toHaveLength(2);
+      expect(actual.events).toBeNull();
+      expect(actual.unavailable).toContainEqual({
+        scope: 'event', reason: 'event_source_plan_unavailable',
+      });
+      expect(actual.provenance.dividendEvents).toBeNull();
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (previousApiKey === undefined) delete process.env.JQUANTS_API_KEY;
+      else process.env.JQUANTS_API_KEY = previousApiKey;
+    }
+  });
+
+  test('maps unavailable official-calendar coverage to typed dividend unavailability', async () => {
+    const originalFetch = globalThis.fetch;
+    const previousApiKey = process.env.JQUANTS_API_KEY;
+    process.env.JQUANTS_API_KEY = 'test-jquants-key';
+    let fetches = 0;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      fetches += 1;
+      const href = input instanceof URL
+        ? input.href
+        : typeof input === 'string'
+          ? input
+          : input.url;
+      expect(new URL(href).pathname).toEndWith('/markets/calendar');
+      return new Response(JSON.stringify({ message: 'Plan history unavailable' }), {
+        status: 403,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    try {
+      const actual = toolData(await analyzeAdvancedDividendTool.invoke({
+        ticker: '7203',
+        analysisAsOfDate: '2026-08-20',
+        summaryRows: [dividendSummarySourceRow()],
+        eventRows: [dividendEventSourceRow()],
+      })) as { observations: unknown[]; events: unknown[] | null; unavailable: unknown[] };
+
+      expect(actual.observations).toEqual([]);
+      expect(actual.events).toBeNull();
+      expect(actual.unavailable).toEqual(expect.arrayContaining([
+        { scope: 'core', reason: 'availability_calendar_unavailable' },
+        { scope: 'event', reason: 'availability_calendar_unavailable' },
+      ]));
+      expect(fetches).toBe(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (previousApiKey === undefined) delete process.env.JQUANTS_API_KEY;
+      else process.env.JQUANTS_API_KEY = previousApiKey;
+    }
+  });
+
+  test('does not swallow non-plan dividend-event source failures', async () => {
+    const originalFetch = globalThis.fetch;
+    const previousApiKey = process.env.JQUANTS_API_KEY;
+    process.env.JQUANTS_API_KEY = 'test-jquants-key';
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const href = input instanceof URL
+        ? input.href
+        : typeof input === 'string'
+          ? input
+          : input.url;
+      const url = new URL(href);
+      if (url.pathname.endsWith('/fins/summary')) {
+        return new Response(JSON.stringify({ data: [rawDividendSummaryRow()] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ message: 'source failed' }), {
+        status: 500,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    try {
+      await expect(analyzeAdvancedDividendTool.invoke({
+        ticker: '7203',
+        analysisAsOfDate: '2026-08-20',
+      })).rejects.toMatchObject({ kind: 'http_error', status: 500 });
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (previousApiKey === undefined) delete process.env.JQUANTS_API_KEY;
+      else process.env.JQUANTS_API_KEY = previousApiKey;
+    }
   });
 
   test('delegates supplied report rows without fetching and preserves report-level results', async () => {

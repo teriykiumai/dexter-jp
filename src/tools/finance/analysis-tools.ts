@@ -2,6 +2,11 @@ import { DynamicStructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
 import { toJQuantsSecuritiesCode } from '../../utils/japanese-securities-code.js';
 import { formatToolResult } from '../types.js';
+import {
+  analyzeDividendFiscalObservations,
+  buildAdvancedDividendResult,
+  replayDividendEvents,
+} from './advanced-dividend-engine.js';
 import { analyzeAdvancedTechnical } from './advanced-technical-engine.js';
 import { analyzeFinancialMetrics } from './financial-metrics-engine.js';
 import { analyzeInvestorTypeFlows } from './investor-type-flow-engine.js';
@@ -17,8 +22,14 @@ import { analyzeStrategy } from './strategy-engine.js';
 import { analyzeSupplyDemand } from './supply-demand-engine.js';
 import { analyzeTechnical } from './technical-engine.js';
 import { getMarginData } from './margin-data.js';
+import { getDividendEvents } from './dividend-events.js';
+import { getDividendSummary } from './dividend-summary.js';
 import { getInvestorTypeFlows } from './investor-type-flows.js';
-import { jquantsGetAll } from './jquants-client.js';
+import {
+  JQuantsApiError,
+  jquantsGetAll,
+  resolveJQuantsCode,
+} from './jquants-client.js';
 import { getShortSaleReports } from './short-sale-report.js';
 import {
   getSectorIndex,
@@ -107,6 +118,41 @@ const investorTypeFlowSourceRowSchema = z.object({
 const investorTypeCalendarDaySchema = z.object({
   date: z.string(),
   holidayDivision: z.string(),
+});
+
+const dividendSummarySourceRowSchema = z.object({
+  issuerCode: z.string(),
+  disclosedDate: z.string(),
+  disclosedTime: z.string().nullable(),
+  disclosureNumber: z.string(),
+  currentFiscalYearEndDate: z.string(),
+  nextFiscalYearEndDate: z.string().nullable(),
+  actualAnnualDividendPerShare: nullableNumber,
+  actualPayoutRatio: nullableNumber,
+  forecastAnnualDividendPerShare: nullableNumber,
+  forecastPayoutRatio: nullableNumber,
+  nextForecastAnnualDividendPerShare: nullableNumber,
+  nextForecastPayoutRatio: nullableNumber,
+});
+
+const dividendEventSourceRowSchema = z.object({
+  notifiedDate: z.string(),
+  notifiedTime: z.string().nullable(),
+  issuerCode: z.string(),
+  referenceNumber: z.string(),
+  statusCode: z.enum(['1', '2', '3']),
+  kindCode: z.enum(['1', '2']),
+  decisionCode: z.enum(['1', '2']),
+  recordDateYearMonth: z.string(),
+  dividendPerShare: nullableNumber,
+  recordDate: z.string().nullable(),
+  exDate: z.string().nullable(),
+  rightsRecordDate: z.string().nullable(),
+  paymentDate: z.string().nullable(),
+  corporateActionReferenceNumber: z.string(),
+  componentCode: z.enum(['0', '1', '2', '3']),
+  commemorativeDividendPerShare: nullableNumber,
+  specialDividendPerShare: nullableNumber,
 });
 
 interface JQuantsCalendarRow extends Record<string, unknown> {
@@ -333,6 +379,59 @@ function parseInvestorTypeFlows(result: unknown): z.infer<
   );
 }
 
+function parseDividendSummaryRows(result: unknown): z.infer<
+  typeof dividendSummarySourceRowSchema
+>[] {
+  const parsed = JSON.parse(
+    typeof result === 'string' ? result : JSON.stringify(result),
+  ) as { data?: unknown };
+  if (Array.isArray(parsed.data)) {
+    return z.array(dividendSummarySourceRowSchema).parse(parsed.data);
+  }
+  if (
+    parsed.data
+    && typeof parsed.data === 'object'
+    && (parsed.data as { reason?: unknown }).reason
+      === 'no_eligible_dividend_disclosure_data'
+  ) {
+    return [];
+  }
+  const error = parsed.data && typeof parsed.data === 'object'
+    ? (parsed.data as { error?: unknown }).error
+    : undefined;
+  throw new Error(
+    typeof error === 'string'
+      ? error
+      : 'get_dividend_summary did not return source rows.',
+  );
+}
+
+function parseDividendEventRows(result: unknown): z.infer<
+  typeof dividendEventSourceRowSchema
+>[] {
+  const parsed = JSON.parse(
+    typeof result === 'string' ? result : JSON.stringify(result),
+  ) as { data?: unknown };
+  if (Array.isArray(parsed.data)) {
+    return z.array(dividendEventSourceRowSchema).parse(parsed.data);
+  }
+  if (
+    parsed.data
+    && typeof parsed.data === 'object'
+    && (parsed.data as { reason?: unknown }).reason === 'no_eligible_dividend_event_data'
+  ) {
+    return [];
+  }
+  const error = parsed.data && typeof parsed.data === 'object'
+    ? (parsed.data as { error?: unknown }).error
+    : undefined;
+  throw new Error(
+    typeof error === 'string'
+      ? error
+      : 'get_dividend_events did not return source rows.',
+  );
+}
+
 function parseSectorIndexSource(
   result: unknown,
   analysisAsOfDate: string,
@@ -362,7 +461,7 @@ function parseSectorIndexSource(
   );
 }
 
-async function fetchInvestorTypeCalendar(from: string | undefined) {
+async function fetchJQuantsCalendar(from: string | undefined) {
   if (!from) return [];
   const rows = await jquantsGetAll<JQuantsCalendarRow>('/markets/calendar', { from });
   return rows.map((row) => ({
@@ -477,6 +576,94 @@ export const analyzeSupplyDemandTool = new DynamicStructuredTool({
   },
 });
 
+export const ANALYZE_ADVANCED_DIVIDEND_DESCRIPTION = `
+Select as-of-safe actual and company-forecast annual dividends and source payout ratios, with optional Premium event-level special/commemorative enrichment. Uses official J-Quants business-calendar eligibility and deterministic correction/deletion replay. Amounts, ratios, event identity, missing states, and source distinctions are preserved; no yield, growth, annual event aggregation, threshold, or signal is calculated.
+`.trim();
+
+export const analyzeAdvancedDividendTool = new DynamicStructuredTool({
+  name: 'analyze_advanced_dividend',
+  description: ANALYZE_ADVANCED_DIVIDEND_DESCRIPTION,
+  schema: z.object({
+    ticker: z.string().describe(
+      'Verified target ticker used to fetch or attribute the dividend sources.',
+    ),
+    analysisAsOfDate: z.string().describe(
+      'Inclusive date-only boundary applied to canonical D+1 source eligibility.',
+    ),
+    summaryRows: z.array(dividendSummarySourceRowSchema).optional().describe(
+      'Optional structured rows from get_dividend_summary. An explicit empty array remains unavailable, not zero.',
+    ),
+    eventRows: z.array(dividendEventSourceRowSchema).optional().describe(
+      'Optional structured rows from get_dividend_events. An explicit empty array remains unavailable, not zero.',
+    ),
+    officialCalendar: z.array(investorTypeCalendarDaySchema).optional().describe(
+      'Optional official J-Quants calendar rows mapped to date and holidayDivision.',
+    ),
+  }),
+  func: async ({ ticker, analysisAsOfDate, summaryRows, eventRows, officialCalendar }) => {
+    const issuerCode = await resolveJQuantsCode(ticker);
+    if (summaryRows === undefined) {
+      summaryRows = parseDividendSummaryRows(await getDividendSummary.invoke({
+        ticker: issuerCode,
+      }));
+    }
+
+    let eventSourcePlanUnavailable = false;
+    if (eventRows === undefined) {
+      try {
+        eventRows = parseDividendEventRows(await getDividendEvents.invoke({
+          ticker: issuerCode,
+        }));
+      } catch (error) {
+        if (error instanceof JQuantsApiError && error.kind === 'plan_unavailable') {
+          eventSourcePlanUnavailable = true;
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    if (officialCalendar === undefined) {
+      const earliestSourceDate = [
+        ...summaryRows.map((row) => row.disclosedDate),
+        ...(eventRows ?? []).map((row) => row.notifiedDate),
+      ].filter((date) => date < analysisAsOfDate).sort().at(0);
+      if (earliestSourceDate === undefined) {
+        officialCalendar = [];
+      } else {
+        try {
+          officialCalendar = await fetchJQuantsCalendar(earliestSourceDate);
+        } catch (error) {
+          if (error instanceof JQuantsApiError && error.kind === 'plan_unavailable') {
+            officialCalendar = [];
+          } else {
+            throw error;
+          }
+        }
+      }
+    }
+
+    const fiscal = analyzeDividendFiscalObservations(
+      issuerCode,
+      summaryRows,
+      officialCalendar,
+      analysisAsOfDate,
+    );
+    const event = eventSourcePlanUnavailable
+      ? { reason: 'event_source_plan_unavailable' as const }
+      : replayDividendEvents(
+          issuerCode,
+          eventRows ?? [],
+          officialCalendar,
+          analysisAsOfDate,
+        );
+    return formatToolResult(
+      buildAdvancedDividendResult(fiscal, event, new Date().toISOString()),
+      [],
+    );
+  },
+});
+
 export const ANALYZE_REPORTED_SHORT_POSITIONS_DESCRIPTION = `
 Apply the disclosure-date as-of boundary and calculate source-provided previous-ratio deltas for public short-position reports. Reports remain separate by reporter and fund; no issue-level total, identity matching, forward fill, or signal is inferred. J-Quants publishes these reports at the 0.5% threshold, and no_public_disclosure_data does not mean a zero short position.
 `.trim();
@@ -547,7 +734,7 @@ export const analyzeInvestorTypeFlowsTool = new DynamicStructuredTool({
         .map((period) => period.publishedDate)
         .sort()
         .at(0);
-      officialCalendar = await fetchInvestorTypeCalendar(earliestPublication);
+      officialCalendar = await fetchJQuantsCalendar(earliestPublication);
     }
     return formatToolResult(
       analyzeInvestorTypeFlows(sourcePeriods, officialCalendar, analysisAsOfDate),
@@ -821,6 +1008,7 @@ export const deterministicAnalysisTools = [
   analyzeFinancialMetricsTool,
   analyzeTechnicalTool,
   analyzeSupplyDemandTool,
+  analyzeAdvancedDividendTool,
   analyzeReportedShortPositionsTool,
   analyzeInvestorTypeFlowsTool,
   analyzePeerComparisonTool,

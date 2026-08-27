@@ -102,6 +102,40 @@ export interface DividendEventReplayResult {
   };
 }
 
+export type AdvancedDividendUnavailableReason =
+  | AdvancedDividendCoreUnavailableReason
+  | DividendEventUnavailableReason
+  | 'event_source_plan_unavailable';
+
+export interface UnavailableAdvancedDividend {
+  scope: 'core' | 'event' | 'component';
+  reason: AdvancedDividendUnavailableReason;
+}
+
+export interface AdvancedDividendResult {
+  analysisAsOfDate: string;
+  collectedAt: string;
+  issuerCode: string;
+  dataDate: string | null;
+  observations: readonly DividendFiscalObservation[];
+  events: readonly DividendEvent[] | null;
+  unavailable: readonly UnavailableAdvancedDividend[];
+  provenance: {
+    financialSummary: { source: 'jquants'; endpoint: '/v2/fins/summary' };
+    dividendEvents: { source: 'jquants'; endpoint: '/v2/fins/dividend' } | null;
+    availabilityCalendar: { source: 'jquants'; endpoint: '/v2/markets/calendar' };
+    calculation: { source: 'advanced_dividend_engine' };
+  };
+  units: {
+    dividendPerShare: 'JPY_per_share';
+    payoutRatio: 'ratio';
+  };
+}
+
+export interface DividendEventSourcePlanUnavailable {
+  reason: 'event_source_plan_unavailable';
+}
+
 interface EligibleRow {
   row: DividendSummarySourceRow;
   sourceEligibleDate: string;
@@ -618,4 +652,55 @@ export function replayDividendEvents(
     mapped.map((item) => item.event),
     unavailable,
   );
+}
+
+/** Combine the independently calculated fiscal and optional event results. */
+export function buildAdvancedDividendResult(
+  fiscal: DividendFiscalResult,
+  event: DividendEventReplayResult | DividendEventSourcePlanUnavailable,
+  collectedAt: string,
+): AdvancedDividendResult {
+  const collectedDate = new Date(collectedAt);
+  if (!collectedAt.endsWith('Z') || Number.isNaN(collectedDate.getTime())) {
+    throw new RangeError('Advanced dividend collectedAt must be a UTC ISO 8601 timestamp.');
+  }
+  if ('analysisAsOfDate' in event && (
+    event.analysisAsOfDate !== fiscal.analysisAsOfDate
+    || event.issuerCode !== fiscal.issuerCode
+  )) {
+    throw new RangeError('Dividend fiscal and event results must share one analysis identity.');
+  }
+
+  const eventDataDate = 'dataDate' in event ? event.dataDate : null;
+  const dataDate = [fiscal.dataDate, eventDataDate]
+    .filter((value): value is string => value !== null)
+    .sort()
+    .at(-1) ?? null;
+  const eventUnavailable: readonly UnavailableAdvancedDividend[] = 'analysisAsOfDate' in event
+    ? event.unavailable
+    : [{ scope: 'event', reason: event.reason }];
+
+  return {
+    analysisAsOfDate: fiscal.analysisAsOfDate,
+    collectedAt,
+    issuerCode: fiscal.issuerCode,
+    dataDate,
+    observations: [...fiscal.observations],
+    events: 'analysisAsOfDate' in event
+      ? event.events === null ? null : [...event.events]
+      : null,
+    unavailable: [...fiscal.unavailable, ...eventUnavailable],
+    provenance: {
+      financialSummary: fiscal.provenance.financialSummary,
+      dividendEvents: 'analysisAsOfDate' in event
+        ? event.provenance.dividendEvents
+        : null,
+      availabilityCalendar: fiscal.provenance.availabilityCalendar,
+      calculation: fiscal.provenance.calculation,
+    },
+    units: {
+      dividendPerShare: 'JPY_per_share',
+      payoutRatio: 'ratio',
+    },
+  };
 }
