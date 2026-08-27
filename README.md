@@ -2,10 +2,12 @@
 
 # Dexter JP — 日本株の自律型リサーチエージェント
 
-> 聞くだけで、勝手に計画を立てて、複数のデータソースを横断して、自分で検証しながらレポートまで仕上げる。
+> 質問から調査を計画し、複数のデータソースと決定論的な分析Engineを横断して、根拠と制約を明示したレポートまで仕上げる。
 
 [EDINET DB](https://edinetdb.jp) + [J-Quants](https://jpx-jquants.com/) で動く、日本株特化の金融AIエージェント。
 [virattt/dexter](https://github.com/virattt/dexter)（米国株版）をフォークし、日本市場向けに全面改修。
+
+Dexter JPは個人・ローカル利用向けのリサーチソフトウェアです。投資助言、証券会社への発注、自動売買は行いません。取得できないデータを0や推測値で補いません。
 
 ![Dexter JP Demo](docs/demo.png)
 
@@ -13,14 +15,27 @@
 
 よくある金融ツールは「スクリーニングできます」「財務データ見れます」で終わる。Dexter JPは違う。
 
-**「ソニーと任天堂、投資先としてどちらが優れているか分析して」** と聞くと:
+**「ソニーと任天堂を、財務・バリュエーション・リスクの根拠付きで比較して」** と聞くと:
 
 1. まず計画を立てる — 比較に必要な指標（収益性、成長性、財務健全性、リスク）を自分で決める
 2. 複数のツールを自律的に呼び出す — 両社の財務データ、有報のリスク要因、決算短信を並列取得
 3. 途中で検証する — 数字とナラティブに矛盾がないか、データが足りているか自分で判断
-4. レポートを仕上げる — 比較表と結論付きの構造化された分析結果を出力
+4. レポートを仕上げる — 比較表、条件付きシナリオ、リスクを含む構造化された分析結果を出力
 
 これを1回の質問で、人間が介在せずにやる。ツールを1つ呼ぶだけの「データ取得」ではなく、複数のデータソースを横断した「分析」が自動で走る。
+
+## 現在の主な分析機能
+
+- Fundamental / Valuation / Peer Comparison
+- SMA・ATR・Swing・trendに加え、RSI14・MACD・Bollinger Bandsを含むTechnical
+- 信用取引のSupply & Demandと、公開空売り残高報告
+- 投資部門別の市場flow、TOPIX / 東証33業種との比較、業種別空売り売買代金
+- 実績・会社予想・配当性向と、利用可能な配当eventを扱うAdvanced Dividend
+- 日足OHLCVによる推定Volume Profile、POC、VAH、VAL
+- source根拠がある場合だけ作るdeterministic Entry / Stop / Target候補
+- Canonical AnalysisSnapshot V9、分析履歴、Local Dashboard、Analysis Watchlist
+
+重要な金融・統計計算はTypeScriptのdeterministic Engineが行い、AIはstructured resultを解釈します。Volume Profileは日足OHLCVから作る推定分布であり、実際の投資家取得単価や真のしこり玉を示すものではありません。POC / VAH / VALも自動的な売買signalではありません。
 
 ## セットアップ
 
@@ -29,6 +44,8 @@
 - [Bun](https://bun.sh/)
 - LLM APIキー（以下のいずれか1つ）
 - [EDINET DB](https://edinetdb.jp) APIキー
+
+J-Quantsを設定すると、株価、Technical、需給、市場・業種比較、空売り、投資部門別、配当、Volume Profileなどの市場データ分析が利用できます。利用可能なendpointと履歴は契約プランやデータ提供状況に依存します。
 
 ### 環境変数
 
@@ -42,6 +59,8 @@ OPENAI_API_KEY=sk-...          # OpenAI（デフォルト）
 ANTHROPIC_API_KEY=sk-ant-...   # Claude
 GOOGLE_API_KEY=...             # Gemini
 XAI_API_KEY=...                # Grok
+MOONSHOT_API_KEY=...           # Kimi
+DEEPSEEK_API_KEY=...           # DeepSeek
 OPENROUTER_API_KEY=...         # OpenRouter（複数モデル利用可）
 
 # 日本株データ
@@ -49,13 +68,14 @@ EDINETDB_API_KEY=edb_...       # edinetdb.jp で取得（無料枠あり）
 
 # === オプション ===
 
-# 株価データ（設定すると get_stock_price ツールが有効化）
-JQUANTS_API_KEY=...            # jpx-jquants.com で取得（無料、期限なし）
+# 日本市場データ（利用可能範囲はJ-Quantsの契約プランに依存）
+JQUANTS_API_KEY=...            # jpx-jquants.com で取得
 
-# Web検索（設定すると web_search ツールが有効化。優先順: Exa → Perplexity → Tavily）
+# Web検索（設定するとweb_search toolが有効化され、CLIでproviderを選択可能）
 EXASEARCH_API_KEY=...
 PERPLEXITY_API_KEY=...
 TAVILY_API_KEY=...
+LANGSEARCH_API_KEY=...
 
 # X/Twitter検索
 X_BEARER_TOKEN=...
@@ -67,12 +87,14 @@ OLLAMA_BASE_URL=http://127.0.0.1:11434
 ### インストール & 起動
 
 ```bash
-git clone https://github.com/edinetdb/dexter-jp.git
+git clone https://github.com/teriykiumai/dexter-jp.git
 cd dexter-jp
 bun install
 cp env.example .env  # 編集してAPIキーを設定
 bun run start
 ```
+
+詳しい操作、Snapshot互換性、Dashboard、data-dateとunavailableの扱いは[Usage Guide](Usage.md)を参照してください。
 
 ## 使い方の例
 
@@ -83,11 +105,11 @@ bun run start
 ```
 トヨタの競争力を総合分析して。財務データ、有報のリスク要因、最新決算を踏まえてレポートにまとめて
 
-ソニーと任天堂、投資先としてどちらが優れているか。財務健全性・収益性・成長性・リスクを比較して結論を出して
+ソニーと任天堂を、財務健全性・収益性・成長性・リスクで比較し、強みと条件付きシナリオを整理して
 
 高ROE・高配当の割安銘柄を探して、トップ3の財務健全性と事業リスクを深掘り分析して
 
-キーエンスのDCFバリュエーションをして。現在の株価水準が割高か割安か判断して
+キーエンスのDCFバリュエーションをして。前提と現在の株価水準との差を示して
 ```
 
 ### シンプルな質問もOK
@@ -107,17 +129,26 @@ ROE15%以上、自己資本比率50%以上の企業をスクリーニングし�
 ```
 Analyze Toyota's competitiveness. Cover financials, risk factors from the annual report, and latest earnings.
 
-Compare Sony vs Nintendo as investment targets with a final recommendation.
+Compare Sony and Nintendo using financial health, profitability, growth, and risk evidence. State the conditions behind the conclusion.
 ```
+
+## SnapshotとLocal Dashboard
+
+Standard Agentの総合分析は、structured source/Engine resultからCanonical AnalysisSnapshotを生成し、`.dexter/analysis/`へ履歴とlatestを保存します。現在のwriterはV9で、V1〜V8の既存履歴もreadableかつimmutableです。
+
+```bash
+bun run dashboard
+```
+
+`http://127.0.0.1:3000/`で、保存済み銘柄のAnalysis Watchlist、最新分析、履歴、Single Stock Dashboardを確認できます。DashboardはSnapshot値を表示するPresentation Layerであり、金融値をBrowserで再計算しません。Snapshot生成は現在Standard Agent runが対象で、Claude Agent SDK modeは未接続です。
 
 ## アーキテクチャ
 
 ```
 ユーザーの質問
     ↓
-エージェントループ（LangChain）
-    ↓ 計画 → ツール選択 → 実行 → 検証 → 繰り返し
-    ↓
+Standard Agent / Claude Agent SDK
+    ↓ 計画 → ツール選択 → 実行 → 検証
 ┌─────────────────────────────────────────┐
 │  get_financials（メタツール）             │
 │    → get_financial_statements           │
@@ -134,10 +165,16 @@ Compare Sony vs Nintendo as investment targets with a final recommendation.
 ├─────────────────────────────────────────┤
 │  get_stock_price（J-Quants V2）          │
 ├─────────────────────────────────────────┤
+│  deterministic finance analysis Engines │
+├─────────────────────────────────────────┤
 │  web_search / browser / skills          │
 └─────────────────────────────────────────┘
     ↓
-構造化されたレポート出力
+structured result → AIによる解釈 → レポート
+    ↓ Standard Agent comprehensive analysis
+Canonical AnalysisSnapshot V9
+    ↓
+Local JSON → Read-only API → Dashboard / Watchlist
 ```
 
 ### メタツールの仕組み
@@ -185,15 +222,10 @@ CLIで `/rules` と入力すると現在のルールを確認できる。
 
 ### 対応LLM
 
-`/model`コマンドでCLI上から切替可能:
-
-- OpenAI（GPT-4o, GPT-4o-mini 等）
-- Anthropic（Claude）
-- Google（Gemini）
-- xAI（Grok）
-- OpenRouter
-- Ollama（ローカルLLM）
-- Claude Agent SDK（後述）
+`/model`コマンドでCLI上から切替可能です。現在のprovider registryはOpenAI、
+Anthropic、Google、xAI、Moonshot、DeepSeek、OpenRouter、Ollama、Claude Agent SDKを
+扱います。利用可能な個別modelはprovider側で変更されるため、CLIの選択肢を確認して
+ください。
 
 ### Claude Agent SDK モード
 
@@ -301,8 +333,8 @@ bun run gateway    # 設定済みの全チャネルが同時に起動
 | ソース | 内容 | 必須？ |
 |--------|------|--------|
 | [EDINET DB](https://edinetdb.jp) | 財務データ、有報テキスト、スクリーニング、AI分析（~3,800社） | 必須 |
-| [J-Quants](https://jpx-jquants.com/) | 株価OHLC（東証公式） | オプション |
-| Web検索 | Exa / Perplexity / Tavily | オプション |
+| [J-Quants](https://jpx-jquants.com/) | 株価・需給・空売り・投資部門別・業種指数・配当等の日本市場データ（plan/history制約あり） | オプション |
+| Web検索 | Exa / Perplexity / Tavily / LangSearch | オプション |
 
 ## オリジナル版（米国株）との違い
 
