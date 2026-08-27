@@ -2,10 +2,12 @@
 
 # Dexter JP — Autonomous Research Agent for Japanese Equities
 
-> Ask a question. It plans the research, pulls data from multiple sources, validates its own work, and delivers a finished report.
+> Ask a question. It plans the research, combines authoritative sources with deterministic analysis engines, and delivers a report that states both evidence and limitations.
 
 A financial AI agent built for the Japanese stock market, powered by [EDINET DB](https://edinetdb.com) + [J-Quants](https://jpx-jquants.com/).
 Forked from [virattt/dexter](https://github.com/virattt/dexter) (US equities) and rebuilt from the ground up for Japan.
+
+Dexter JP is personal, local research software. It does not provide investment advice, place broker orders, or trade automatically. Unavailable data is never replaced with zero or an invented value.
 
 ![Dexter JP Demo](docs/demo.png)
 
@@ -13,14 +15,27 @@ Forked from [virattt/dexter](https://github.com/virattt/dexter) (US equities) an
 
 Most financial tools stop at "here's a screener" or "here's the data." Dexter JP goes further.
 
-**Ask: "Analyze Sony vs Nintendo as investment targets and give me a recommendation"** and it will:
+**Ask: "Compare Sony and Nintendo using financial, valuation, and risk evidence"** and it will:
 
 1. Build a plan — decide which metrics matter (profitability, growth, balance sheet strength, risk) on its own
 2. Call multiple tools autonomously — pull financial statements, annual report risk factors, and earnings summaries for both companies in parallel
 3. Self-validate mid-process — check whether the numbers and narrative are consistent, and whether it has enough data
-4. Deliver a report — output a structured analysis with comparison tables and a clear conclusion
+4. Deliver a report — output a structured analysis with comparison tables, conditional scenarios, and risks
 
 One question, zero human intervention. This is not single-tool data retrieval. It is multi-source, autonomous analysis.
+
+## Current Analysis Capabilities
+
+- Fundamental / Valuation / Peer Comparison
+- Technical analysis with SMA, ATR, swings, trend, RSI14, MACD, and Bollinger Bands
+- Margin Supply & Demand and public short-position disclosures
+- Investor-type market flows, TOPIX / TSE 33-sector comparison, and sector short-selling turnover
+- Advanced Dividend context covering actuals, company forecasts, payout ratios, and available dividend events
+- Daily-OHLCV estimated Volume Profile with POC, VAH, and VAL
+- Deterministic Entry / Stop / Target candidates only when their required source inputs exist
+- Canonical AnalysisSnapshot V9, analysis history, a local Dashboard, and an Analysis Watchlist
+
+Important financial and statistical calculations run in deterministic TypeScript engines; the AI interprets structured results. Volume Profile is an estimate derived from daily OHLCV, not actual investor cost basis or true retained overhead supply. POC / VAH / VAL are not automatic trading signals.
 
 ## Setup
 
@@ -29,6 +44,8 @@ One question, zero human intervention. This is not single-tool data retrieval. I
 - [Bun](https://bun.sh/)
 - An LLM API key (at least one of the options below)
 - An [EDINET DB](https://edinetdb.com) API key
+
+Configure J-Quants to enable market-data analysis such as prices, Technical, supply and demand, market/sector comparisons, short selling, investor types, dividends, and Volume Profile. Endpoint access and history depend on the configured plan and current data availability.
 
 ### Environment Variables
 
@@ -42,6 +59,8 @@ OPENAI_API_KEY=sk-...          # OpenAI (default)
 ANTHROPIC_API_KEY=sk-ant-...   # Claude
 GOOGLE_API_KEY=...             # Gemini
 XAI_API_KEY=...                # Grok
+MOONSHOT_API_KEY=...           # Kimi
+DEEPSEEK_API_KEY=...           # DeepSeek
 OPENROUTER_API_KEY=...         # OpenRouter (access to multiple models)
 
 # Japanese equity data
@@ -49,13 +68,14 @@ EDINETDB_API_KEY=edb_...       # Get yours at edinetdb.com (free tier available)
 
 # === Optional ===
 
-# Stock prices (enables the get_stock_price tool)
-JQUANTS_API_KEY=...            # Free, no expiration — jpx-jquants.com
+# Japanese market data (coverage depends on the J-Quants plan)
+JQUANTS_API_KEY=...            # Get yours at jpx-jquants.com
 
-# Web search (enables the web_search tool; priority: Exa > Perplexity > Tavily)
+# Web search (enables web_search and provider selection in the CLI)
 EXASEARCH_API_KEY=...
 PERPLEXITY_API_KEY=...
 TAVILY_API_KEY=...
+LANGSEARCH_API_KEY=...
 
 # X/Twitter search
 X_BEARER_TOKEN=...
@@ -67,12 +87,14 @@ OLLAMA_BASE_URL=http://127.0.0.1:11434
 ### Install & Run
 
 ```bash
-git clone https://github.com/edinetdb/dexter-jp.git
+git clone https://github.com/teriykiumai/dexter-jp.git
 cd dexter-jp
 bun install
 cp env.example .env  # Edit this file and add your API keys
 bun run start
 ```
+
+See the [Usage Guide](Usage.md) for detailed operation, Snapshot compatibility, the Dashboard, data dates, and unavailable-data semantics.
 
 ## Usage Examples
 
@@ -83,11 +105,11 @@ Throw a complex question at Dexter and it will plan, gather data across multiple
 ```
 Comprehensive analysis of Toyota's competitiveness. Cover financials, risk factors from the annual report, and latest earnings — compile everything into a report.
 
-Sony vs Nintendo: which is the better investment? Compare financial health, profitability, growth, and risk, then give a verdict.
+Compare Sony and Nintendo using financial health, profitability, growth, and risk. Explain the strengths and conditional scenarios.
 
 Find undervalued stocks with high ROE and high dividends, then deep-dive into the top 3 on balance sheet strength and business risk.
 
-Run a DCF valuation on Keyence. Is the current stock price overvalued or undervalued?
+Run a DCF valuation on Keyence. Show the assumptions and the gap to the current price.
 ```
 
 ### Simple Queries Work Too
@@ -107,17 +129,26 @@ Find high-dividend stocks yielding above 4%.
 ```
 Analyze Toyota's competitiveness. Cover financials, risk factors from the annual report, and latest earnings.
 
-Compare Sony vs Nintendo as investment targets with a final recommendation.
+Compare Sony and Nintendo using financial health, profitability, growth, and risk evidence. State the conditions behind the conclusion.
 ```
+
+## Snapshot and Local Dashboard
+
+A Standard Agent comprehensive analysis builds a Canonical AnalysisSnapshot from structured source and Engine results, then saves latest and historical files under `.dexter/analysis/`. V9 is the current writer; existing V1-V8 history remains readable and immutable.
+
+```bash
+bun run dashboard
+```
+
+Open `http://127.0.0.1:3000/` to view the Analysis Watchlist, latest analyses, history, and the Single Stock Dashboard. The Dashboard is a presentation layer over Snapshot values and does not recalculate financial metrics in the browser. Snapshot generation currently applies to Standard Agent runs; Claude Agent SDK mode is not connected to that path.
 
 ## Architecture
 
 ```
 User's question
     |
-Agent loop (LangChain)
-    | Plan -> Select tools -> Execute -> Validate -> Repeat
-    |
+Standard Agent / Claude Agent SDK
+    | Plan -> Select tools -> Execute -> Validate
 +-------------------------------------------+
 |  get_financials (meta-tool)               |
 |    -> get_financial_statements            |
@@ -134,10 +165,16 @@ Agent loop (LangChain)
 +-------------------------------------------+
 |  get_stock_price (J-Quants V2)            |
 +-------------------------------------------+
+|  deterministic finance analysis Engines   |
++-------------------------------------------+
 |  web_search / browser / skills            |
 +-------------------------------------------+
     |
-Structured report output
+structured results -> AI interpretation -> report
+    | Standard Agent comprehensive analysis
+Canonical AnalysisSnapshot V9
+    |
+Local JSON -> read-only API -> Dashboard / Watchlist
 ```
 
 ### How the Meta-Tool Works
@@ -185,15 +222,10 @@ Persists across sessions. Dexter remembers your investment thesis, portfolio inf
 
 ### Supported LLMs
 
-Switch models on the fly with the `/model` command:
-
-- OpenAI (GPT-4o, GPT-4o-mini, etc.)
-- Anthropic (Claude)
-- Google (Gemini)
-- xAI (Grok)
-- OpenRouter
-- Ollama (local LLMs)
-- Claude Agent SDK (see below)
+Switch providers with `/model`. The current provider registry includes OpenAI,
+Anthropic, Google, xAI, Moonshot, DeepSeek, OpenRouter, Ollama, and Claude Agent SDK.
+Individual model availability can change at the provider, so use the current choices
+shown by the CLI.
 
 ### Claude Agent SDK mode
 
@@ -301,8 +333,8 @@ bun run gateway    # All configured channels start simultaneously
 | Source | Coverage | Required? |
 |--------|----------|-----------|
 | [EDINET DB](https://edinetdb.com) | Financial statements, annual report text, screening, AI analysis (~3,800 companies) | Required |
-| [J-Quants](https://jpx-jquants.com/) | Stock price OHLC (official TSE data) | Optional |
-| Web search | Exa / Perplexity / Tavily | Optional |
+| [J-Quants](https://jpx-jquants.com/) | Japanese market data including prices, margin data, short selling, investor types, sector indices, and dividends (plan/history limits apply) | Optional |
+| Web search | Exa / Perplexity / Tavily / LangSearch | Optional |
 
 ## Differences from the Original (US Version)
 
