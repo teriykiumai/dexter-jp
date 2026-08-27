@@ -64,13 +64,14 @@ describe('buildDexterSdkTools', () => {
     expect(new Set(names).size).toBe(names.length);
   });
 
-  test('exposes the dividend-summary raw source when J-Quants is configured', () => {
+  test('exposes the dividend raw sources when J-Quants is configured', () => {
     const originalApiKey = process.env.JQUANTS_API_KEY;
     process.env.JQUANTS_API_KEY = 'test-key';
     try {
       const configuredNames = buildDexterSdkTools()
         .map((tool) => (tool as { name?: string }).name ?? '');
       expect(configuredNames).toContain('get_dividend_summary');
+      expect(configuredNames).toContain('get_dividend_events');
     } finally {
       if (originalApiKey === undefined) {
         delete process.env.JQUANTS_API_KEY;

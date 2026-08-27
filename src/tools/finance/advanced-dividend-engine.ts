@@ -4,9 +4,12 @@ import {
   type DividendAvailabilityCalendarDay,
   type DividendSummarySourceRow,
 } from './dividend-summary.js';
+import type { DividendEventSourceRow } from './dividend-events.js';
 
 const CANONICAL_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/;
+const EVENT_TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+const YEAR_MONTH_PATTERN = /^\d{4}-\d{2}$/;
 
 export type AdvancedDividendCoreUnavailableReason =
   | 'no_eligible_dividend_disclosure_data'
@@ -52,6 +55,53 @@ export interface DividendFiscalResult {
   };
 }
 
+export type DividendEventUnavailableReason =
+  | 'no_eligible_dividend_event_data'
+  | 'availability_calendar_unavailable'
+  | 'component_breakdown_unavailable'
+  | 'missing_data'
+  | 'invalid_data';
+
+export interface UnavailableDividendEvent {
+  scope: 'event' | 'component';
+  reason: DividendEventUnavailableReason;
+}
+
+export interface DividendEvent {
+  notifiedDate: string;
+  notifiedTime: string | null;
+  sourceEligibleDate: string;
+  referenceNumber: string;
+  corporateActionReferenceNumber: string;
+  kind: 'interim' | 'fiscal_year_end';
+  decision: 'decided' | 'forecast';
+  recordDateYearMonth: string;
+  dividendPerShare: number | null;
+  ordinaryDividendPerShare: number | null;
+  commemorativeDividendPerShare: number | null;
+  specialDividendPerShare: number | null;
+  recordDate: string | null;
+  rightsRecordDate: string | null;
+  exDate: string | null;
+  paymentDate: string | null;
+}
+
+export interface DividendEventReplayResult {
+  analysisAsOfDate: string;
+  issuerCode: string;
+  dataDate: string | null;
+  events: readonly DividendEvent[] | null;
+  unavailable: readonly UnavailableDividendEvent[];
+  provenance: {
+    dividendEvents: { source: 'jquants'; endpoint: '/v2/fins/dividend' };
+    availabilityCalendar: { source: 'jquants'; endpoint: '/v2/markets/calendar' };
+    calculation: { source: 'advanced_dividend_engine' };
+  };
+  units: {
+    dividendPerShare: 'JPY_per_share';
+  };
+}
+
 interface EligibleRow {
   row: DividendSummarySourceRow;
   sourceEligibleDate: string;
@@ -61,6 +111,10 @@ function isCanonicalDate(value: string): boolean {
   if (!CANONICAL_DATE_PATTERN.test(value)) return false;
   const date = new Date(`${value}T00:00:00Z`);
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function isCanonicalYearMonth(value: string): boolean {
+  return YEAR_MONTH_PATTERN.test(value) && isCanonicalDate(`${value}-01`);
 }
 
 function isNormalizedJQuantsIssuerCode(value: string): boolean {
@@ -274,6 +328,294 @@ export function analyzeDividendFiscalObservations(
     issuerCode,
     dataDate,
     observations,
+    unavailable,
+  );
+}
+
+interface EligibleEventNotification {
+  row: DividendEventSourceRow;
+  sourceEligibleDate: string;
+}
+
+function eventResult(
+  analysisAsOfDate: string,
+  issuerCode: string,
+  dataDate: string | null,
+  events: readonly DividendEvent[] | null,
+  unavailable: readonly UnavailableDividendEvent[],
+): DividendEventReplayResult {
+  return {
+    analysisAsOfDate,
+    issuerCode,
+    dataDate,
+    events,
+    unavailable,
+    provenance: {
+      dividendEvents: { source: 'jquants', endpoint: '/v2/fins/dividend' },
+      availabilityCalendar: { source: 'jquants', endpoint: '/v2/markets/calendar' },
+      calculation: { source: 'advanced_dividend_engine' },
+    },
+    units: { dividendPerShare: 'JPY_per_share' },
+  };
+}
+
+function eventNotificationOrder(
+  left: Pick<DividendEventSourceRow, 'notifiedDate' | 'notifiedTime' | 'referenceNumber'>,
+  right: Pick<DividendEventSourceRow, 'notifiedDate' | 'notifiedTime' | 'referenceNumber'>,
+): number {
+  return left.notifiedDate.localeCompare(right.notifiedDate)
+    || (left.notifiedTime ?? '').localeCompare(right.notifiedTime ?? '')
+    || left.referenceNumber.localeCompare(right.referenceNumber);
+}
+
+function isNullableCanonicalDate(value: string | null): boolean {
+  return value === null || isCanonicalDate(value);
+}
+
+function hasValidEventMetadata(row: DividendEventSourceRow, issuerCode: string): boolean {
+  return row.issuerCode === issuerCode
+    && isCanonicalDate(row.notifiedDate)
+    && (row.notifiedTime === null || EVENT_TIME_PATTERN.test(row.notifiedTime))
+    && row.referenceNumber.length > 0
+    && row.corporateActionReferenceNumber.length > 0
+    && (row.statusCode === '1' || row.statusCode === '2' || row.statusCode === '3')
+    && (row.statusCode !== '1'
+      || row.corporateActionReferenceNumber === row.referenceNumber)
+    && (row.kindCode === '1' || row.kindCode === '2')
+    && (row.decisionCode === '1' || row.decisionCode === '2')
+    && isCanonicalYearMonth(row.recordDateYearMonth)
+    && isNullableCanonicalDate(row.recordDate)
+    && isNullableCanonicalDate(row.rightsRecordDate)
+    && isNullableCanonicalDate(row.exDate)
+    && isNullableCanonicalDate(row.paymentDate)
+    && (
+      row.componentCode === '0'
+      || row.componentCode === '1'
+      || row.componentCode === '2'
+      || row.componentCode === '3'
+    );
+}
+
+function areValidEventAmounts(row: DividendEventSourceRow): boolean {
+  return [
+    row.dividendPerShare,
+    row.commemorativeDividendPerShare,
+    row.specialDividendPerShare,
+  ].every((value) => value === null || (Number.isFinite(value) && value >= 0));
+}
+
+interface MappedDividendEvent {
+  event: DividendEvent;
+  missingDividend: boolean;
+  componentUnavailable: boolean;
+  invalid: boolean;
+}
+
+function mapDividendEvent(
+  notification: EligibleEventNotification,
+): MappedDividendEvent {
+  const { row } = notification;
+  const dividend = row.dividendPerShare;
+  const needsCommemorativeComponent = row.componentCode === '1' || row.componentCode === '3';
+  const needsSpecialComponent = row.componentCode === '2' || row.componentCode === '3';
+  let ordinaryDividendPerShare: number | null = null;
+  let componentUnavailable = false;
+
+  if (dividend !== null) {
+    if (row.componentCode === '0') {
+      ordinaryDividendPerShare = dividend;
+    } else if (row.componentCode === '1') {
+      if (row.commemorativeDividendPerShare === null) {
+        componentUnavailable = true;
+      } else {
+        ordinaryDividendPerShare = dividend - row.commemorativeDividendPerShare;
+      }
+    } else if (row.componentCode === '2') {
+      if (row.specialDividendPerShare === null) {
+        componentUnavailable = true;
+      } else {
+        ordinaryDividendPerShare = dividend - row.specialDividendPerShare;
+      }
+    } else if (
+      row.commemorativeDividendPerShare === null
+      || row.specialDividendPerShare === null
+    ) {
+      componentUnavailable = true;
+    } else {
+      ordinaryDividendPerShare = dividend
+        - row.commemorativeDividendPerShare
+        - row.specialDividendPerShare;
+    }
+  } else if (
+    (needsCommemorativeComponent && row.commemorativeDividendPerShare === null)
+    || (needsSpecialComponent && row.specialDividendPerShare === null)
+  ) {
+    componentUnavailable = true;
+  }
+
+  return {
+    event: {
+      notifiedDate: row.notifiedDate,
+      notifiedTime: row.notifiedTime,
+      sourceEligibleDate: notification.sourceEligibleDate,
+      referenceNumber: row.referenceNumber,
+      corporateActionReferenceNumber: row.corporateActionReferenceNumber,
+      kind: row.kindCode === '1' ? 'interim' : 'fiscal_year_end',
+      decision: row.decisionCode === '1' ? 'decided' : 'forecast',
+      recordDateYearMonth: row.recordDateYearMonth,
+      dividendPerShare: dividend,
+      ordinaryDividendPerShare,
+      commemorativeDividendPerShare: row.commemorativeDividendPerShare,
+      specialDividendPerShare: row.specialDividendPerShare,
+      recordDate: row.recordDate,
+      rightsRecordDate: row.rightsRecordDate,
+      exDate: row.exDate,
+      paymentDate: row.paymentDate,
+    },
+    missingDividend: dividend === null,
+    componentUnavailable,
+    invalid: ordinaryDividendPerShare !== null && ordinaryDividendPerShare < 0,
+  };
+}
+
+/** Replay eligible J-Quants dividend notifications through their CA reference identity. */
+export function replayDividendEvents(
+  issuerCode: string,
+  sourceRows: readonly DividendEventSourceRow[],
+  officialCalendar: readonly DividendAvailabilityCalendarDay[],
+  analysisAsOfDate: string,
+): DividendEventReplayResult {
+  if (!isNormalizedJQuantsIssuerCode(issuerCode)) {
+    throw new RangeError('Dividend issuerCode must be a normalized five-digit JPX code.');
+  }
+  if (!isCanonicalDate(analysisAsOfDate)) {
+    throw new RangeError('Dividend analysisAsOfDate must be a valid YYYY-MM-DD date.');
+  }
+
+  const eligibleNotifications: EligibleEventNotification[] = [];
+  for (const row of sourceRows) {
+    if (row.notifiedDate >= analysisAsOfDate) continue;
+    const sourceEligibleDate = resolveDividendSourceEligibleDate(
+      row.notifiedDate,
+      officialCalendar,
+    );
+    if (sourceEligibleDate === null) {
+      return eventResult(
+        analysisAsOfDate,
+        issuerCode,
+        null,
+        null,
+        [{ scope: 'event', reason: 'availability_calendar_unavailable' }],
+      );
+    }
+    if (sourceEligibleDate <= analysisAsOfDate) {
+      eligibleNotifications.push({ row, sourceEligibleDate });
+    }
+  }
+
+  if (eligibleNotifications.length === 0) {
+    return eventResult(
+      analysisAsOfDate,
+      issuerCode,
+      null,
+      null,
+      [{ scope: 'event', reason: 'no_eligible_dividend_event_data' }],
+    );
+  }
+
+  const ordered = [...eligibleNotifications].sort(
+    (left, right) => eventNotificationOrder(left.row, right.row),
+  );
+  const dataDate = ordered.at(-1)?.row.notifiedDate ?? null;
+  if (!ordered.every(({ row }) => hasValidEventMetadata(row, issuerCode))) {
+    return eventResult(
+      analysisAsOfDate,
+      issuerCode,
+      dataDate,
+      null,
+      [{ scope: 'event', reason: 'invalid_data' }],
+    );
+  }
+
+  const states = new Map<string, EligibleEventNotification>();
+  const seenReferences = new Set<string>();
+  for (const notification of ordered) {
+    const { row } = notification;
+    if (seenReferences.has(row.referenceNumber)) {
+      return eventResult(
+        analysisAsOfDate,
+        issuerCode,
+        dataDate,
+        null,
+        [{ scope: 'event', reason: 'invalid_data' }],
+      );
+    }
+    seenReferences.add(row.referenceNumber);
+
+    const target = row.corporateActionReferenceNumber;
+    if (row.statusCode === '1') {
+      if (states.has(target)) {
+        return eventResult(
+          analysisAsOfDate,
+          issuerCode,
+          dataDate,
+          null,
+          [{ scope: 'event', reason: 'invalid_data' }],
+        );
+      }
+      states.set(target, notification);
+    } else if (!states.has(target)) {
+      return eventResult(
+        analysisAsOfDate,
+        issuerCode,
+        dataDate,
+        null,
+        [{ scope: 'event', reason: 'invalid_data' }],
+      );
+    } else if (row.statusCode === '2') {
+      states.set(target, notification);
+    } else {
+      states.delete(target);
+    }
+  }
+
+  const finalNotifications = [...states.values()].sort(
+    (left, right) => eventNotificationOrder(left.row, right.row),
+  );
+  if (!finalNotifications.every(({ row }) => areValidEventAmounts(row))) {
+    return eventResult(
+      analysisAsOfDate,
+      issuerCode,
+      dataDate,
+      null,
+      [{ scope: 'event', reason: 'invalid_data' }],
+    );
+  }
+
+  const mapped = finalNotifications.map(mapDividendEvent);
+  if (mapped.some((item) => item.invalid)) {
+    return eventResult(
+      analysisAsOfDate,
+      issuerCode,
+      dataDate,
+      null,
+      [{ scope: 'event', reason: 'invalid_data' }],
+    );
+  }
+
+  const unavailable: UnavailableDividendEvent[] = [];
+  if (mapped.some((item) => item.missingDividend)) {
+    unavailable.push({ scope: 'event', reason: 'missing_data' });
+  }
+  if (mapped.some((item) => item.componentUnavailable)) {
+    unavailable.push({ scope: 'component', reason: 'component_breakdown_unavailable' });
+  }
+
+  return eventResult(
+    analysisAsOfDate,
+    issuerCode,
+    dataDate,
+    mapped.map((item) => item.event),
     unavailable,
   );
 }
