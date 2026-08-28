@@ -1,6 +1,6 @@
 # Dashboard Detail UX Improvement Plan
 
-**Status:** Candidate for independent adversarial review
+**Status:** Candidate amended after independent adversarial review; pending re-review
 
 **Baseline:** `main` at `3d391bc5f02211b851a74f53ed2c4559b9bfda1f`
 
@@ -58,8 +58,8 @@ The following context remains visible above the tab panels:
 - Snapshot generation time;
 - Snapshot status;
 - the existing principal KPI row;
-- a compact count of recorded data gaps; and
-- the saved-Snapshot reload control after UX-4.
+- separate compact counts for unavailable and uncollected sections; and
+- the saved-Snapshot reload control after its dedicated implementation step.
 
 The persistent area does not derive a completeness score or investment severity.
 
@@ -69,39 +69,56 @@ Use a fixed, typed registry with these stable identifiers and labels, in this or
 
 | ID | Label | Existing content |
 | --- | --- | --- |
+| `report` | 概要・レポート | Data Freshness, Unavailable, Final Report, Scenarios, Risks |
 | `technical` | 株価・テクニカル | Price Structure, Advanced Technical, Volume Profile, Strategy |
-| `fundamentals` | 業績・比較・配当 | Peer Position, Advanced Dividend |
+| `fundamentals` | 比較・配当 | Peer Position, Advanced Dividend |
 | `supply-demand` | 需給・空売り | Supply & Demand, Public Short Position Reports |
 | `market` | 市場・セクター | Investor Type Flows, Market Correlation, Sector Benchmark, Sector Short-selling Flow |
-| `report` | レポート・データ | Scenarios, Risks, Final Report, Data Freshness, Unavailable |
 
 All five tabs exist for every readable Snapshot version. A section introduced after
 the loaded Snapshot version remains reachable and displays `未収集`; the tab is not
 hidden or disabled. Valid zero remains available data.
 
-The initial tab is `technical`.
+The initial tab is `report`. Within that tab, Data Freshness and the unavailable /
+uncollected summary precede Final Report, Scenarios, and Risks so the user sees the
+data boundary before interpreting the narrative.
+
+These five IDs remain stable for V1-V9. The registry is extensible only through a
+later reviewed plan. P3-0 decides whether Evaluator, Radar, and historical-diff views
+belong in an existing tab or require an additional stable ID; this plan does not
+pre-assign them.
 
 ### 3.3 URL and navigation state
 
 The detail URL uses the current ticker query together with a stable tab query:
 
 ```text
-/?ticker=7203&tab=technical
+/?ticker=7203&tab=report
 ```
 
 - Existing ticker normalization and `History API` navigation are reused; no Router
   dependency is added.
-- Selecting a tab updates the URL with `history.replaceState`, avoiding a new browser
-  history entry for every tab switch.
+- Selecting a tab updates only the `tab` query with `history.replaceState`, avoiding
+  a new browser history entry for every tab switch and preserving other recognized
+  or future detail-query parameters.
 - A valid explicit `tab` deep link is respected on initial load and `popstate`.
-- A missing or unknown tab value falls back to `technical` without an error page.
+- A missing or unknown tab value falls back to `report` and canonicalizes the URL
+  with `replaceState`, without an error page or a new history entry.
 - Selecting a different ticker from the saved-analysis list resets the tab to
-  `technical` unless that navigation includes a valid explicit tab.
+  `report` unless that navigation includes a valid explicit tab.
 - Returning to the list removes detail-only ticker and tab state.
-- Tab and panel semantics follow the ARIA tabs pattern. Arrow keys move between
-  adjacent tabs, Home/End move to the first/last tab, and focus behavior is tested.
-- On narrow screens the tab list scrolls horizontally; it does not change into a
-  different control model such as a select element.
+- Tab and panel semantics use automatic activation under the ARIA tabs pattern.
+  Left/Right Arrow wraps and moves focus, selection, visible panel, and the canonical
+  URL together. Home/End activates the first/last tab. Mouse/touch activation follows
+  the same state transition; Enter/Space do not introduce a separate manual mode.
+- `popstate` changes the selected panel without stealing focus from content outside
+  the tablist. If focus is already within the tablist, it moves to the newly selected
+  tab.
+- Tab activation keeps the viewport anchored at the sticky tablist rather than
+  jumping to the document start.
+- On narrow screens the sticky tab list scrolls horizontally; it does not change into
+  a different control model such as a select element. It provides a visible edge cue
+  and scrolls the selected tab fully into view, so the final tab is discoverable.
 
 ## 4. Progressive disclosure
 
@@ -115,6 +132,10 @@ Keep decision-relevant stored summaries visible, including:
 - Volume Profile POC, VAL, VAH, target share, and achieved share;
 - section availability and unavailable reasons;
 - report and observation counts where already available from stored arrays;
+- Public Short Position report count, stored `dataDate`, and the existing disclosure
+  boundary note;
+- Advanced Dividend observation/event counts, stored `dataDate`, and existing
+  actual/forecast and component-availability context;
 - Investor Type Flow summary before brokerage detail; and
 - data dates needed to interpret a result.
 
@@ -126,36 +147,101 @@ financial aggregation.
 The following detailed content is fully collapsed by default, with no preview rows:
 
 - all Volume Profile bins;
-- all Public Short Position reports;
 - Investor Type Flow brokerage breakdown;
-- Advanced Dividend fiscal observations and dividend events when presented as large
-  tables; and
 - detailed provenance or methodology fields that are not required to identify the
   visible summary.
+
+Public Short Position reports and Advanced Dividend fiscal/event tables may use
+native disclosures, but remain open by default in the initial implementation. Their
+principal stored facts do not have an approved representative-row selection contract,
+so a count/date-only summary must not hide ratio, shares, reporter identity, annual
+DPS, payout ratio, or dividend components. Making either table closed by default
+requires a later reviewed presentation contract that selects a narrow stored summary
+without sorting, aggregating, or calculating in the Browser.
 
 Every stored value currently reachable remains reachable inside a disclosure. Do not
 delete, aggregate, sort, filter, paginate, sample, or reorder source report rows as
 part of this plan.
 
-Disclosure open state may survive tab changes while the same ticker and Snapshot are
-displayed. It resets when the ticker changes or a saved Snapshot is successfully
-replaced. No disclosure state is persisted to storage or the URL.
+Disclosure open state is keyed to displayed Snapshot identity
+`canonicalTicker + generatedAt`. It must survive tab changes and an unchanged reload
+for that identity. It resets only when the ticker changes or a different Snapshot
+identity replaces the display. No disclosure state is persisted to storage or the
+URL.
 
-## 5. Data-gap visibility
+## 5. Availability navigation
 
-Show a compact recorded-gap count in the persistent area and a per-tab count on each
-tab. Counts follow these presentation rules:
+Never combine unavailable data with schema-version or collection absence under one
+"gap" number. The persistent area and each tab show two neutral labels where the
+count is non-zero:
 
-- use top-level stored unavailable records as the authoritative gap records;
-- count a section shown as `not_collected` once when no corresponding top-level
-  record exists;
-- do not count the same stored gap again because it is also rendered inside a card;
-- do not treat valid zero as a gap;
-- keep the full stored reason and detail accessible in the report/data tab; and
-- use neutral presentation rather than investment-risk colors or severity scores.
+- `利用不可 N` — distinct stored unavailable records whose reason is not
+  `not_collected`; and
+- `未収集 N` — distinct sections not collected in this Snapshot, including sections
+  introduced after its schema version.
 
-This count is navigation metadata only. It does not change Snapshot `complete` or
-`partial` semantics.
+The latter is labelled `このSnapshotでは未収集` in its explanation. It does not mean
+the Snapshot failed, and it does not change a V1-V8 Snapshot's historical
+`complete`/`partial` meaning.
+
+Counts are visible text and included in the tab's accessible name or description;
+they are not conveyed by color alone.
+
+### 5.1 Exhaustive section ownership
+
+UX-1 implements an exhaustive typed registry for the V9 section vocabulary:
+
+| Destination | Snapshot sections |
+| --- | --- |
+| persistent/global-only | `identity`, `fundamental`, `valuation` |
+| `technical` | `priceHistory`, `technical`, `advancedTechnical`, `volumeProfile`, `strategy` |
+| `fundamentals` | `peerComparison`, `advancedDividend` |
+| `supply-demand` | `supplyDemand`, `reportedShortPositions` |
+| `market` | `investorTypeFlows`, `marketCorrelation`, `sectorBenchmark`, `sectorShortRatio` |
+| `report` | `scenarios`, `risks` |
+
+Adding a section to a future Snapshot union must fail the registry's exhaustiveness
+check until a reviewed destination is assigned.
+
+### 5.2 Unavailable-record count
+
+The authoritative source is `snapshot.unavailable`; card-level renderings are not a
+second source. Navigation metadata de-duplicates only exact stored record identities:
+
+```text
+section + (metric ?? null) + reason + (detail ?? null)
+```
+
+Section-level and metric-level records are distinct because their `metric` values
+differ. Records that differ by reason or detail also remain distinct. Stored records
+with reason `not_collected` are excluded from `利用不可` and handled by the section set
+below. The full raw stored array, including exact duplicates and details, remains
+visible in the report tab; de-duplication affects navigation counts only.
+
+The global unavailable count is the union of all distinct tab-assigned and
+persistent/global-only records. A tab count is the subset assigned by the registry,
+so the global count can exceed the sum of tab counts when persistent records exist.
+
+### 5.3 Uncollected-section count
+
+The uncollected set contains each applicable section at most once when either:
+
+- its stored state is explicitly `not_collected`/null; or
+- the field is absent because the loaded schema predates its introduction:
+  `advancedTechnical` (V2), `reportedShortPositions` (V4), `investorTypeFlows` (V5),
+  `sectorBenchmark` (V6), `sectorShortRatio` (V7), `advancedDividend` (V8), and
+  `volumeProfile` (V9).
+
+Stored `not_collected` records and schema-derived absence for the same section produce
+one set member, never two. A later-version field with another unavailable reason is
+not also called uncollected. Valid zero belongs to neither count.
+
+The global uncollected count is the union of these unique sections. Per-tab counts use
+the same exhaustive registry; no synthetic persistent section is created. The full
+stored reasons and all section states remain accessible in the report tab.
+
+Both count types are navigation metadata only. They do not create a completeness
+score, alter Snapshot status, or rank investment risk.
 
 ## 6. Metric guidance
 
@@ -166,14 +252,19 @@ Do not use hover-only tooltips. Use:
 - a short section-level context sentence;
 - a keyboard- and touch-operable explanation button where a term needs more detail;
   and
-- one global glossary opened in a native dialog or equivalent accessible drawer.
+- one always-visible `用語集` button near the persistent header, opening a native
+  `dialog`.
 
 The glossary is a typed static presentation registry in
 `src/dashboard/web/glossary.ts`. It contains explanatory prose only. It does not copy
 Snapshot values or formulas into a second calculation path.
 
-The dialog must support labelled title/content, predictable initial focus, Escape to
-close, focus containment while open, and focus return to the invoking control.
+Clicking a term explanation button opens that term directly. The dialog must support
+labelled title/content, predictable initial focus, Escape to close, native modal focus
+containment, and focus return to the invoking control. A tab, route, ticker, or
+different-Snapshot change closes it. If the invoker remains connected and visible,
+focus returns there; otherwise focus moves to the active tab, or to the destination
+page's main heading after leaving detail view. An unchanged reload does not close it.
 
 ### 6.2 Explanation content
 
@@ -194,21 +285,49 @@ Prioritize:
 - POC, VAH, and VAL.
 
 Use Japanese-first labels with standard abbreviations retained where they are the
-recognized term. Definitions must preserve the source-specific limits already fixed
-in the applicable plans, such as public short-position disclosure not being total
-short interest and daily Volume Profile being an estimated distribution proxy.
+recognized term. UX-2 fixes at least this presentation inventory:
+
+| Current term | Japanese-first presentation |
+| --- | --- |
+| Price Structure | 株価チャート |
+| Advanced Technical | テクニカル指標 |
+| Volume Profile | 出来高価格分布（Volume Profile） |
+| Strategy | 戦略水準 |
+| Peer Position | 同業比較 |
+| Advanced Dividend | 配当分析 |
+| Supply & Demand | 信用需給 |
+| Public Short Position Reports | 公開空売り残高報告 |
+| Investor Type Flows | 投資部門別売買 |
+| Market Correlation | 市場相関 |
+| Sector Benchmark | 業種指数比較 |
+| Sector Short-selling Flow | 業種別空売り売買代金 |
+| Data Freshness | データ基準日 |
+| Unavailable | 利用不可データ |
+| Final Report | 総合レポート |
+
+RSI, MACD, ATR, POC, VAH, VAL, Beta, Alpha, and R-squared may retain their standard
+abbreviations alongside Japanese explanations. Source identity strings, endpoint
+field names, and official categories are not translated, normalized, or
+reclassified. User-facing context replaces avoidable standalone English such as
+`flow`, `proxy`, `position`, `Advanced`, `Source eligible`, and `Analysis as-of` with
+Japanese-first wording while retaining the exact source/audit meaning.
+
+Definitions must preserve the source-specific limits already fixed in the applicable
+plans, such as public short-position disclosure not being total short interest and
+daily Volume Profile being an estimated distribution proxy.
 
 ### 6.3 Number formatting
 
-Compact Japanese currency notation is limited to summary displays whose stored unit
-is `thousand_JPY`:
+This UX plan preserves the current exact unit-aware formatting. In particular,
+`thousand_JPY` values remain exact 千円 values in both summary and detail views.
+Compact 億円/兆円 conversion is removed from this plan because rounding can turn a
+small positive or negative value into displayed zero, and Investor Type summary and
+brokerage rows are not interchangeable exact-value counterparts.
 
-- use `億円` or `兆円` with at most two decimal places;
-- retain the exact stored source-unit value in the corresponding detail table; and
-- never compact an unavailable value into zero.
-
-Do not apply compact currency formatting generically to stock prices, shares,
-adjusted shares, ratios, or other units.
+A future compact formatter requires a separate reviewed contract for thresholds,
+divisors, sign, rounding, boundary values, non-zero fallback, and an adjacent exact
+rendering of the same source value. It must not be applied generically to stock
+prices, shares, adjusted shares, ratios, or other units.
 
 ## 7. Chart presentation
 
@@ -220,10 +339,21 @@ UX-3 uses only fields already present in the loaded Snapshot.
   height, with a synchronized time scale and crosshair.
 - Preserve existing SMA20 and Swing High/Low price lines.
 - Display a chart legend with session-only visibility toggles for each existing price
-  line. All existing lines are visible initially.
-- Reset toggle state when the ticker or loaded Snapshot changes.
+  line. Each toggle is a button with `aria-pressed`; all existing lines are visible
+  initially, and toggling changes visibility only, never the stored lines or bars.
+- Key toggle state to `canonicalTicker + generatedAt`. Preserve it across tabs and an
+  unchanged reload; reset it for a different ticker or Snapshot identity.
 - Move the existing latest RSI14, MACD, and Bollinger values into a compact status
-  strip adjacent to the chart. Do not duplicate the current Advanced Technical card.
+  strip adjacent to the chart. Label it `最新値`, include the stored technical data
+  date, and state that it is not linked to the chart crosshair. Do not duplicate the
+  current Advanced Technical card or imply the values belong to the crosshair date.
+- Associate the visual chart with a text description containing the stored date
+  range, latest stored close, and currently visible stored price-line labels/levels.
+  Selecting and formatting those values is presentation, not a replacement
+  calculation.
+- On mobile, stack the legend and latest-value strip below the chart. Preserve usable
+  minimum plot heights and prevent labels, panes, legend, and status content from
+  overlapping.
 - Keep the TradingView attribution required by the existing chart dependency.
 
 No dated RSI/MACD/Bollinger or Swing series exists in V1-V9. UX-3 must not synthesize
@@ -237,24 +367,49 @@ UX-4 adds one header control with the exact label:
 保存済みSnapshotを再読み込み
 ```
 
-It means only: reissue the existing `GET /api/analyses/:ticker` request and replace
-the displayed Snapshot if that read succeeds.
+It means only: reissue the existing `GET /api/analyses/:ticker` request and consider a
+validated response for the current display.
 
 - It does not fetch fresh source data, invoke an Agent, call an LLM, save a Snapshot,
   or rerun analysis.
 - It preserves the selected tab.
-- A successful response with a different `generatedAt` is presented as updated; the
-  same `generatedAt` is presented as unchanged.
-- An error or invalid response leaves the currently displayed Snapshot intact.
 - Loading, updated, unchanged, and error feedback is rendered inline with an
-  appropriate `aria-live` region.
+  appropriate `aria-live` region. Every terminal message includes the displayed
+  `generatedAt` and states
+  `外部ソースからの最新データ取得・再分析は実行していません`.
 - At most one reload is authoritative. Starting a new reload aborts the earlier one,
   and an aborted or stale response cannot overwrite a newer response.
 - Changing ticker or leaving the detail page aborts the active reload.
-- A successful replacement resets disclosure and chart-toggle state, even when the
-  selected tab is retained.
 - No polling, focus-triggered refresh, section-level refresh, or automatic retry is
   added.
+
+The Browser applies this state machine before changing the displayed object:
+
+```text
+HTTP success
+  -> JSON decode
+  -> AnalysisSnapshotSchema validation
+  -> canonicalTicker equals requested route ticker
+  -> request token is still current
+  -> compare canonicalTicker + generatedAt with displayed identity
+```
+
+`canonicalTicker + generatedAt` is the displayed Snapshot identity. The repository's
+immutable history contract derives its Snapshot ID from `generatedAt`, so a valid
+same-ticker response with the same timestamp is the same persisted analysis identity.
+
+- Invalid JSON/schema, ticker mismatch, HTTP error, and other request failure show an
+  error while preserving the current Snapshot, selected tab, disclosure state,
+  chart-toggle state, and glossary state.
+- The same identity does not replace the Snapshot object. It reports `変更なし` and
+  preserves all UI state.
+- A different valid identity for the requested ticker replaces the Snapshot, reports
+  `更新`, preserves only the selected tab, and resets disclosures and chart toggles;
+  an open glossary closes under its lifecycle contract.
+- Aborted and stale responses change neither Snapshot/UI state nor current feedback,
+  even if a test double or transport ignores `AbortSignal` and resolves later. A
+  monotonically increasing request token enforces latest-request-wins independently
+  of abort support.
 
 `Usage.md` receives only the minimum wording needed to distinguish this control from
 true source-data reanalysis when UX-4 is implemented.
@@ -263,12 +418,12 @@ A true reanalysis action needs a separate reviewed contract for credentials, API
 cost confirmation, progress, duplicate execution, cancellation, atomic persistence,
 and failure recovery. It is not part of this Dashboard plan.
 
-## 9. Deferred visualizations and Phase 3 boundary
+## 9. Deferred and follow-up visualizations
 
 ### 9.1 Volume Profile chart
 
-After P3-0 is reviewed, but independently of Phase 3 scoring work, a dedicated UX PR
-may visualize the full bins already stored by Snapshot V9:
+A dedicated UX PR may visualize the full bins already stored by Snapshot V9 without
+waiting for or constraining P3-0:
 
 - price is the vertical axis and stored allocated volume is horizontal;
 - stored POC and the stored VAL-VAH area are highlighted;
@@ -280,20 +435,14 @@ may visualize the full bins already stored by Snapshot V9:
 
 ### 9.2 Dated technical series
 
-P3-0 must decide the versioned deterministic series contract before a technical
-indicator pane is added. The first candidate is RSI14 only:
+V1-V9 contain latest Advanced Technical values but no dated RSI, MACD, Bollinger, or
+Swing series. This Dashboard plan therefore does not implement an indicator pane or
+synthesize dated points from OHLCV/latest values.
 
-- available points have the shape `{ date, value }`;
-- warm-up dates are omitted rather than represented as fabricated zero or ambiguous
-  null points;
-- the final point equals the existing latest RSI14 result for the same canonical
-  calculation sequence;
-- missing or invalid data in that canonical sequence makes the whole series typed
-  unavailable; it is not skipped, filled, interpolated, or restarted; and
-- Snapshot evolution remains additive and versioned.
-
-After RSI is evaluated, MACD, Bollinger, and dated Swing markers are reconsidered
-independently. They are not bundled automatically.
+Any dated-series formula, warm-up, unavailable, no-look-ahead, result shape, Snapshot
+version, and chart placement belongs to a separate future reviewed docs-only design.
+P3-0 may evaluate that work if it is relevant to the Phase 3 architecture, but this
+plan does not require it or preselect RSI as the first series.
 
 ### 9.3 Chart patterns
 
@@ -312,36 +461,50 @@ Dashboard at its boundary, and does not pull forward later scope.
 
 1. **UX-0 — Dashboard UX contract (docs-only)**
    - add this candidate plan;
-   - perform two independent adversarial reviews against one immutable PR head;
+   - perform independent architecture, UX, and final-contract reviews against one
+     immutable PR head;
    - adopt the reviewed final contract before runtime work.
-2. **UX-1 — Detail information architecture**
-   - typed tab registry, URL state, stable section placement, progressive disclosure,
-     gap navigation, responsive behavior, and ARIA interactions;
-   - no metric wording/formatting, chart, API, Engine, or Snapshot change.
-3. **UX-2 — Metric guidance**
+2. **UX-1a — Detail tabs and section placement**
+   - typed/extensible tab registry, exhaustive section ownership, URL state,
+     automatic ARIA tab interactions, sticky responsive tab access, and Japanese tab
+     and section labels;
+   - all existing tables remain expanded and reachable at this boundary;
+   - no chart, API, Engine, Snapshot, or stored-value change.
+3. **UX-1b — Availability navigation and progressive disclosure**
+   - separate unavailable/uncollected metadata, exact de-duplication rules, disclosure
+     summaries/lifecycle, and complete responsive overflow handling;
+   - collapse by default only content with an existing safe stored summary; Public
+     Short and Advanced Dividend remain open by default;
+   - no Browser aggregation, representative-row inference, or stored-value change.
+4. **UX-2 — Metric guidance**
    - Japanese-first labels, section captions, static glossary, accessible dialog, and
-     narrowly scoped compact summary formatting;
+     exact existing unit-aware number formatting;
    - no financial calculation or stored-value change.
-4. **UX-3 — Existing chart presentation**
+5. **UX-3 — Existing chart presentation**
    - price/volume panes, synchronized interaction, existing-line legend/toggles, and
-     latest-indicator status strip;
+     dated/latest-value accessibility descriptions and latest-indicator status strip;
    - Snapshot-only, with no dated indicator generation.
-5. **UX-4 — Saved-Snapshot reload**
-   - existing GET-only endpoint, inline request state, abort/stale-response handling,
-     state preservation, and minimum `Usage.md` clarification;
+6. **UX-4 — Saved-Snapshot reload**
+   - existing GET-only endpoint, client schema/identity boundary, inline request
+     state, request-token/abort handling, state preservation, and minimum `Usage.md`
+     clarification;
    - no source fetch or reanalysis endpoint.
-6. **P3-0 — Phase 3 source/formula/architecture design (docs-only)**
-   - coordinate the next Snapshot version and evaluate the dated RSI series contract;
-   - do not implement Phase 3 runtime work in P3-0.
 7. **UX-5 — Stored Volume Profile visualization**
    - render Snapshot V9 bins and aggregate levels without Browser calculation;
    - remain independent from scores and signals.
-8. **Reviewed Phase 3 runtime steps**
+8. **UX-C — Dashboard UX closeout gate**
+   - run the complete desktop/tablet/mobile, keyboard, screen-reader, V1-V9, and seven
+     user-journey acceptance matrix;
+   - correct UX regressions before Phase 3 rather than deferring known issues.
+9. **P3-0 — Phase 3 source/formula/architecture design (docs-only)**
+   - decide Phase 3 result ownership, Snapshot evolution, and Dashboard extension
+     points from current `main` without being bound to a dated-series design here;
+   - do not implement Phase 3 runtime work in P3-0.
+10. **Reviewed Phase 3 runtime steps**
    - follow the P3-0 sequence only after its independent review.
 
-Perform final cross-tab visual polish after Phase 3 presentation is present, so a
-single styling pass can address the complete information architecture without
-blocking the structural UX work above.
+Phase 3 presentation may receive its own later polish, but the Phase 2 Dashboard UX
+work must satisfy UX-C before P3-0 begins.
 
 ## 11. Test and validation contract
 
@@ -349,22 +512,36 @@ Implementation PRs add focused tests appropriate to their scope. Across the sequ
 the matrix must cover:
 
 - unique tab IDs and deterministic section mapping;
-- default, explicit, missing, and invalid URL tab state;
-- ticker changes, `popstate`, and history behavior;
+- exhaustive V9 section ownership, including persistent/global-only sections;
+- default, explicit, missing, and invalid URL tab state and canonicalization;
+- automatic activation, wrap, selected-panel relation, ticker changes, `popstate`,
+  Back/Forward, focus, and preservation of non-tab detail queries;
 - readable V1-V9 fixtures with all five tabs present;
 - `not_collected`, unavailable, and valid-zero distinction;
-- gap-count de-duplication and unchanged Snapshot status semantics;
+- fixed V1, V4, V8, and V9 unavailable/uncollected counts;
+- exact duplicate, section-level versus metric-level, persistent, and synthetic
+  not-collected reconciliation without changing Snapshot status;
+- Public Short and Advanced Dividend principal values visible before interaction,
+  valid-zero/unavailable handling, and unchanged canonical row order;
 - complete access to collapsed rows without preview, reordering, or aggregation;
-- disclosure state reset/preservation rules;
-- keyboard tab navigation, Home/End, visible focus, and horizontal narrow-screen tab
-  access;
-- glossary dialog labelling, focus containment, Escape, and focus return;
-- compact `thousand_JPY` summaries with exact detail values preserved;
+- disclosure preservation across tabs/unchanged reload and reset for different
+  identity;
+- keyboard tab navigation, Home/End, visible focus, sticky edge cue, and selected-tab
+  narrow-screen access;
+- glossary direct-term opening, labelling, modal focus, Escape, tab/route/Snapshot
+  close, invoker return, and fallback focus;
+- exact `thousand_JPY` summary/detail values with no compact conversion;
 - Snapshot-only candlestick, volume, line, and latest-indicator presentation;
-- chart toggle defaults and reset rules;
+- chart toggle `aria-pressed`, visibility-only behavior, accessible date/close/line
+  description, latest data date/crosshair warning, defaults, and identity reset rules;
 - reload uses GET only and never invokes analysis;
-- reload updated/unchanged/error feedback;
-- abort, latest-request-wins, ticker-change, and stale-response behavior;
+- reload updated/unchanged/error feedback with generated time and explicit no-analysis
+  wording;
+- malformed JSON, schema-invalid response, ticker mismatch, 404, and 500;
+- same identity preserves object and all UI state; different identity performs the
+  limited reset;
+- abort, request-token latest-request-wins, ticker/list navigation, and stale response
+  behavior even when a test transport ignores `AbortSignal`;
 - current UI preservation when reload fails;
 - absence of Browser RSI, MACD, Bollinger, Volume Profile, pattern, score, threshold,
   or signal calculation; and
@@ -379,17 +556,33 @@ bun run typecheck
 git diff --check
 ```
 
-UX implementation PRs also include manual visual/accessibility QA at desktop and
-mobile widths. Before/after screenshots at 1280px and 390px may be attached to PR
-descriptions but are not committed as binary test artifacts. Check at least 980px and
-680px intermediate widths. Do not add a visual-test dependency or broad DOM snapshots
-solely for this work.
+UX implementation PRs reuse the installed Playwright dependency for a small focused
+browser-interaction suite where unit tests cannot establish focus, History API,
+overflow, or reload races. Do not add a dependency or broad DOM snapshots.
+
+Manual visual/accessibility QA covers 320, 390, 680, 768 portrait, 980, 1024 landscape,
+and 1280px. There must be no document-level horizontal overflow; wide source tables
+may keep their own labelled scroll container. Every tab must be discoverable and the
+selected tab fully visible. Chart panes, labels, legend, and latest-value strip must
+not overlap and must retain usable plot height. Before/after screenshots at 1280px and
+390px may be attached to PR descriptions but are not committed as binary artifacts.
+
+UX-C repeats the principal journeys against representative V1, V4, and V9 complete,
+partial, unavailable, uncollected, and valid-zero fixtures:
+
+1. first-time reading of overview, data dates, gaps, and final narrative;
+2. focused technical review;
+3. comparison of margin supply/demand and public short reports without aggregation;
+4. market and sector context review without issuer attribution;
+5. locating unavailable versus uncollected causes;
+6. CLI reanalysis followed by saved-Snapshot reload; and
+7. keyboard, screen-reader, touch, and mobile access to all detail content.
 
 ## 12. Independent adversarial review gate
 
-Before this candidate becomes the final plan, two independent review tasks inspect
-the same immutable Draft PR head. Neither review receives the other review's output or
-the prior conversation's recommendation framing.
+Before this candidate becomes the final plan, independent architecture, UX, and
+final-contract review tasks inspect the same immutable Draft PR head. Neither review
+receives another review's output or the prior conversation's recommendation framing.
 
 ### Review A — architecture and contract red team
 
@@ -403,6 +596,12 @@ Focus on discoverability, grouping, hidden critical information, gap visibility,
 glossary usability, Japanese labels, number readability, responsive behavior,
 keyboard/touch use, chart density, reload misunderstanding, Phase 3 extension points,
 and concrete end-to-end research journeys.
+
+### Review C — contract convergence review
+
+Independently inspect the complete candidate against Source of Truth, merged schemas,
+builders, API/client boundaries, intermediate PR safety, and testability. It must not
+resolve ambiguity merely by choosing one of Reviews A/B; it supplies its own evidence.
 
 Each review reports:
 
