@@ -224,17 +224,21 @@ so the global count can exceed the sum of tab counts when persistent records exi
 
 ### 5.3 Uncollected-section count
 
-The uncollected set contains each applicable section at most once when either:
+The uncollected set contains each applicable section at most once only when either:
 
-- its stored state is explicitly `not_collected`/null; or
+- top-level `snapshot.unavailable` contains a stored record for that section whose
+  reason is exactly `not_collected`; or
 - the field is absent because the loaded schema predates its introduction:
   `advancedTechnical` (V2), `reportedShortPositions` (V4), `investorTypeFlows` (V5),
   `sectorBenchmark` (V6), `sectorShortRatio` (V7), `advancedDividend` (V8), and
   `volumeProfile` (V9).
 
 Stored `not_collected` records and schema-derived absence for the same section produce
-one set member, never two. A later-version field with another unavailable reason is
-not also called uncollected. Valid zero belongs to neither count.
+one set member, never two. Field `null` alone is not an uncollected-count source.
+In particular, a required section whose `null` value produces stored
+`missing_required_section` belongs only to `利用不可`; it is never also counted as
+`未収集`. A later-version field with another unavailable reason is likewise not called
+uncollected. Valid zero belongs to neither count.
 
 The global uncollected count is the union of these unique sections. Per-tab counts use
 the same exhaustive registry; no synthetic persistent section is created. The full
@@ -521,6 +525,11 @@ the matrix must cover:
 - fixed V1, V4, V8, and V9 unavailable/uncollected counts;
 - exact duplicate, section-level versus metric-level, persistent, and synthetic
   not-collected reconciliation without changing Snapshot status;
+- a V9 required `fundamental: null` with stored `missing_required_section` produces
+  `利用不可 1 / 未収集 0`;
+- a V1 schema without `volumeProfile` contributes exactly one `volumeProfile` member
+  to the uncollected set, while V9 `volumeProfile: null` plus stored `not_collected`
+  also contributes exactly one;
 - Public Short and Advanced Dividend principal values visible before interaction,
   valid-zero/unavailable handling, and unchanged canonical row order;
 - complete access to collapsed rows without preview, reordering, or aggregation;
