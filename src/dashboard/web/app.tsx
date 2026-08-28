@@ -1,4 +1,12 @@
-import { StrictMode, useEffect, useMemo, useState, type ReactNode } from 'react';
+import {
+  StrictMode,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from 'react';
 import { createRoot } from 'react-dom/client';
 import type {
   AnalysisSnapshot,
@@ -7,6 +15,8 @@ import type {
 import { LIGHTWEIGHT_CHARTS_NOTICE, PriceChart } from './chart.js';
 import {
   ADVANCED_DIVIDEND_CONTEXT_NOTE,
+  DASHBOARD_TABS,
+  DEFAULT_DASHBOARD_TAB,
   UNAVAILABLE_TEXT,
   INVESTOR_TYPE_FLOW_CONTEXT_NOTE,
   REPORTED_SHORT_POSITION_DISCLOSURE_NOTE,
@@ -15,11 +25,16 @@ import {
   VOLUME_PROFILE_CONTEXT_NOTE,
   WATCHLIST_STALE_AFTER_DAYS,
   buildDetailPath,
+  buildWatchlistPath,
+  hasCanonicalDetailTab,
   mapSnapshotToDashboard,
   mapLatestAnalysisToWatchlistItem,
+  moveDashboardTab,
+  parseDetailTab,
   parseDetailTicker,
   sortWatchlistItems,
   type DashboardMetric,
+  type DashboardTabId,
   type DisplayValue,
   type InvestorTypeCategoryView,
   type WatchlistItemView,
@@ -84,7 +99,97 @@ function InvestorTypeTable({ rows }: { rows: InvestorTypeCategoryView[] }) {
   );
 }
 
-function Dashboard({ snapshot, onBack }: { snapshot: AnalysisSnapshot; onBack: () => void }) {
+function DashboardTabs({
+  selectedTab,
+  onSelect,
+}: {
+  selectedTab: DashboardTabId;
+  onSelect: (tab: DashboardTabId) => void;
+}) {
+  const tabRefs = useRef<Partial<Record<DashboardTabId, HTMLButtonElement>>>({});
+
+  useEffect(() => {
+    tabRefs.current[selectedTab]?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [selectedTab]);
+
+  const handleKeyDown = (
+    event: ReactKeyboardEvent<HTMLButtonElement>,
+    currentTab: DashboardTabId,
+  ) => {
+    if (
+      event.key !== 'ArrowLeft'
+      && event.key !== 'ArrowRight'
+      && event.key !== 'Home'
+      && event.key !== 'End'
+    ) return;
+    event.preventDefault();
+    const nextTab = moveDashboardTab(currentTab, event.key);
+    onSelect(nextTab);
+    tabRefs.current[nextTab]?.focus();
+  };
+
+  return (
+    <nav className="detail-tabs-shell" aria-label="分析表示の切り替え">
+      <div className="detail-tabs" role="tablist" aria-label="分析セクション">
+        {DASHBOARD_TABS.map(tab => (
+          <button
+            aria-controls={`dashboard-panel-${tab.id}`}
+            aria-selected={selectedTab === tab.id}
+            className="detail-tab"
+            id={`dashboard-tab-${tab.id}`}
+            key={tab.id}
+            onClick={() => onSelect(tab.id)}
+            onKeyDown={event => handleKeyDown(event, tab.id)}
+            ref={element => {
+              if (element) tabRefs.current[tab.id] = element;
+              else delete tabRefs.current[tab.id];
+            }}
+            role="tab"
+            tabIndex={selectedTab === tab.id ? 0 : -1}
+            type="button"
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+    </nav>
+  );
+}
+
+function DashboardTabPanel({
+  children,
+  selectedTab,
+  tab,
+}: {
+  children: ReactNode;
+  selectedTab: DashboardTabId;
+  tab: DashboardTabId;
+}) {
+  return (
+    <section
+      aria-labelledby={`dashboard-tab-${tab}`}
+      className="detail-tab-panel"
+      hidden={selectedTab !== tab}
+      id={`dashboard-panel-${tab}`}
+      role="tabpanel"
+      tabIndex={0}
+    >
+      {selectedTab === tab ? children : null}
+    </section>
+  );
+}
+
+function Dashboard({
+  snapshot,
+  onBack,
+  onSelectTab,
+  selectedTab,
+}: {
+  snapshot: AnalysisSnapshot;
+  onBack: () => void;
+  onSelectTab: (tab: DashboardTabId) => void;
+  selectedTab: DashboardTabId;
+}) {
   const view = mapSnapshotToDashboard(snapshot);
 
   return (
@@ -119,7 +224,13 @@ function Dashboard({ snapshot, onBack }: { snapshot: AnalysisSnapshot; onBack: (
         ))}
       </section>
 
-      <Card title="Price Structure" eyebrow="Adjusted OHLCV" className="chart-panel">
+      <DashboardTabs selectedTab={selectedTab} onSelect={onSelectTab} />
+
+      {DASHBOARD_TABS.map(tab => (
+        <DashboardTabPanel key={tab.id} selectedTab={selectedTab} tab={tab.id}>
+          {tab.id === 'technical' ? (
+            <>
+      <Card title="株価チャート" eyebrow="Adjusted OHLCV" className="chart-panel">
         <PriceChart bars={view.chart.bars} priceLines={view.chart.priceLines} />
         <p className="chart-credit">
           <span>{LIGHTWEIGHT_CHARTS_NOTICE[0]}</span>
@@ -132,7 +243,7 @@ function Dashboard({ snapshot, onBack }: { snapshot: AnalysisSnapshot; onBack: (
         </p>
       </Card>
 
-      <Card title="Advanced Technical" eyebrow="Latest deterministic values">
+      <Card title="テクニカル指標" eyebrow="Latest deterministic values">
         {view.advancedTechnical ? (
           <>
             <MetricGrid metrics={view.advancedTechnical.metrics} />
@@ -144,10 +255,10 @@ function Dashboard({ snapshot, onBack }: { snapshot: AnalysisSnapshot; onBack: (
                 )
               : null}
           </>
-        ) : <div className="empty-state">Advanced Technicalは未収集です。</div>}
+        ) : <div className="empty-state">テクニカル指標は未収集です。</div>}
       </Card>
 
-      <Card title="Volume Profile" eyebrow="Daily OHLCV estimated distribution proxy">
+      <Card title="出来高価格分布（Volume Profile）" eyebrow="Daily OHLCV estimated distribution proxy">
         <p className="disclosure-note">{VOLUME_PROFILE_CONTEXT_NOTE}</p>
         {view.volumeProfile.state !== 'not_collected' ? (
           <>
@@ -235,58 +346,11 @@ function Dashboard({ snapshot, onBack }: { snapshot: AnalysisSnapshot; onBack: (
           </>
         ) : <div className="empty-state">出来高価格分布は未収集です。</div>}
       </Card>
+            </>
+          ) : null}
 
-      <Card title="Sector Short-selling Flow" eyebrow="TSE 33-sector daily turnover">
-        <p className="disclosure-note">{SECTOR_SHORT_RATIO_CONTEXT_NOTE}</p>
-        {view.sectorShortRatio.state !== 'not_collected' ? (
-          <>
-            <MetricGrid metrics={[
-              { label: 'Analysis as-of', value: view.sectorShortRatio.analysisAsOfDate },
-              { label: 'Classification date', value: view.sectorShortRatio.classificationDate },
-              { label: 'Sector code', value: view.sectorShortRatio.sectorCode },
-              { label: 'Sector name', value: view.sectorShortRatio.sectorName },
-              { label: 'Data date', value: view.sectorShortRatio.dataDate },
-            ]} />
-            {view.sectorShortRatio.observations.length ? (
-              <div className="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Date</th><th>Non-short selling</th><th>Restricted short</th>
-                      <th>Unrestricted short</th><th>Short selling</th>
-                      <th>Total selling</th><th>Short ratio</th><th>Availability</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {view.sectorShortRatio.observations.map(observation => (
-                      <tr key={observation.date.text}>
-                        <td><Value value={observation.date} /></td>
-                        <td><Value value={observation.nonShortSellingValue} /></td>
-                        <td><Value value={observation.restrictedShortSellingValue} /></td>
-                        <td><Value value={observation.unrestrictedShortSellingValue} /></td>
-                        <td><Value value={observation.shortSellingValue} /></td>
-                        <td><Value value={observation.totalSellingValue} /></td>
-                        <td><Value value={observation.shortSellingRatio} /></td>
-                        <td>{observation.unavailableReasons.join(' / ') || 'available'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : null}
-            {view.sectorShortRatio.unavailableReasons.length ? (
-              <p className="reason-list">
-                業種別空売りflowは利用できません。{view.sectorShortRatio.unavailableReasons.join(' / ')}
-              </p>
-            ) : null}
-          </>
-        ) : (
-          <div className="empty-state">業種別空売りflowは未収集です。</div>
-        )}
-      </Card>
-
-      <div className="two-column">
-        <Card title="Peer Position" eyebrow="Deterministic comparison">
+          {tab.id === 'fundamentals' ? (
+        <Card title="同業比較" eyebrow="Deterministic comparison">
           {view.peer ? (
             <>
               <div className="priority-line">
@@ -317,15 +381,18 @@ function Dashboard({ snapshot, onBack }: { snapshot: AnalysisSnapshot; onBack: (
             </>
           ) : <div className="empty-state">Peer比較は利用できません。</div>}
         </Card>
+          ) : null}
 
-        <Card title="Supply & Demand" eyebrow="Margin balance">
+          {tab.id === 'supply-demand' ? (
+        <Card title="信用需給" eyebrow="Margin balance">
           {view.supplyDemand
             ? <MetricGrid metrics={view.supplyDemand} />
             : <div className="empty-state">需給データは利用できません。</div>}
         </Card>
-      </div>
+          ) : null}
 
-      <Card title="Advanced Dividend" eyebrow="As-of deterministic dividend context">
+          {tab.id === 'fundamentals' ? (
+      <Card title="配当分析" eyebrow="As-of deterministic dividend context">
         <p className="disclosure-note">{ADVANCED_DIVIDEND_CONTEXT_NOTE}</p>
         {view.advancedDividend.state !== 'not_collected' ? (
           <>
@@ -430,10 +497,12 @@ function Dashboard({ snapshot, onBack }: { snapshot: AnalysisSnapshot; onBack: (
               </p>
             ) : null}
           </>
-        ) : <div className="empty-state">Advanced Dividendは未収集です。</div>}
+        ) : <div className="empty-state">配当分析は未収集です。</div>}
       </Card>
+          ) : null}
 
-      <Card title="Public Short Position Reports" eyebrow="J-Quants disclosure ≥ 0.5%">
+          {tab.id === 'supply-demand' ? (
+      <Card title="公開空売り残高報告" eyebrow="J-Quants disclosure ≥ 0.5%">
         <p className="disclosure-note">{REPORTED_SHORT_POSITION_DISCLOSURE_NOTE}</p>
         {view.reportedShortPositions.reports.length > 0 ? (
           <div className="table-scroll">
@@ -478,8 +547,10 @@ function Dashboard({ snapshot, onBack }: { snapshot: AnalysisSnapshot; onBack: (
           </div>
         )}
       </Card>
+          ) : null}
 
-      <Card title="Investor Type Flows" eyebrow="Tokyo/Nagoya weekly market context">
+          {tab.id === 'market' ? (
+      <Card title="投資部門別売買" eyebrow="Tokyo/Nagoya weekly market context">
         <p className="disclosure-note">{INVESTOR_TYPE_FLOW_CONTEXT_NOTE}</p>
         {view.investorTypeFlows.state === 'available' ? (
           <>
@@ -508,8 +579,34 @@ function Dashboard({ snapshot, onBack }: { snapshot: AnalysisSnapshot; onBack: (
           </div>
         )}
       </Card>
+          ) : null}
 
-      <Card title="Sector Benchmark" eyebrow="TSE 33-sector price index">
+          {tab.id === 'market' ? (
+        <Card title="市場相関" eyebrow="TOPIX benchmark">
+          {view.correlations?.length ? (
+            <div className="correlation-grid">
+              {view.correlations.map(window => (
+                <article className="window-card" key={window.period}>
+                  <h3>{window.period}日</h3>
+                  <MetricGrid metrics={[
+                    { label: '観測数', value: window.observations },
+                    { label: 'Correlation', value: window.correlation },
+                    { label: 'Beta', value: window.beta },
+                    { label: 'Alpha annualized', value: window.alpha },
+                    { label: 'R²', value: window.rSquared },
+                  ]} />
+                  {window.unavailableReasons.length
+                    ? <p className="reason-list">{window.unavailableReasons.join(' / ')}</p>
+                    : null}
+                </article>
+              ))}
+            </div>
+          ) : <div className="empty-state">市場相関は利用できません。</div>}
+        </Card>
+          ) : null}
+
+          {tab.id === 'market' ? (
+      <Card title="業種指数比較" eyebrow="TSE 33-sector price index">
         <p className="disclosure-note">{SECTOR_BENCHMARK_CONTEXT_NOTE}</p>
         {view.sectorBenchmark.state !== 'not_collected' ? (
           <>
@@ -555,31 +652,61 @@ function Dashboard({ snapshot, onBack }: { snapshot: AnalysisSnapshot; onBack: (
           <div className="empty-state">業種指数比較は未収集です。</div>
         )}
       </Card>
+          ) : null}
 
-      <div className="two-column">
-        <Card title="Market Correlation" eyebrow="TOPIX benchmark">
-          {view.correlations?.length ? (
-            <div className="correlation-grid">
-              {view.correlations.map(window => (
-                <article className="window-card" key={window.period}>
-                  <h3>{window.period}日</h3>
-                  <MetricGrid metrics={[
-                    { label: '観測数', value: window.observations },
-                    { label: 'Correlation', value: window.correlation },
-                    { label: 'Beta', value: window.beta },
-                    { label: 'Alpha annualized', value: window.alpha },
-                    { label: 'R²', value: window.rSquared },
-                  ]} />
-                  {window.unavailableReasons.length
-                    ? <p className="reason-list">{window.unavailableReasons.join(' / ')}</p>
-                    : null}
-                </article>
-              ))}
-            </div>
-          ) : <div className="empty-state">市場相関は利用できません。</div>}
-        </Card>
+          {tab.id === 'market' ? (
+      <Card title="業種別空売り売買代金" eyebrow="TSE 33-sector daily turnover">
+        <p className="disclosure-note">{SECTOR_SHORT_RATIO_CONTEXT_NOTE}</p>
+        {view.sectorShortRatio.state !== 'not_collected' ? (
+          <>
+            <MetricGrid metrics={[
+              { label: 'Analysis as-of', value: view.sectorShortRatio.analysisAsOfDate },
+              { label: 'Classification date', value: view.sectorShortRatio.classificationDate },
+              { label: 'Sector code', value: view.sectorShortRatio.sectorCode },
+              { label: 'Sector name', value: view.sectorShortRatio.sectorName },
+              { label: 'Data date', value: view.sectorShortRatio.dataDate },
+            ]} />
+            {view.sectorShortRatio.observations.length ? (
+              <div className="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Date</th><th>Non-short selling</th><th>Restricted short</th>
+                      <th>Unrestricted short</th><th>Short selling</th>
+                      <th>Total selling</th><th>Short ratio</th><th>Availability</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {view.sectorShortRatio.observations.map(observation => (
+                      <tr key={observation.date.text}>
+                        <td><Value value={observation.date} /></td>
+                        <td><Value value={observation.nonShortSellingValue} /></td>
+                        <td><Value value={observation.restrictedShortSellingValue} /></td>
+                        <td><Value value={observation.unrestrictedShortSellingValue} /></td>
+                        <td><Value value={observation.shortSellingValue} /></td>
+                        <td><Value value={observation.totalSellingValue} /></td>
+                        <td><Value value={observation.shortSellingRatio} /></td>
+                        <td>{observation.unavailableReasons.join(' / ') || 'available'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+            {view.sectorShortRatio.unavailableReasons.length ? (
+              <p className="reason-list">
+                業種別空売りflowは利用できません。{view.sectorShortRatio.unavailableReasons.join(' / ')}
+              </p>
+            ) : null}
+          </>
+        ) : (
+          <div className="empty-state">業種別空売りflowは未収集です。</div>
+        )}
+      </Card>
+          ) : null}
 
-        <Card title="Strategy" eyebrow="Deterministic levels">
+          {tab.id === 'technical' ? (
+        <Card title="戦略水準" eyebrow="Deterministic levels">
           {view.strategy ? (
             <>
               <MetricGrid metrics={[
@@ -603,13 +730,15 @@ function Dashboard({ snapshot, onBack }: { snapshot: AnalysisSnapshot; onBack: (
             </>
           ) : <div className="empty-state">Strategyは利用できません。</div>}
         </Card>
-      </div>
+          ) : null}
 
+          {tab.id === 'report' ? (
+            <>
       <div className="two-column">
-        <Card title="Data Freshness" eyebrow="Source dates">
+        <Card title="データ基準日" eyebrow="Source dates">
           <MetricGrid metrics={view.dataDates} />
         </Card>
-        <Card title="Unavailable" eyebrow={`${view.unavailable.length} recorded gaps`}>
+        <Card title="利用不可データ" eyebrow={`${view.unavailable.length} recorded gaps`}>
           {view.unavailable.length ? (
             <ul className="unavailable-list">
               {view.unavailable.map((item, index) => (
@@ -624,8 +753,12 @@ function Dashboard({ snapshot, onBack }: { snapshot: AnalysisSnapshot; onBack: (
         </Card>
       </div>
 
+      <Card title="総合レポート" eyebrow="Agent narrative">
+        <pre className="report-markdown">{view.finalReportMarkdown}</pre>
+      </Card>
+
       {view.scenarios ? (
-        <Card title="Scenarios" eyebrow="Structured narrative">
+        <Card title="シナリオ" eyebrow="Structured narrative">
           <div className="scenario-grid">
             {Object.entries(view.scenarios).map(([name, scenario]) => (
               <article className={`scenario ${name}`} key={name}>
@@ -640,7 +773,7 @@ function Dashboard({ snapshot, onBack }: { snapshot: AnalysisSnapshot; onBack: (
       ) : null}
 
       {view.risks ? (
-        <Card title="Risks" eyebrow="Structured narrative">
+        <Card title="リスク" eyebrow="Structured narrative">
           <ul className="risk-list">
             {view.risks.map((risk, index) => (
               <li key={`${risk.category ?? 'risk'}-${index}`}>
@@ -651,10 +784,11 @@ function Dashboard({ snapshot, onBack }: { snapshot: AnalysisSnapshot; onBack: (
           </ul>
         </Card>
       ) : null}
+            </>
+          ) : null}
 
-      <Card title="Final Report" eyebrow="Agent narrative">
-        <pre className="report-markdown">{view.finalReportMarkdown}</pre>
-      </Card>
+        </DashboardTabPanel>
+      ))}
 
       <footer className="footer">
         <span>DEXTER JP / READ-ONLY LOCAL ANALYSIS</span>
@@ -820,6 +954,9 @@ function App() {
   const [selectedTicker, setSelectedTicker] = useState<string | null>(() => (
     parseDetailTicker(window.location.search)
   ));
+  const [selectedTab, setSelectedTab] = useState<DashboardTabId>(() => (
+    parseDetailTab(window.location.search)
+  ));
   const [snapshot, setSnapshot] = useState<AnalysisSnapshot | null>(null);
   const [watchlistItems, setWatchlistItems] = useState<WatchlistItemView[]>([]);
   const [sortKey, setSortKey] = useState<WatchlistSortKey>('latestDataDate');
@@ -827,7 +964,34 @@ function App() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const handlePopState = () => setSelectedTicker(parseDetailTicker(window.location.search));
+    const canonicalizeTab = (ticker: string, tab: DashboardTabId) => {
+      if (!hasCanonicalDetailTab(window.location.search)) {
+        window.history.replaceState(
+          {},
+          '',
+          buildDetailPath(ticker, tab, window.location.search),
+        );
+      }
+    };
+    const initialTicker = parseDetailTicker(window.location.search);
+    if (initialTicker) canonicalizeTab(initialTicker, parseDetailTab(window.location.search));
+
+    const handlePopState = () => {
+      const focusWasInTablist = document.activeElement instanceof HTMLElement
+        && document.activeElement.closest('[role="tablist"]') !== null;
+      const nextTicker = parseDetailTicker(window.location.search);
+      const nextTab = nextTicker
+        ? parseDetailTab(window.location.search)
+        : DEFAULT_DASHBOARD_TAB;
+      if (nextTicker) canonicalizeTab(nextTicker, nextTab);
+      setSelectedTicker(nextTicker);
+      setSelectedTab(nextTab);
+      if (nextTicker && focusWasInTablist) {
+        window.requestAnimationFrame(() => {
+          document.getElementById(`dashboard-tab-${nextTab}`)?.focus();
+        });
+      }
+    };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
@@ -872,12 +1036,27 @@ function App() {
   }, [selectedTicker]);
 
   const navigateToTicker = (ticker: string) => {
-    window.history.pushState({}, '', buildDetailPath(ticker));
+    window.history.pushState(
+      {},
+      '',
+      buildDetailPath(ticker, DEFAULT_DASHBOARD_TAB, window.location.search),
+    );
     setSelectedTicker(ticker);
+    setSelectedTab(DEFAULT_DASHBOARD_TAB);
   };
   const navigateToWatchlist = () => {
-    window.history.pushState({}, '', '/');
+    window.history.pushState({}, '', buildWatchlistPath(window.location.search));
     setSelectedTicker(null);
+    setSelectedTab(DEFAULT_DASHBOARD_TAB);
+  };
+  const navigateToTab = (tab: DashboardTabId) => {
+    if (!selectedTicker) return;
+    window.history.replaceState(
+      {},
+      '',
+      buildDetailPath(selectedTicker, tab, window.location.search),
+    );
+    setSelectedTab(tab);
   };
 
   if (error) {
@@ -905,7 +1084,14 @@ function App() {
     );
   }
   if (selectedTicker && snapshot) {
-    return <Dashboard snapshot={snapshot} onBack={navigateToWatchlist} />;
+    return (
+      <Dashboard
+        snapshot={snapshot}
+        onBack={navigateToWatchlist}
+        onSelectTab={navigateToTab}
+        selectedTab={selectedTab}
+      />
+    );
   }
   return (
     <Watchlist
