@@ -106,10 +106,29 @@ function DashboardTabs({
   selectedTab: DashboardTabId;
   onSelect: (tab: DashboardTabId) => void;
 }) {
+  const tabListRef = useRef<HTMLDivElement>(null);
   const tabRefs = useRef<Partial<Record<DashboardTabId, HTMLButtonElement>>>({});
 
   useEffect(() => {
-    tabRefs.current[selectedTab]?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    const tabList = tabListRef.current;
+    const selectedElement = tabRefs.current[selectedTab];
+    if (!tabList || !selectedElement) return;
+
+    const selectedLeft = selectedElement.offsetLeft;
+    const selectedRight = selectedLeft + selectedElement.offsetWidth;
+    const style = window.getComputedStyle(tabList);
+    const leftPadding = Number.parseFloat(style.scrollPaddingLeft) || 0;
+    const rightPadding = Number.parseFloat(style.scrollPaddingRight) || 0;
+    const visibleLeft = tabList.scrollLeft + leftPadding;
+    const visibleRight = tabList.scrollLeft + tabList.clientWidth - rightPadding;
+    if (selectedLeft < visibleLeft) {
+      tabList.scrollLeft = Math.max(0, Math.floor(selectedLeft - leftPadding));
+    }
+    else if (selectedRight > visibleRight) {
+      tabList.scrollLeft = Math.ceil(
+        selectedRight - tabList.clientWidth + rightPadding,
+      ) + 1;
+    }
   }, [selectedTab]);
 
   const handleKeyDown = (
@@ -130,7 +149,12 @@ function DashboardTabs({
 
   return (
     <nav className="detail-tabs-shell" aria-label="分析表示の切り替え">
-      <div className="detail-tabs" role="tablist" aria-label="分析セクション">
+      <div
+        aria-label="分析セクション"
+        className="detail-tabs"
+        ref={tabListRef}
+        role="tablist"
+      >
         {DASHBOARD_TABS.map(tab => (
           <button
             aria-controls={`dashboard-panel-${tab.id}`}
