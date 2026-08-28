@@ -23,6 +23,9 @@ import {
 } from '../../analysis/snapshot/index.js';
 import {
   ADVANCED_DIVIDEND_CONTEXT_NOTE,
+  DASHBOARD_SECTION_DESTINATIONS,
+  DASHBOARD_TABS,
+  DEFAULT_DASHBOARD_TAB,
   UNAVAILABLE_TEXT,
   INVESTOR_TYPE_FLOW_CONTEXT_NOTE,
   REPORTED_SHORT_POSITION_DISCLOSURE_NOTE,
@@ -31,10 +34,14 @@ import {
   VOLUME_PROFILE_CONTEXT_NOTE,
   WATCHLIST_STALE_AFTER_DAYS,
   buildDetailPath,
+  buildWatchlistPath,
   displayText,
   formatMetric,
+  hasCanonicalDetailTab,
   mapSnapshotToDashboard,
   mapLatestAnalysisToWatchlistItem,
+  moveDashboardTab,
+  parseDetailTab,
   parseDetailTicker,
   sortWatchlistItems,
 } from './presentation.js';
@@ -651,7 +658,7 @@ describe('snapshot presentation mapping', () => {
     expect(view.advancedTechnical?.metrics.map(metric => metric.label)).not.toContain('Buy');
     expect(view.advancedTechnical?.metrics.map(metric => metric.label)).not.toContain('Sell');
     expect(view.dataDates).toContainEqual({
-      label: 'Advanced Technical',
+      label: 'テクニカル指標',
       value: { text: '2026-08-21', available: true },
     });
   });
@@ -753,7 +760,7 @@ describe('snapshot presentation mapping', () => {
       'component: component breakdown unavailable',
     ]);
     expect(mapSnapshotToDashboard(snapshot).dataDates).toContainEqual({
-      label: 'Advanced Dividend',
+      label: '配当分析',
       value: { text: '2026-08-21', available: true },
     });
     expect(ADVANCED_DIVIDEND_CONTEXT_NOTE).toContain('Browserで再計算');
@@ -864,7 +871,7 @@ describe('snapshot presentation mapping', () => {
       lastBinIndex: 11,
     });
     expect(dashboard.dataDates).toContainEqual({
-      label: 'Volume Profile',
+      label: '出来高価格分布',
       value: { text: '2026-08-21', available: true },
     });
     expect(JSON.stringify(view)).not.toContain('2026-08-26');
@@ -1975,10 +1982,64 @@ describe('watchlist presentation mapping', () => {
   });
 
   test('builds and parses safe detail navigation without a router dependency', () => {
-    expect(buildDetailPath('130A')).toBe('/?ticker=130A');
+    expect(buildDetailPath('130A')).toBe('/?ticker=130A&tab=report');
+    expect(buildDetailPath('7203', 'market', '?snapshot=v9&ticker=130A&tab=technical'))
+      .toBe('/?snapshot=v9&ticker=7203&tab=market');
+    expect(buildWatchlistPath('?snapshot=v9&ticker=7203&tab=market'))
+      .toBe('/?snapshot=v9');
+    expect(buildWatchlistPath('?ticker=7203&tab=market')).toBe('/');
     expect(parseDetailTicker('?ticker=7203')).toBe('7203');
     expect(parseDetailTicker('?ticker=130A')).toBe('130A');
     expect(parseDetailTicker('?ticker=../7203')).toBeNull();
     expect(parseDetailTicker('?ticker=72030')).toBeNull();
+  });
+
+  test('uses stable tabs and canonicalizes missing or unknown detail tabs to report', () => {
+    expect(DASHBOARD_TABS.map(tab => tab.id)).toEqual([
+      'report',
+      'technical',
+      'fundamentals',
+      'supply-demand',
+      'market',
+    ]);
+    expect(new Set(DASHBOARD_TABS.map(tab => tab.id)).size).toBe(DASHBOARD_TABS.length);
+    expect(DEFAULT_DASHBOARD_TAB).toBe('report');
+    expect(parseDetailTab('?ticker=7203&tab=technical')).toBe('technical');
+    expect(parseDetailTab('?ticker=7203')).toBe('report');
+    expect(parseDetailTab('?ticker=7203&tab=unknown')).toBe('report');
+    expect(hasCanonicalDetailTab('?ticker=7203&tab=market')).toBeTrue();
+    expect(hasCanonicalDetailTab('?ticker=7203')).toBeFalse();
+    expect(hasCanonicalDetailTab('?ticker=7203&tab=unknown')).toBeFalse();
+  });
+
+  test('maps every V9 Snapshot section to one tab or the persistent area', () => {
+    expect(DASHBOARD_SECTION_DESTINATIONS).toEqual({
+      identity: 'persistent',
+      fundamental: 'persistent',
+      valuation: 'persistent',
+      priceHistory: 'technical',
+      technical: 'technical',
+      advancedTechnical: 'technical',
+      volumeProfile: 'technical',
+      strategy: 'technical',
+      peerComparison: 'fundamentals',
+      advancedDividend: 'fundamentals',
+      supplyDemand: 'supply-demand',
+      reportedShortPositions: 'supply-demand',
+      investorTypeFlows: 'market',
+      marketCorrelation: 'market',
+      sectorBenchmark: 'market',
+      sectorShortRatio: 'market',
+      scenarios: 'report',
+      risks: 'report',
+    });
+  });
+
+  test('moves automatic tab activation with wrapping and Home/End behavior', () => {
+    expect(moveDashboardTab('report', 'ArrowLeft')).toBe('market');
+    expect(moveDashboardTab('market', 'ArrowRight')).toBe('report');
+    expect(moveDashboardTab('technical', 'ArrowRight')).toBe('fundamentals');
+    expect(moveDashboardTab('market', 'Home')).toBe('report');
+    expect(moveDashboardTab('report', 'End')).toBe('market');
   });
 });

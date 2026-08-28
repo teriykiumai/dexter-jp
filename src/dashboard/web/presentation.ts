@@ -7,6 +7,68 @@ import type {
 
 export const UNAVAILABLE_TEXT = '利用不可' as const;
 
+export const DASHBOARD_TABS = [
+  { id: 'report', label: '概要・レポート' },
+  { id: 'technical', label: '株価・テクニカル' },
+  { id: 'fundamentals', label: '比較・配当' },
+  { id: 'supply-demand', label: '需給・空売り' },
+  { id: 'market', label: '市場・セクター' },
+] as const;
+
+export type DashboardTabId = (typeof DASHBOARD_TABS)[number]['id'];
+export type DashboardSectionDestination = DashboardTabId | 'persistent';
+export type DashboardTabNavigationKey = 'ArrowLeft' | 'ArrowRight' | 'Home' | 'End';
+
+export const DEFAULT_DASHBOARD_TAB: DashboardTabId = 'report';
+
+export const DASHBOARD_SECTION_DESTINATIONS = {
+  identity: 'persistent',
+  fundamental: 'persistent',
+  valuation: 'persistent',
+  priceHistory: 'technical',
+  technical: 'technical',
+  advancedTechnical: 'technical',
+  volumeProfile: 'technical',
+  strategy: 'technical',
+  peerComparison: 'fundamentals',
+  advancedDividend: 'fundamentals',
+  supplyDemand: 'supply-demand',
+  reportedShortPositions: 'supply-demand',
+  investorTypeFlows: 'market',
+  marketCorrelation: 'market',
+  sectorBenchmark: 'market',
+  sectorShortRatio: 'market',
+  scenarios: 'report',
+  risks: 'report',
+} as const satisfies Record<SnapshotUnavailable['section'], DashboardSectionDestination>;
+
+const DASHBOARD_TAB_IDS = new Set<string>(DASHBOARD_TABS.map(tab => tab.id));
+
+export function isDashboardTabId(value: string | null): value is DashboardTabId {
+  return value !== null && DASHBOARD_TAB_IDS.has(value);
+}
+
+export function parseDetailTab(search: string): DashboardTabId {
+  const tab = new URLSearchParams(search).get('tab');
+  return isDashboardTabId(tab) ? tab : DEFAULT_DASHBOARD_TAB;
+}
+
+export function hasCanonicalDetailTab(search: string): boolean {
+  return isDashboardTabId(new URLSearchParams(search).get('tab'));
+}
+
+export function moveDashboardTab(
+  current: DashboardTabId,
+  key: DashboardTabNavigationKey,
+): DashboardTabId {
+  if (key === 'Home') return DASHBOARD_TABS[0].id;
+  if (key === 'End') return DASHBOARD_TABS.at(-1)!.id;
+  const currentIndex = DASHBOARD_TABS.findIndex(tab => tab.id === current);
+  const offset = key === 'ArrowRight' ? 1 : -1;
+  const nextIndex = (currentIndex + offset + DASHBOARD_TABS.length) % DASHBOARD_TABS.length;
+  return DASHBOARD_TABS[nextIndex]!.id;
+}
+
 export interface DisplayValue {
   text: string;
   available: boolean;
@@ -412,18 +474,18 @@ const dataDateLabels = {
   fundamental: '財務情報',
   valuationPrice: '株価',
   valuationFinancial: 'バリュエーション財務',
-  peerComparison: 'Peer比較',
+  peerComparison: '同業比較',
   technical: 'テクニカル',
-  advancedTechnical: 'Advanced Technical',
+  advancedTechnical: 'テクニカル指標',
   reportedShortPositions: '公開空売り残高報告',
   investorTypeFlows: '投資部門別 公表日',
   supplyDemand: '需給',
   marketCorrelation: '市場相関',
   sectorBenchmark: '業種指数比較',
   sectorShortRatio: '業種別空売り比率',
-  advancedDividend: 'Advanced Dividend',
-  volumeProfile: 'Volume Profile',
-  strategy: 'Strategy',
+  advancedDividend: '配当分析',
+  volumeProfile: '出来高価格分布',
+  strategy: '戦略水準',
   priceHistory: '価格履歴',
 } as const;
 
@@ -512,8 +574,23 @@ export function sortWatchlistItems(
   });
 }
 
-export function buildDetailPath(ticker: string): string {
-  return `/?ticker=${encodeURIComponent(ticker)}`;
+export function buildDetailPath(
+  ticker: string,
+  tab: DashboardTabId = DEFAULT_DASHBOARD_TAB,
+  currentSearch = '',
+): string {
+  const parameters = new URLSearchParams(currentSearch);
+  parameters.set('ticker', ticker);
+  parameters.set('tab', tab);
+  return `/?${parameters.toString()}`;
+}
+
+export function buildWatchlistPath(currentSearch = ''): string {
+  const parameters = new URLSearchParams(currentSearch);
+  parameters.delete('ticker');
+  parameters.delete('tab');
+  const search = parameters.toString();
+  return search ? `/?${search}` : '/';
 }
 
 export function parseDetailTicker(search: string): string | null {

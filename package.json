@@ -16,6 +16,7 @@
     "gateway:login": "tsx src/gateway/index.ts login",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
+    "test:dashboard-browser": "node node_modules/playwright/cli.js test --config src/dashboard/web/playwright.config.ts",
     "test:watch": "bun test --watch",
     "postinstall": "playwright install chromium"
   },
