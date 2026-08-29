@@ -87,13 +87,16 @@ reimplement financial or statistical calculations.
 - V1–V9 remain immutable and readable; Phase 3 does not create Snapshot V10.
 - History and Evaluator sidecars use the reviewed cross-process no-replace publish
   contract. Latest state is resolved authoritatively from immutable history by
-  `(generatedAt, snapshotId)`; legacy `latest.json` is read only for a ticker with
-  zero history files and is never rewritten by Phase 3.
+  validated numeric `generatedAtEpochMs`; raw timestamp strings are never sorted and
+  the inherited identity permits no distinct same-millisecond tie. Legacy
+  `latest.json` is read only for a ticker with zero history files and is never
+  rewritten by Phase 3.
 - Browser and LLM consumers do not reconstruct values from presentation text.
 - Phase 3 creates no Buy/Sell signal, automatic action, or runtime composite score.
 - Evaluator execution requires a tracked passed attestation whose manifest, exact
-  provider/model/reasoning tuple, versions, and evaluator-source digest match the
-  current runtime; no pending-manifest or ungated override exists.
+  provider/model/reasoning tuple, versions, evaluator-source/config bytes, pinned
+  Bun/platform/architecture, and frozen resolved-dependency bytes match the current
+  runtime; no pending-manifest or ungated override exists.
 - The product remains personal, local, single-user research software.
 
 Detailed formulas and source contracts remain in `docs/SPEC.md`,
@@ -125,8 +128,11 @@ Phase 3 adopts:
 
 - deterministic, explicit-registry comparison of two immutable saved Snapshots;
 - a presentation-only Radar of the seven stored peer percentiles;
+- a bounded, record-grouped Evidence manifest that preserves exact typed facts
+  without unbounded scalar expansion;
 - an explicitly invoked qualitative Independent Evaluator whose result is stored in
-  a separate versioned sidecar and whose exact runtime has passed the gold gate; and
+  a separate versioned sidecar, whose exact Snapshot/run URL identity is preserved,
+  and whose exact source/dependency/runtime environment has passed the gold gate; and
 - a docs-only composite-score evaluation plan whose runtime adoption remains gated
   by Phase 4 validation.
 
@@ -164,8 +170,9 @@ Each item is a separate reviewed PR. Do not start a dependent step until its
 predecessor is merged and local `main` is fast-forwarded.
 
 1. P3-0 — Source of Truth design synchronization
-2. P3-I0 — history immutability, authoritative latest resolution, canonical digest,
-   and stored-report safety
+2. P3-I0 — history immutability, authoritative epoch-ordered latest resolution,
+   existing latest/history-consumer integration, canonical digest, and stored-report
+   safety
 3. P3-H1 — pure saved-analysis comparison
 4. P3-H2 — read-only Comparison API and Dashboard
 5. P3-R1 — Peer Radar
@@ -178,12 +185,15 @@ predecessor is merged and local `main` is fast-forwarded.
 After P3-0 passes independent review and is merged, the next task is:
 
 ```text
-P3-I0 — History immutability, authoritative history latest resolution,
-CanonicalJsonV1 digest, and stored-report safety gate
+P3-I0 — History immutability, authoritative epoch-ordered history latest resolution,
+existing latest/history-consumer integration, CanonicalJsonV1 digest, and
+stored-report safety gate
 ```
 
-P3-I0 must not add Comparison calculation, API/UI, Radar, Evaluator runtime,
-PDF, score, Snapshot V10, or source fetch.
+P3-I0 updates only the existing latest/history GET, Watchlist, and saved-Snapshot
+reload integration and must not add a new route/component, Comparison
+calculation/API/UI, Radar, Evaluator runtime, PDF, score, Snapshot V10, or source
+fetch.
 
 ## 8. Maintenance boundary
 

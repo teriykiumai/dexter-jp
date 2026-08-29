@@ -125,17 +125,32 @@ filesystems before merge. The Evaluator sidecar repository reuses this exact pro
 in P3-E1. A sidecar `EEXIST` is an ID collision, even when payloads happen to match,
 because each `evaluationId` denotes one run.
 
-`LatestSnapshotOrderV1` is the ascending tuple `(generatedAt, snapshotId)`. The
-authoritative latest Snapshot is the maximum tuple across every validated history
-file for the ticker. P3-I0 changes `loadLatest`, `listLatest`, Dashboard latest detail,
-Watchlist, and Comparison reload to use that history resolver, never mutable-file
-last-writer completion order.
+`LatestSnapshotOrderV1` is the ascending numeric `generatedAtEpochMs`, computed as
+`Date.parse(snapshot.generatedAt)` after schema validation. The authoritative latest
+Snapshot is the history item with the maximum epoch milliseconds for the ticker.
+Raw ISO-string or locale ordering is prohibited. P3-I0 changes `loadLatest`,
+`listLatest`, and the existing descending `listHistory` ordering, plus the existing
+latest-detail GET, Watchlist, and saved-Snapshot reload controller, to use the shared
+numeric epoch comparator, never mutable-file last-writer completion or raw-string
+order. P3-H2 later reuses the comparator/resolver for predecessor selection and
+Comparison reload; P3-I0 introduces no Comparison path.
 
 Resolution validates every candidate's schema, filename/body ID, canonical ticker,
 and digest before ordering. It does not skip a corrupt/unsupported/mismatched history
-file; any such item returns typed `latest_resolution_failed`. Zero valid history items
-returns the existing not-found outcome. Equal `generatedAt` uses `snapshotId` only as
-the deterministic tie-breaker.
+file; any such item returns typed `latest_resolution_failed`. Zero history files
+enters the legacy fallback below; if that file is also absent, return the existing
+not-found outcome. P3-I0 adds the new repository
+error kind to the existing exhaustive Dashboard mapping as sanitized HTTP 500
+`snapshot_unavailable` for both latest-list and latest-detail GET; no path, corrupt
+identity, or parser detail is exposed.
+
+There is no V1–V9 tie-breaker. `createSnapshotId(generatedAt)` canonicalizes the same
+validated epoch millisecond to the same ID/path. The same canonical payload is
+idempotent, a different payload is `snapshot_id_collision`, and a history filename
+that differs from the generated ID is corrupt. Different schema-valid timestamp
+spellings that normalize to the same millisecond therefore cannot coexist as two
+ordered history items. A future identity model may add a versioned tie rule; Phase 3
+must not fabricate one.
 
 P3-I0 stops writing `latest.json`. An existing `latest.json` is a legacy read fallback
 only when the ticker has zero history files; validate it normally and never rewrite,
@@ -184,6 +199,13 @@ type ArtifactInputEnvelopeV1 = Readonly<{
   gateAttestationDigest: `sha256:${string}`;
   evaluatorSourceDigest: `sha256:${string}`;
   gateEvaluatedCommitSha: string;
+  executionEnvironment: Readonly<{
+    bunVersion: string;
+    bunRevision: string;
+    platform: string;
+    arch: string;
+    dependencyManifestDigest: `sha256:${string}`;
+  }>;
   runtime: Readonly<{
     providerId: string;
     modelId: string;
@@ -289,8 +311,17 @@ P3-I0 acceptance tests include:
   winning final inode, equal-payload idempotency, typed collision, corrupt winner,
   unsupported hard link, and no replaced winner or leaked temporary file;
 - history A at `t1`, history B at `t2`, then a delayed retry of A always resolves B
-  from `loadLatest`, `listLatest`, Dashboard latest detail, Watchlist, and reload;
-  include cross-process interleavings and equal-`generatedAt` snapshot-ID ties;
+  from `loadLatest`, `listLatest`, the existing latest-detail GET, Watchlist, and
+  saved-Snapshot reload; include reversed cross-process completion order;
+- schema-valid `2026-08-23T01:02:03Z` and
+  `2026-08-23T01:02:03.500Z` histories order by epoch milliseconds in latest detail,
+  Watchlist, and existing history list, never by raw string;
+- equal normalized epoch milliseconds produce one snapshot ID: equal canonical
+  payload is idempotent, different payload collides, and a different filename ID is
+  rejected as corrupt rather than tie-sorted;
+- `latest_resolution_failed` maps through latest-list and latest-detail GET to the
+  existing sanitized 500 response, while the inherited Dashboard reload state
+  machine preserves its current successful Snapshot/UI state;
 - history presence prevents every read and write of legacy `latest.json`; a
   latest-only legacy ticker remains readable only while it has zero history files,
   and no P3-I0 path rewrites, deletes, or migrates that file;
@@ -508,6 +539,11 @@ type ComparisonUnavailableReasonV1 = Readonly<{
   detail: string | null;
 }>;
 
+type NonEmptyComparisonUnavailableReasonsV1 = readonly [
+  ComparisonUnavailableReasonV1,
+  ...ComparisonUnavailableReasonV1[],
+];
+
 type ComparisonObservationV1 =
   | Readonly<ComparisonObservationContextV1 & {
       state: 'available';
@@ -519,19 +555,13 @@ type ComparisonObservationV1 =
       state: 'unavailable';
       value: null;
       actualUnit: string | null;
-      unavailableReasons: readonly [
-        ComparisonUnavailableReasonV1,
-        ...ComparisonUnavailableReasonV1[],
-      ];
+      unavailableReasons: NonEmptyComparisonUnavailableReasonsV1;
     }>
   | Readonly<ComparisonObservationContextV1 & {
       state: 'not_collected';
       value: null;
       actualUnit: null;
-      unavailableReasons: readonly [
-        ComparisonUnavailableReasonV1,
-        ...ComparisonUnavailableReasonV1[],
-      ];
+      unavailableReasons: NonEmptyComparisonUnavailableReasonsV1;
     }>
   | Readonly<{
       state: 'absent';
@@ -630,11 +660,11 @@ type ComparisonSectionAvailabilityV1 =
   | Readonly<{ state: 'available'; unavailableReasons: readonly [] }>
   | Readonly<{
       state: 'unavailable';
-      unavailableReasons: ComparisonObservationV1['unavailableReasons'];
+      unavailableReasons: NonEmptyComparisonUnavailableReasonsV1;
     }>
   | Readonly<{
       state: 'not_collected';
-      unavailableReasons: ComparisonObservationV1['unavailableReasons'];
+      unavailableReasons: NonEmptyComparisonUnavailableReasonsV1;
     }>;
 
 type ComparisonSectionStateV1 = Readonly<{
@@ -1070,12 +1100,13 @@ API query names remain `baseSnapshotId` and `targetSnapshotId`; Page query names
 are `base` and `target`.
 
 - Normal detail loads latest and has no Comparison.
-- History is ordered by `generatedAt asc, snapshotId asc` after every item has passed
-  repository validation. An immediate predecessor means the final item in that order
-  whose `generatedAt` is strictly earlier than the target; same-time items are never
-  a valid base for each other.
-- With no strictly ordered pair—including zero items, one item, or only same-time
-  items—the start action is disabled and the UI says
+- History is ordered by numeric `generatedAtEpochMs asc` after every item has passed
+  repository validation. Raw stored timestamp strings are never sorted. An immediate
+  predecessor is the item immediately before the target in that order. Equal epoch
+  milliseconds map to the same inherited snapshot ID and cannot form two validated
+  history items.
+- With no strictly ordered pair—including zero or one item—the start action is
+  disabled and the UI says
   `比較には生成時刻の異なる保存済み分析が2件以上必要です`. It does not write
   a one-sided URL or start a Comparison request.
 - The oldest item may be selected as base but is disabled as a target because it has
@@ -1185,6 +1216,8 @@ P3-H1 tests:
   available-with-reasons, unavailable-with-value/empty-reasons,
   not-collected-with-value/unit/empty-reasons, and absent with residual
   value/unit/date/provenance/reason context;
+- section-level unavailable/not-collected states require the named non-empty reason
+  tuple at type and runtime-schema boundaries; an empty tuple is unrepresentable;
 - exact raw delta, metric-specific native/percent/fraction/category display metadata,
   presentation conversion, and negative-zero handling;
 - fixed dynamic instance order, duplicate identity, resistance-candidate exclusion,
@@ -1194,8 +1227,9 @@ P3-H1 tests:
 P3-H2 tests:
 
 - 200/400/404/405/500 and safe route/query validation;
-- latest/no-comparison, start/reset, target/base changes, zero/one/same-time history,
-  oldest-target rejection, and no transient/invalid History entry;
+- latest/no-comparison, start/reset, target/base changes, zero/one history,
+  chronological fractional-second predecessor selection consistent with the shared
+  resolver, oldest-target rejection, and no transient/invalid History entry;
 - deep link, reload, Back/Forward, ticker/list/tab transitions, and pair-keyed
   filter/disclosure restoration and reset;
 - unchanged/newer/failed reload behavior, explicit target adoption, overlapping
@@ -1417,8 +1451,8 @@ Manifest V1 has exactly these scope IDs; adding/removing/renaming a scope increm
 | `advanced_dividend` | `advanced_dividend_persisted_facts` | every persisted fiscal/event fact within 20/50 limits, methods and dates |
 | `volume_profile_summary` | `volume_profile_summary` | exact stored POC/Value Area summary and method; complete for the summary domain |
 | `strategy` | `strategy_persisted_candidates` | every exact persisted entry/candidate value, reason and calculation input |
-| `price_history_series` | `price_history_series` | no items; a stored non-null array is `persisted_but_excluded/excluded_from_manifest/raw_series_excluded`; null/unavailable follows stored-scope precedence |
-| `volume_profile_bins` | `volume_profile_bins` | no items; V1–V8 are `not_collected/partial/schema_predates_scope`; a V9 stored non-null bins array is `persisted_but_excluded/excluded_from_manifest/volume_profile_bins_excluded`; null/unavailable follows stored-scope precedence |
+| `price_history_series` | `price_history_series` | no items; a stored schema-valid non-empty array is `persisted_but_excluded/excluded_from_manifest/raw_series_excluded`; null/unavailable follows stored-scope precedence |
+| `volume_profile_bins` | `volume_profile_bins` | no items; V1–V8 are `not_collected/partial/schema_predates_scope`; a V9 stored schema-valid non-empty bins array is `persisted_but_excluded/excluded_from_manifest/volume_profile_bins_excluded`; null/unavailable follows stored-scope precedence |
 | `outside_filing_narrative` | `outside_filing_narrative` | no items; filing prose/tool output is not persisted |
 | `outside_company_management_history` | `outside_company_management_history` | no items; management/company-history facts are not persisted |
 | `outside_competitors_industry` | `outside_competitors_industry` | no items; competitor/industry narrative is not persisted |
@@ -1438,9 +1472,9 @@ never changes the scope to not-collected. Raw free-form top-level reason/detail 
 sent; only the allowlisted scope reason and schema-enumerated item state/reason are.
 
 The two intentionally omitted persisted collections have exact additional state
-rules. A non-null stored `priceHistory` array, including an empty array, produces
+rules. A schema-valid non-empty stored `priceHistory` array produces
 `price_history_series/persisted_but_excluded/excluded_from_manifest/raw_series_excluded`.
-A V9 non-null stored Volume Profile `bins` array, including an empty array, produces
+A V9 schema-valid non-empty stored Volume Profile `bins` array produces
 `volume_profile_bins/persisted_but_excluded/excluded_from_manifest/volume_profile_bins_excluded`.
 The Evaluator receives no items from either scope. Their unavailable/null cases use
 the normal stored-scope precedence; a schema that predates bins is `not_collected`,
@@ -1452,11 +1486,46 @@ for their explicitly named *persisted-content* domains. The Evaluator must not i
 or say that their upstream source, all dates, or all disclosures are complete. A
 claim of source totality always maps to `outside_source_totality`.
 
-Each eligible field is declared in a typed code-owned Evidence Definition registry
-with stable definition key, introduced Snapshot version, per-instance introduction
-version, exact accessor, scope, value/unit/date/identity projection, and coverage
-rule. Do not reflectively traverse the Snapshot. Dynamic item IDs hash this exact
-single object:
+Every eligible fact is declared in a typed code-owned Evidence Definition registry.
+The registry fixes both fact projection and item granularity; P3-E1 may not decide to
+emit one scalar per collection field. Fixed scalar metrics use one item per metric.
+A dynamic fiscal period, public-short row, investor-flow period, correlation/window,
+sector-short observation, dividend observation/event, or Strategy candidate uses one
+item per semantic record and carries every allowlisted scalar/category in a non-empty
+ordered `facts` tuple. Thus one public-short row is one evidence ref, not four or more
+independent scalar refs, while every value and unit remains exact.
+
+Each definition has a stable definition key, introduced Snapshot version,
+per-instance introduction version, exact accessor, scope, item granularity,
+fact-key/value/unit/date projection, identity/method projection, and coverage rule.
+Do not reflectively traverse the Snapshot. A fact key is stable within its definition
+and never contains dynamic identity. The public item shape is:
+
+```ts
+type EvidenceFactV1 = Readonly<{
+  factKey: string;
+  state: 'available' | 'unavailable' | 'not_collected';
+  value: number | string | boolean | null;
+  unit: string | null;
+  dataDates: readonly NamedDataDateV1[];
+}>;
+
+type EvidenceItemV1 = Readonly<{
+  itemId: string;
+  scopeId: string;
+  definitionKey: string;
+  instanceIdentity: ComparisonInstanceIdentityV1;
+  facts: readonly [EvidenceFactV1, ...EvidenceFactV1[]];
+  provenance: readonly ComparisonProvenanceV1[];
+  method: string | null;
+  limitation: string | null;
+}>;
+```
+
+Fact state/value/unit combinations use the same available/non-available invariants
+as Comparison; a record item may contain both available and unavailable facts.
+Facts are ordered by the code-owned definition and there are at most 64 facts per
+item. Dynamic item IDs hash this exact single object:
 
 ```ts
 type EvidenceItemIdEnvelopeV1 = Readonly<{
@@ -1491,7 +1560,7 @@ Each item records:
 
 - stable semantic item ID;
 - scope ID and schema pointer;
-- exact value and unit;
+- a non-empty ordered tuple of exact keyed values/states/units;
 - named dates;
 - record/window identity;
 - applicable method/coverage limitations.
@@ -1523,15 +1592,45 @@ Limits:
 
 - at most 6 fundamental periods;
 - at most 100 public-short records;
+- at most 100 sector-short observations;
 - at most 20 dividend fiscal observations;
 - at most 50 dividend events;
-- at most 32 scopes and 512 items;
+- at most 16 Strategy candidates;
+- at most 32 scopes and 343 items;
 - at most 2,000 characters per string;
 - at most 150,000 manifest characters;
 - at most 200,000 total Evaluator logical-input characters.
 
 Do not truncate. A limit violation fails before provider dispatch. A contractually
 omitted collection is represented by scope coverage, not fabricated evidence.
+
+The 343-item cap is proven against this exact V1 item budget; it is not an arbitrary
+post-generation guard:
+
+| Scope | Item granularity | Maximum items |
+| --- | --- | ---: |
+| Snapshot identity | one identity record | 1 |
+| Valuation | one item per fixed metric | 5 |
+| Fundamental | one item per fiscal record | 6 |
+| Peer positions | seven metrics plus selection/cohort | 8 |
+| Technical | one item per fixed metric | 6 |
+| Advanced Technical | one item per fixed metric | 7 |
+| Supply/Demand | one item per fixed metric | 12 |
+| Market Correlation | one item per 20/60/250 window | 3 |
+| Reported short positions | one item per persisted row | 100 |
+| Investor type flows | one complete Tokyo/Nagoya period item | 1 |
+| Sector benchmark | identity/method plus three windows | 4 |
+| Sector short ratio | identity/method plus at most 100 observations | 101 |
+| Advanced Dividend | identity/method plus 20 fiscal and 50 event records | 71 |
+| Volume Profile summary | one summary/method item | 1 |
+| Strategy | entry/method plus at most 16 candidate items | 17 |
+| Persisted-but-excluded and outside scopes | no items | 0 |
+| **V1 maximum** |  | **343** |
+
+An over-limit persisted collection fails the entire Evaluator preflight; it is never
+truncated and its scope is never mislabeled complete. Adding a scope, item kind, fact,
+or higher collection maximum requires an `evidenceManifestVersion` increment and a
+reviewed recomputation that stays within both the 343-item and character limits.
 
 ### 6.3 Finding schema
 
@@ -1542,9 +1641,23 @@ type ReportAnchorV1 = Readonly<{
   excerpt: string; // exact report.slice(start, end)
 }>;
 
+type SingleReportAnchorLocationV1 = Readonly<{
+  kind: 'single_anchor';
+  anchor: ReportAnchorV1;
+}>;
+
+type ReportAnchorSetLocationV1 = Readonly<{
+  kind: 'report_anchor_set';
+  anchors: readonly [ReportAnchorV1, ReportAnchorV1, ...ReportAnchorV1[]];
+}>;
+
 type EvidenceRefsBasisV1 = Readonly<{
   kind: 'evidence_refs';
   refs: readonly string[];
+}>;
+
+type ReportContradictionBasisV1 = Readonly<{
+  kind: 'report_contradiction';
 }>;
 
 type ManifestAbsenceBasisV1 = Readonly<{
@@ -1569,7 +1682,7 @@ type EvaluationFindingV1 =
       claimDomains: EvidenceClaimDomainsV1;
       importance: 'material' | 'advisory';
       summary: string;
-      anchor: ReportAnchorV1;
+      location: SingleReportAnchorLocationV1;
       basis: ManifestAbsenceBasisV1 & Readonly<{
         reason: 'no_matching_allowlisted_evidence';
       }>;
@@ -1580,7 +1693,7 @@ type EvaluationFindingV1 =
       claimDomains: EvidenceClaimDomainsV1;
       importance: 'advisory';
       summary: string;
-      anchor: ReportAnchorV1;
+      location: SingleReportAnchorLocationV1;
       basis: ManifestAbsenceBasisV1 & Readonly<{
         reason: 'relevant_evidence_unavailable' | 'outside_snapshot_scope';
       }>;
@@ -1591,18 +1704,36 @@ type EvaluationFindingV1 =
       claimDomains: EvidenceClaimDomainsV1;
       importance: 'advisory';
       summary: string;
-      anchor: ReportAnchorV1;
+      location: SingleReportAnchorLocationV1;
       basis: ManifestAbsenceBasisV1 & Readonly<{
         reason: 'persisted_evidence_not_sent';
       }>;
     }>
   | Readonly<{
       findingId: string;
-      category: 'internal_inconsistency' | 'unclear_reasoning';
+      category: 'internal_inconsistency';
       claimDomains: EvidenceClaimDomainsV1;
       importance: 'material' | 'advisory';
       summary: string;
-      anchor: ReportAnchorV1;
+      location: SingleReportAnchorLocationV1;
+      basis: EvidenceRefsBasisV1;
+    }>
+  | Readonly<{
+      findingId: string;
+      category: 'internal_inconsistency';
+      claimDomains: EvidenceClaimDomainsV1;
+      importance: 'material' | 'advisory';
+      summary: string;
+      location: ReportAnchorSetLocationV1;
+      basis: ReportContradictionBasisV1;
+    }>
+  | Readonly<{
+      findingId: string;
+      category: 'unclear_reasoning';
+      claimDomains: EvidenceClaimDomainsV1;
+      importance: 'material' | 'advisory';
+      summary: string;
+      location: SingleReportAnchorLocationV1;
       basis: EvidenceRefsBasisV1;
     }>
   | Readonly<{
@@ -1611,7 +1742,7 @@ type EvaluationFindingV1 =
       claimDomains: EvidenceClaimDomainsV1;
       importance: 'material' | 'advisory';
       summary: string;
-      anchor: ReportAnchorV1;
+      location: SingleReportAnchorLocationV1;
       basis: EvidenceRefsBasisV1 | ManifestAbsenceBasisV1;
     }>;
 ```
@@ -1630,8 +1761,15 @@ Categories:
 - `not_verifiable_by_evaluator` requires `manifest_absence` with reason
   `persisted_evidence_not_sent`, only
   `persisted_but_excluded/excluded_from_manifest` scopes, and advisory importance;
-- `internal_inconsistency` and `unclear_reasoning` require `evidence_refs` whose
-  available items cover every finding domain;
+- `internal_inconsistency` with `evidence_refs` means one report claim contradicts
+  available Snapshot evidence and requires one anchor plus refs covering every
+  domain; with `report_contradiction` it means two to four report spans are mutually
+  inconsistent, requires no Snapshot evidence, and is valid for persisted,
+  unavailable, excluded, or outside domains;
+- `unclear_reasoning` is deliberately evidence-grounded in V1: it requires one
+  report anchor and available evidence refs covering every domain. Purely rhetorical
+  or prose-only lack of clarity without eligible Snapshot evidence is outside this
+  category and produces no fabricated ref;
 - `missing_caveat` accepts either basis; evidence refs must be available and cover
   every domain, while a manifest-absence basis must use the same exact
   reason/state/coverage compatibility defined above for its reason.
@@ -1644,20 +1782,24 @@ without an appropriate limitation may instead produce `missing_caveat`.
 `not_verifiable_by_evaluator` says that the target Snapshot contains the relevant
 collection but the versioned Evaluator input intentionally omitted it; it neither
 asserts that the claim is false nor that the Snapshot lacks the evidence. If one
-anchor contains domains requiring different absence reasons, emit separate findings
+single anchor contains domains requiring different absence reasons, emit separate
+findings
 rather than selecting one misleading reason.
 
-Every finding has `material | advisory` importance, plain-text summary, one exact
-anchor, and one typed basis.
+Every finding has `material | advisory` importance, a plain-text summary, one typed
+location, and one typed basis. All categories except report-to-report internal
+inconsistency use `single_anchor`.
 
 Validation:
 
 - maximum 20 findings;
 - summary 1–1,000 trimmed characters;
-- excerpt 1–500 UTF-16 code units;
-- `0 <= start < end <= report.length`;
-- no anchor boundary inside a surrogate pair;
-- exact `report.slice(start, end) === excerpt`;
+- each excerpt is 1–500 UTF-16 code units;
+- each anchor satisfies `0 <= start < end <= report.length`, has no boundary inside
+  a surrogate pair, and exactly equals `report.slice(start, end)`;
+- `report_anchor_set` has 2–4 unique, non-overlapping anchors ordered by
+  `(start, end)`; duplicate, overlapping, out-of-order, or single-anchor sets reject
+  the entire available artifact;
 - 1–4 unique claim domains, ordered by the closed EvidenceClaimDomain registry;
 - 1–16 unique valid evidence refs or 1–8 unique valid scope refs;
 - no empty refs, sentinel IDs, free-form paths, unknown fields, score, pass, or
@@ -1665,7 +1807,8 @@ Validation:
 - duplicate finding and finding-ID collision invalidate the available output.
 
 Category/basis/coverage incompatibility invalidates the entire available output;
-never coerce it into another category or fabricate an evidence ref. For every basis,
+never coerce it into another category or fabricate an evidence ref. For every
+evidence or manifest-absence basis,
 the set of domains reached through referenced Evidence items or scopes must equal
 `claimDomains`: no domain may be omitted, and no referenced item/scope may belong to
 another domain. `evidence_refs` requires at least one available referenced item for
@@ -1675,6 +1818,9 @@ unavailable, not-collected, excluded, or outside scope cannot satisfy
 `unsupported_claim`, and an excluded scope cannot satisfy
 `not_verifiable_from_snapshot`. More than four domains requires splitting at an
 anchor into separately valid findings.
+`report_contradiction` is the only basis exempt from Evidence/scope coverage because
+the exact report spans are its complete basis; it is legal only for
+`internal_inconsistency` with `report_anchor_set` and has no refs or scope refs.
 For a dynamic persisted-content domain, lack of a row is unsupported only when the
 claim is explicitly about what this exact Snapshot persisted. A claim about upstream
 source totality maps to `outside_source_totality` even when the persisted-content
@@ -1692,17 +1838,21 @@ type EvaluationFindingIdEnvelopeV1 = Readonly<{
   category: EvaluationFindingV1['category'];
   claimDomains: EvidenceClaimDomainsV1;
   importance: 'material' | 'advisory';
-  anchor: ReportAnchorV1;
-  basis: EvidenceRefsBasisV1 | ManifestAbsenceBasisV1;
+  location: SingleReportAnchorLocationV1 | ReportAnchorSetLocationV1;
+  basis:
+    | EvidenceRefsBasisV1
+    | ManifestAbsenceBasisV1
+    | ReportContradictionBasisV1;
 }>;
 
 findingId = 'f_' + sha256Hex(CanonicalJsonV1(envelope)).slice(0, 24)
 ```
 
 `sha256Hex` produces all 64 lowercase hex characters before truncation. Never hash
-provider ref order or the unvalidated wire object. After IDs exist, normalize
-findings by material before advisory, then anchor start, category order, and finding
-ID.
+provider ref order or an unvalidated location/wire object; anchor sets must first
+pass the canonical-order contract above. After IDs exist, normalize findings by
+material before advisory, then first location-anchor start, category order, and
+finding ID.
 
 #### 6.3.1 Canonical golden vectors
 
@@ -1726,30 +1876,31 @@ sha256Hex
 
 ```text
 EvidenceItemIdEnvelopeV1
-  = {"definitionKey":"marketCorrelation.window.beta","instanceIdentity":[{"name":"benchmark","value":"TOPIX"},{"name":"period","value":20}],"kind":"dexter_evidence_item_id","manifestVersion":1,"scopeId":"market_correlation","version":1}
+  = {"definitionKey":"marketCorrelation.window","instanceIdentity":[{"name":"benchmark","value":"TOPIX"},{"name":"period","value":20}],"kind":"dexter_evidence_item_id","manifestVersion":1,"scopeId":"market_correlation","version":1}
 sha256Hex
-  = f6445e5bbc10fdb2a5191e0f1b0c1722c450dab3b62639f33e90b3c49f6e47d2
+  = 83b8164e241819769d1fe6fde8d7ebf80a2b06fa1bdf49fa616aa8de284eb907
 itemId
-  = e_f6445e5bbc10fdb2a5191e0f
+  = e_83b8164e241819769d1fe6fd
 ```
 
 ```text
 Normalized EvaluationFindingIdEnvelopeV1
-  = {"anchor":{"end":2,"excerpt":"根拠","start":0},"basis":{"kind":"manifest_absence","reason":"no_matching_allowlisted_evidence","scopeRefs":["valuation"]},"category":"unsupported_claim","claimDomains":["valuation_metrics"],"importance":"material","kind":"dexter_evaluation_finding_id","version":1}
+  = {"basis":{"kind":"manifest_absence","reason":"no_matching_allowlisted_evidence","scopeRefs":["valuation"]},"category":"unsupported_claim","claimDomains":["valuation_metrics"],"importance":"material","kind":"dexter_evaluation_finding_id","location":{"anchor":{"end":2,"excerpt":"根拠","start":0},"kind":"single_anchor"},"version":1}
 sha256Hex
-  = dd5efe33943d190bec3fa83aada2f6bd1b2557471c9ab7e283b3b45181b449bd
+  = 462879a85341fa9c9caf9503fab4e1629e74bdeff3356a77be21a5c6e1b540f1
 findingId
-  = f_dd5efe33943d190bec3fa83a
+  = f_462879a85341fa9c9caf9503
 ```
 
 ```text
 ArtifactInputEnvelopeV1 with zero snapshot digest; one manifest digest; two gate
-manifest digest; three gate-attestation digest; four evaluator-source digest; 40
+manifest digest; three gate-attestation digest; four evaluator-source digest; five
+dependency-manifest digest; Bun 1.3.14 revision 1.3.14+0d9b296af on win32/x64; 40
 lowercase `a` gate commit; qualityGateId=qg_v1_terra_high; and
 openai/gpt-5.6-terra/high
-  = {"evaluatorSchemaVersion":1,"evaluatorSourceDigest":"sha256:4444444444444444444444444444444444444444444444444444444444444444","evidenceManifestDigest":"sha256:1111111111111111111111111111111111111111111111111111111111111111","evidenceManifestVersion":1,"gateAttestationDigest":"sha256:3333333333333333333333333333333333333333333333333333333333333333","gateEvaluatedCommitSha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","gateManifestDigest":"sha256:2222222222222222222222222222222222222222222222222222222222222222","kind":"dexter_evaluator_input","promptVersion":1,"qualityGateId":"qg_v1_terra_high","rubricVersion":1,"runtime":{"modelId":"gpt-5.6-terra","providerId":"openai","reasoningEffort":"high"},"safetyPolicyVersion":1,"snapshotDigest":"sha256:0000000000000000000000000000000000000000000000000000000000000000","version":1}
+  = {"evaluatorSchemaVersion":1,"evaluatorSourceDigest":"sha256:4444444444444444444444444444444444444444444444444444444444444444","evidenceManifestDigest":"sha256:1111111111111111111111111111111111111111111111111111111111111111","evidenceManifestVersion":1,"executionEnvironment":{"arch":"x64","bunRevision":"1.3.14+0d9b296af","bunVersion":"1.3.14","dependencyManifestDigest":"sha256:5555555555555555555555555555555555555555555555555555555555555555","platform":"win32"},"gateAttestationDigest":"sha256:3333333333333333333333333333333333333333333333333333333333333333","gateEvaluatedCommitSha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","gateManifestDigest":"sha256:2222222222222222222222222222222222222222222222222222222222222222","kind":"dexter_evaluator_input","promptVersion":1,"qualityGateId":"qg_v1_terra_high","rubricVersion":1,"runtime":{"modelId":"gpt-5.6-terra","providerId":"openai","reasoningEffort":"high"},"safetyPolicyVersion":1,"snapshotDigest":"sha256:0000000000000000000000000000000000000000000000000000000000000000","version":1}
 artifactInputDigest
-  = sha256:40dffb601c1646ec0e99bab00759cc943313cc80001f3a5a708adfd46651f723
+  = sha256:a646bd34a55aa315717916499ed965773688e40ebbc32fcf26c89b1e0aed5603
 ```
 
 ### 6.4 Sidecar
@@ -1800,6 +1951,8 @@ Persist:
 - evaluator schema, manifest, rubric, prompt, and safety versions;
 - `qualityGateId`, gate manifest/attestation/source digests, and gate-evaluated commit
   SHA;
+- exact Bun version/revision, platform/architecture, and resolved runtime-dependency
+  manifest digest;
 - created/completed timestamps;
 - provider, effective model, task profile, nullable reasoning effort;
 - attempt count, timeout, duration;
@@ -1847,6 +2000,13 @@ type QualifiedEvaluatorRuntimeV1 = Readonly<{
   evaluatorSourceDigest: `sha256:${string}`;
   gateEvaluatedCommitSha: string;
   state: 'qualified';
+  executionEnvironment: Readonly<{
+    bunVersion: string;
+    bunRevision: string;
+    platform: string;
+    arch: string;
+    dependencyManifestDigest: `sha256:${string}`;
+  }>;
   providerId: string;
   modelId: string;
   reasoningEffort: string | null;
@@ -1860,15 +2020,17 @@ type QualifiedEvaluatorRuntimeV1 = Readonly<{
 
 `qualityGateId` matches `^qg_[a-z0-9][a-z0-9_-]{0,63}$`; the manifest,
 attestation, and source digests are full lowercase `sha256:` digests; and
-`gateEvaluatedCommitSha` is exactly 40 lowercase hex characters. Duplicate IDs,
-digest mismatch, pending-only manifest, failed attestation, tuple/version mismatch,
-or current-source mismatch fails as `runtime_not_quality_gated` before confirmation
-or provider dispatch.
+`gateEvaluatedCommitSha` is exactly 40 lowercase hex characters. The initial
+execution tuple is Bun `1.3.14`, revision `1.3.14+0d9b296af`, on `win32/x64`;
+another Bun build, platform, or architecture requires its own passed gate. Duplicate
+IDs, digest mismatch, pending-only manifest, failed attestation, tuple/version,
+execution-environment, installed-dependency, or current-source mismatch fails as
+`runtime_not_quality_gated` before confirmation or provider dispatch.
 
 Use that immutable provider/model/reasoning and version tuple for the entire run.
 There is no ungated/experimental mode, compatibility fallback, or reasoning
-downgrade. The CLI and Dashboard detail display gate ID, source digest, and evaluated
-commit.
+downgrade. The CLI and Dashboard detail display gate ID, source/dependency digests,
+exact Bun/platform/architecture, and evaluated commit.
 
 P3-E2 introduces an Evaluator-only `invokeEvaluatorOnce` provider boundary. It must
 not call the current generic `callLlm` or `withRetry` paths, because those paths have
@@ -1926,20 +2088,44 @@ Page query:
 ```text
 /?ticker=<ticker>&tab=evaluation
   [&base=<base-id>&target=<target-id>]
+  [&evaluationSnapshot=<snapshot-id>]
   [&evaluation=<evaluation-id>]
 ```
 
-- Missing `evaluation` means unselected.
+- `evaluationSnapshot` is an Evaluation-only selector and does not satisfy or alter
+  the Comparison rule that `base` and `target` must appear together. When present,
+  it pins the entire Dashboard detail—including the exact stored report used for
+  excerpts—to that history Snapshot across tab changes.
+- Missing both Evaluation selectors means an unpinned, unselected list for the
+  currently displayed Snapshot: the validated latest Snapshot in normal detail or
+  the exact `target` in Comparison.
+- `evaluationSnapshot` without `evaluation` is a legal pinned-unselected state.
+  `evaluation` without `evaluationSnapshot` is invalid and is removed before any
+  Evaluation request.
+- When a Comparison pair and `evaluationSnapshot` coexist, the Evaluation Snapshot
+  must equal `target`; a mismatch is an inline invalid-selection state and starts no
+  Evaluation request. It is never repaired by changing the Comparison pair.
 - Never auto-select even when exactly one run exists.
-- Select/clear uses `pushState`.
-- Tab changes use `replaceState` and preserve evaluation selection.
-- Target/ticker/list changes clear evaluation.
-- A base-only change preserves evaluation because target is unchanged.
-- Syntactically invalid evaluation is removed before a request with
+- Selecting a run uses one `pushState` that writes both the displayed Snapshot ID as
+  `evaluationSnapshot` and the run ID. Clearing the run removes only `evaluation`
+  and preserves the pinned Snapshot/list. An explicit `現在の分析に戻る` action
+  removes both selectors with one `pushState`.
+- Tab changes use `replaceState` and preserve both Evaluation selectors.
+- Target/ticker/list changes clear both Evaluation selectors. A base-only change
+  preserves them because the target is unchanged.
+- Syntactically invalid `evaluationSnapshot` or `evaluation`, and an evaluation ID
+  without its Snapshot selector, are removed together before a request with one
   `replaceState`.
-- A valid 404 ID remains in the URL and shows inline error; do not fall back.
-- Restore exact selection on Back/Forward.
+- A syntactically valid 404 Snapshot or evaluation ID remains in the URL and shows
+  its scoped inline error; do not fall back to latest, another Snapshot, or another
+  run.
+- Initial load, bookmark, reload, and Back/Forward restore the exact tuple
+  `ticker + evaluationSnapshot + evaluation`. A newly saved latest Snapshot never
+  retargets a pinned tuple; an unpinned view follows the normal validated latest
+  reload contract.
 - List and detail use separate AbortControllers and monotonic request tokens.
+- Their request identity includes ticker, effective Snapshot ID, and applicable
+  evaluation ID; stale success/error from another tuple cannot replace the panel.
 - Evaluation-panel failure does not replace the saved Snapshot page with a global
   error.
 
@@ -1961,7 +2147,8 @@ The tab displays:
 - distinct states for no stored run, unselected, available zero findings,
   unavailable run, and available findings;
 - material/advisory plain-text importance;
-- escaped exact report excerpt in a blockquote;
+- the escaped exact report excerpt in a blockquote, or every ordered contradictory
+  excerpt in separately labelled blockquotes;
 - evidence value/unit/date/state/method/limitation table; or
 - manifest-absence scope and reason.
 
@@ -1980,6 +2167,8 @@ Create a versioned Japanese set of 64 cases:
 - balanced unsupported, not-verifiable-from-Snapshot,
   not-verifiable-by-Evaluator, inconsistency, missing-caveat, and unclear-reasoning
   cases;
+- at least four locked report-to-report inconsistency cases, including at least two
+  outside/unavailable Snapshot domains that have no eligible Evidence ref;
 - V1–V9, zero, unavailable, not-collected, partial, compound, Japanese, and
   injection cases;
 - fixed input digests;
@@ -1994,9 +2183,11 @@ does not mean secret or unreviewable.
 
 Finding matching is maximum one-to-one within category:
 
-- exact `claimDomains` set equality is a prerequisite; a category/anchor match with
+- exact `claimDomains` set equality is a prerequisite; a category/location match with
   missing or extra domains is not a match;
-- report-anchor intersection-over-union at least 0.5;
+- single locations require report-anchor intersection-over-union at least 0.5;
+- report-anchor sets require the same anchor count and a maximum one-to-one ordered
+  match in which every paired anchor has intersection-over-union at least 0.5;
 - evidence-ref set F1 at least 0.5;
 - manifest-absence reason exact match plus at least one overlapping scope;
 - importance exact match for material metrics.
@@ -2010,8 +2201,9 @@ Locked-holdout gate:
 - not-verifiable-from-Snapshot precision and recall: each at least 90%;
 - not-verifiable-by-Evaluator precision and recall: each at least 90%;
 - missing-caveat recall: at least 85%;
-- evidence-basis and matched-anchor accuracy: each at least 95%;
-- ref/anchor integrity for available artifacts: 100%;
+- evidence/manifest/report-contradiction basis and matched-location accuracy: each at
+  least 95%;
+- ref/location integrity for available artifacts: 100%;
 - material false positives across 12 clean cases: zero;
 - clean cases with an advisory false positive: at most 1/12;
 - timeouts: at most 1/48;
@@ -2047,7 +2239,16 @@ paths plus SHA-256 of each exact Git blob. It contains:
   attestation directories;
 - the complete transitive tracked local-import closure of the Evaluator CLI and gold
   harness when a dependency lives outside `src/evaluator/**`; and
-- `package.json` and `bun.lock`.
+- `package.json`, `bun.lock`, root `tsconfig.json`, every recursively extended
+  TypeScript config, and any tracked Bun/module-resolution config that affects that
+  closure.
+
+The current execution-config set is exactly `package.json`, `bun.lock`, and
+`tsconfig.json`. A discovery guard fails if a tracked `tsconfig*.json`,
+`bunfig.toml`, `.bunfig.toml`, `bun.lockb`, workspace/package manifest, or another
+code-owned resolver config can affect the closure but is not classified and hashed.
+Adding one requires a reviewed source-manifest/version update; it is never silently
+ignored.
 
 Generation requires a clean checkout at one exact commit, hashes bytes from that Git
 commit rather than mutable working-tree reads, rejects symlinks/untracked imports,
@@ -2066,17 +2267,59 @@ type EvaluatorSourceDigestEnvelopeV1 = Readonly<{
 }>;
 ```
 
-The pending gate manifest binds that source digest, complete source-manifest copy,
-provider/model/reasoning, all Evaluator versions, gold-set version, pricing/cost cap,
-and campaign parameters. `gateManifestDigest` is the full CanonicalJsonV1 digest of
-the manifest.
+External installed code is bound separately. Starting from the Evaluator CLI and
+gold-harness entrypoints, the pinned Bun resolver walks the complete literal
+static/dynamic import closure. For every loaded package it records package name,
+exact installed version, lockfile package key, exact resolved entry/submodule paths,
+and SHA-256 of every JavaScript/TypeScript/JSON/native file actually reachable at
+runtime. Package metadata that controls `exports`, conditional resolution, or module
+type is included. Non-literal dynamic imports, unresolved optional fallbacks, a
+symlink/reparse target, a package outside the frozen lock, or an unclassified loaded
+file makes the runtime ineligible rather than weakening the manifest.
 
-Only the manual gold harness may execute a pending manifest. It requires the exact
-clean source digest and explicit paid confirmation, writes no Evaluation sidecar,
-and writes its proposed passed attestation only below
+```ts
+type EvaluatorDependencyDigestEnvelopeV1 = Readonly<{
+  kind: 'dexter_evaluator_dependencies';
+  version: 1;
+  packages: readonly Readonly<{
+    packageName: string;
+    packageVersion: string;
+    lockfilePackageKey: string;
+    files: readonly Readonly<{
+      packageRelativePath: string;
+      byteDigest: `sha256:${string}`;
+    }>[];
+  }>[];
+}>;
+```
+
+Packages and files use unique POSIX paths and UTF-16 code-unit sort order.
+`dependencyManifestDigest` is the CanonicalJsonV1 SHA-256 of that complete envelope;
+hashing all unrelated `node_modules` content is neither required nor allowed.
+
+P3-E2 pins root `packageManager` and CI setup to Bun `1.3.14`; CI must not use
+`bun-version: latest`. The pending gate manifest binds Bun version, full
+`bun --revision` output, platform, architecture, dependency manifest/digest, source
+digest/copy, provider/model/reasoning, all Evaluator versions, gold-set version,
+pricing/cost cap, and campaign parameters. `gateManifestDigest` is the full
+CanonicalJsonV1 digest of the manifest.
+
+The qualification-verification CI job runs on the attested `win32/x64` platform with
+that exact Bun build and a frozen install. A Linux or different-architecture job may
+validate pure schemas/fixtures but cannot qualify or revalidate the initial Windows
+attestation. Another supported execution platform requires a separate gate ID,
+campaign, attestation, and matching-platform verification job.
+
+Only the manual gold harness may execute a pending manifest. It starts from a fresh
+disposable clean checkout of the evaluated commit, verifies the pinned Bun
+version/revision/platform/architecture, runs `bun install --frozen-lockfile`, derives
+the dependency manifest from those installed bytes, requires both exact source and
+dependency digests, and then requires explicit paid confirmation. It writes no
+Evaluation sidecar and writes its proposed passed attestation only below
 `.dexter/evaluator-gates/<qualityGateId>/`. The proposed attestation contains:
 
-- state `passed`, quality-gate ID, gate-manifest digest, and evaluator-source digest;
+- state `passed`, quality-gate ID, gate-manifest digest, evaluator-source digest,
+  dependency-manifest digest, and exact Bun/platform/architecture tuple;
 - exact runtime and Evaluator versions;
 - evaluated commit SHA as audit metadata, start/completion times, aggregate metrics,
   per-case result digests, injection/stability results, and charged/reserved cost; and
@@ -2091,18 +2334,38 @@ the evaluated source. CI on that qualification commit must prove:
 1. the difference from `gateEvaluatedCommitSha` contains only the matching new
    attestation file;
 2. the attestation's CanonicalJsonV1 bytes hash to `gateAttestationDigest`;
-3. its manifest/runtime/version/source fields exactly match the pending manifest;
-4. recomputing current tracked source bytes produces the attested source digest; and
+3. its manifest/runtime/version/source/dependency/execution fields exactly match the
+   pending manifest;
+4. recomputing current tracked source/config bytes and the frozen resolved-
+   dependency manifest produces the attested digests; and
 5. every locked gate threshold passed within the cost cap.
 
 Production derives `QualifiedEvaluatorRuntimeV1` only from a manifest plus a passed
 tracked attestation satisfying those checks. The initial tuple is
 `openai / gpt-5.6-terra / high`. A one-byte change to any source-manifest file,
-dependency manifest/lockfile, prompt, evidence registry, finding schema, rubric,
-safety code, harness, or gold fixture invalidates qualification. A new tuple or
-version requires a new gate ID and paid campaign. The evaluated commit SHA remains
-auditable metadata; `evaluatorSourceDigest` is the mechanical runtime binding that
-survives the attestation-only qualification commit and merge commit.
+execution config, resolved dependency file, dependency manifest/lockfile, prompt,
+evidence registry, finding schema, rubric, safety code, harness, or gold fixture
+invalidates qualification. A new provider/model/reasoning, Bun/revision/platform/
+architecture, dependency, or Evaluator-version tuple requires a new gate ID and paid
+campaign. The evaluated commit SHA remains auditable metadata; source, dependency,
+and execution-environment digests are the mechanical runtime binding that survives
+the attestation-only qualification commit and merge commit.
+
+Production does not trust Git blobs while executing mutable working-tree files. At
+initial preflight and again immediately after external-send confirmation before
+dispatch, it uses the actual current filesystem and pinned Bun resolver to:
+
+1. verify exact Bun version/revision/platform/architecture;
+2. hash every attested local source/config path from working-tree bytes and require
+   exact source-manifest equality;
+3. resolve the actual external closure, hash the installed reachable files, and
+   require exact dependency-manifest equality; and
+4. reject missing/extra resolution inputs, symlinks/reparse targets, dirty relevant
+   bytes, or resolution outside the attested manifests.
+
+Unrelated working-tree files outside both closures do not invalidate the run. Any
+relevant mismatch returns `runtime_not_quality_gated` before provider dispatch and
+creates no sidecar, even if the tracked Git blobs still match the attestation.
 
 One campaign has a USD 25 hard cap. The gate manifest pins currency, input/output
 unit prices, source, and verification date. Before each call reserve a safe upper
@@ -2125,6 +2388,10 @@ P3-E1 tests include:
 
 - deterministic V1–V9 manifests with exact scope domain/state/coverage/reason,
   stable item IDs, limits, and no silent truncation;
+- the exact all-maxima fixture produces 343 grouped Evidence items, including one
+  multi-fact item per public-short/dividend/sector-short record; scalar-per-field
+  expansion is rejected as a registry contract violation, and 101st sector-short or
+  17th Strategy record fails preflight without truncation;
 - a claim with no matching evidence inside a `complete_for_domain` scope can be
   represented as `unsupported_claim` with exact absence basis and no evidence refs;
 - filing-derived or otherwise outside-scope claims map to
@@ -2134,10 +2401,15 @@ P3-E1 tests include:
   `not_verifiable_by_evaluator` or an applicable `missing_caveat`, never to
   `not_verifiable_from_snapshot` or `unsupported_claim` solely because those
   collections are intentionally excluded from the manifest;
+- schema-invalid empty `priceHistory` or available Volume Profile-bin arrays are
+  rejected at Snapshot load and never added as an Evidence state/test branch;
 - unavailable and partial scopes cannot be promoted to complete coverage;
 - every category rejects missing-domain, extra-domain, wrong-domain, missing-scope,
   category/basis/importance mismatches, fabricated refs, invalid anchors, unknown
   fields, and duplicate IDs; cross-domain findings require complete exact coverage;
+- report-to-report inconsistency accepts exactly 2–4 ordered non-overlapping anchors
+  without Evidence refs, while evidence-based inconsistency and unclear reasoning
+  require exact available Evidence-domain coverage;
 - exact persisted manifest loading across evaluator code-version change, without
   regeneration from the target Snapshot; and
 - malformed/missing targets and preflight safety failures create no sidecar and
@@ -2147,12 +2419,19 @@ P3-E2 tests include:
 
 - production rejects a pending-only manifest while the manual harness accepts only
   that pending state with explicit paid confirmation; adding the exact passed
-  attestation leaves the recomputed evaluator-source digest unchanged and qualifies
-  only its exact manifest/runtime/version/source tuple;
+  attestation leaves the recomputed evaluator-source/dependency digests unchanged and
+  qualifies only its exact manifest/runtime/version/source/execution tuple;
 - a stale/wrong attestation, an attestation hash mismatch, a repository diff beyond
   the one expected attestation file, a missing transitive source file, or a one-byte
   change to any source-manifest file rejects qualification before confirmation or
   dispatch;
+- `tsconfig.json` path mapping and every discovered execution config affect the
+  source digest; an unclassified config, dirty relevant working-tree byte, changed
+  resolved dependency file, symlink/reparse target, Bun version/revision, platform,
+  or architecture rejects both initial and immediate-pre-dispatch preflight;
+- the manual gate uses a fresh checkout plus `bun install --frozen-lockfile`, normal
+  CI pins Bun 1.3.14 rather than latest, and production accepts only the exact
+  attested resolved-dependency manifest;
 - report/manifest prompt-injection fixtures remain inert quoted data with an empty
   tool list;
 - qualified runtime acceptance, `--model`/saved/default ungated rejection before
@@ -2167,6 +2446,20 @@ P3-E2 tests include:
 - no fabricated evidence, score, pass/fail, Buy/Sell, unknown ref, or invalid anchor;
 - deterministic stub-provider tests in normal CI; and
 - the versioned manual Japanese gold-set campaign as the merge gate above.
+
+P3-E3 tests include:
+
+- an evaluation selection writes both `evaluationSnapshot` and `evaluation`; a
+  bookmark/reload after a newer latest Snapshot appears still loads the exact pinned
+  sidecar and never performs a global evaluation-ID lookup;
+- pinned-unselected, clear-run, return-to-current, tab, target/ticker/list, and
+  base-only transitions use the exact push/replace/clear rules above;
+- evaluation-without-Snapshot, Comparison-target mismatch, malformed selectors,
+  valid 404 selectors, Back/Forward, and no-fallback behavior;
+- separate list/detail abort tokens reject reversed stale success/error for another
+  ticker/Snapshot/run tuple; and
+- zero runs, available zero findings, unavailable run, report-anchor-set display,
+  keyboard/focus behavior, and mobile layout.
 
 ## 7. P3-C — Composite-score evaluation plan
 
@@ -2229,10 +2522,13 @@ dependent step before the predecessor is independently reviewed and merged.
 1. **P3-0 — Source of Truth design synchronization**
    - update SPEC, MVP roadmap, this plan, and the non-normative handoff;
    - no runtime code.
-2. **P3-I0 — History immutability, digest, and stored-report safety**
-   - create-only history, authoritative history-based latest resolver,
+2. **P3-I0 — History immutability, latest resolution, digest, and stored-report safety**
+   - create-only history, authoritative epoch-ordered latest resolver,
      CanonicalJsonV1, digest, collision, save/evaluator safety;
-   - no Comparison, API/UI, Evaluator call, Radar, score, or PDF.
+   - integrate the comparator/resolver and `latest_resolution_failed` only through
+     the existing latest/history GET, Watchlist, and saved-Snapshot reload surfaces;
+     add no new API route or UI;
+   - no Comparison, Evaluator call, Radar, score, or PDF.
 3. **P3-H1 — Pure saved-analysis Comparison**
    - 67-key registry, typed result, V1–V9 accessors, identity/delta logic;
    - no API or Dashboard.
@@ -2270,13 +2566,13 @@ Additional gates:
 
 | Step | Required focused validation |
 | --- | --- |
-| P3-I0 | cross-process no-clobber/idempotency, hard-link unsupported path, authoritative history latest/no legacy rewrite, canonical golden vectors, exact safety grammar, V1–V9 readability |
+| P3-I0 | cross-process no-clobber/idempotency, hard-link unsupported path, epoch-ordered authoritative latest/no legacy rewrite, existing GET error mapping/reload preservation, canonical golden vectors, exact safety grammar, V1–V9 readability |
 | P3-H1 | 67 definitions/accessors, definition/instance versions, discriminated observation invariants, added/removed/non-available reachability, display/provenance, V1–V9, dates/identities/zero |
 | P3-H2 | exact HTTP union, URL lifecycle, disclosure/reload races, focus, responsive |
 | P3-R1 | range/direction/sample/cohort/rank, SVG/table accessibility, mobile |
-| P3-E1 | closed claim-domain sets, strict category/domain/basis coverage, persisted-but-excluded scopes, canonical IDs, V1–V9 manifest, no-replace sidecar |
-| P3-E2 | qualified tuple, pending-manifest production rejection, source/attestation binding, injection, confirmation, one dispatch/timeout/cancel, sanitized logs, stub CI, manual paid gate |
-| P3-E3 | cursor, gate metadata, unselected/no-fallback, zero/unavailable/findings, race/keyboard |
+| P3-E1 | grouped-record cardinality budget, closed claim-domain sets, strict category/domain/basis/location coverage, persisted-but-excluded scopes, canonical IDs, V1–V9 manifest, no-replace sidecar |
+| P3-E2 | pinned Bun/frozen resolved dependencies, working-tree source/config preflight, qualified tuple, pending-manifest rejection, source/attestation binding, injection, confirmation, one dispatch/timeout/cancel, sanitized logs, stub CI, manual paid gate |
+| P3-E3 | `evaluationSnapshot` exact identity, cursor, gate/runtime metadata, unselected/no-fallback, zero/unavailable/findings, race/keyboard |
 | P3-C0 | no-look-ahead, gate completeness, absence of runtime score |
 | P3-X | full regression, Playwright, CI/review/merge/main and docs synchronization |
 
@@ -2372,9 +2668,10 @@ Self-review verifies:
 After the exact P3-0 head passes independent review and is merged:
 
 ```text
-P3-I0 — History immutability, CanonicalJsonV1 digest,
-         and stored-report safety gate
+P3-I0 — History immutability, authoritative epoch-ordered latest resolution,
+         CanonicalJsonV1 digest, and stored-report safety gate
 ```
 
-Implement only that prerequisite. Do not add Comparison calculation/API/UI, Radar,
-Evaluator runtime, score, PDF, Snapshot V10, or source fetch in P3-I0.
+Implement only that prerequisite and its existing latest/history GET, Watchlist, and
+reload integration. Do not add a new route/component, Comparison calculation/API/UI,
+Radar, Evaluator runtime, score, PDF, Snapshot V10, or source fetch in P3-I0.
