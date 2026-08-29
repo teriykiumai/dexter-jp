@@ -184,6 +184,49 @@ function richV9Snapshot(ticker = '1010'): AnalysisSnapshotV9 {
 
   return AnalysisSnapshotV9Schema.parse({
     ...snapshot,
+    advancedTechnical: {
+      dataDate: '2026-08-21',
+      rsi14: 62.35,
+      macd: { value: 42.5, signal: 40.25, histogram: 2.25 },
+      bollinger20: { middle: 2_950, upper: 3_100, lower: 2_800 },
+      unavailable: [],
+    },
+    supplyDemand: {
+      dataDate: '2026-08-19',
+      volumeDataDate: '2026-08-21',
+      buyingBalance: 10_000,
+      sellingBalance: 5_000,
+      marginRatio: 2,
+      buyingBalanceWeeklyChange: 100,
+      sellingBalanceWeeklyChange: -100,
+      mean4w: 9_500,
+      mean13w: 9_000,
+      mean52w: 8_000,
+      deviation52w: 0.25,
+      percentile52w: 0.8,
+      averageDailyVolume20: 2_000,
+      digestionDays: 5,
+      unavailable: [],
+    },
+    marketCorrelation: {
+      benchmark: 'TOPIX',
+      dataDate: '2026-08-21',
+      alignedPriceCount: 21,
+      windows: [{
+        period: 20,
+        startDate: '2026-07-24',
+        endDate: '2026-08-21',
+        observations: 20,
+        correlation: 0.625,
+        beta: 1.1,
+        alphaAnnualized: 0.02,
+        rSquared: 0.390625,
+        stockVolatilityAnnualized: 0.25,
+        benchmarkVolatilityAnnualized: 0.18,
+        excessReturn: 0.03,
+        unavailable: [],
+      }],
+    },
     reportedShortPositions: {
       dataDate: '2026-08-20',
       reports: [
@@ -347,6 +390,9 @@ function richV9Snapshot(ticker = '1010'): AnalysisSnapshotV9 {
     },
     dataDates: {
       ...snapshot.dataDates,
+      advancedTechnical: '2026-08-21',
+      supplyDemand: '2026-08-19',
+      marketCorrelation: '2026-08-21',
       reportedShortPositions: '2026-08-20',
       investorTypeFlows: '2026-08-20',
       advancedDividend: '2026-08-21',
@@ -357,6 +403,9 @@ function richV9Snapshot(ticker = '1010'): AnalysisSnapshotV9 {
       'investorTypeFlows',
       'advancedDividend',
       'volumeProfile',
+      'advancedTechnical',
+      'supplyDemand',
+      'marketCorrelation',
     ].includes(item.section)),
   });
 }
@@ -423,11 +472,26 @@ async function waitForServer(process: ChildProcessWithoutNullStreams): Promise<v
   throw new Error('Dashboard fixture server did not become ready.');
 }
 
-async function mockSnapshotApi(page: Page): Promise<void> {
+async function mockSnapshotApi(
+  page: Page,
+  responseDelayMs: Readonly<Record<string, number>> = {},
+): Promise<void> {
   await page.route('**/api/analyses/*', async route => {
     const ticker = new URL(route.request().url()).pathname.split('/').at(-1) ?? '';
+    const delay = responseDelayMs[ticker] ?? 0;
+    if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay));
     await route.fulfill({
       body: JSON.stringify(snapshotFor(ticker)),
+      contentType: 'application/json; charset=utf-8',
+      status: 200,
+    });
+  });
+}
+
+async function mockWatchlistApi(page: Page): Promise<void> {
+  await page.route('**/api/analyses', async route => {
+    await route.fulfill({
+      body: '[]',
       contentType: 'application/json; charset=utf-8',
       status: 200,
     });
@@ -554,6 +618,95 @@ test.describe('Dashboard detail tab browser interaction', () => {
       await expectSelectedTab(page, 'technical');
       expect(await page.evaluate(() => document.activeElement?.textContent?.trim()))
         .toBe('← Analysis Portfolio');
+    } finally {
+      await page.close();
+    }
+  });
+
+  test('opens metric guidance accessibly and closes it across context changes', async ({ browser }) => {
+    const page = await browser.newPage();
+    try {
+      await mockSnapshotApi(page, { '1009': 2_500 });
+      await mockWatchlistApi(page);
+      await openDetail(page, '1010', 'technical');
+
+      const rsiInvoker = page.getByRole('button', { name: 'RSIの説明を開く' });
+      await rsiInvoker.click();
+      const dialog = page.getByRole('dialog', { name: '用語集 / RSI' });
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByText('何を測るか', { exact: true })).toBeVisible();
+      await expect(dialog.getByText('単位と読み方', { exact: true })).toBeVisible();
+      await expect(dialog.getByText('主な制約', { exact: true })).toBeVisible();
+      await expect(dialog.getByText('判断上の注意', { exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: '用語集を閉じる' })).toBeFocused();
+      await page.locator('#dashboard-tab-report').focus();
+      expect(await page.evaluate(() => (
+        document.querySelector('dialog')?.contains(document.activeElement) ?? false
+      ))).toBe(true);
+      await page.keyboard.press('Escape');
+      await expect(dialog).toBeHidden();
+      await expect(rsiInvoker).toBeFocused();
+
+      await rsiInvoker.click();
+      await page.evaluate(() => {
+        window.history.replaceState({}, '', '/?ticker=1010&tab=technical&future=changed');
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      });
+      await expect(dialog).toBeHidden();
+      await expect(rsiInvoker).toBeFocused();
+
+      const glossaryInvoker = page.getByRole('button', { name: '用語集', exact: true });
+      await glossaryInvoker.click();
+      const glossary = page.getByRole('dialog', { name: '用語集', exact: true });
+      await expect(glossary).toBeVisible();
+      await page.setViewportSize({ width: 320, height: 568 });
+      const glossaryLayout = await glossary.evaluate(element => {
+        const rect = element.getBoundingClientRect();
+        return {
+          documentOverflow: document.documentElement.scrollWidth - window.innerWidth,
+          left: rect.left,
+          right: rect.right,
+        };
+      });
+      expect(glossaryLayout.documentOverflow).toBeLessThanOrEqual(0);
+      expect(glossaryLayout.left).toBeGreaterThanOrEqual(0);
+      expect(glossaryLayout.right).toBeLessThanOrEqual(320);
+      await glossary.getByRole('button', { name: /ATR/ }).click();
+      await expect(page.getByRole('dialog', { name: '用語集 / ATR' })).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(glossaryInvoker).toBeFocused();
+
+      await rsiInvoker.click();
+      await page.evaluate(() => {
+        window.history.replaceState({}, '', '/?ticker=1010&tab=market');
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      });
+      await expectSelectedTab(page, 'market');
+      await expect(page.getByRole('dialog')).toBeHidden();
+      await expect(page.locator('#dashboard-tab-market')).toBeFocused();
+
+      await page.getByRole('button', { name: '投資部門別売買の説明を開く' }).click();
+      await expect(page.getByRole('dialog', { name: '用語集 / 投資部門別売買' }))
+        .toBeVisible();
+      await page.evaluate(() => {
+        window.history.pushState({}, '', '/?ticker=1009&tab=technical');
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      });
+      await expect(page.getByText('1009 Snapshotを読み込み中…')).toBeVisible();
+      await expectSelectedTab(page, 'technical');
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await expect(page.locator('#dashboard-tab-technical')).toBeFocused();
+
+      await page.getByRole('button', { name: '用語集', exact: true }).click();
+      await expect(page.getByRole('dialog', { name: '用語集', exact: true })).toBeVisible();
+      await page.evaluate(() => {
+        window.history.pushState({}, '', '/');
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      });
+      const watchlistHeading = page.getByRole('heading', { name: 'Saved Analysis' });
+      await expect(watchlistHeading).toBeVisible();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await expect(watchlistHeading).toBeFocused();
     } finally {
       await page.close();
     }
@@ -755,12 +908,12 @@ test.describe('Dashboard detail tab browser interaction', () => {
         hasText: '価格帯別分布 2件',
       });
       await expect(technicalPanel.getByRole('heading', {
-        name: 'POC — stored deterministic value',
+        name: 'POC（最大出来高価格帯）',
         exact: true,
       }))
         .toBeVisible();
       await expect(technicalPanel.getByText('¥1,015', { exact: true }).first()).toBeVisible();
-      await expect(technicalPanel.getByText('Target share', { exact: true }))
+      await expect(technicalPanel.getByText('目標出来高比率', { exact: true }))
         .toBeVisible();
       await expect(methodology).not.toHaveAttribute('open', '');
       await expect(bins).not.toHaveAttribute('open', '');
@@ -777,7 +930,7 @@ test.describe('Dashboard detail tab browser interaction', () => {
       await expectSelectedTab(page, 'market');
       const marketPanel = page.locator('#dashboard-panel-market');
       const brokerage = marketPanel.locator('details').filter({
-        hasText: 'Brokerage breakdown 10 categories',
+        hasText: '委託内訳 10区分',
       });
       await expect(page.getByRole('region', { name: '投資部門別売買の集計' })).toBeVisible();
       await expect(marketPanel.getByText('777 千円', { exact: true }).first()).toBeVisible();
@@ -786,6 +939,7 @@ test.describe('Dashboard detail tab browser interaction', () => {
       const brokerageTable = page.getByRole('region', { name: '投資部門別売買の委託内訳' });
       await expect(brokerageTable).toBeVisible();
       expect(await brokerageTable.locator('tbody tr').count()).toBe(10);
+      await expect(brokerageTable.getByText('777 千円', { exact: true }).first()).toBeVisible();
 
       await page.locator('#dashboard-tab-supply-demand').click();
       await expectSelectedTab(page, 'supply-demand');

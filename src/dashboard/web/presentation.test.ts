@@ -650,11 +650,11 @@ describe('snapshot presentation mapping', () => {
     expect(view.advancedTechnical?.metrics).toEqual([
       { label: 'RSI 14', value: { text: '62.35', available: true } },
       { label: 'MACD', value: { text: '¥45.5', available: true } },
-      { label: 'MACD Signal', value: { text: '¥40.25', available: true } },
-      { label: 'MACD Histogram', value: { text: '¥5.25', available: true } },
-      { label: 'Bollinger Middle', value: { text: '¥2,950', available: true } },
-      { label: 'Bollinger Upper', value: { text: '¥3,150.5', available: true } },
-      { label: 'Bollinger Lower', value: { text: '¥2,749.5', available: true } },
+      { label: 'MACD シグナル', value: { text: '¥40.25', available: true } },
+      { label: 'MACD ヒストグラム', value: { text: '¥5.25', available: true } },
+      { label: 'ボリンジャー中心線', value: { text: '¥2,950', available: true } },
+      { label: 'ボリンジャー上限', value: { text: '¥3,150.5', available: true } },
+      { label: 'ボリンジャー下限', value: { text: '¥2,749.5', available: true } },
     ]);
     expect(view.advancedTechnical?.metrics.map(metric => metric.label)).not.toContain('Buy');
     expect(view.advancedTechnical?.metrics.map(metric => metric.label)).not.toContain('Sell');
@@ -764,8 +764,8 @@ describe('snapshot presentation mapping', () => {
       label: '配当分析',
       value: { text: '2026-08-21', available: true },
     });
-    expect(ADVANCED_DIVIDEND_CONTEXT_NOTE).toContain('Browserで再計算');
-    expect(ADVANCED_DIVIDEND_CONTEXT_NOTE).toContain('既存のdeterministic配当利回り');
+    expect(ADVANCED_DIVIDEND_CONTEXT_NOTE).toContain('ブラウザで再計算');
+    expect(ADVANCED_DIVIDEND_CONTEXT_NOTE).toContain('既存の決定論的な配当利回り');
   });
 
   test('keeps optional event-source unavailability separate from an available core result', () => {
@@ -881,11 +881,11 @@ describe('snapshot presentation mapping', () => {
     expect(JSON.stringify(view)).not.toContain('2026-08-26');
     expect(JSON.stringify(view)).not.toContain('2026-08-27');
     expect(JSON.stringify(view)).not.toContain('basisAuditThroughDate');
-    expect(VOLUME_PROFILE_CONTEXT_NOTE).toContain('推定出来高価格分布proxy');
-    expect(VOLUME_PROFILE_CONTEXT_NOTE).toContain('Browserで再計算せず');
+    expect(VOLUME_PROFILE_CONTEXT_NOTE).toContain('推定出来高価格分布');
+    expect(VOLUME_PROFILE_CONTEXT_NOTE).toContain('ブラウザで再計算せず');
     expect(VOLUME_PROFILE_CONTEXT_NOTE).toContain('真のしこり玉');
-    expect(VOLUME_PROFILE_CONTEXT_NOTE).toContain('support/resistance');
-    expect(VOLUME_PROFILE_CONTEXT_NOTE).toContain('Buy/Sell signal');
+    expect(VOLUME_PROFILE_CONTEXT_NOTE).toContain('支持線・抵抗線');
+    expect(VOLUME_PROFILE_CONTEXT_NOTE).toContain('買い／売りシグナル');
   });
 
   test('distinguishes volume-profile unavailability and valid zero from not-collected', () => {
@@ -1245,7 +1245,7 @@ describe('snapshot presentation mapping', () => {
     expect(REPORTED_SHORT_POSITION_DISCLOSURE_NOTE).toContain('0.5%以上');
     expect(REPORTED_SHORT_POSITION_DISCLOSURE_NOTE).toContain('空売り残高0');
     expect(REPORTED_SHORT_POSITION_DISCLOSURE_NOTE).toContain('信用売残');
-    expect(REPORTED_SHORT_POSITION_DISCLOSURE_NOTE).toContain('市場全体のshort interest');
+    expect(REPORTED_SHORT_POSITION_DISCLOSURE_NOTE).toContain('市場全体の空売り残高');
   });
 
   test('treats V1, V2, V3, and a null V4 report section as not collected', () => {
@@ -1274,6 +1274,10 @@ describe('snapshot presentation mapping', () => {
     expect(available.supplyDemand).toContainEqual({
       label: '買残4週平均',
       value: { text: '9,500 株', available: true },
+    });
+    expect(available.supplyDemand).toContainEqual({
+      label: '52週パーセンタイル',
+      value: { text: '80%', available: true },
     });
 
     const unavailableSnapshot: AnalysisSnapshotV4 = {
@@ -1436,10 +1440,10 @@ describe('snapshot presentation mapping', () => {
       value: { text: '2026-08-21', available: true },
     });
     expect(SECTOR_BENCHMARK_CONTEXT_NOTE).toContain('analysisAsOfDate');
-    expect(SECTOR_BENCHMARK_CONTEXT_NOTE).toContain('lookback期間全体');
-    expect(SECTOR_BENCHMARK_CONTEXT_NOTE).toContain('current classification');
-    expect(SECTOR_BENCHMARK_CONTEXT_NOTE).toContain('stitch');
-    expect(SECTOR_BENCHMARK_CONTEXT_NOTE).toContain('rank・score・signal');
+    expect(SECTOR_BENCHMARK_CONTEXT_NOTE).toContain('遡及期間全体');
+    expect(SECTOR_BENCHMARK_CONTEXT_NOTE).toContain('現在の分類の過去適用');
+    expect(SECTOR_BENCHMARK_CONTEXT_NOTE).toContain('複数業種指数の接合');
+    expect(SECTOR_BENCHMARK_CONTEXT_NOTE).toContain('順位・スコア・シグナル');
   });
 
   test('keeps sector source and metric unavailability distinct from zero', () => {
@@ -1647,9 +1651,9 @@ describe('snapshot presentation mapping', () => {
       label: '業種別空売り比率',
       value: { text: '2026-08-21', available: true },
     });
-    expect(SECTOR_SHORT_RATIO_CONTEXT_NOTE).toContain('個別銘柄のshort position');
+    expect(SECTOR_SHORT_RATIO_CONTEXT_NOTE).toContain('個別銘柄の空売り残高');
     expect(SECTOR_SHORT_RATIO_CONTEXT_NOTE).toContain('合算');
-    expect(SECTOR_SHORT_RATIO_CONTEXT_NOTE).toContain('Buy/Sell signal');
+    expect(SECTOR_SHORT_RATIO_CONTEXT_NOTE).toContain('買い／売りシグナル');
   });
 
   test('keeps sector short-ratio unavailable observations and empty source distinct from zero', () => {

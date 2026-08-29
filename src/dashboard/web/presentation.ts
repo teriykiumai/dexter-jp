@@ -367,22 +367,22 @@ export interface VolumeProfileView {
 }
 
 export const REPORTED_SHORT_POSITION_DISCLOSURE_NOTE =
-  'J-Quantsの0.5%以上の公開報告です。未収集・利用不可は、空売り残高0、空売り主体なし、0.5%未満のpositionなし、または買い戻し完了を意味しません。信用売残や市場全体のshort interestとは別データです。';
+  'J-Quantsの0.5%以上の公開報告です。未収集・利用不可は、空売り残高0、空売り主体なし、0.5%未満の残高なし、または買い戻し完了を意味しません。信用売残や市場全体の空売り残高（short interest）とは別データです。';
 
 export const INVESTOR_TYPE_FLOW_CONTEXT_NOTE =
-  'Tokyo/Nagoya市場全体の週次market contextです。個別銘柄の売買フローではありません。公表日と売買期間を区別し、Snapshotに保存されたsource categoryと値をそのまま表示します。';
+  '東京・名古屋市場全体の週次情報です。個別銘柄の売買フローではありません。公表日と売買期間を区別し、Snapshotに保存された公式区分と値をそのまま表示します。';
 
 export const SECTOR_BENCHMARK_CONTEXT_NOTE =
-  'analysisAsOfDate時点で解決した単一の東証33業種指数を各window全体に使用したhistorical comparisonです。銘柄がlookback期間全体で同じsectorに所属していたことを意味せず、current classificationの過去適用、複数sector indexのstitch、銘柄への業種指数値の帰属、rank・score・signalは行いません。';
+  '分析基準日（analysisAsOfDate）時点で解決した単一の東証33業種指数を各期間全体に使用した過去比較です。銘柄が遡及期間全体で同じ業種に所属していたことを意味せず、現在の分類の過去適用、複数業種指数の接合、銘柄への業種指数値の帰属、順位・スコア・シグナルは行いません。';
 
 export const SECTOR_SHORT_RATIO_CONTEXT_NOTE =
-  '東証33業種単位の日次売買代金flowです。個別銘柄のshort position、残高、信用売残ではありません。Snapshotのsource値とdeterministic ratioだけを表示し、業種指数・公開空売り残高報告・信用残との合算、forward fill、threshold・squeeze・Buy/Sell signalは行いません。';
+  '東証33業種単位の日次空売り売買代金です。個別銘柄の空売り残高や信用売残ではありません。Snapshotのソース値と決定論的な比率だけを表示し、業種指数・公開空売り残高報告・信用残との合算、欠損値の補完、閾値・空売りの買い戻し圧力判定・買い／売りシグナルは行いません。';
 
 export const ADVANCED_DIVIDEND_CONTEXT_NOTE =
-  'Snapshotに保存された年間1株配当、source-provided配当性向、event-level配当内訳をそのまま表示します。金額（JPY/株）、配当性向、既存のdeterministic配当利回りは別指標です。actualとcompany forecast、ordinary・special・commemorativeを区別し、Browserで再計算・年次集計・成長率推定を行いません。';
+  'Snapshotに保存された年間1株配当、ソース提供の配当性向、イベント単位の配当内訳をそのまま表示します。金額（円／株）、配当性向、既存の決定論的な配当利回りは別指標です。実績と会社予想、普通・特別・記念配当を区別し、ブラウザで再計算・年次集計・成長率推定を行いません。';
 
 export const VOLUME_PROFILE_CONTEXT_NOTE =
-  '日足の調整後OHLCVを一様レンジ配分した推定出来高価格分布proxyです。実際の価格別約定出来高、現在の保有株数、投資家の取得単価、真のしこり玉やoverhead supplyではありません。Snapshotのbin・POC・Value Areaをそのまま表示し、Browserで再計算せず、support/resistance、Entry/Stop/Target、score、threshold、Buy/Sell signalへ変換しません。';
+  '日足の調整後OHLCVを価格範囲へ一様配分した推定出来高価格分布です。実際の価格別約定出来高、現在の保有株数、投資家の取得単価、真のしこり玉や上値の売り圧力そのものではありません。Snapshotの価格帯・POC・Value Areaをそのまま表示し、ブラウザで再計算せず、支持線・抵抗線、Entry・Stop・Target、スコア、閾値、買い／売りシグナルへ変換しません。';
 
 export interface DashboardViewModel {
   header: {
@@ -795,7 +795,7 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
     { label: '売残', value: formatMetric(supply.sellingBalance, supplyUnits.sellingBalance) },
     { label: '信用倍率', value: formatMetric(supply.marginRatio, supplyUnits.marginRatio) },
     {
-      label: '52週Percentile',
+      label: '52週パーセンタイル',
       value: formatMetric(supply.percentile52w, supplyUnits.percentile52w, {
         ratioAsPercent: true,
       }),
@@ -854,32 +854,32 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
         value: formatMetric(advancedTechnical.macd?.value, advancedUnits['macd.value']),
       },
       {
-        label: 'MACD Signal',
+        label: 'MACD シグナル',
         value: formatMetric(advancedTechnical.macd?.signal, advancedUnits['macd.signal']),
       },
       {
-        label: 'MACD Histogram',
+        label: 'MACD ヒストグラム',
         value: formatMetric(
           advancedTechnical.macd?.histogram,
           advancedUnits['macd.histogram'],
         ),
       },
       {
-        label: 'Bollinger Middle',
+        label: 'ボリンジャー中心線',
         value: formatMetric(
           advancedTechnical.bollinger20?.middle,
           advancedUnits['bollinger20.middle'],
         ),
       },
       {
-        label: 'Bollinger Upper',
+        label: 'ボリンジャー上限',
         value: formatMetric(
           advancedTechnical.bollinger20?.upper,
           advancedUnits['bollinger20.upper'],
         ),
       },
       {
-        label: 'Bollinger Lower',
+        label: 'ボリンジャー下限',
         value: formatMetric(
           advancedTechnical.bollinger20?.lower,
           advancedUnits['bollinger20.lower'],
