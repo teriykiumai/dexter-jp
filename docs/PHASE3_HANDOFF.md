@@ -92,6 +92,13 @@ reimplement financial or statistical calculations.
   `latest.json` is read only for a ticker with zero history files and is never
   rewritten by Phase 3.
 - Browser and LLM consumers do not reconstruct values from presentation text.
+- Comparison maps schema-supported nullable fields without a stored metric reason to
+  the sole `missing_metric_value` synthetic state and compares only strict canonical
+  Gregorian date roles; malformed legacy dates make only that row incomparable.
+- Radar trusts stored Engine positions/unavailable state, preserves valid sparse
+  per-metric samples, and never replays peer metric eligibility in the Browser.
+- Evaluator Evidence provenance is structurally URL-free, and production plus the
+  paid gold harness share the same sole request builder/provider invocation path.
 - Phase 3 creates no Buy/Sell signal, automatic action, or runtime composite score.
 - Evaluator execution requires a tracked passed attestation whose manifest, exact
   provider/model/reasoning/endpoint/organization/project/zero-retry tuple, versions,
@@ -128,15 +135,19 @@ P3-0 changes the following Source of Truth documents together:
 Phase 3 adopts:
 
 - deterministic, explicit-registry comparison of two immutable saved Snapshots using
-  numeric epoch request/order validation and typed duplicate-identity outcomes;
+  numeric epoch request/order validation, strict row date comparison, typed nullable
+  metric reasons, and typed duplicate-identity outcomes;
 - a presentation-only Radar of the seven stored peer percentiles that suppresses its
-  polygon for an internally inconsistent selected-peer/position state;
+  polygon for an internally inconsistent stored selected-peer/position state without
+  re-running Engine eligibility or imposing a five-peer per-metric threshold;
 - a bounded, record-grouped Evidence manifest that preserves exact typed facts
-  and their allowlisted non-available reasons without unbounded scalar expansion;
+  and their allowlisted non-available reasons through URL-free provenance without
+  unbounded scalar expansion;
 - an explicitly invoked qualitative Independent Evaluator whose result is stored in
   a separate versioned sidecar, whose exact Snapshot/run URL identity is preserved,
   whose findings reference exact available/non-available facts, and whose exact
-  source/dependency/provider-route/runtime environment has passed the gold gate; and
+  source/dependency/provider-route/runtime environment and sole production/gold
+  provider call path have passed the gold gate; and
 - a docs-only composite-score evaluation plan whose runtime adoption remains gated
   by Phase 4 validation.
 

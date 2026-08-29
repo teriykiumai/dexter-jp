@@ -377,7 +377,9 @@ type ComparisonValueStateV1 =
 ```
 
 - `available` includes valid numeric zero.
-- `unavailable` preserves an applicable stored or allowlisted reason.
+- `unavailable` preserves an applicable stored reason; when an exact
+  schema-supported nullable metric has no persisted field-level reason, Comparison
+  and Evidence use only the code-owned `missing_metric_value` synthetic reason.
 - `not_collected` is used when an older schema cannot contain the field or an
   optional section was explicitly uncollected.
 - `absent` is Comparison-only and means a schema-supported dynamic identity exists
@@ -630,6 +632,8 @@ type ComparisonDispositionV1 =
         | 'benchmark_changed'
         | 'method_changed'
         | 'window_changed'
+        | 'missing_data_date'
+        | 'invalid_data_date'
         | 'data_date_regressed'
         | 'identity_changed';
     }>
@@ -807,6 +811,24 @@ Observation invariants are schema-enforced, not runtime convention:
   `ambiguous + candidateCount < 2`, ambiguous residual record context,
   `absent + value`, and empty required reason tuples are invalid results.
 
+For a schema-supported metric whose section/record exists, observation extraction
+uses this exact value/reason precedence:
+
+1. a non-null schema-valid value with no matching stored metric-unavailable entry is
+   `available`;
+2. a null value with one or more exact registry-mapped stored metric reasons is
+   `unavailable` and preserves those reasons/details in registry-defined order;
+3. a null value with no applicable stored metric reason is `unavailable` with the
+   sole code-owned synthetic reason `{ reason: 'missing_metric_value', detail: null }`;
+4. a non-null value paired with a matching stored metric-unavailable entry is a
+   semantic contradiction and fails the request as sanitized `corrupt_snapshot`.
+
+`missing_metric_value` is not inferred from prose and does not mean zero,
+not-collected, or an absent dynamic record. It is the shared Comparison/Evidence V1
+fallback only for an exact schema-supported nullable field that has no persisted
+field-level reason. Section state/version and dynamic-identity precedence still run
+before this value rule.
+
 Disposition uses this exact precedence:
 
 1. either side `ambiguous` → `identity_ambiguous`, with ambiguous sides in
@@ -868,6 +890,7 @@ type ComparisonMetricDefinitionV1 = Readonly<{
   valueKind: 'number' | 'category';
   expectedUnit: string | null;
   displaySemantics: ComparisonDisplaySemanticsV1;
+  comparisonDateRoles: readonly NamedDataDateV1['role'][];
   resolveInstances: (
     snapshot: AnalysisSnapshot,
   ) => readonly ComparisonInstanceDefinitionV1[];
@@ -1095,12 +1118,55 @@ indices, and full bins are registry-excluded. V1–V8 are `not_collected`.
 
 ### 4.5 Unit, date, identity, and ordering rules
 
-For numeric delta:
+For every both-available row, comparability is evaluated in this exact order:
 
-- both sides must be finite and available;
-- both actual units must exist and equal the registry expected unit;
-- required identity fields must match;
-- relevant target dates must not regress behind base dates.
+1. both values must satisfy the registry value kind;
+2. numeric actual units must both exist and equal the registry expected unit;
+3. registry identity checks run in the applicable order `period`, `benchmark`,
+   `method`, `window`, then remaining identity;
+4. every `comparisonDateRoles` entry is checked in its declared order; and
+5. only then is numeric `absolute_delta` or category `from_to` emitted.
+
+Each observation contains at most one `NamedDataDateV1` per role. A checked role that
+is absent or null on either side returns `missing_data_date`. A non-null checked value
+must pass `CanonicalCalendarDateV1`:
+
+```text
+YYYY-MM-DD
+year 0001..9999
+month 01..12
+day valid for that Gregorian month
+leap year = divisible by 4, except centuries not divisible by 400
+```
+
+Validation extracts numeric `(year, month, day)` components and compares those tuples
+lexicographically. `Date.parse`, implementation-defined normalization, locale
+comparison, and raw string comparison are prohibited. A malformed/non-canonical or
+duplicate checked role returns `invalid_data_date`; a valid target tuple earlier than
+the base tuple returns `data_date_regressed`. These are row-level incomparable states,
+not Snapshot corruption, because the inherited V1–V9 schema deliberately accepts
+non-empty legacy date strings. Raw values remain in `dataDates` for display/audit.
+
+The initial registry fixes `comparisonDateRoles` as follows:
+
+- Valuation: `currentPrice` uses `price`; PER/PBR/dividend yield use `price` then
+  `financial`; revenue CAGR uses `financial`.
+- Fundamental rows use `submit`.
+- Technical and Advanced Technical rows use `section`.
+- Supply/Demand rows use `section`, except `averageDailyVolume20` uses `volume` and
+  `digestionDays` uses `section` then `volume`.
+- Market Correlation rows use `section`, `window_start`, then `window_end`.
+- Sector Benchmark rows use `analysis_as_of`, `section`, `window_start`, then
+  `window_end`.
+- Strategy rows use `section`.
+- Advanced Dividend fiscal rows use `source_eligible` then `disclosed`; event rows
+  use `source_eligible` then `notified`. Record/rights-record/ex/payment dates remain
+  display-only context and do not gate comparability.
+- Volume Profile rows use `section`, `window_start`, then `window_end`.
+
+Changing this role map or the canonical-date/comparison policy increments
+`registryVersion`. The Browser only displays the resulting dates/reason and never
+parses or compares dates.
 
 Raw numeric `delta` is always unscaled `target - base`. Display conversion is
 metric-specific and comes only from the registry entry:
@@ -1269,6 +1335,15 @@ P3-H1 tests:
 - available zero, required-null `missing_required_section`, supported optional-null
   stored `not_collected`, unavailable, absent, mixed asymmetric side states with
   reason/detail preservation, and identity ambiguity;
+- nullable Fundamental values, `valuation.currentPrice`, and nullable fiscal/event
+  dividend facts use an exact stored metric reason when present and otherwise the
+  sole `missing_metric_value` synthetic reason; numeric zero remains available, and
+  non-null value plus a matching unavailable record is corrupt;
+- every checked date role accepts only a valid canonical Gregorian `YYYY-MM-DD`,
+  compares numeric year/month/day tuples, and deterministically distinguishes
+  `missing_data_date`, `invalid_data_date`, and `data_date_regressed` across V1–V9;
+  non-canonical month/day width, impossible leap/day values, raw lexical order, and
+  permissive `Date.parse` normalization are regression failures;
 - `absent → available` reaches `record_added`, `available → absent` reaches
   `record_removed`, and absent paired with unavailable/not-collected follows the
   declared non-available precedence;
@@ -1331,21 +1406,29 @@ For every axis require:
 - `selection.tooFewPeers` exactly equals
   `selection.peers.length < PEER_COMPARISON_DEFAULTS.minimumPeers` and is false for
   a rendered polygon;
-- stored `targetValue` is finite, passes the existing engine eligibility predicate,
-  and exactly equals the corresponding stored target metric; stored `median` is
-  finite;
+- stored `targetValue` is finite and exactly equals the corresponding finite stored
+  target metric; stored `median` is finite;
 - no matching entry exists in the stored top-level `unavailable` array;
-- `peerSampleSize` exactly equals the count of selected peers whose stored value for
-  that metric passes the existing `isAvailableMetricValue` engine predicate, and is
-  at least `PEER_COMPARISON_DEFAULTS.minimumPeers`; P3-R1 reuses/exposes that pure
-  helper without changing its financial eligibility behavior;
+- stored `peerSampleSize` is an integer from 1 through `selection.peers.length`;
 - `cohortSize = peerSampleSize + 1`; and
 - finite rank in inclusive range 1–cohortSize. Fractional average ranks from ties are
   valid and must not be rejected as non-integer.
 
-These are semantic-consistency checks over stored Peer inputs/outputs, not a
-recalculation of median, rank, percentile, or score. P3-R1 must not repair an
-inconsistent Snapshot or reimplement those calculations in the Browser.
+The 5–10 threshold applies only to company selection and `tooFewPeers`; it is not a
+per-metric sample threshold. An engine-valid stored position whose `peerSampleSize`
+is greater than zero remains available even when only 1–4 selected peers have an
+eligible value for that metric. Preserve and display that exact sparse sample size
+and the existing market-cap limitation; do not relabel the position or suppress the
+polygon solely for being below five.
+
+These are structural checks over stored Peer outputs, not a recalculation of median,
+rank, percentile, eligibility, or score. P3-R1 must not import/call
+`isAvailableMetricValue`, iterate selected peer metric values to reconstruct sample
+size, or otherwise replay Engine eligibility in the Browser. Zero eligible peers
+remain represented only by the stored `insufficient_peer_data` unavailable entry and
+its stored null position fields. If replay validation is ever required, it belongs in
+a separately reviewed versioned deterministic analysis/Snapshot boundary, not a
+retroactive V1–V9 presentation rule.
 
 If any axis is missing or invalid, suppress the entire polygon and preserve the
 exact table with an explicit invalid/unavailable state. Do not clamp, re-rank,
@@ -1353,9 +1436,6 @@ impute, or draw a partial polygon.
 
 `marketCapPriorityApplied === false` does not by itself suppress an otherwise valid
 polygon, but its stored reason/limitation is displayed next to both chart and table.
-The minimum of five is not a new Phase 3 quality score; it is the existing Peer
-Comparison engine adequacy threshold and changes only with that reviewed engine
-contract.
 
 ### 5.3 Presentation and accessibility
 
@@ -1371,12 +1451,19 @@ contract.
 - Keep chart/table overflow inside labelled regions on mobile; no document overflow.
 
 Tests cover boundary 0/1, out-of-range, missing, direction mismatch, selected-peer
-count/duplicate/target/sector mismatch, sample sizes 0/1/4/5, eligibility-derived
-sample mismatch, null/mismatched target value, null median, matching unavailable
-entry, inconsistent top-level `tooFewPeers`, cohort mismatch, valid fractional and
-invalid out-of-range rank, market-cap-priority limitation display, polygon
-suppression, exact table equivalence, screen-reader naming, and 320/768/1280px
-layout.
+count/duplicate/target/sector mismatch, null/mismatched target value, null median,
+matching unavailable entry, inconsistent top-level `tooFewPeers`, invalid sample/
+cohort relation, valid fractional and invalid out-of-range rank, market-cap-priority
+limitation display, polygon suppression, exact table equivalence, screen-reader
+naming, and 320/768/1280px layout. With five valid selected same-sector peers and
+`tooFewPeers: false`, stored positions with `peerSampleSize` 1 or 4 remain available
+and render; the same sparse fixture behaves identically in every V1–V9 envelope.
+Another fixture proves zero samples retain the stored `insufficient_peer_data` state.
+A module-boundary test permits shared constants/types but prohibits a Dashboard
+runtime dependency on any Peer Engine eligibility predicate. Paired browser fixtures
+that differ only in selected peers' raw metric values but have identical stored
+positions/unavailable state must render identically, proving chart visibility and
+sample-size display do not replay eligibility.
 
 ## 6. P3-E — Independent Evaluator
 
@@ -1546,6 +1633,10 @@ Manifest V1 has exactly these scope IDs; adding/removing/renaming a scope increm
 | `outside_source_totality` | `outside_source_totality` | no items; claims such as “all filings/disclosures/periods” cannot be proven by persisted rows |
 | `outside_other_context` | `outside_other_context` | no items; catch-all for a claim outside every closed persisted domain |
 
+Every mention of provenance in this table means the URL-free
+`EvidenceProvenanceV1` projection. Identity/section `sourceUrls` and provenance-record
+`sourceUrls` are excluded even when non-empty in the validated Snapshot.
+
 Stored-scope state uses the same precedence as Comparison: schema predates scope →
 `not_collected/partial/schema_predates_scope`; supported null plus matching stored
 top-level `reason === 'not_collected'` →
@@ -1623,13 +1714,23 @@ type EvidenceFactV1 =
       unavailableReasons: NonEmptyEvidenceFactUnavailableReasonsV1;
     }>;
 
+type EvidenceProvenanceV1 = Readonly<{
+  source: string;
+  role: string;
+  asOfDate: string | null;
+  qualifiers: readonly Readonly<{
+    name: 'endpoint' | 'section';
+    value: string | null;
+  }>[];
+}>;
+
 type EvidenceItemV1 = Readonly<{
   itemId: string;
   scopeId: string;
   definitionKey: string;
   instanceIdentity: ComparisonInstanceIdentityV1;
   facts: readonly [EvidenceFactV1, ...EvidenceFactV1[]];
-  provenance: readonly ComparisonProvenanceV1[];
+  provenance: readonly EvidenceProvenanceV1[];
   method: string | null;
   limitation: string | null;
 }>;
@@ -1639,9 +1740,20 @@ Fact state/value/unit/reason combinations use the same available/non-available
 invariants as Comparison; false and numeric zero are valid available values. Every
 registry definition enumerates the only accepted stored/synthetic reason values and
 their source mapping. `schema_predates_instance` is the fixed synthetic reason for a
-later fixed instance; unknown/free-form reasons fail manifest generation. A record
-item may contain available, unavailable, and not-collected facts simultaneously
-without relabelling the whole scope unavailable.
+later fixed instance. `missing_metric_value` is the fixed synthetic reason for a
+schema-supported nullable fact whose item exists but has no exact persisted
+field-level reason, using the same precedence as Comparison. Unknown/free-form
+reasons fail manifest generation. A record item may contain available, unavailable,
+and not-collected facts simultaneously without relabelling the whole scope
+unavailable.
+
+Evidence provenance is projected into the dedicated URL-free shape above. Snapshot
+`sourceUrls` are never copied, hashed into the manifest, persisted in a sidecar, or
+sent to the provider; `ComparisonProvenanceV1` is not assignable at this boundary.
+`endpoint` qualifiers remain only the exact registry-allowlisted relative API paths,
+never an `http:`/`https:` URL or caller-supplied string. Any unexpected provenance
+source, role, qualifier, or non-relative endpoint fails manifest generation rather
+than passing through raw metadata.
 Facts are ordered by the code-owned definition and there are at most 64 facts per
 item. Dynamic item IDs hash this exact single object:
 
@@ -2222,6 +2334,22 @@ contract. Existing callers remain unchanged. The new boundary:
   Raw error/message/cause, response, prompt, request ID, credential, and path are
   never logged.
 
+`buildEvaluatorProviderRequestV1` is the sole code-owned normalizer for instructions,
+quoted report/manifest data, strict output schema, tools, token limit, timeout signal,
+and provider boundary. `invokeEvaluatorOnce` is the sole owner of provider-client
+construction and the sole function allowed to issue an outbound Evaluator request.
+Both production evaluation and every paid gold-case invocation must call these exact
+same functions. Gate authorization metadata is validated before this builder and is
+not added to the provider payload; given the same logical report/manifest and runtime,
+both modes produce a deep-equal normalized outbound request and adapter configuration.
+
+The gold harness may add fixture/campaign orchestration, authorize an exact pending
+manifest after paid confirmation, collect gate metrics, and suppress sidecar
+persistence. It must not construct a provider client, duplicate prompt/request
+building, bypass `invokeEvaluatorOnce`, or alter instructions/schema/tool/token/
+timeout/route/retry settings. Production differs only by requiring the matching
+passed attestation and enabling the already-defined sidecar lifecycle.
+
 The attempt count is the actual outbound HTTP-request count, not merely calls to
 `invokeEvaluatorOnce`. A retryable network/408/409/429/5xx failure therefore still
 produces exactly one request. Timeout or cancellation cannot start another provider
@@ -2499,7 +2627,9 @@ Only the manual gold harness may execute a pending manifest. It starts from a fr
 disposable clean checkout of the evaluated commit, verifies the pinned Bun
 version/revision/platform/architecture, runs `bun install --frozen-lockfile`, derives
 the dependency manifest from those installed bytes, requires both exact source and
-dependency digests, and then requires explicit paid confirmation. It writes no
+dependency digests, and then requires explicit paid confirmation. Each case passes
+through the same `buildEvaluatorProviderRequestV1` and `invokeEvaluatorOnce` used by
+production; the harness has no second provider client or request path. It writes no
 Evaluation sidecar and writes its proposed passed attestation only below
 `.dexter/evaluator-gates/<qualityGateId>/`. The proposed attestation contains:
 
@@ -2584,6 +2714,12 @@ P3-E1 tests include:
 - every fact-state union rejects invalid value/unit/reason combinations and unknown
   reasons; `definitionKey` is the only schema traceability pointer and no separate
   path-like pointer is persisted;
+- nullable Fundamental/current-price/dividend facts with no exact stored reason use
+  only `missing_metric_value`, while a stored exact reason takes precedence and valid
+  numeric zero remains available;
+- a Snapshot fixture with non-empty provenance `sourceUrls` produces a manifest and
+  provider input containing none of those URL strings; Evidence provenance has no
+  `sourceUrls` field, and an unknown/non-relative endpoint qualifier fails preflight;
 - a claim with no matching evidence inside a `complete_for_domain` scope can be
   represented as `unsupported_claim` with exact absence basis and no fact refs;
 - V1/V2 20-day correlation, one unavailable Advanced Technical metric, and a grouped
@@ -2617,6 +2753,11 @@ P3-E2 tests include:
   that pending state with explicit paid confirmation; adding the exact passed
   attestation leaves the recomputed evaluator-source/dependency digests unchanged and
   qualifies only its exact manifest/runtime/version/source/execution tuple;
+- a spied provider adapter proves both a pending-manifest gold case and a production
+  run traverse the same `buildEvaluatorProviderRequestV1` and sole
+  `invokeEvaluatorOnce` outbound boundary; equal logical report/manifest and runtime
+  produce a deep-equal normalized outbound request/configuration after authorization,
+  and a harness-owned client/request builder is structurally absent;
 - a stale/wrong attestation, an attestation hash mismatch, a repository diff beyond
   the one expected attestation file, a missing transitive source file, or a one-byte
   change to any source-manifest file rejects qualification before confirmation or
@@ -2768,11 +2909,11 @@ Additional gates:
 | Step | Required focused validation |
 | --- | --- |
 | P3-I0 | cross-process no-clobber/idempotency, hard-link unsupported path, epoch-ordered authoritative latest/no legacy rewrite, existing GET error mapping/reload preservation, canonical golden vectors, exact safety grammar, V1–V9 readability |
-| P3-H1 | 67 definitions/accessors, epoch request order, definition/instance versions, discriminated observation including duplicate ambiguity, added/removed/non-available reachability, display/provenance, V1–V9, dates/identities/zero |
+| P3-H1 | 67 definitions/accessors, epoch request order, definition/instance versions, nullable-value synthetic reason, discriminated observation including duplicate ambiguity, added/removed/non-available reachability, strict canonical date-role comparison, display/provenance, V1–V9, identities/zero |
 | P3-H2 | exact HTTP union, Evaluation-pinned cross-feature URL lifecycle, result/registry-version state key, disclosure/reload races, focus, responsive |
-| P3-R1 | selected-peer/target/unavailable semantic consistency, range/direction/eligible sample/cohort/fractional rank, SVG/table accessibility, mobile |
-| P3-E1 | grouped-record cardinality budget, fact state/reason and exact available/non-available fact refs, closed claim-domain sets, strict category/domain/basis/location coverage, persisted-but-excluded scopes, canonical IDs, V1–V9 manifest, no-replace sidecar |
-| P3-E2 | pinned endpoint/org/project/zero-retry policy, Bun/frozen resolved dependencies, working-tree source/config preflight, qualified tuple, pending-manifest rejection, source/attestation binding, injection, confirmation, one outbound request/timeout/cancel, sanitized logs, stub CI, manual paid gate |
+| P3-R1 | selected-peer/target/unavailable structural consistency, stored sparse sample/cohort/fractional rank without Engine eligibility replay, SVG/table accessibility, mobile |
+| P3-E1 | grouped-record cardinality budget, fact state/stored-or-synthetic reason, URL-free provenance, exact available/non-available fact refs, closed claim-domain sets, strict category/domain/basis/location coverage, persisted-but-excluded scopes, canonical IDs, V1–V9 manifest, no-replace sidecar |
+| P3-E2 | sole shared production/gold provider boundary, pinned endpoint/org/project/zero-retry policy, Bun/frozen resolved dependencies, working-tree source/config preflight, qualified tuple, pending-manifest rejection, source/attestation binding, injection, confirmation, one outbound request/timeout/cancel, sanitized logs, stub CI, manual paid gate |
 | P3-E3 | `evaluationSnapshot` exact identity, cursor, gate/runtime metadata, unselected/no-fallback, exact fact state/reason display, zero/unavailable/findings, race/keyboard |
 | P3-C0 | no-look-ahead, gate completeness, absence of runtime score |
 | P3-X | full regression, Playwright, CI/review/merge/main and docs synchronization |
