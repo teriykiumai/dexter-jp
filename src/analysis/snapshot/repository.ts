@@ -1,9 +1,24 @@
-import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { mkdir, readFile, readdir, realpath } from 'node:fs/promises';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import { dexterPath } from '../../utils/paths.js';
+import {
+  canonicalJsonV1,
+  digestValidatedAnalysisSnapshot,
+  type CanonicalJsonValue,
+  type SnapshotDigest,
+} from './canonical-json.js';
+import {
+  CreateOnlyFilePublicationError,
+  publishCreateOnlyFile,
+  type CreateOnlyLinkFile,
+} from './create-only-file.js';
 import { AnalysisSnapshotPersistenceError } from './errors.js';
+import {
+  compareLatestSnapshotOrderV1,
+  resolveLatestSnapshotV1,
+} from './latest-order.js';
+import { assertStoredReportSafe } from './safety.js';
 import {
   ANALYSIS_SNAPSHOT_SCHEMA_VERSION,
   ANALYSIS_SNAPSHOT_V1_SCHEMA_VERSION,
@@ -30,6 +45,10 @@ export type SnapshotId = z.infer<typeof SnapshotIdSchema>;
 export interface SavedAnalysisSnapshot {
   snapshotId: SnapshotId;
   canonicalTicker: string;
+}
+
+export interface AnalysisSnapshotRepositoryOptions {
+  readonly linkFile?: CreateOnlyLinkFile;
 }
 
 export interface AnalysisSnapshotHistoryItem {
@@ -130,6 +149,14 @@ function filesystemError(message: string, causeValue: unknown): AnalysisSnapshot
   return new AnalysisSnapshotPersistenceError('filesystem_error', message, causeValue);
 }
 
+function latestResolutionError(causeValue: unknown): AnalysisSnapshotPersistenceError {
+  return new AnalysisSnapshotPersistenceError(
+    'latest_resolution_failed',
+    'The latest saved Snapshot could not be resolved from immutable history.',
+    causeValue,
+  );
+}
+
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && 'code' in error;
 }
@@ -223,9 +250,14 @@ function parseSnapshotJson(contents: string, source: string): AnalysisSnapshot {
 
 export class AnalysisSnapshotRepository {
   readonly rootDirectory: string;
+  private readonly linkFile: CreateOnlyLinkFile | undefined;
 
-  constructor(rootDirectory: string = dexterPath('analysis')) {
+  constructor(
+    rootDirectory: string = dexterPath('analysis'),
+    options: AnalysisSnapshotRepositoryOptions = {},
+  ) {
     this.rootDirectory = resolve(rootDirectory);
+    this.linkFile = options.linkFile;
   }
 
   async save(rawSnapshot: unknown): Promise<SavedAnalysisSnapshot> {
@@ -240,11 +272,13 @@ export class AnalysisSnapshotRepository {
 
     // Zod parsing creates the allowlisted object that is serialized below.
     const snapshot = parsed.data;
+    assertStoredReportSafe(snapshot.finalReportMarkdown);
     const canonicalTicker = assertCanonicalTicker(snapshot.canonicalTicker);
     const snapshotId = createSnapshotId(snapshot.generatedAt);
     const tickerDirectory = this.resolveTickerDirectory(canonicalTicker);
     const historyPath = this.resolveSnapshotPath(canonicalTicker, `${snapshotId}.json`);
-    const latestPath = this.resolveSnapshotPath(canonicalTicker, 'latest.json');
+    const canonicalPayload = canonicalJsonV1(snapshot as CanonicalJsonValue);
+    const expectedDigest = digestValidatedAnalysisSnapshot(snapshot);
 
     try {
       await mkdir(tickerDirectory, { recursive: true });
@@ -254,28 +288,29 @@ export class AnalysisSnapshotRepository {
       throw filesystemError(`Could not create snapshot directory for ${canonicalTicker}.`, error);
     }
 
-    await this.writeValidatedAtomic(historyPath, snapshot);
-    try {
-      await this.writeValidatedAtomic(latestPath, snapshot);
-    } catch (error) {
-      throw new AnalysisSnapshotPersistenceError(
-        'latest_update_failed',
-        `Snapshot history was saved, but latest.json could not be updated for ${canonicalTicker}.`,
-        error,
-      );
-    }
+    await this.publishHistoryCreateOnly({
+      canonicalPayload,
+      canonicalTicker,
+      expectedDigest,
+      historyPath,
+      snapshotId,
+    });
+    await this.resolveLatestFromHistory(canonicalTicker);
 
     return { snapshotId, canonicalTicker };
   }
 
   async loadLatest(ticker: string): Promise<AnalysisSnapshot> {
     const canonicalTicker = assertCanonicalTicker(ticker);
-    const snapshot = await this.readSnapshot(
+    const latest = await this.resolveLatestFromHistory(canonicalTicker);
+    if (latest !== null) return latest.snapshot;
+
+    const legacy = await this.readSnapshot(
       this.resolveSnapshotPath(canonicalTicker, 'latest.json'),
       `${canonicalTicker}/latest.json`,
     );
-    this.assertSnapshotIdentity(snapshot, canonicalTicker);
-    return snapshot;
+    this.assertSnapshotIdentity(legacy, canonicalTicker);
+    return legacy;
   }
 
   async loadHistory(ticker: string, snapshotId: string): Promise<AnalysisSnapshot> {
@@ -291,27 +326,9 @@ export class AnalysisSnapshotRepository {
 
   async listHistory(ticker: string): Promise<AnalysisSnapshotHistoryItem[]> {
     const canonicalTicker = assertCanonicalTicker(ticker);
-    const tickerDirectory = this.resolveTickerDirectory(canonicalTicker);
-    let entries;
-    try {
-      entries = await readdir(tickerDirectory, { withFileTypes: true });
-    } catch (error) {
-      if (isNodeError(error) && error.code === 'ENOENT') return [];
-      throw filesystemError(`Could not list snapshot history for ${canonicalTicker}.`, error);
-    }
-
-    const snapshotIds = entries
-      .filter(entry => entry.isFile() && entry.name.endsWith('.json') && entry.name !== 'latest.json')
-      .map(entry => entry.name.slice(0, -'.json'.length))
-      .filter(name => SnapshotIdSchema.safeParse(name).success);
-
-    const snapshots = await Promise.all(snapshotIds.map(async (snapshotId) => ({
-      snapshotId: assertSnapshotId(snapshotId),
-      snapshot: await this.loadHistory(canonicalTicker, snapshotId),
-    })));
-
+    const snapshots = await this.loadValidatedHistory(canonicalTicker);
     return snapshots
-      .sort((left, right) => right.snapshot.generatedAt.localeCompare(left.snapshot.generatedAt))
+      .sort((left, right) => compareLatestSnapshotOrderV1(right, left))
       .map(({ snapshotId, snapshot }) => historyItem(snapshot, snapshotId));
   }
 
@@ -397,23 +414,110 @@ export class AnalysisSnapshotRepository {
     return parseSnapshotJson(contents, source);
   }
 
-  private async writeValidatedAtomic(path: string, snapshot: AnalysisSnapshot): Promise<void> {
-    const temporaryPath = resolve(dirname(path), `.${randomUUID()}.tmp`);
-    this.assertContained(temporaryPath);
-    let renamed = false;
+  private async listHistoryFilenames(canonicalTicker: string): Promise<string[]> {
+    const tickerDirectory = this.resolveTickerDirectory(canonicalTicker);
+    let entries;
     try {
-      await writeFile(temporaryPath, `${JSON.stringify(snapshot, null, 2)}\n`, {
-        encoding: 'utf8',
-        flag: 'wx',
+      entries = await readdir(tickerDirectory, { withFileTypes: true });
+    } catch (error) {
+      if (isNodeError(error) && error.code === 'ENOENT') return [];
+      throw latestResolutionError(error);
+    }
+    return entries
+      .map(entry => entry.name)
+      .filter(name => name.endsWith('.json') && name !== 'latest.json');
+  }
+
+  private async loadValidatedHistory(canonicalTicker: string): Promise<Array<{
+    snapshotId: SnapshotId;
+    snapshot: AnalysisSnapshot;
+  }>> {
+    const filenames = await this.listHistoryFilenames(canonicalTicker);
+    try {
+      return await Promise.all(filenames.map(async filename => {
+        const snapshotId = assertSnapshotId(filename.slice(0, -'.json'.length));
+        const snapshot = await this.loadHistory(canonicalTicker, snapshotId);
+        digestValidatedAnalysisSnapshot(snapshot);
+        return { snapshotId, snapshot };
+      }));
+    } catch (error) {
+      throw latestResolutionError(error);
+    }
+  }
+
+  private async resolveLatestFromHistory(canonicalTicker: string): Promise<{
+    snapshotId: SnapshotId;
+    snapshot: AnalysisSnapshot;
+  } | null> {
+    const candidates = await this.loadValidatedHistory(canonicalTicker);
+    try {
+      return resolveLatestSnapshotV1(candidates);
+    } catch (error) {
+      throw latestResolutionError(error);
+    }
+  }
+
+  private async publishHistoryCreateOnly(input: {
+    canonicalPayload: string;
+    canonicalTicker: string;
+    expectedDigest: SnapshotDigest;
+    historyPath: string;
+    snapshotId: SnapshotId;
+  }): Promise<'created' | 'existing_same'> {
+    try {
+      return await publishCreateOnlyFile({
+        finalPath: input.historyPath,
+        canonicalPayload: input.canonicalPayload,
+        assertTemporaryPath: temporaryPath => this.assertContained(temporaryPath),
+        validateTemporary: async temporaryPath => {
+          const temporarySnapshot = await this.readSnapshot(temporaryPath, 'temporary Snapshot');
+          this.assertSnapshotIdentity(
+            temporarySnapshot,
+            input.canonicalTicker,
+            input.snapshotId,
+          );
+          if (digestValidatedAnalysisSnapshot(temporarySnapshot) !== input.expectedDigest) {
+            throw new AnalysisSnapshotPersistenceError(
+              'snapshot_history_corrupt',
+              'The temporary Snapshot failed canonical digest validation.',
+            );
+          }
+        },
+        resolveExisting: async historyPath => {
+          let winner: AnalysisSnapshot;
+          try {
+            winner = await this.readSnapshot(historyPath, 'existing history Snapshot');
+            this.assertSnapshotIdentity(winner, input.canonicalTicker, input.snapshotId);
+          } catch (winnerError) {
+            throw new AnalysisSnapshotPersistenceError(
+              'snapshot_history_corrupt',
+              'The existing immutable history Snapshot is invalid.',
+              winnerError,
+            );
+          }
+          if (digestValidatedAnalysisSnapshot(winner) !== input.expectedDigest) {
+            throw new AnalysisSnapshotPersistenceError(
+              'snapshot_id_collision',
+              'The Snapshot ID already exists with a different canonical payload.',
+            );
+          }
+          return 'existing_same' as const;
+        },
+        linkFile: this.linkFile,
       });
-      await this.readSnapshot(temporaryPath, temporaryPath);
-      await rename(temporaryPath, path);
-      renamed = true;
     } catch (error) {
       if (error instanceof AnalysisSnapshotPersistenceError) throw error;
-      throw filesystemError(`Could not atomically write snapshot: ${path}`, error);
-    } finally {
-      if (!renamed) await rm(temporaryPath, { force: true }).catch(() => undefined);
+      if (
+        error instanceof CreateOnlyFilePublicationError
+        && error.kind === 'publish_unsupported'
+      ) {
+        throw new AnalysisSnapshotPersistenceError(
+          'create_only_publish_unsupported',
+          'Create-only Snapshot publication is not supported by this filesystem.',
+          error,
+        );
+      }
+      throw filesystemError('Could not publish immutable Snapshot history.', error);
     }
   }
 }

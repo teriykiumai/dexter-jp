@@ -12,8 +12,8 @@ import { createRoot } from 'react-dom/client';
 import {
   AnalysisSnapshotSchema,
   type AnalysisSnapshot,
-  type AnalysisSnapshotLatestItem,
-} from '../../analysis/snapshot/index.js';
+} from '../../analysis/snapshot/schema.js';
+import type { AnalysisSnapshotLatestItem } from '../../analysis/snapshot/repository.js';
 import { LIGHTWEIGHT_CHARTS_NOTICE, PriceChart } from './chart.js';
 import {
   DASHBOARD_GLOSSARY,

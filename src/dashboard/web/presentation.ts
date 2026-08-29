@@ -1,9 +1,9 @@
 import type {
   AnalysisSnapshot,
-  AnalysisSnapshotLatestItem,
   MetricUnit,
   SnapshotUnavailable,
-} from '../../analysis/snapshot/index.js';
+} from '../../analysis/snapshot/schema.js';
+import type { AnalysisSnapshotLatestItem } from '../../analysis/snapshot/repository.js';
 
 export const UNAVAILABLE_TEXT = '利用不可' as const;
 
