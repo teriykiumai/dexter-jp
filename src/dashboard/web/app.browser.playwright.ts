@@ -4,13 +4,17 @@ import { expect, test, type Page } from 'playwright/test';
 import {
   AnalysisSnapshotSchema,
   AnalysisSnapshotV1Schema,
+  AnalysisSnapshotV2Schema,
+  AnalysisSnapshotV3Schema,
   AnalysisSnapshotV4Schema,
+  AnalysisSnapshotV5Schema,
+  AnalysisSnapshotV6Schema,
+  AnalysisSnapshotV7Schema,
   AnalysisSnapshotV8Schema,
   AnalysisSnapshotV9Schema,
   buildAnalysisSnapshot,
   type AnalysisSnapshot,
   type AnalysisSnapshotInput,
-  type AnalysisSnapshotV4,
   type AnalysisSnapshotV9,
 } from '../../analysis/snapshot/index.js';
 import {
@@ -67,41 +71,209 @@ function snapshotInput(ticker: string): AnalysisSnapshotInput {
   };
 }
 
+function completeSnapshotInput(ticker: string): AnalysisSnapshotInput {
+  const input = snapshotInput(ticker);
+  const peerPosition = (
+    metric: 'per' | 'pbr' | 'roe' | 'roic' | 'operatingMargin'
+      | 'revenueGrowth' | 'dividendYield',
+  ) => ({
+    metric,
+    direction: metric === 'per' || metric === 'pbr'
+      ? 'lower_is_better' as const
+      : 'higher_is_better' as const,
+    targetValue: 10,
+    median: 12,
+    rank: 1,
+    percentile: 1,
+    peerSampleSize: 1,
+    cohortSize: 2,
+  });
+  return {
+    ...input,
+    fundamental: {
+      periods: [{
+        fiscalYear: 2026,
+        submitDate: '2026-06-10',
+        revenue: 48_000,
+        operatingIncome: 4_000,
+        ordinaryIncome: 4_500,
+        netIncome: 3_000,
+        eps: 200,
+        roe: 0.12,
+        equityRatio: 0.4,
+        operatingCashFlow: 5_000,
+        freeCashFlow: 2_000,
+      }],
+      sourceUrls: ['https://example.test/financials'],
+    },
+    valuation: {
+      priceDataDate: '2026-08-21',
+      financialDataDate: '2026-06-10',
+      latestFiscalYear: 2026,
+      currentPrice: 3_050,
+      per: 15,
+      pbr: 1.2,
+      dividendYieldPercent: 2,
+      revenueCagrPercent: 5,
+      cagrStartFiscalYear: 2021,
+      cagrEndFiscalYear: 2026,
+      cagrPeriods: 5,
+      unavailable: [],
+    },
+    peerComparison: {
+      target: {
+        id: ticker,
+        name: `${ticker} テスト株式会社`,
+        sector: 'テスト業種',
+        marketCap: 1_000,
+        dataDate: '2026-06-10',
+        metrics: { per: 10 },
+      },
+      selection: {
+        peers: [{
+          id: '9999',
+          name: '比較株式会社',
+          sector: 'テスト業種',
+          marketCap: 900,
+          dataDate: '2026-06-11',
+          metrics: { per: 12 },
+        }],
+        sameSectorCandidateCount: 1,
+        marketCapPrioritizedPeerCount: 1,
+        sectorLeaderId: null,
+        sectorLeaderIncluded: false,
+        tooFewPeers: true,
+      },
+      targetIncludedInStatistics: true,
+      positions: {
+        per: peerPosition('per'),
+        pbr: peerPosition('pbr'),
+        roe: peerPosition('roe'),
+        roic: peerPosition('roic'),
+        operatingMargin: peerPosition('operatingMargin'),
+        revenueGrowth: peerPosition('revenueGrowth'),
+        dividendYield: peerPosition('dividendYield'),
+      },
+      unavailable: [],
+    },
+    peerCandidateMarketCapsComplete: true,
+    technical: {
+      dataDate: '2026-08-21',
+      ma20: 2_950,
+      atr14: 75,
+      averageVolume20: 12_000,
+      trend: 'uptrend',
+      latestSwingHigh: 3_100,
+      latestSwingLow: 2_800,
+      unavailable: [],
+    },
+    supplyDemand: {
+      dataDate: '2026-08-19',
+      volumeDataDate: '2026-08-21',
+      buyingBalance: 10_000,
+      sellingBalance: 5_000,
+      marginRatio: 2,
+      buyingBalanceWeeklyChange: 100,
+      sellingBalanceWeeklyChange: -100,
+      mean4w: 9_500,
+      mean13w: 9_000,
+      mean52w: 8_000,
+      deviation52w: 0.25,
+      percentile52w: 0.8,
+      averageDailyVolume20: 2_000,
+      digestionDays: 5,
+      unavailable: [],
+    },
+    marketCorrelation: {
+      benchmark: 'TOPIX',
+      dataDate: '2026-08-21',
+      alignedPriceCount: 21,
+      windows: [{
+        period: 20,
+        startDate: '2026-07-24',
+        endDate: '2026-08-21',
+        observations: 20,
+        correlation: 0.625,
+        beta: 1.1,
+        alphaAnnualized: 0.02,
+        rSquared: 0.390625,
+        stockVolatilityAnnualized: 0.25,
+        benchmarkVolatilityAnnualized: 0.18,
+        excessReturn: 0.03,
+        unavailable: [],
+      }],
+    },
+    strategy: {
+      dataDate: '2026-08-21',
+      entry: {
+        triggerPrice: 3_100,
+        price: 3_101,
+        reason: 'breakout_above_swing_high',
+        trigger: 'strictly_above',
+        tickSizeApplied: 1,
+      },
+      candidates: [],
+      unavailable: [],
+    },
+    priceHistory: [
+      { date: '2026-08-19', open: 2_900, high: 2_980, low: 2_880, close: 2_960, volume: 10_000 },
+      { date: '2026-08-20', open: 2_960, high: 3_040, low: 2_930, close: 3_010, volume: 0 },
+      { date: '2026-08-21', open: 3_010, high: 3_080, low: 2_990, close: 3_050, volume: 14_000 },
+    ],
+  };
+}
+
 function v9Snapshot(ticker = '1009'): AnalysisSnapshotV9 {
   return buildAnalysisSnapshot(snapshotInput(ticker));
 }
 
-const V4_LATER_SECTIONS = [
-  'investorTypeFlows',
-  'sectorBenchmark',
-  'sectorShortRatio',
-  'advancedDividend',
-  'volumeProfile',
+const VERSIONED_SECTIONS = [
+  { section: 'advancedTechnical', introducedIn: 2 },
+  { section: 'reportedShortPositions', introducedIn: 4 },
+  { section: 'investorTypeFlows', introducedIn: 5 },
+  { section: 'sectorBenchmark', introducedIn: 6 },
+  { section: 'sectorShortRatio', introducedIn: 7 },
+  { section: 'advancedDividend', introducedIn: 8 },
+  { section: 'volumeProfile', introducedIn: 9 },
 ] as const;
 
-const V1_LATER_SECTIONS = [
-  'advancedTechnical',
-  'reportedShortPositions',
-  ...V4_LATER_SECTIONS,
-] as const;
+type SnapshotSchemaVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+
+const SNAPSHOT_SCHEMAS: Record<
+  SnapshotSchemaVersion,
+  { parse: (value: unknown) => AnalysisSnapshot }
+> = {
+  1: AnalysisSnapshotV1Schema,
+  2: AnalysisSnapshotV2Schema,
+  3: AnalysisSnapshotV3Schema,
+  4: AnalysisSnapshotV4Schema,
+  5: AnalysisSnapshotV5Schema,
+  6: AnalysisSnapshotV6Schema,
+  7: AnalysisSnapshotV7Schema,
+  8: AnalysisSnapshotV8Schema,
+  9: AnalysisSnapshotV9Schema,
+};
 
 function omitProperties(value: object, keys: readonly string[]): Record<string, unknown> {
   const excluded = new Set(keys);
   return Object.fromEntries(Object.entries(value).filter(([key]) => !excluded.has(key)));
 }
 
-function legacySnapshotPayload(
+function versionedSnapshot(
   ticker: string,
-  schemaVersion: 1 | 4,
-): Record<string, unknown> {
+  schemaVersion: SnapshotSchemaVersion,
+): AnalysisSnapshot {
   const v9 = v9Snapshot(ticker);
-  const laterSections = schemaVersion === 1 ? V1_LATER_SECTIONS : V4_LATER_SECTIONS;
+  if (schemaVersion === 9) return v9;
+  const laterSections = VERSIONED_SECTIONS
+    .filter(item => item.introducedIn > schemaVersion)
+    .map(item => item.section);
   const excludedSections = new Set<string>(laterSections);
   const units = omitProperties(v9.units, laterSections);
-  if (schemaVersion === 1) {
+  if (schemaVersion < 3) {
     units.supplyDemand = omitProperties(v9.units.supplyDemand, ['mean4w']);
   }
-  return {
+  const payload = {
     ...omitProperties(v9, [
       'schemaVersion',
       'dataDates',
@@ -116,33 +288,7 @@ function legacySnapshotPayload(
     units,
     unavailable: v9.unavailable.filter(item => !excludedSections.has(item.section)),
   };
-}
-
-function v4Snapshot(ticker = '1004'): AnalysisSnapshotV4 {
-  return AnalysisSnapshotV4Schema.parse(legacySnapshotPayload(ticker, 4));
-}
-
-function v1Snapshot(ticker = '1001'): AnalysisSnapshot {
-  return AnalysisSnapshotV1Schema.parse(legacySnapshotPayload(ticker, 1));
-}
-
-function v8Snapshot(ticker = '1008'): AnalysisSnapshot {
-  const v9 = v9Snapshot(ticker);
-  return AnalysisSnapshotV8Schema.parse({
-    ...omitProperties(v9, [
-      'schemaVersion',
-      'dataDates',
-      'provenance',
-      'units',
-      'unavailable',
-      'volumeProfile',
-    ]),
-    schemaVersion: 8,
-    dataDates: omitProperties(v9.dataDates, ['volumeProfile']),
-    provenance: omitProperties(v9.provenance, ['volumeProfile']),
-    units: omitProperties(v9.units, ['volumeProfile']),
-    unavailable: v9.unavailable.filter(item => item.section !== 'volumeProfile'),
-  });
+  return SNAPSHOT_SCHEMAS[schemaVersion].parse(payload);
 }
 
 function duplicateStateSnapshot(ticker = '1011'): AnalysisSnapshotV9 {
@@ -167,8 +313,8 @@ function duplicateStateSnapshot(ticker = '1011'): AnalysisSnapshotV9 {
   });
 }
 
-function richV9Snapshot(ticker = '1010'): AnalysisSnapshotV9 {
-  const snapshot = v9Snapshot(ticker);
+function completeV9Snapshot(ticker = '1010'): AnalysisSnapshotV9 {
+  const snapshot = buildAnalysisSnapshot(completeSnapshotInput(ticker));
   const investorValues = { sell: 10, buy: 20, total: 777, balance: -333 };
   const investorBreakdown = {
     individuals: investorValues,
@@ -453,11 +599,16 @@ function richV9Snapshot(ticker = '1010'): AnalysisSnapshotV9 {
 }
 
 const snapshots = new Map<string, AnalysisSnapshot>([
-  ['1001', v1Snapshot()],
-  ['1004', v4Snapshot()],
-  ['1008', v8Snapshot()],
-  ['1009', v9Snapshot()],
-  ['1010', richV9Snapshot()],
+  ['1001', versionedSnapshot('1001', 1)],
+  ['1002', versionedSnapshot('1002', 2)],
+  ['1003', versionedSnapshot('1003', 3)],
+  ['1004', versionedSnapshot('1004', 4)],
+  ['1005', versionedSnapshot('1005', 5)],
+  ['1006', versionedSnapshot('1006', 6)],
+  ['1007', versionedSnapshot('1007', 7)],
+  ['1008', versionedSnapshot('1008', 8)],
+  ['1009', versionedSnapshot('1009', 9)],
+  ['1010', completeV9Snapshot()],
   ['1011', duplicateStateSnapshot()],
 ]);
 
@@ -1269,11 +1420,13 @@ test.describe('Dashboard detail tab browser interaction', () => {
     }
   });
 
-  test('shows separate unavailable and uncollected navigation states for V1, V4, V8, and V9', async ({ browser }) => {
+  test('shows separate unavailable and uncollected navigation states for V1 through V9', async ({ browser }) => {
     const page = await browser.newPage();
     try {
       await mockSnapshotApi(page);
-      for (const ticker of ['1001', '1004', '1008', '1009']) {
+      for (const ticker of [
+        '1001', '1002', '1003', '1004', '1005', '1006', '1007', '1008', '1009',
+      ]) {
         const availability = buildDashboardAvailabilityNavigation(snapshotFor(ticker));
         await openDetail(page, ticker);
 
@@ -1476,7 +1629,102 @@ test.describe('Dashboard detail tab browser interaction', () => {
     }
   });
 
-  test('keeps the approved section headings reachable in V1, V4, and V9', async ({ browser }) => {
+  test('supports the first-time, supply-demand, and market-context research journeys', async ({ browser }) => {
+    const page = await browser.newPage();
+    try {
+      await mockSnapshotApi(page);
+      expect(snapshotFor('1001').status).toBe('partial');
+      expect(snapshotFor('1004').status).toBe('partial');
+      expect(snapshotFor('1009').status).toBe('partial');
+      expect(snapshotFor('1010').status).toBe('complete');
+      await openDetail(page, '1010');
+
+      await expect(page.getByRole('heading', { name: '1010 テスト株式会社' })).toBeVisible();
+      await expect(page.locator('.status-badge.complete')).toHaveText('COMPLETE');
+      await expect(page.getByLabel('Snapshotのデータ利用状況')).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'データ基準日', exact: true })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'データ状態', exact: true })).toBeVisible();
+      await expect(page.getByRole('heading', { name: '総合レポート', exact: true })).toBeVisible();
+      await expect(page.locator('.report-markdown')).toContainText('Browser fixture.');
+
+      await page.locator('#dashboard-tab-supply-demand').click();
+      const supplyPanel = page.locator('#dashboard-panel-supply-demand');
+      await expect(supplyPanel.getByRole('heading', { name: '信用需給', exact: true }))
+        .toBeVisible();
+      await expect(supplyPanel.getByRole('heading', {
+        name: '公開空売り残高報告', exact: true,
+      })).toBeVisible();
+      await expect(supplyPanel.getByText(
+        '信用売残や市場全体の空売り残高（short interest）とは別データです。',
+        { exact: false },
+      )).toBeVisible();
+      const shortReportRows = page.getByRole('region', {
+        name: '公開空売り残高報告の全報告',
+      }).locator('tbody tr');
+      await expect(shortReportRows).toHaveCount(2);
+      expect(await shortReportRows.locator('td:nth-child(3)').allTextContents())
+        .toEqual(['Reporter A', 'Reporter B']);
+
+      await page.locator('#dashboard-tab-market').click();
+      const marketPanel = page.locator('#dashboard-panel-market');
+      await expect(marketPanel.getByText(
+        '個別銘柄の売買フローではありません。', { exact: false },
+      )).toBeVisible();
+      await expect(marketPanel.getByText(
+        '銘柄への業種指数値の帰属', { exact: false },
+      )).toBeVisible();
+      await expect(marketPanel.getByText(
+        '個別銘柄の空売り残高や信用売残ではありません。', { exact: false },
+      )).toBeVisible();
+      await expect(marketPanel.getByRole('heading', { name: '市場相関', exact: true }))
+        .toBeVisible();
+    } finally {
+      await page.close();
+    }
+  });
+
+  test('keeps all detail content reachable by touch and screen-reader semantics on mobile', async ({ browser }) => {
+    const context = await browser.newContext({
+      hasTouch: true,
+      viewport: { width: 390, height: 844 },
+    });
+    const page = await context.newPage();
+    try {
+      await mockSnapshotApi(page);
+      await openDetail(page, '1010');
+
+      const tabs = page.getByRole('tab');
+      await expect(tabs).toHaveCount(DASHBOARD_TABS.length);
+      await page.locator('#dashboard-tab-technical').tap();
+      await expectSelectedTab(page, 'technical');
+      await expect(page.locator('#dashboard-panel-technical'))
+        .toHaveAttribute('aria-labelledby', 'dashboard-tab-technical');
+
+      await page.getByRole('button', { name: 'RSIの説明を開く' }).tap();
+      const dialog = page.getByRole('dialog', { name: '用語集 / RSI' });
+      await expect(dialog).toBeVisible();
+      await page.getByRole('button', { name: '用語集を閉じる' }).tap();
+      await expect(dialog).toBeHidden();
+
+      const bins = page.locator('#dashboard-panel-technical details').filter({
+        hasText: '価格帯別分布 2件',
+      });
+      await bins.locator('summary').tap();
+      await expect(page.getByRole('region', { name: '出来高価格分布の価格帯別データ' }))
+        .toBeVisible();
+
+      for (const tab of DASHBOARD_TABS) {
+        await page.locator(`#dashboard-tab-${tab.id}`).tap();
+        await expectSelectedTab(page, tab.id);
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth))
+        .toBeLessThanOrEqual(0);
+    } finally {
+      await context.close();
+    }
+  });
+
+  test('keeps the approved section headings reachable in V1 through V9', async ({ browser }) => {
     const page = await browser.newPage();
     const headingsByTab = {
       report: ['総合レポート'],
@@ -1493,7 +1741,9 @@ test.describe('Dashboard detail tab browser interaction', () => {
     } as const satisfies Record<DashboardTabId, readonly string[]>;
     try {
       await mockSnapshotApi(page);
-      for (const ticker of ['1001', '1004', '1009']) {
+      for (const ticker of [
+        '1001', '1002', '1003', '1004', '1005', '1006', '1007', '1008', '1009',
+      ]) {
         await openDetail(page, ticker);
         expect(await page.locator('[role="tab"]').count()).toBe(DASHBOARD_TABS.length);
         for (const tab of DASHBOARD_TABS) {
