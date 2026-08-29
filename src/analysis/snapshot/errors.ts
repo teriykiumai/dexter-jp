@@ -7,7 +7,10 @@ export type AnalysisSnapshotPersistenceErrorKind =
   | 'unsafe_ticker'
   | 'unsafe_snapshot_id'
   | 'filesystem_error'
-  | 'latest_update_failed';
+  | 'snapshot_id_collision'
+  | 'snapshot_history_corrupt'
+  | 'create_only_publish_unsupported'
+  | 'latest_resolution_failed';
 
 export class AnalysisSnapshotPersistenceError extends Error {
   readonly kind: AnalysisSnapshotPersistenceErrorKind;

@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildAnalysisSnapshot } from './builder.js';
+import { canonicalAnalysisSnapshotJsonV1 } from './canonical-json.js';
 import { AnalysisSnapshotPersistenceError } from './errors.js';
+import { ArtifactSafetyError } from './safety.js';
 import {
   AnalysisSnapshotRepository,
   createSnapshotId,
@@ -539,6 +541,40 @@ async function expectPersistenceError(
   throw new Error(`Expected ${kind} persistence error.`);
 }
 
+async function saveInChildProcess(
+  root: string,
+  payloadPath: string,
+  delayMs = 0,
+): Promise<string> {
+  const repositoryModule = new URL('./repository.ts', import.meta.url).href;
+  const script = [
+    "import { readFile } from 'node:fs/promises';",
+    `import { AnalysisSnapshotRepository } from ${JSON.stringify(repositoryModule)};`,
+    'const [root, payloadPath, delayMs] = process.argv.slice(1);',
+    "const payload = JSON.parse(await readFile(payloadPath, 'utf8'));",
+    'await Bun.sleep(Number(delayMs));',
+    'try {',
+    '  await new AnalysisSnapshotRepository(root).save(payload);',
+    "  console.log('saved');",
+    '} catch (error) {',
+    "  console.log(error && typeof error === 'object' && 'kind' in error ? error.kind : 'unknown');",
+    '}',
+  ].join('\n');
+  const child = Bun.spawn([process.execPath, '-e', script, root, payloadPath, String(delayMs)], {
+    cwd: process.cwd(),
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+  expect(exitCode).toBe(0);
+  expect(stderr).toBe('');
+  return stdout.trim();
+}
+
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map(directory => (
     rm(directory, { recursive: true, force: true })
@@ -546,7 +582,7 @@ afterEach(async () => {
 });
 
 describe('AnalysisSnapshotRepository', () => {
-  test('saves validated V9 history and latest JSON atomically and loads both', async () => {
+  test('saves validated V9 history create-only without writing latest JSON', async () => {
     const { repository, root } = await createRepository();
     const snapshot = partialSnapshot();
 
@@ -570,10 +606,105 @@ describe('AnalysisSnapshotRepository', () => {
     expect(latest.sectorShortRatio).toEqual(sectorShortRatioResult());
     expect(latest.advancedDividend).toEqual(advancedDividendResult());
     expect(latest.volumeProfile).toEqual(volumeProfileResult());
-    expect(filenames.sort()).toEqual([
-      '2026-08-23T01-02-03-000Z.json',
-      'latest.json',
+    expect(await readFile(join(root, '7203', `${saved.snapshotId}.json`), 'utf8'))
+      .toBe(canonicalAnalysisSnapshotJsonV1(snapshot));
+    expect(filenames).toEqual(['2026-08-23T01-02-03-000Z.json']);
+  });
+
+  test('keeps the winning inode for idempotent writes and rejects a different payload', async () => {
+    const { repository, root } = await createRepository();
+    const snapshot = partialSnapshot();
+    const saved = await repository.save(snapshot);
+    const historyPath = join(root, '7203', `${saved.snapshotId}.json`);
+    const before = await stat(historyPath);
+
+    await repository.save(snapshot);
+    const after = await stat(historyPath);
+    expect(after.ino).toBe(before.ino);
+
+    await expectPersistenceError(repository.save({
+      ...snapshot,
+      finalReportMarkdown: '# Different analysis',
+    }), 'snapshot_id_collision');
+    expect((await stat(historyPath)).ino).toBe(before.ino);
+    expect((await repository.loadHistory('7203', saved.snapshotId)).finalReportMarkdown)
+      .toBe('# Analysis');
+    expect((await readdir(join(root, '7203'))).some(name => name.endsWith('.tmp'))).toBeFalse();
+  });
+
+  test('publishes same and different payload races safely across real processes', async () => {
+    const { root } = await createRepository();
+    const samePayloadPath = join(root, 'same-payload.json');
+    await writeFile(samePayloadPath, JSON.stringify(partialSnapshot()), 'utf8');
+
+    const sameResults = await Promise.all(Array.from(
+      { length: 3 },
+      () => saveInChildProcess(root, samePayloadPath),
+    ));
+    expect(sameResults).toEqual(['saved', 'saved', 'saved']);
+
+    const tickerDirectory = join(root, '7203');
+    const historyPath = join(tickerDirectory, '2026-08-23T01-02-03-000Z.json');
+    const winningInode = (await stat(historyPath)).ino;
+    const payloadAPath = join(root, 'payload-a.json');
+    const payloadBPath = join(root, 'payload-b.json');
+    await writeFile(payloadAPath, JSON.stringify(partialSnapshot(
+      '2026-08-23T01:02:04.000Z',
+    )), 'utf8');
+    await writeFile(payloadBPath, JSON.stringify({
+      ...partialSnapshot('2026-08-23T01:02:04.000Z'),
+      finalReportMarkdown: '# Competing analysis',
+    }), 'utf8');
+
+    const differentResults = await Promise.all([
+      saveInChildProcess(root, payloadAPath),
+      saveInChildProcess(root, payloadBPath),
     ]);
+    expect(differentResults.sort()).toEqual(['saved', 'snapshot_id_collision']);
+    expect((await stat(historyPath)).ino).toBe(winningInode);
+    const competingHistoryPath = join(tickerDirectory, '2026-08-23T01-02-04-000Z.json');
+    expect((await stat(competingHistoryPath)).nlink).toBe(1);
+    const filenames = await readdir(tickerDirectory);
+    expect(filenames.filter(name => name.endsWith('.json'))).toHaveLength(2);
+    expect(filenames.some(name => name.endsWith('.tmp'))).toBeFalse();
+
+    const delayedOlderPath = join(root, 'delayed-older.json');
+    const immediateNewerPath = join(root, 'immediate-newer.json');
+    const delayedOlder = partialSnapshot('2026-08-23T01:02:05.000Z');
+    const immediateNewer = partialSnapshot('2026-08-23T01:02:06.000Z');
+    await writeFile(delayedOlderPath, JSON.stringify(delayedOlder), 'utf8');
+    await writeFile(immediateNewerPath, JSON.stringify(immediateNewer), 'utf8');
+    expect(await Promise.all([
+      saveInChildProcess(root, delayedOlderPath, 150),
+      saveInChildProcess(root, immediateNewerPath),
+    ])).toEqual(['saved', 'saved']);
+    expect((await new AnalysisSnapshotRepository(root).loadLatest('7203')).generatedAt)
+      .toBe(immediateNewer.generatedAt);
+  });
+
+  test('returns typed failures for a corrupt winner and unsupported hard links', async () => {
+    const { repository, root } = await createRepository();
+    const snapshot = partialSnapshot();
+    const snapshotId = createSnapshotId(snapshot.generatedAt);
+    const tickerDirectory = join(root, '7203');
+    await mkdir(tickerDirectory, { recursive: true });
+    await writeFile(join(tickerDirectory, `${snapshotId}.json`), '{invalid', 'utf8');
+    await expectPersistenceError(repository.save(snapshot), 'snapshot_history_corrupt');
+    expect((await readdir(tickerDirectory)).some(name => name.endsWith('.tmp'))).toBeFalse();
+
+    const unsupportedRoot = await mkdtemp(join(tmpdir(), 'dexter-analysis-unsupported-'));
+    temporaryDirectories.push(unsupportedRoot);
+    const unsupported = new AnalysisSnapshotRepository(unsupportedRoot, {
+      linkFile: async () => {
+        throw Object.assign(new Error('unsupported'), { code: 'ENOSYS' });
+      },
+    });
+    await expectPersistenceError(
+      unsupported.save(partialSnapshot('2026-08-23T01:02:04.000Z')),
+      'create_only_publish_unsupported',
+    );
+    const unsupportedFiles = await readdir(join(unsupportedRoot, '7203'));
+    expect(unsupportedFiles).toEqual([]);
   });
 
   test('reads existing V1 history and latest JSON without rewriting either file', async () => {
@@ -761,6 +892,36 @@ describe('AnalysisSnapshotRepository', () => {
     });
   });
 
+  test('orders by epoch milliseconds and a delayed old retry never changes latest', async () => {
+    const { repository } = await createRepository();
+    const older = partialSnapshot('2026-08-23T01:02:03Z');
+    const newer = partialSnapshot('2026-08-23T01:02:03.500Z');
+    await repository.save(older);
+    await repository.save(newer);
+    await repository.save(older);
+
+    expect((await repository.loadLatest('7203')).generatedAt).toBe(newer.generatedAt);
+    expect((await repository.listHistory('7203')).map(item => item.generatedAt)).toEqual([
+      newer.generatedAt,
+      older.generatedAt,
+    ]);
+  });
+
+  test('normalizes equal epoch milliseconds to one ID and collides on different spelling', async () => {
+    const { repository } = await createRepository();
+    const withoutMilliseconds = partialSnapshot('2026-08-23T01:02:03Z');
+    await repository.save(withoutMilliseconds);
+    await repository.save(withoutMilliseconds);
+
+    expect(createSnapshotId('2026-08-23T01:02:03.000Z')).toBe(
+      createSnapshotId(withoutMilliseconds.generatedAt),
+    );
+    await expectPersistenceError(
+      repository.save(partialSnapshot('2026-08-23T01:02:03.000Z')),
+      'snapshot_id_collision',
+    );
+  });
+
   test('lists one latest metadata item per canonical ticker', async () => {
     const { repository } = await createRepository();
     await repository.save(partialSnapshot('2026-08-23T01:02:03.000Z', '7203'));
@@ -812,6 +973,22 @@ describe('AnalysisSnapshotRepository', () => {
     expect('apiKey' in await repository.loadLatest('7203')).toBeFalse();
   });
 
+  test('fails closed on an unsafe stored report before creating persistence files', async () => {
+    const { repository, root } = await createRepository();
+    try {
+      await repository.save({
+        ...partialSnapshot(),
+        finalReportMarkdown: 'sk-proj-abcdefghijklmnop',
+      });
+      throw new Error('Expected stored-report safety failure.');
+    } catch (error) {
+      expect(error).toBeInstanceOf(ArtifactSafetyError);
+      expect((error as ArtifactSafetyError).code).toBe('credential_marker_detected');
+      expect((error as Error).message).not.toContain('sk-proj-abcdefghijklmnop');
+    }
+    expect(await readdir(root)).toEqual([]);
+  });
+
   test('distinguishes malformed JSON, schema validation, and unsupported versions', async () => {
     const { repository, root } = await createRepository();
     const tickerDirectory = join(root, '7203');
@@ -825,6 +1002,35 @@ describe('AnalysisSnapshotRepository', () => {
 
     await writeFile(join(tickerDirectory, 'latest.json'), JSON.stringify({ schemaVersion: 10 }), 'utf8');
     await expectPersistenceError(repository.loadLatest('7203'), 'unsupported_schema_version');
+  });
+
+  test('uses latest JSON only as an untouched zero-history legacy fallback', async () => {
+    const { repository, root } = await createRepository();
+    const tickerDirectory = join(root, '7203');
+    const latestPath = join(tickerDirectory, 'latest.json');
+    const legacy = v4Snapshot('2026-08-22T01:02:03.000Z');
+    const legacyJson = `${JSON.stringify(legacy, null, 2)}\n`;
+    await mkdir(tickerDirectory, { recursive: true });
+    await writeFile(latestPath, legacyJson, 'utf8');
+
+    expect(await repository.loadLatest('7203')).toEqual(legacy);
+    expect(await readFile(latestPath, 'utf8')).toBe(legacyJson);
+
+    const current = partialSnapshot('2026-08-23T01:02:03.000Z');
+    await repository.save(current);
+    await writeFile(latestPath, '{still-legacy-and-corrupt', 'utf8');
+    expect(await repository.loadLatest('7203')).toEqual(current);
+    expect(await repository.listHistory('7203')).toHaveLength(1);
+    expect(await readFile(latestPath, 'utf8')).toBe('{still-legacy-and-corrupt');
+  });
+
+  test('fails latest resolution on any unsupported or mismatched history filename', async () => {
+    const { repository, root } = await createRepository();
+    await repository.save(partialSnapshot());
+    await writeFile(join(root, '7203', 'unexpected.json'), '{}', 'utf8');
+
+    await expectPersistenceError(repository.loadLatest('7203'), 'latest_resolution_failed');
+    await expectPersistenceError(repository.listHistory('7203'), 'latest_resolution_failed');
   });
 
   test('distinguishes missing snapshots and rejects unsafe path segments', async () => {
@@ -911,20 +1117,25 @@ describe('AnalysisSnapshotRepository', () => {
       process.platform === 'win32' ? 'junction' : 'dir',
     );
 
-    await expectPersistenceError(repository.loadLatest('7203'), 'filesystem_error');
+    await expectPersistenceError(repository.loadLatest('7203'), 'latest_resolution_failed');
     await expectPersistenceError(repository.save(partialSnapshot()), 'filesystem_error');
   });
 
-  test('reports when history succeeds but latest cannot be atomically updated', async () => {
+  test('does not read or write an existing latest path after history is present', async () => {
     const { repository, root } = await createRepository();
-    await mkdir(join(root, '7203', 'latest.json'), { recursive: true });
+    const tickerDirectory = join(root, '7203');
+    const latestPath = join(tickerDirectory, 'latest.json');
+    await mkdir(tickerDirectory, { recursive: true });
+    await writeFile(latestPath, '{legacy', 'utf8');
     const snapshot = partialSnapshot();
     const snapshotId = createSnapshotId(snapshot.generatedAt);
 
-    await expectPersistenceError(repository.save(snapshot), 'latest_update_failed');
+    await repository.save(snapshot);
 
     expect(await repository.loadHistory('7203', snapshotId)).toEqual(snapshot);
-    const filenames = await readdir(join(root, '7203'));
+    expect(await repository.loadLatest('7203')).toEqual(snapshot);
+    expect(await readFile(latestPath, 'utf8')).toBe('{legacy');
+    const filenames = await readdir(tickerDirectory);
     expect(filenames.some(filename => filename.endsWith('.tmp'))).toBeFalse();
   });
 

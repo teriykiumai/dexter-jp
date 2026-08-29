@@ -79,7 +79,10 @@ function persistenceErrorResponse(error: AnalysisSnapshotPersistenceError): Resp
     case 'unsupported_schema_version':
     case 'snapshot_identity_mismatch':
     case 'filesystem_error':
-    case 'latest_update_failed':
+    case 'snapshot_id_collision':
+    case 'snapshot_history_corrupt':
+    case 'create_only_publish_unsupported':
+    case 'latest_resolution_failed':
       return internalServerErrorResponse();
   }
 }

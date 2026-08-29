@@ -142,6 +142,33 @@ describe('dashboard request handler', () => {
     expect(detailResponse.headers.has('access-control-allow-origin')).toBeFalse();
   });
 
+  test('uses epoch-ordered immutable history for watchlist, latest detail, and history GET', async () => {
+    const { repository } = await createRepository();
+    const older = partialSnapshot('2026-08-23T01:02:03Z');
+    const newer = partialSnapshot('2026-08-23T01:02:03.500Z');
+    await repository.save(older);
+    await repository.save(newer);
+    await repository.save(older);
+
+    const list = await responseJson(await handleDashboardRequest(
+      request('/api/analyses'),
+      repository,
+    )) as Array<Record<string, unknown>>;
+    expect(list[0]?.generatedAt).toBe(newer.generatedAt);
+
+    const detail = await responseJson(await handleDashboardRequest(
+      request('/api/analyses/7203'),
+      repository,
+    )) as Record<string, unknown>;
+    expect(detail.generatedAt).toBe(newer.generatedAt);
+
+    const history = await responseJson(await handleDashboardRequest(
+      request('/api/analyses/7203/history'),
+      repository,
+    )) as Array<Record<string, unknown>>;
+    expect(history.map(item => item.generatedAt)).toEqual([newer.generatedAt, older.generatedAt]);
+  });
+
   test('returns safe errors for unknown ticker and history snapshots', async () => {
     const { repository } = await createRepository();
     await repository.save(partialSnapshot());
@@ -288,6 +315,30 @@ describe('dashboard request handler', () => {
     }));
     expect(body).not.toContain(root);
     expect(body).not.toContain('SyntaxError');
+  });
+
+  test('maps immutable-history resolution failure to one sanitized 500 response', async () => {
+    const { repository, root } = await createRepository();
+    await repository.save(partialSnapshot());
+    await writeFile(join(root, '7203', 'unexpected.json'), '{invalid', 'utf8');
+
+    for (const path of [
+      '/api/analyses',
+      '/api/analyses/7203',
+      '/api/analyses/7203/history',
+    ]) {
+      const response = await handleDashboardRequest(request(path), repository);
+      const body = await response.text();
+      expect(response.status).toBe(500);
+      expect(body).toBe(JSON.stringify({
+        error: {
+          code: 'snapshot_unavailable',
+          message: 'The requested analysis snapshot is unavailable.',
+        },
+      }));
+      expect(body).not.toContain(root);
+      expect(body).not.toContain('unexpected.json');
+    }
   });
 
   test('does not expose identity mismatch details through the API', async () => {
