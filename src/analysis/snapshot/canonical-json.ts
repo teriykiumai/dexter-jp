@@ -37,7 +37,14 @@ function canonicalize(value: unknown, ancestors: Set<object>): string {
   ancestors.add(value);
   try {
     if (Array.isArray(value)) {
-      return `[${value.map(item => canonicalize(item, ancestors)).join(',')}]`;
+      const items: string[] = [];
+      for (let index = 0; index < value.length; index += 1) {
+        if (!Object.prototype.hasOwnProperty.call(value, index)) {
+          throw new TypeError('CanonicalJsonV1 does not accept sparse arrays.');
+        }
+        items.push(canonicalize(value[index], ancestors));
+      }
+      return `[${items.join(',')}]`;
     }
     const prototype = Object.getPrototypeOf(value);
     if (prototype !== Object.prototype && prototype !== null) {

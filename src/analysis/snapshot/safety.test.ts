@@ -40,6 +40,20 @@ async function typescriptFiles(directory: string): Promise<string[]> {
   return nested.flat();
 }
 
+function discoverCredentialNames(
+  contents: readonly string[],
+  classifiedNonCredentials: ReadonlySet<string>,
+): Set<string> {
+  const discovered = new Set<string>();
+  const credentialName = /\b[A-Z][A-Z0-9_]*(?:_API_KEY|_TOKEN|_SECRET|_ACCESS_KEY_ID|_SECRET_ACCESS_KEY)\b/g;
+  for (const content of contents) {
+    for (const match of content.matchAll(credentialName)) {
+      if (!classifiedNonCredentials.has(match[0])) discovered.add(match[0]);
+    }
+  }
+  return discovered;
+}
+
 describe('SafetyPolicyV1', () => {
   test('rejects every allowlisted configured credential by exact case-sensitive value', () => {
     for (const [index, name] of SAFETY_CREDENTIAL_ENV_NAMES.entries()) {
@@ -72,17 +86,24 @@ describe('SafetyPolicyV1', () => {
       ...await typescriptFiles(join(process.cwd(), 'src/tools/finance')),
       ...await typescriptFiles(join(process.cwd(), 'src/gateway')),
     ];
-    const contents = await Promise.all(files.map(file => readFile(file, 'utf8')));
-    const discovered = new Set<string>();
     const classifiedNonCredentials = new Set(['HEARTBEAT_OK_TOKEN']);
-    const credentialName = /\b[A-Z][A-Z0-9_]*(?:API_KEY|AUTH_TOKEN|OAUTH_TOKEN|BEARER_TOKEN|BOT_TOKEN|APP_TOKEN|CHANNEL_SECRET|CHANNEL_ACCESS_TOKEN|ACCESS_KEY_ID|SECRET_ACCESS_KEY|SESSION_TOKEN)\b/g;
-    for (const content of contents) {
-      for (const match of content.matchAll(credentialName)) {
-        if (!classifiedNonCredentials.has(match[0])) discovered.add(match[0]);
-      }
-    }
+    const contents = await Promise.all(files.map(file => readFile(file, 'utf8')));
+    const discovered = discoverCredentialNames(contents, classifiedNonCredentials);
     expect([...discovered].sort()).toEqual([...SAFETY_CREDENTIAL_ENV_NAMES].sort());
     expect(discovered.has('LANGSMITH_API_KEY')).toBeTrue();
+  });
+
+  test('discovers generic credential suffixes unless explicitly classified', () => {
+    const fixture = 'FOO_TOKEN FOO_SECRET FOO_API_KEY FOO_ACCESS_KEY_ID FOO_SECRET_ACCESS_KEY';
+    expect([...discoverCredentialNames([fixture], new Set())].sort()).toEqual([
+      'FOO_ACCESS_KEY_ID',
+      'FOO_API_KEY',
+      'FOO_SECRET',
+      'FOO_SECRET_ACCESS_KEY',
+      'FOO_TOKEN',
+    ]);
+    expect([...discoverCredentialNames([fixture], new Set(['FOO_TOKEN']))].sort())
+      .not.toContain('FOO_TOKEN');
   });
 
   test('rejects the exact marker grammar without exposing matched content', () => {

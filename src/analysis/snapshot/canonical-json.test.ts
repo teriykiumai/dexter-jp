@@ -120,6 +120,17 @@ describe('CanonicalJsonV1', () => {
     expect(() => canonicalJsonV1(cyclic)).toThrow(TypeError);
   });
 
+  test('rejects sparse arrays instead of colliding with dense canonical JSON', () => {
+    const singleHole = new Array<CanonicalJsonValue>(1);
+    const mixed = [1] as CanonicalJsonValue[];
+    mixed.length = 2;
+
+    expect(() => canonicalJsonV1(singleHole)).toThrow('does not accept sparse arrays');
+    expect(() => sha256CanonicalJsonV1(singleHole)).toThrow('does not accept sparse arrays');
+    expect(() => canonicalJsonV1(mixed)).toThrow('does not accept sparse arrays');
+    expect(canonicalJsonV1([])).toBe('[]');
+  });
+
   test('requires a schema-valid V1-V9 Snapshot before calculating a Snapshot digest', () => {
     expect(() => digestAnalysisSnapshot({ schemaVersion: 9 })).toThrow();
     expect(sha256CanonicalJsonV1({ value: 0 })).toMatch(/^sha256:[0-9a-f]{64}$/);
