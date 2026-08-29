@@ -95,7 +95,8 @@ P3-I0 changes saved history to create-only:
 - the same ID plus the same canonical payload is an idempotent success;
 - the same ID plus a different payload is a typed `snapshot_id_collision` failure;
 - an existing history file is never replaced, repaired, or migrated in place;
-- `latest.json` keeps its established replace semantics;
+- authoritative latest selection moves to validated immutable history as the explicit
+  P3-I0 repository change described below;
 - V9 remains the writer and V1–V9 remain readable;
 - no V10, history backfill, or migration is introduced.
 
@@ -124,10 +125,25 @@ filesystems before merge. The Evaluator sidecar repository reuses this exact pro
 in P3-E1. A sidecar `EEXIST` is an ID collision, even when payloads happen to match,
 because each `evaluationId` denotes one run.
 
-`latest.json` alone keeps the established replace-by-rename behavior. The writer
-publishes history first and may update `latest.json` only after a `created` or
-`existing_same` history outcome. Collision, corrupt-winner, validation, filesystem,
-or unsupported-publication failure never changes `latest.json`.
+`LatestSnapshotOrderV1` is the ascending tuple `(generatedAt, snapshotId)`. The
+authoritative latest Snapshot is the maximum tuple across every validated history
+file for the ticker. P3-I0 changes `loadLatest`, `listLatest`, Dashboard latest detail,
+Watchlist, and Comparison reload to use that history resolver, never mutable-file
+last-writer completion order.
+
+Resolution validates every candidate's schema, filename/body ID, canonical ticker,
+and digest before ordering. It does not skip a corrupt/unsupported/mismatched history
+file; any such item returns typed `latest_resolution_failed`. Zero valid history items
+returns the existing not-found outcome. Equal `generatedAt` uses `snapshotId` only as
+the deterministic tie-breaker.
+
+P3-I0 stops writing `latest.json`. An existing `latest.json` is a legacy read fallback
+only when the ticker has zero history files; validate it normally and never rewrite,
+delete, migrate, or use it when any history file exists. Thus there is no mutable
+cross-process latest pointer to regress, while legacy latest-only installations remain
+readable without backfill. A successful history `created` or `existing_same` outcome
+returns only after the authoritative resolver confirms the maximum identity; an old
+idempotent retry never changes it.
 
 ### 3.3 Canonical digest
 
@@ -165,6 +181,8 @@ type ArtifactInputEnvelopeV1 = Readonly<{
   safetyPolicyVersion: 1;
   qualityGateId: string;
   gateManifestDigest: `sha256:${string}`;
+  gateAttestationDigest: `sha256:${string}`;
+  evaluatorSourceDigest: `sha256:${string}`;
   gateEvaluatedCommitSha: string;
   runtime: Readonly<{
     providerId: string;
@@ -193,7 +211,8 @@ OPENAI_API_KEY, ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN,
 CLAUDE_CODE_OAUTH_TOKEN, GOOGLE_API_KEY, XAI_API_KEY, MOONSHOT_API_KEY,
 DEEPSEEK_API_KEY, OPENROUTER_API_KEY, EDINETDB_API_KEY, JQUANTS_API_KEY,
 EXASEARCH_API_KEY, PERPLEXITY_API_KEY, TAVILY_API_KEY, LANGSEARCH_API_KEY,
-X_BEARER_TOKEN, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN,
+X_BEARER_TOKEN, LANGSMITH_API_KEY, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
+AWS_SESSION_TOKEN,
 SLACK_BOT_TOKEN, SLACK_APP_TOKEN, DISCORD_BOT_TOKEN, LINE_CHANNEL_SECRET,
 LINE_CHANNEL_ACCESS_TOKEN
 ```
@@ -222,12 +241,38 @@ UTF-8 bytes. Before Evaluator confirmation and dispatch, repeat that scan over t
 report and scan the complete logical input; also reject a logical input above 200,000
 UTF-16 code units.
 
-Evaluator-only absolute-path detection splits with
+Evaluator-only `FilesystemPathPolicyV1` scans the report and every manifest string
+value before JSON serialization. It splits with
 ``/[\s"'`<>()\[\]{}]+/u``, strips only trailing
-`/[.,;:!?。、，；：！？]+$/u`, and then applies `path.win32.isAbsolute` and
-`path.posix.isAbsolute`. A token parsed as an `http:` or `https:` URL is exempt;
-`file:` URLs, Windows drive paths, UNC paths, and POSIX absolute paths are rejected.
-Relative paths and plain ticker/ID strings are not rejected.
+`/[.,;:!?。、，；：！？]+$/u`, and applies these rules in order:
+
+1. an empty token, the exact prose separator `/`, a relative path, and a plain
+   ticker/ID are allowed;
+2. a syntactically valid `http:` or `https:` URL is allowed; a `file:` URL is
+   rejected;
+3. the following exact origin-relative Snapshot endpoint literals are allowed and no
+   general `/v2/` or `/api/` exception exists:
+
+```text
+/v2/equities/investor-types
+/v2/equities/master
+/v2/equities/bars/daily
+/v2/fins/summary
+/v2/fins/dividend
+/v2/indices/bars/daily
+/v2/markets/calendar
+/v2/markets/short-ratio
+```
+
+4. otherwise, a token for which `path.win32.isAbsolute` or
+   `path.posix.isAbsolute` is true is rejected.
+
+The endpoint allowlist is code-owned and must equal the endpoint literals eligible
+for the V1–V9 Evidence manifest; a new eligible endpoint changes
+`SafetyPolicyV1`. The standard required headings `# Entry / Stop / Target` and
+`# Bull / Base / Bear` therefore pass, as do the allowlisted endpoint values. Bare
+`/` passes; `C:\Users\...`, UNC, `/home/user/...`, `/tmp/...`, other absolute
+filesystem tokens, and `file:` URLs fail.
 
 Failures use only these fixed codes: `credential_value_detected`,
 `credential_marker_detected`, `private_key_marker_detected`,
@@ -243,8 +288,12 @@ P3-I0 acceptance tests include:
 - two or more real processes racing the same/different canonical payload, exactly one
   winning final inode, equal-payload idempotency, typed collision, corrupt winner,
   unsupported hard link, and no replaced winner or leaked temporary file;
-- `latest.json` unchanged after every losing/error outcome and updated only after a
-  verified created/existing-same history outcome;
+- history A at `t1`, history B at `t2`, then a delayed retry of A always resolves B
+  from `loadLatest`, `listLatest`, Dashboard latest detail, Watchlist, and reload;
+  include cross-process interleavings and equal-`generatedAt` snapshot-ID ties;
+- history presence prevents every read and write of legacy `latest.json`; a
+  latest-only legacy ticker remains readable only while it has zero history files,
+  and no P3-I0 path rewrites, deletes, or migrates that file;
 - literal canonical golden vectors, source-key reordering, Unicode preservation,
   negative zero, explicit null, `undefined`, non-finite number, and complete lowercase
   digest length;
@@ -252,9 +301,16 @@ P3-I0 acceptance tests include:
   every marker regex, every rejected/allowed control boundary, UTF-16 and UTF-8 size
   boundaries including surrogate pairs, and fixed failure messages with no matched
   content;
-- Windows drive/UNC, POSIX and `file:` rejection; `http:`/`https:` exemption;
-  relative-path acceptance; punctuation/token boundaries; and no provider dispatch;
-  and
+- exact equality between the Safety credential allowlist and all credential-bearing
+  names discovered from `env.example`, provider/search registries, finance/source
+  clients, Agent SDK auth guards, and gateway integrations; adding an unclassified
+  `*_API_KEY`, `*_TOKEN`, `*_SECRET`, `*_ACCESS_KEY_ID`, or
+  `*_SECRET_ACCESS_KEY` fails the test, and `LANGSMITH_API_KEY` is an explicit
+  regression fixture;
+- required output headings with bare `/`, every allowlisted Snapshot endpoint,
+  `http:`/`https:`, relative paths, and punctuation boundaries pass; Windows
+  drive/UNC, `/home/user`, `/tmp`, another POSIX absolute path, and `file:` reject;
+  all failures occur before provider dispatch; and
 - V9 remains the only writer, V1–V9 remain readable, and no old history file is
   rewritten or backfilled.
 
@@ -441,18 +497,51 @@ type ComparisonProvenanceV1 = Readonly<{
   }>[];
 }>;
 
-type ComparisonObservationV1 = Readonly<{
-  state: ComparisonValueStateV1;
-  value: number | string | null;
-  actualUnit: string | null;
+type ComparisonObservationContextV1 = Readonly<{
   dataDates: readonly NamedDataDateV1[];
   provenance: readonly ComparisonProvenanceV1[];
   identity: ComparisonInstanceIdentityV1;
-  unavailableReasons: readonly Readonly<{
-    reason: string;
-    detail: string | null;
-  }>[];
 }>;
+
+type ComparisonUnavailableReasonV1 = Readonly<{
+  reason: string;
+  detail: string | null;
+}>;
+
+type ComparisonObservationV1 =
+  | Readonly<ComparisonObservationContextV1 & {
+      state: 'available';
+      value: number | string;
+      actualUnit: string | null;
+      unavailableReasons: readonly [];
+    }>
+  | Readonly<ComparisonObservationContextV1 & {
+      state: 'unavailable';
+      value: null;
+      actualUnit: string | null;
+      unavailableReasons: readonly [
+        ComparisonUnavailableReasonV1,
+        ...ComparisonUnavailableReasonV1[],
+      ];
+    }>
+  | Readonly<ComparisonObservationContextV1 & {
+      state: 'not_collected';
+      value: null;
+      actualUnit: null;
+      unavailableReasons: readonly [
+        ComparisonUnavailableReasonV1,
+        ...ComparisonUnavailableReasonV1[],
+      ];
+    }>
+  | Readonly<{
+      state: 'absent';
+      value: null;
+      actualUnit: null;
+      dataDates: readonly [];
+      provenance: readonly [];
+      identity: ComparisonInstanceIdentityV1;
+      unavailableReasons: readonly [];
+    }>;
 
 type ComparisonDisplaySemanticsV1 =
   | 'native'
@@ -503,8 +592,17 @@ type ComparisonDispositionV1 =
       state: 'not_applicable';
       mode: 'not_applicable';
       delta: null;
-      reason: 'record_added' | 'record_removed';
-      affectedSides: readonly ('base' | 'target')[];
+      reason: 'record_added';
+      affectedSides: readonly ['base'];
+      presentSide: 'target';
+    }>
+  | Readonly<{
+      state: 'not_applicable';
+      mode: 'not_applicable';
+      delta: null;
+      reason: 'record_removed';
+      affectedSides: readonly ['target'];
+      presentSide: 'base';
     }>;
 
 type SnapshotComparisonMetricRowV1 = Readonly<{
@@ -619,10 +717,33 @@ A field-level null alone never implies `not_collected`. An existing section obje
 paired with a matching top-level `not_collected` entry is a semantic contradiction
 and fails the whole request as sanitized `corrupt_snapshot`; it is not repaired.
 Individual unavailable metrics remain row states and do not relabel an existing
-section. Preserve each side's section reasons separately. When a row has any
-non-available side, `reason: non_available_state`, `sideStates`, and `affectedSides`
-preserve the exact asymmetric transition; do not collapse mixed
-unavailable/not-collected/absent states to one reason.
+section. Preserve each side's section reasons separately.
+
+Observation invariants are schema-enforced, not runtime convention:
+
+- `available` has a finite number or valid non-empty category string; numeric zero is
+  valid, `value` is never null, and reasons are empty;
+- `unavailable` has null value and at least one preserved/allowlisted reason; its
+  actual stored unit may remain present;
+- `not_collected` has null value, null actual unit, and at least one stored or
+  synthetic reason;
+- `absent` is only a missing side of a schema-supported dynamic identity and has null
+  value/unit, empty dates/provenance/reasons, and the union identity; and
+- `available + null`, non-finite available number, `not_collected + value`,
+  `absent + value`, and empty required reason tuples are invalid results.
+
+Disposition uses this exact precedence:
+
+1. base `absent` and target `available` → `record_added`, affected base, present
+   target;
+2. base `available` and target `absent` → `record_removed`, affected target, present
+   base;
+3. either side `unavailable` or `not_collected`, including its pairing with
+   `absent` → `non_available_state` with exact `sideStates` and all non-available
+   `affectedSides` in base/target order;
+4. both sides `available` → registry comparison; and
+5. both sides `absent` is an impossible union-generation result and fails as an
+   internal contract error rather than returning a row.
 
 The failure branch contains only the requested selectors and a sanitized allowlisted
 error. `message` is a fixed, code-owned string for `code`; it contains no path,
@@ -1057,6 +1178,13 @@ P3-H1 tests:
 - available zero, required-null `missing_required_section`, supported optional-null
   stored `not_collected`, unavailable, absent, mixed asymmetric side states with
   reason/detail preservation, and identity ambiguity;
+- `absent → available` reaches `record_added`, `available → absent` reaches
+  `record_removed`, and absent paired with unavailable/not-collected follows the
+  declared non-available precedence;
+- reject every invalid observation combination, including available-null,
+  available-with-reasons, unavailable-with-value/empty-reasons,
+  not-collected-with-value/unit/empty-reasons, and absent with residual
+  value/unit/date/provenance/reason context;
 - exact raw delta, metric-specific native/percent/fraction/category display metadata,
   presentation conversion, and negative-zero handling;
 - fixed dynamic instance order, duplicate identity, resistance-candidate exclusion,
@@ -1205,8 +1333,8 @@ type EvidenceClaimDomainV1 =
   | 'advanced_dividend_persisted_facts'
   | 'volume_profile_summary'
   | 'strategy_persisted_candidates'
-  | 'outside_price_history_series'
-  | 'outside_volume_profile_bins'
+  | 'price_history_series'
+  | 'volume_profile_bins'
   | 'outside_filing_narrative'
   | 'outside_company_management_history'
   | 'outside_competitors_industry'
@@ -1223,12 +1351,14 @@ reason, and coverage:
 type EvidenceScopeCoverageV1 =
   | 'complete_for_domain'
   | 'partial'
+  | 'excluded_from_manifest'
   | 'outside_snapshot_scope';
 
 type EvidenceScopeStateV1 =
   | 'available'
   | 'unavailable'
   | 'not_collected'
+  | 'persisted_but_excluded'
   | 'outside_snapshot_scope';
 
 type EvidenceScopeReasonV1 =
@@ -1246,7 +1376,9 @@ persisted Snapshot fact eligible to verify that exact, narrowly named claim doma
 it never claims complete source disclosures, all periods, or complete knowledge of
 the company or market. `partial` means the target Snapshot cannot supply every item
 eligible for that persisted domain because the section is unavailable or
-uncollected.
+uncollected. `excluded_from_manifest` means the Snapshot persists the domain but the
+Evaluator input contract intentionally sends none of its records. It is distinct
+from unavailable data and from data outside Snapshot scope.
 `outside_snapshot_scope` means V1–V9 persist no evidence eligible to verify it.
 Coverage and reason are generated from schema/version and collection state, never
 chosen by the model.
@@ -1285,8 +1417,8 @@ Manifest V1 has exactly these scope IDs; adding/removing/renaming a scope increm
 | `advanced_dividend` | `advanced_dividend_persisted_facts` | every persisted fiscal/event fact within 20/50 limits, methods and dates |
 | `volume_profile_summary` | `volume_profile_summary` | exact stored POC/Value Area summary and method; complete for the summary domain |
 | `strategy` | `strategy_persisted_candidates` | every exact persisted entry/candidate value, reason and calculation input |
-| `outside_price_history_series` | `outside_price_history_series` | no items; always outside with `raw_series_excluded` |
-| `outside_volume_profile_bins` | `outside_volume_profile_bins` | no items; always outside with `volume_profile_bins_excluded` |
+| `price_history_series` | `price_history_series` | no items; a stored non-null array is `persisted_but_excluded/excluded_from_manifest/raw_series_excluded`; null/unavailable follows stored-scope precedence |
+| `volume_profile_bins` | `volume_profile_bins` | no items; V1–V8 are `not_collected/partial/schema_predates_scope`; a V9 stored non-null bins array is `persisted_but_excluded/excluded_from_manifest/volume_profile_bins_excluded`; null/unavailable follows stored-scope precedence |
 | `outside_filing_narrative` | `outside_filing_narrative` | no items; filing prose/tool output is not persisted |
 | `outside_company_management_history` | `outside_company_management_history` | no items; management/company-history facts are not persisted |
 | `outside_competitors_industry` | `outside_competitors_industry` | no items; competitor/industry narrative is not persisted |
@@ -1304,6 +1436,15 @@ top-level `reason === 'not_collected'` →
 matching top-level `not_collected` entry is corrupt input. Field-level null alone
 never changes the scope to not-collected. Raw free-form top-level reason/detail is not
 sent; only the allowlisted scope reason and schema-enumerated item state/reason are.
+
+The two intentionally omitted persisted collections have exact additional state
+rules. A non-null stored `priceHistory` array, including an empty array, produces
+`price_history_series/persisted_but_excluded/excluded_from_manifest/raw_series_excluded`.
+A V9 non-null stored Volume Profile `bins` array, including an empty array, produces
+`volume_profile_bins/persisted_but_excluded/excluded_from_manifest/volume_profile_bins_excluded`.
+The Evaluator receives no items from either scope. Their unavailable/null cases use
+the normal stored-scope precedence; a schema that predates bins is `not_collected`,
+not `persisted_but_excluded`.
 
 The four collections that have no persisted source-completeness field—reported short
 positions, investor flow, sector benchmark, and sector short ratio—are complete only
@@ -1369,12 +1510,14 @@ Filing narrative, company/management history, competitor/industry statements,
 macro/news statements, undeclared metrics, source-totality claims, and all remaining
 context map to their exact outside domain. Existing AI scenarios/risks are not
 evidence and map by what they claim; they do not default to filing narrative.
-`unsupported_claim` is allowed only when the finding's domain maps to a
+`unsupported_claim` is allowed only when every finding domain maps to a
 `complete_for_domain` persisted scope and no matching allowlisted item exists.
 Every outside, unavailable, or not-collected domain is
 `not_verifiable_from_snapshot` or an applicable `missing_caveat`, never unsupported
-solely because the Snapshot lacks evidence. Phase 3 adds no source field, V10, or
-backfill to close these gaps.
+solely because the Snapshot lacks evidence. A `persisted_but_excluded` domain is
+`not_verifiable_by_evaluator` or an applicable `missing_caveat`; it must not be
+described as missing from the Snapshot. Phase 3 adds no source field, V10, or backfill
+to close these gaps.
 
 Limits:
 
@@ -1410,14 +1553,20 @@ type ManifestAbsenceBasisV1 = Readonly<{
   reason:
     | 'no_matching_allowlisted_evidence'
     | 'relevant_evidence_unavailable'
+    | 'persisted_evidence_not_sent'
     | 'outside_snapshot_scope';
 }>;
+
+type EvidenceClaimDomainsV1 = readonly [
+  EvidenceClaimDomainV1,
+  ...EvidenceClaimDomainV1[],
+];
 
 type EvaluationFindingV1 =
   | Readonly<{
       findingId: string;
       category: 'unsupported_claim';
-      claimDomain: EvidenceClaimDomainV1;
+      claimDomains: EvidenceClaimDomainsV1;
       importance: 'material' | 'advisory';
       summary: string;
       anchor: ReportAnchorV1;
@@ -1428,7 +1577,7 @@ type EvaluationFindingV1 =
   | Readonly<{
       findingId: string;
       category: 'not_verifiable_from_snapshot';
-      claimDomain: EvidenceClaimDomainV1;
+      claimDomains: EvidenceClaimDomainsV1;
       importance: 'advisory';
       summary: string;
       anchor: ReportAnchorV1;
@@ -1438,8 +1587,19 @@ type EvaluationFindingV1 =
     }>
   | Readonly<{
       findingId: string;
+      category: 'not_verifiable_by_evaluator';
+      claimDomains: EvidenceClaimDomainsV1;
+      importance: 'advisory';
+      summary: string;
+      anchor: ReportAnchorV1;
+      basis: ManifestAbsenceBasisV1 & Readonly<{
+        reason: 'persisted_evidence_not_sent';
+      }>;
+    }>
+  | Readonly<{
+      findingId: string;
       category: 'internal_inconsistency' | 'unclear_reasoning';
-      claimDomain: EvidenceClaimDomainV1;
+      claimDomains: EvidenceClaimDomainsV1;
       importance: 'material' | 'advisory';
       summary: string;
       anchor: ReportAnchorV1;
@@ -1448,7 +1608,7 @@ type EvaluationFindingV1 =
   | Readonly<{
       findingId: string;
       category: 'missing_caveat';
-      claimDomain: EvidenceClaimDomainV1;
+      claimDomains: EvidenceClaimDomainsV1;
       importance: 'material' | 'advisory';
       summary: string;
       anchor: ReportAnchorV1;
@@ -1459,22 +1619,33 @@ type EvaluationFindingV1 =
 Categories:
 
 - `unsupported_claim` requires `manifest_absence` with reason
-  `no_matching_allowlisted_evidence`, at least one referenced
-  `complete_for_domain` scope whose `claimDomain` exactly equals the finding domain,
-  no matching unavailable/not-collected item or scope limitation, and no evidence
-  refs;
+  `no_matching_allowlisted_evidence`; every referenced scope is
+  `available/complete_for_domain`, every finding domain is represented by at least
+  one referenced scope, and no unavailable, not-collected, excluded, or outside
+  scope participates;
 - `not_verifiable_from_snapshot` requires `manifest_absence` with reason
-  `relevant_evidence_unavailable` or `outside_snapshot_scope`, references only scopes
-  whose `claimDomain` equals the finding domain, and importance is always `advisory`;
-- `internal_inconsistency` requires `evidence_refs`;
-- `unclear_reasoning` requires `evidence_refs`;
-- `missing_caveat` accepts either basis.
+  `relevant_evidence_unavailable` for only unavailable/not-collected scopes or
+  `outside_snapshot_scope` for only outside scopes, and importance is always
+  `advisory`;
+- `not_verifiable_by_evaluator` requires `manifest_absence` with reason
+  `persisted_evidence_not_sent`, only
+  `persisted_but_excluded/excluded_from_manifest` scopes, and advisory importance;
+- `internal_inconsistency` and `unclear_reasoning` require `evidence_refs` whose
+  available items cover every finding domain;
+- `missing_caveat` accepts either basis; evidence refs must be available and cover
+  every domain, while a manifest-absence basis must use the same exact
+  reason/state/coverage compatibility defined above for its reason.
 
 `not_verifiable_from_snapshot` says only that the persisted artifact cannot verify
 the claim; it is not an assertion that the claim is false or unsupported. A correctly
 source-caveated outside-scope claim produces no finding merely for being outside the
 Snapshot. A central conclusion that relies on unavailable/outside-scope evidence
 without an appropriate limitation may instead produce `missing_caveat`.
+`not_verifiable_by_evaluator` says that the target Snapshot contains the relevant
+collection but the versioned Evaluator input intentionally omitted it; it neither
+asserts that the claim is false nor that the Snapshot lacks the evidence. If one
+anchor contains domains requiring different absence reasons, emit separate findings
+rather than selecting one misleading reason.
 
 Every finding has `material | advisory` importance, plain-text summary, one exact
 anchor, and one typed basis.
@@ -1487,14 +1658,23 @@ Validation:
 - `0 <= start < end <= report.length`;
 - no anchor boundary inside a surrogate pair;
 - exact `report.slice(start, end) === excerpt`;
+- 1–4 unique claim domains, ordered by the closed EvidenceClaimDomain registry;
 - 1–16 unique valid evidence refs or 1–8 unique valid scope refs;
 - no empty refs, sentinel IDs, free-form paths, unknown fields, score, pass, or
   recommendation;
 - duplicate finding and finding-ID collision invalidate the available output.
 
 Category/basis/coverage incompatibility invalidates the entire available output;
-never coerce it into another category or fabricate an evidence ref. In particular,
-an unavailable or outside-scope domain cannot satisfy `unsupported_claim`.
+never coerce it into another category or fabricate an evidence ref. For every basis,
+the set of domains reached through referenced Evidence items or scopes must equal
+`claimDomains`: no domain may be omitted, and no referenced item/scope may belong to
+another domain. `evidence_refs` requires at least one available referenced item for
+each domain. `manifest_absence` requires at least one referenced scope for each
+domain and the exact category-compatible state/coverage above. In particular, an
+unavailable, not-collected, excluded, or outside scope cannot satisfy
+`unsupported_claim`, and an excluded scope cannot satisfy
+`not_verifiable_from_snapshot`. More than four domains requires splitting at an
+anchor into separately valid findings.
 For a dynamic persisted-content domain, lack of a row is unsupported only when the
 claim is explicitly about what this exact Snapshot persisted. A claim about upstream
 source totality maps to `outside_source_totality` even when the persisted-content
@@ -1510,7 +1690,7 @@ type EvaluationFindingIdEnvelopeV1 = Readonly<{
   kind: 'dexter_evaluation_finding_id';
   version: 1;
   category: EvaluationFindingV1['category'];
-  claimDomain: EvidenceClaimDomainV1;
+  claimDomains: EvidenceClaimDomainsV1;
   importance: 'material' | 'advisory';
   anchor: ReportAnchorV1;
   basis: EvidenceRefsBasisV1 | ManifestAbsenceBasisV1;
@@ -1555,20 +1735,21 @@ itemId
 
 ```text
 Normalized EvaluationFindingIdEnvelopeV1
-  = {"anchor":{"end":2,"excerpt":"根拠","start":0},"basis":{"kind":"manifest_absence","reason":"no_matching_allowlisted_evidence","scopeRefs":["valuation"]},"category":"unsupported_claim","claimDomain":"valuation_metrics","importance":"material","kind":"dexter_evaluation_finding_id","version":1}
+  = {"anchor":{"end":2,"excerpt":"根拠","start":0},"basis":{"kind":"manifest_absence","reason":"no_matching_allowlisted_evidence","scopeRefs":["valuation"]},"category":"unsupported_claim","claimDomains":["valuation_metrics"],"importance":"material","kind":"dexter_evaluation_finding_id","version":1}
 sha256Hex
-  = 70ceb8a3bdf2877d9bfd621972e51cfec507197d4d70eab6f2f5970fa5491ca9
+  = dd5efe33943d190bec3fa83aada2f6bd1b2557471c9ab7e283b3b45181b449bd
 findingId
-  = f_70ceb8a3bdf2877d9bfd6219
+  = f_dd5efe33943d190bec3fa83a
 ```
 
 ```text
-ArtifactInputEnvelopeV1 with zero snapshot digest, one manifest digest, two gate
-manifest digest, 40 lowercase `a` gate commit, qualityGateId=qg_v1_terra_high,
-and openai/gpt-5.6-terra/high
-  = {"evaluatorSchemaVersion":1,"evidenceManifestDigest":"sha256:1111111111111111111111111111111111111111111111111111111111111111","evidenceManifestVersion":1,"gateEvaluatedCommitSha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","gateManifestDigest":"sha256:2222222222222222222222222222222222222222222222222222222222222222","kind":"dexter_evaluator_input","promptVersion":1,"qualityGateId":"qg_v1_terra_high","rubricVersion":1,"runtime":{"modelId":"gpt-5.6-terra","providerId":"openai","reasoningEffort":"high"},"safetyPolicyVersion":1,"snapshotDigest":"sha256:0000000000000000000000000000000000000000000000000000000000000000","version":1}
+ArtifactInputEnvelopeV1 with zero snapshot digest; one manifest digest; two gate
+manifest digest; three gate-attestation digest; four evaluator-source digest; 40
+lowercase `a` gate commit; qualityGateId=qg_v1_terra_high; and
+openai/gpt-5.6-terra/high
+  = {"evaluatorSchemaVersion":1,"evaluatorSourceDigest":"sha256:4444444444444444444444444444444444444444444444444444444444444444","evidenceManifestDigest":"sha256:1111111111111111111111111111111111111111111111111111111111111111","evidenceManifestVersion":1,"gateAttestationDigest":"sha256:3333333333333333333333333333333333333333333333333333333333333333","gateEvaluatedCommitSha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","gateManifestDigest":"sha256:2222222222222222222222222222222222222222222222222222222222222222","kind":"dexter_evaluator_input","promptVersion":1,"qualityGateId":"qg_v1_terra_high","rubricVersion":1,"runtime":{"modelId":"gpt-5.6-terra","providerId":"openai","reasoningEffort":"high"},"safetyPolicyVersion":1,"snapshotDigest":"sha256:0000000000000000000000000000000000000000000000000000000000000000","version":1}
 artifactInputDigest
-  = sha256:781fc1a408d67c18ae0cdf00777e4f3568bf0b9b67cb367cf5fd158425600a5a
+  = sha256:40dffb601c1646ec0e99bab00759cc943313cc80001f3a5a708adfd46651f723
 ```
 
 ### 6.4 Sidecar
@@ -1617,7 +1798,8 @@ Persist:
 - `artifactInputDigest`;
 - exact evidence manifest and its digest;
 - evaluator schema, manifest, rubric, prompt, and safety versions;
-- `qualityGateId`, gate manifest digest, and gate-evaluated commit SHA;
+- `qualityGateId`, gate manifest/attestation/source digests, and gate-evaluated commit
+  SHA;
 - created/completed timestamps;
 - provider, effective model, task profile, nullable reasoning effort;
 - attempt count, timeout, duration;
@@ -1654,13 +1836,15 @@ Runtime selection first resolves:
 2. saved `modelId`;
 3. `DEFAULT_MODEL`.
 
-Resolve once with `deep_analysis`, then require an exact match in this code-owned
-gate record:
+Resolve once with `deep_analysis`, then require an exact match in a validated tracked
+qualification attestation:
 
 ```ts
 type QualifiedEvaluatorRuntimeV1 = Readonly<{
   qualityGateId: string;
   gateManifestDigest: `sha256:${string}`;
+  gateAttestationDigest: `sha256:${string}`;
+  evaluatorSourceDigest: `sha256:${string}`;
   gateEvaluatedCommitSha: string;
   state: 'qualified';
   providerId: string;
@@ -1674,14 +1858,17 @@ type QualifiedEvaluatorRuntimeV1 = Readonly<{
 }>;
 ```
 
-`qualityGateId` matches `^qg_[a-z0-9][a-z0-9_-]{0,63}$`, the gate digest is a full
-lowercase `sha256:` digest, and `gateEvaluatedCommitSha` is exactly 40 lowercase hex
-characters. Duplicate gate IDs or a gate record whose manifest does not hash to its
-declared digest are invalid configuration and fail before provider dispatch.
+`qualityGateId` matches `^qg_[a-z0-9][a-z0-9_-]{0,63}$`; the manifest,
+attestation, and source digests are full lowercase `sha256:` digests; and
+`gateEvaluatedCommitSha` is exactly 40 lowercase hex characters. Duplicate IDs,
+digest mismatch, pending-only manifest, failed attestation, tuple/version mismatch,
+or current-source mismatch fails as `runtime_not_quality_gated` before confirmation
+or provider dispatch.
 
 Use that immutable provider/model/reasoning and version tuple for the entire run.
 There is no ungated/experimental mode, compatibility fallback, or reasoning
-downgrade. The CLI and Dashboard detail display the gate ID and evaluated commit.
+downgrade. The CLI and Dashboard detail display gate ID, source digest, and evaluated
+commit.
 
 P3-E2 introduces an Evaluator-only `invokeEvaluatorOnce` provider boundary. It must
 not call the current generic `callLlm` or `withRetry` paths, because those paths have
@@ -1790,8 +1977,9 @@ Create a versioned Japanese set of 64 cases:
 - 16 development and 48 locked holdout cases;
 - two independent annotators plus adjudication;
 - 12 clean holdout cases;
-- balanced unsupported, not-verifiable-from-Snapshot, inconsistency,
-  missing-caveat, and unclear-reasoning cases;
+- balanced unsupported, not-verifiable-from-Snapshot,
+  not-verifiable-by-Evaluator, inconsistency, missing-caveat, and unclear-reasoning
+  cases;
 - V1–V9, zero, unavailable, not-collected, partial, compound, Japanese, and
   injection cases;
 - fixed input digests;
@@ -1806,6 +1994,8 @@ does not mean secret or unreviewable.
 
 Finding matching is maximum one-to-one within category:
 
+- exact `claimDomains` set equality is a prerequisite; a category/anchor match with
+  missing or extra domains is not a match;
 - report-anchor intersection-over-union at least 0.5;
 - evidence-ref set F1 at least 0.5;
 - manifest-absence reason exact match plus at least one overlapping scope;
@@ -1818,6 +2008,7 @@ Locked-holdout gate:
 - per-category recall: each at least 80%;
 - unsupported-claim precision and recall: each at least 90%;
 - not-verifiable-from-Snapshot precision and recall: each at least 90%;
+- not-verifiable-by-Evaluator precision and recall: each at least 90%;
 - missing-caveat recall: at least 85%;
 - evidence-basis and matched-anchor accuracy: each at least 95%;
 - ref/anchor integrity for available artifacts: 100%;
@@ -1838,18 +2029,80 @@ Eight injected pairs must:
   or tool calls; and
 - not reduce material recall versus the paired baseline.
 
-The gate pins exact provider/model/reasoning and every field of
-`QualifiedEvaluatorRuntimeV1` in its versioned manifest. The initial gate runtime is
-`openai / gpt-5.6-terra / high`. A successful campaign creates one reviewed gate
-record whose ID and manifest digest are used by the CLI and sidecars.
+The gate lifecycle is deliberately non-self-referential. Tracked paths are:
 
-The campaign is run against the exact P3-E2 candidate commit. Any later change to
-Evaluator runtime/provider adapter, prompt, evidence registry/manifest, finding
-schema, rubric, safety policy, gold harness/fixtures, or dependency lockfile
-invalidates that result and requires the full paid gate again before merge. An
-unrelated docs-only correction may be explicitly excluded only by independent
-review. Changing any qualified runtime or version requires a new gate ID; an old
-record never authorizes a different tuple.
+```text
+src/evaluator/quality-gates/manifests/<qualityGateId>.json
+src/evaluator/quality-gates/attestations/<qualityGateId>.json
+```
+
+The manifest exists before the paid run and has state `pending`. The attestation does
+not exist until that campaign passes. Production CLI reads pending manifests only to
+verify an attestation and never treats `pending` as executable qualification.
+
+`EvaluatorSourceManifestV1` is a canonical sorted list of repository-relative POSIX
+paths plus SHA-256 of each exact Git blob. It contains:
+
+- every tracked file under `src/evaluator/**` except the two quality-gate manifest /
+  attestation directories;
+- the complete transitive tracked local-import closure of the Evaluator CLI and gold
+  harness when a dependency lives outside `src/evaluator/**`; and
+- `package.json` and `bun.lock`.
+
+Generation requires a clean checkout at one exact commit, hashes bytes from that Git
+commit rather than mutable working-tree reads, rejects symlinks/untracked imports,
+and fails if an imported local file or gold fixture is absent from the list. Paths
+are unique and sorted by UTF-16 code-unit order. The source digest hashes this exact
+object:
+
+```ts
+type EvaluatorSourceDigestEnvelopeV1 = Readonly<{
+  kind: 'dexter_evaluator_source';
+  version: 1;
+  files: readonly Readonly<{
+    path: string;
+    blobDigest: `sha256:${string}`;
+  }>[];
+}>;
+```
+
+The pending gate manifest binds that source digest, complete source-manifest copy,
+provider/model/reasoning, all Evaluator versions, gold-set version, pricing/cost cap,
+and campaign parameters. `gateManifestDigest` is the full CanonicalJsonV1 digest of
+the manifest.
+
+Only the manual gold harness may execute a pending manifest. It requires the exact
+clean source digest and explicit paid confirmation, writes no Evaluation sidecar,
+and writes its proposed passed attestation only below
+`.dexter/evaluator-gates/<qualityGateId>/`. The proposed attestation contains:
+
+- state `passed`, quality-gate ID, gate-manifest digest, and evaluator-source digest;
+- exact runtime and Evaluator versions;
+- evaluated commit SHA as audit metadata, start/completion times, aggregate metrics,
+  per-case result digests, injection/stability results, and charged/reserved cost; and
+- a full campaign-result digest, but no prompt, response, credential, private text,
+  or provider request ID.
+
+After independent inspection, the sole permitted post-gate repository change is to
+copy that exact attestation into the tracked attestation path. The attestation
+directory is excluded from the source digest, so adding the record does not change
+the evaluated source. CI on that qualification commit must prove:
+
+1. the difference from `gateEvaluatedCommitSha` contains only the matching new
+   attestation file;
+2. the attestation's CanonicalJsonV1 bytes hash to `gateAttestationDigest`;
+3. its manifest/runtime/version/source fields exactly match the pending manifest;
+4. recomputing current tracked source bytes produces the attested source digest; and
+5. every locked gate threshold passed within the cost cap.
+
+Production derives `QualifiedEvaluatorRuntimeV1` only from a manifest plus a passed
+tracked attestation satisfying those checks. The initial tuple is
+`openai / gpt-5.6-terra / high`. A one-byte change to any source-manifest file,
+dependency manifest/lockfile, prompt, evidence registry, finding schema, rubric,
+safety code, harness, or gold fixture invalidates qualification. A new tuple or
+version requires a new gate ID and paid campaign. The evaluated commit SHA remains
+auditable metadata; `evaluatorSourceDigest` is the mechanical runtime binding that
+survives the attestation-only qualification commit and merge commit.
 
 One campaign has a USD 25 hard cap. The gate manifest pins currency, input/output
 unit prices, source, and verification date. Before each call reserve a safe upper
@@ -1861,8 +2114,10 @@ Raising the cap requires a reviewed manifest change.
 The paid gate is manual and never runs in normal CI. Passing it does not authorize
 automatic/default-on evaluation. P3-E2 cannot merge until the pinned locked-holdout
 campaign passes all gates within the cost cap; P3-E3 cannot begin before that merge.
-Unsupported-claim metrics exclude `not_verifiable_from_snapshot` gold labels and
-predictions so lack of persisted filing evidence cannot be counted as unsupported.
+Unsupported-claim metrics exclude `not_verifiable_from_snapshot` and
+`not_verifiable_by_evaluator` gold labels and predictions so absent Snapshot
+evidence and intentionally unsent persisted evidence cannot be counted as
+unsupported.
 
 ### 6.9 Evaluator acceptance
 
@@ -1875,9 +2130,14 @@ P3-E1 tests include:
 - filing-derived or otherwise outside-scope claims map to
   `not_verifiable_from_snapshot` or an applicable `missing_caveat`, never to
   `unsupported_claim` solely because evidence was not persisted;
+- stored price-history/Volume Profile-bin claims map to
+  `not_verifiable_by_evaluator` or an applicable `missing_caveat`, never to
+  `not_verifiable_from_snapshot` or `unsupported_claim` solely because those
+  collections are intentionally excluded from the manifest;
 - unavailable and partial scopes cannot be promoted to complete coverage;
-- category/basis/importance mismatches, fabricated refs, invalid anchors, unknown
-  fields, and duplicate IDs reject the available artifact;
+- every category rejects missing-domain, extra-domain, wrong-domain, missing-scope,
+  category/basis/importance mismatches, fabricated refs, invalid anchors, unknown
+  fields, and duplicate IDs; cross-domain findings require complete exact coverage;
 - exact persisted manifest loading across evaluator code-version change, without
   regeneration from the target Snapshot; and
 - malformed/missing targets and preflight safety failures create no sidecar and
@@ -1885,6 +2145,14 @@ P3-E1 tests include:
 
 P3-E2 tests include:
 
+- production rejects a pending-only manifest while the manual harness accepts only
+  that pending state with explicit paid confirmation; adding the exact passed
+  attestation leaves the recomputed evaluator-source digest unchanged and qualifies
+  only its exact manifest/runtime/version/source tuple;
+- a stale/wrong attestation, an attestation hash mismatch, a repository diff beyond
+  the one expected attestation file, a missing transitive source file, or a one-byte
+  change to any source-manifest file rejects qualification before confirmation or
+  dispatch;
 - report/manifest prompt-injection fixtures remain inert quoted data with an empty
   tool list;
 - qualified runtime acceptance, `--model`/saved/default ungated rejection before
@@ -1892,9 +2160,10 @@ P3-E2 tests include:
   no generic `callLlm`/retry path, timeout, cancel, late response,
   provider/schema/reference failure, sanitized logs, and save-after-cost behavior;
 - correct closed-domain classification of unsupported versus
-  not-verifiable-from-Snapshot cases, including filing, company/management,
-  competitor/industry, macro/news, undeclared EV/EBITDA, source-totality, and other
-  outside-context fixtures;
+  not-verifiable-from-Snapshot versus not-verifiable-by-Evaluator cases, including
+  filing, company/management, competitor/industry, macro/news, undeclared EV/EBITDA,
+  source-totality, raw price history, Volume Profile bins, and other outside-context
+  fixtures;
 - no fabricated evidence, score, pass/fail, Buy/Sell, unknown ref, or invalid anchor;
 - deterministic stub-provider tests in normal CI; and
 - the versioned manual Japanese gold-set campaign as the merge gate above.
@@ -1961,7 +2230,8 @@ dependent step before the predecessor is independently reviewed and merged.
    - update SPEC, MVP roadmap, this plan, and the non-normative handoff;
    - no runtime code.
 2. **P3-I0 — History immutability, digest, and stored-report safety**
-   - create-only history, CanonicalJsonV1, digest, collision, save/evaluator safety;
+   - create-only history, authoritative history-based latest resolver,
+     CanonicalJsonV1, digest, collision, save/evaluator safety;
    - no Comparison, API/UI, Evaluator call, Radar, score, or PDF.
 3. **P3-H1 — Pure saved-analysis Comparison**
    - 67-key registry, typed result, V1–V9 accessors, identity/delta logic;
@@ -2000,12 +2270,12 @@ Additional gates:
 
 | Step | Required focused validation |
 | --- | --- |
-| P3-I0 | cross-process no-clobber/idempotency, hard-link unsupported path, latest ordering, canonical golden vectors, exact safety grammar, V1–V9 readability |
-| P3-H1 | 67 definitions/accessors, definition/instance versions, display/provenance, V1–V9, dates/identities/zero |
+| P3-I0 | cross-process no-clobber/idempotency, hard-link unsupported path, authoritative history latest/no legacy rewrite, canonical golden vectors, exact safety grammar, V1–V9 readability |
+| P3-H1 | 67 definitions/accessors, definition/instance versions, discriminated observation invariants, added/removed/non-available reachability, display/provenance, V1–V9, dates/identities/zero |
 | P3-H2 | exact HTTP union, URL lifecycle, disclosure/reload races, focus, responsive |
 | P3-R1 | range/direction/sample/cohort/rank, SVG/table accessibility, mobile |
-| P3-E1 | closed claim domains, strict finding/basis, canonical IDs, V1–V9 manifest, no-replace sidecar |
-| P3-E2 | qualified tuple, injection, confirmation, one dispatch/timeout/cancel, sanitized logs, stub CI, exact-head paid gate |
+| P3-E1 | closed claim-domain sets, strict category/domain/basis coverage, persisted-but-excluded scopes, canonical IDs, V1–V9 manifest, no-replace sidecar |
+| P3-E2 | qualified tuple, pending-manifest production rejection, source/attestation binding, injection, confirmation, one dispatch/timeout/cancel, sanitized logs, stub CI, manual paid gate |
 | P3-E3 | cursor, gate metadata, unselected/no-fallback, zero/unavailable/findings, race/keyboard |
 | P3-C0 | no-look-ahead, gate completeness, absence of runtime score |
 | P3-X | full regression, Playwright, CI/review/merge/main and docs synchronization |
