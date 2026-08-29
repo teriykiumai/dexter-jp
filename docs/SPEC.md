@@ -333,7 +333,7 @@ AIは以下を担当する。
 
 Phase 1.5は、Step 10で満たしたMVP完成条件を変更または再度開くものではない。MVP完了後に、分析結果の保存・可視化・Presentation Layerを追加する拡張である。
 
-目的は、CLI中心の分析結果を、CLI、ローカルDashboard、将来のPDF、過去比較、Portfolio分析から再利用できるCanonical Analysis Artifactへ変換することにある。
+目的は、CLI中心の分析結果を、CLI、ローカルDashboard、過去比較、Portfolio分析、および具体的需要が確認された場合の将来のexportから再利用できるCanonical Analysis Artifactへ変換することにある。
 
 依存方向:
 
@@ -402,15 +402,19 @@ Phase 1.5の非目標:
 
 ### Phase 3
 - Independent Evaluator
-- 高度な総合スコア
-- PDF / Radar chart
+- Radar chart
 - 過去分析との差分
+- 総合スコアの評価計画（runtime scoreは実装しない）
 
 ### Phase 4
 - Backtest
 - Entry / Stop / Target有効性検証
-- Score検証
+- Score検証とruntime採否判断
 - Look-ahead検証
+
+PDF exportはPhase 3の対象としない。Dashboard外共有、immutableな監査提出、
+定常的なoffline保存・印刷、またはPDF固有のaccessibility要件が具体化した
+場合に、Phase番号を先に割り当てず独立した計画で再評価する。
 
 ### Phase 5
 - Portfolio分析
