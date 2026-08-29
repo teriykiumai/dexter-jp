@@ -2,7 +2,8 @@
 
 **Purpose:** Non-normative context recovery for the Phase 3 design thread
 
-**Status:** Candidate; not approved until independent review and merge
+**Status:** Non-normative; this file never asserts current approval, PR, CI, or merge
+state
 
 **Repository:** `teriykiumai/dexter-jp`
 
@@ -84,32 +85,29 @@ reimplement financial or statistical calculations.
 - Missing, unavailable, uncollected, and valid zero remain distinct.
 - Historical work respects source-specific dates and never introduces look-ahead.
 - V1–V9 remain immutable and readable; Phase 3 does not create Snapshot V10.
+- History and Evaluator sidecars use the reviewed cross-process no-replace publish
+  contract; `latest.json` alone retains replace semantics.
 - Browser and LLM consumers do not reconstruct values from presentation text.
 - Phase 3 creates no Buy/Sell signal, automatic action, or runtime composite score.
+- Evaluator execution requires the exact provider/model/reasoning tuple that passed
+  its versioned manual quality gate; no ungated override exists.
 - The product remains personal, local, single-user research software.
 
 Detailed formulas and source contracts remain in `docs/SPEC.md`,
 `docs/PHASE2_PLAN.md`, and `docs/PHASE3_PLAN.md`; do not copy them from this
 summary.
 
-## 5. P3-0 candidate state
+## 5. P3-0 durable design boundary
 
-At the 2026-08-29 inspection point:
+The design investigation began from merged `main`
+`b2989cd1f78fc374f433352fd6532a506fb00108` after the PR #73 Dashboard UX
+closeout. That SHA identifies the predecessor design baseline only; it is not a claim
+about the current checkout or current Phase 3 approval.
 
-- branch: `docs/phase3-architecture-design-step0`
-- reviewed predecessor head: `6eafc4e50803ca2061e21453fb6c6059c04367c8`
-- base `main` / `origin/main`:
-  `b2989cd1f78fc374f433352fd6532a506fb00108`
-- PR #74: Draft, open, merge state clean
-- review feedback on the immutable `6eafc4e` head: one submitted PR review comment
-  and one adversarial issue comment, both with a stated Changes Required verdict;
-  GitHub `reviewDecision` remains empty
-- CI on that head: `bun test` and `bun run typecheck` successful
-- the PR branch now contains P3-0 plan corrections responding to both reviews;
-  the corrected head is not yet re-reviewed or approved
-
-These facts describe an inspection point, not approval. Recheck the exact PR head,
-reviews, CI, and merge state before relying on them.
+Do not record a working branch, open PR number, review verdict, check result, merge
+state, or corrected candidate head in this handoff. Resolve all of those from current
+Git/GitHub state and `docs/REVIEW_POLICY.md`. After P3-0 merges, its merge commit and
+current `docs/PHASE3_PLAN.md` replace this starting-point context.
 
 P3-0 changes the following Source of Truth documents together:
 
@@ -125,7 +123,7 @@ Phase 3 adopts:
 - deterministic, explicit-registry comparison of two immutable saved Snapshots;
 - a presentation-only Radar of the seven stored peer percentiles;
 - an explicitly invoked qualitative Independent Evaluator whose result is stored in
-  a separate versioned sidecar; and
+  a separate versioned sidecar and whose exact runtime has passed the gold gate; and
 - a docs-only composite-score evaluation plan whose runtime adoption remains gated
   by Phase 4 validation.
 
