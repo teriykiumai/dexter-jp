@@ -184,6 +184,16 @@ function richV9Snapshot(ticker = '1010'): AnalysisSnapshotV9 {
 
   return AnalysisSnapshotV9Schema.parse({
     ...snapshot,
+    technical: {
+      dataDate: '2026-08-21',
+      ma20: 2_950,
+      atr14: 75,
+      averageVolume20: 12_000,
+      trend: 'uptrend',
+      latestSwingHigh: 3_100,
+      latestSwingLow: 2_800,
+      unavailable: [],
+    },
     advancedTechnical: {
       dataDate: '2026-08-21',
       rsi14: 62.35,
@@ -191,6 +201,32 @@ function richV9Snapshot(ticker = '1010'): AnalysisSnapshotV9 {
       bollinger20: { middle: 2_950, upper: 3_100, lower: 2_800 },
       unavailable: [],
     },
+    priceHistory: [
+      {
+        date: '2026-08-19',
+        open: 2_900,
+        high: 2_980,
+        low: 2_880,
+        close: 2_960,
+        volume: 10_000,
+      },
+      {
+        date: '2026-08-20',
+        open: 2_960,
+        high: 3_040,
+        low: 2_930,
+        close: 3_010,
+        volume: 0,
+      },
+      {
+        date: '2026-08-21',
+        open: 3_010,
+        high: 3_080,
+        low: 2_990,
+        close: 3_050,
+        volume: 14_000,
+      },
+    ],
     supplyDemand: {
       dataDate: '2026-08-19',
       volumeDataDate: '2026-08-21',
@@ -390,6 +426,7 @@ function richV9Snapshot(ticker = '1010'): AnalysisSnapshotV9 {
     },
     dataDates: {
       ...snapshot.dataDates,
+      technical: '2026-08-21',
       advancedTechnical: '2026-08-21',
       supplyDemand: '2026-08-19',
       marketCorrelation: '2026-08-21',
@@ -397,8 +434,11 @@ function richV9Snapshot(ticker = '1010'): AnalysisSnapshotV9 {
       investorTypeFlows: '2026-08-20',
       advancedDividend: '2026-08-21',
       volumeProfile: '2026-08-21',
+      priceHistory: '2026-08-21',
     },
     unavailable: snapshot.unavailable.filter(item => ![
+      'technical',
+      'priceHistory',
       'reportedShortPositions',
       'investorTypeFlows',
       'advancedDividend',
@@ -712,6 +752,121 @@ test.describe('Dashboard detail tab browser interaction', () => {
     }
   });
 
+  test('presents Snapshot-only price and volume panes with persistent line toggles', async ({ browser }) => {
+    const page = await browser.newPage();
+    try {
+      await mockSnapshotApi(page);
+      await openDetail(page, '1010', 'technical');
+
+      const chart = page.getByRole('img', {
+        name: '調整後日足ローソク足と日次出来高の同期チャート',
+      });
+      await expect(chart).toBeVisible();
+      const descriptionId = await chart.getAttribute('aria-describedby');
+      expect(descriptionId).toBeTruthy();
+      const description = page.locator(`#${descriptionId}`);
+      await expect(description).toContainText('2026-08-19から2026-08-21');
+      await expect(description).toContainText('保存済み最新行の終値 ¥3,050');
+      await expect(description).toContainText('SMA 20 ¥2,950');
+      await expect(description).toContainText('Swing High ¥3,100');
+      await expect(description).toContainText('Swing Low ¥2,800');
+
+      const paneHeights = await chart.evaluate(element => {
+        const table = element.querySelector('table');
+        return table
+          ? [...table.rows]
+              .map(row => row.getBoundingClientRect().height)
+              .filter(height => height > 50)
+          : [];
+      });
+      expect(paneHeights.length).toBeGreaterThanOrEqual(2);
+      const pricePaneShare = paneHeights[0]! / (paneHeights[0]! + paneHeights[1]!);
+      expect(pricePaneShare).toBeGreaterThan(0.64);
+      expect(pricePaneShare).toBeLessThan(0.76);
+
+      await chart.scrollIntoViewIfNeeded();
+      const chartBox = await chart.boundingBox();
+      expect(chartBox).not.toBeNull();
+      const timeAxisClip = {
+        x: chartBox!.x + 30,
+        y: chartBox!.y + chartBox!.height - 28,
+        width: chartBox!.width - 90,
+        height: 24,
+      };
+      await page.mouse.move(1, 1);
+      const fitContentAxis = await page.screenshot({ clip: timeAxisClip });
+      await page.mouse.move(
+        chartBox!.x + chartBox!.width / 2,
+        chartBox!.y + chartBox!.height / 2,
+      );
+      await page.mouse.wheel(0, -800);
+      await page.mouse.move(1, 1);
+      await page.waitForTimeout(200);
+      const zoomedAxis = await page.screenshot({ clip: timeAxisClip });
+      expect(zoomedAxis.equals(fitContentAxis)).toBe(false);
+
+      const latest = page.getByRole('region', { name: '最新値' });
+      await expect(latest).toContainText('データ基準日 2026-08-21');
+      await expect(latest).toContainText('crosshair日付とは連動しません');
+      await expect(latest.getByText('RSI 14', { exact: true })).toBeVisible();
+      await expect(latest.getByText('MACD', { exact: true })).toBeVisible();
+      await expect(latest.getByText('ボリンジャー中心線', { exact: true })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'テクニカル指標', exact: true }))
+        .toHaveCount(0);
+
+      const smaToggle = page.getByRole('button', { name: /SMA 20/ });
+      await expect(smaToggle).toHaveAttribute('aria-pressed', 'true');
+      await smaToggle.click();
+      await expect(smaToggle).toHaveAttribute('aria-pressed', 'false');
+      await expect(description).not.toContainText('SMA 20');
+      await expect(description).toContainText('Swing High ¥3,100');
+      await page.mouse.move(1, 1);
+      await page.waitForTimeout(200);
+      const toggledAxis = await page.screenshot({ clip: timeAxisClip });
+      expect(toggledAxis.equals(zoomedAxis)).toBe(true);
+
+      await page.locator('#dashboard-tab-report').click();
+      await page.locator('#dashboard-tab-technical').click();
+      await expectSelectedTab(page, 'technical');
+      await expect(page.getByRole('button', { name: /SMA 20/ }))
+        .toHaveAttribute('aria-pressed', 'false');
+
+      await page.evaluate(() => {
+        window.history.pushState({}, '', '/?ticker=1009&tab=technical');
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      });
+      await page.getByRole('heading', { name: '1009 テスト株式会社' }).waitFor();
+      await page.evaluate(() => {
+        window.history.pushState({}, '', '/?ticker=1010&tab=technical');
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      });
+      await page.getByRole('heading', { name: '1010 テスト株式会社' }).waitFor();
+      await expect(page.getByRole('button', { name: /SMA 20/ }))
+        .toHaveAttribute('aria-pressed', 'true');
+
+      await page.setViewportSize({ width: 390, height: 844 });
+      const mobileLayout = await page.evaluate(() => {
+        const chartBox = document.querySelector('.price-chart')!.getBoundingClientRect();
+        const legendBox = document.querySelector('.chart-legend')!.getBoundingClientRect();
+        const latestBox = document.querySelector('.chart-latest-values')!.getBoundingClientRect();
+        return {
+          chartBottom: chartBox.bottom,
+          chartHeight: chartBox.height,
+          legendTop: legendBox.top,
+          legendBottom: legendBox.bottom,
+          latestTop: latestBox.top,
+          overflow: document.documentElement.scrollWidth - window.innerWidth,
+        };
+      });
+      expect(mobileLayout.chartHeight).toBeGreaterThanOrEqual(390);
+      expect(mobileLayout.legendTop).toBeGreaterThanOrEqual(mobileLayout.chartBottom);
+      expect(mobileLayout.latestTop).toBeGreaterThanOrEqual(mobileLayout.legendBottom);
+      expect(mobileLayout.overflow).toBeLessThanOrEqual(0);
+    } finally {
+      await page.close();
+    }
+  });
+
   test('keeps initial vertical position and every tab reachable on narrow screens', async ({ browser }) => {
     const page = await browser.newPage({ viewport: { width: 320, height: 568 } });
     try {
@@ -1011,7 +1166,13 @@ test.describe('Dashboard detail tab browser interaction', () => {
     const page = await browser.newPage();
     const headingsByTab = {
       report: ['総合レポート'],
-      technical: ['株価チャート', 'テクニカル指標', '出来高価格分布（Volume Profile）', '戦略水準'],
+      technical: [
+        '株価チャート',
+        '価格線',
+        '最新値',
+        '出来高価格分布（Volume Profile）',
+        '戦略水準',
+      ],
       fundamentals: ['同業比較', '配当分析'],
       'supply-demand': ['信用需給', '公開空売り残高報告'],
       market: ['投資部門別売買', '市場相関', '業種指数比較', '業種別空売り売買代金'],

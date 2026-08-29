@@ -463,16 +463,25 @@ function Dashboard({
   onSelectTab: (tab: DashboardTabId) => void;
   selectedTab: DashboardTabId;
 }) {
-  const view = mapSnapshotToDashboard(snapshot);
+  const view = useMemo(() => mapSnapshotToDashboard(snapshot), [snapshot]);
   const [disclosures, setDisclosures] = useState<DashboardDisclosureState>({
     ...DEFAULT_DISCLOSURE_STATE,
   });
+  const [hiddenPriceLineLabels, setHiddenPriceLineLabels] = useState<readonly string[]>([]);
   const [glossarySelection, setGlossarySelection] = useState<GlossarySelection>(null);
   const glossaryInvokerRef = useRef<HTMLButtonElement | null>(null);
   const glossarySelectionRef = useRef<GlossarySelection>(glossarySelection);
   const selectedTabRef = useRef(selectedTab);
   const previousSelectedTabRef = useRef(selectedTab);
   const previousNavigationRevisionRef = useRef(navigationRevision);
+  const visiblePriceLines = useMemo(() => view.chart.priceLines.filter(
+    line => !hiddenPriceLineLabels.includes(line.label),
+  ), [hiddenPriceLineLabels, view.chart.priceLines]);
+  const togglePriceLine = (label: string) => {
+    setHiddenPriceLineLabels(current => current.includes(label)
+      ? current.filter(item => item !== label)
+      : [...current, label]);
+  };
   const setDisclosure = (id: DashboardDisclosureId, open: boolean) => {
     setDisclosures(current => current[id] === open ? current : { ...current, [id]: open });
   };
@@ -531,6 +540,18 @@ function Dashboard({
     glossaryInvokerRef.current = null;
     window.requestAnimationFrame(() => focusGlossaryDestination());
   }, []);
+
+  const chartDescriptionId = 'stored-price-chart-description';
+  const visibleLineDescription = visiblePriceLines.length > 0
+    ? visiblePriceLines.map(line => `${line.label} ${line.displayPrice.text}`).join('、')
+    : 'なし';
+  const storedPriceDescription = view.chart.startDate.available && view.chart.endDate.available
+    ? `保存済み調整後日足 ${view.chart.startDate.text}から${view.chart.endDate.text}。保存済み最新行の終値 ${view.chart.latestClose.text}。`
+    : '保存済み調整後日足は利用できません。';
+  const drawablePriceDescription = view.chart.bars.length === 0 && view.chart.startDate.available
+    ? '完全なOHLCを持つ描画可能な行はありません。'
+    : '';
+  const chartDescription = `${storedPriceDescription}${drawablePriceDescription}表示中の価格線: ${visibleLineDescription}。`;
 
   return (
     <main className="dashboard-shell">
@@ -596,7 +617,71 @@ function Dashboard({
           {tab.id === 'technical' ? (
             <>
       <Card title="株価チャート" eyebrow="調整後OHLCV" className="chart-panel">
-        <PriceChart bars={view.chart.bars} priceLines={view.chart.priceLines} />
+        <div className="chart-presentation">
+          <div className="chart-visual">
+            <PriceChart
+              bars={view.chart.bars}
+              describedBy={chartDescriptionId}
+              priceLines={visiblePriceLines}
+            />
+            <p className="chart-description" id={chartDescriptionId}>{chartDescription}</p>
+          </div>
+          <aside className="chart-context" aria-label="チャート表示情報">
+            <section className="chart-legend" aria-labelledby="chart-legend-title">
+              <h3 id="chart-legend-title">価格線</h3>
+              <p>表示だけを切り替えます。保存値は変更しません。</p>
+              {view.chart.priceLines.length > 0 ? (
+                <div className="chart-line-toggles">
+                  {view.chart.priceLines.map(line => {
+                    const visible = !hiddenPriceLineLabels.includes(line.label);
+                    return (
+                      <button
+                        aria-pressed={visible}
+                        key={line.label}
+                        onClick={() => togglePriceLine(line.label)}
+                        type="button"
+                      >
+                        <span aria-hidden="true" style={{ backgroundColor: line.color }} />
+                        <strong>{line.label}</strong>
+                        <small>{line.displayPrice.text}</small>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : <div className="empty-state compact-empty">保存済み価格線はありません。</div>}
+            </section>
+
+            <section className="chart-latest-values" aria-labelledby="chart-latest-title">
+              <h3 id="chart-latest-title">最新値</h3>
+              {view.advancedTechnical ? (
+                <>
+                  <p>
+                    データ基準日 <Value value={view.advancedTechnical.dataDate} />。
+                    チャートのcrosshair日付とは連動しません。
+                  </p>
+                  <MetricGrid
+                    guidance={{
+                      'RSI 14': 'rsi',
+                      MACD: 'macd',
+                      'MACD シグナル': 'macd',
+                      'MACD ヒストグラム': 'macd',
+                      'ボリンジャー中心線': 'bollingerBands',
+                      'ボリンジャー上限': 'bollingerBands',
+                      'ボリンジャー下限': 'bollingerBands',
+                    }}
+                    metrics={view.advancedTechnical.metrics}
+                    onOpenGuidance={openGlossary}
+                  />
+                  {view.advancedTechnical.unavailableReasons.length > 0 ? (
+                    <p className="reason-list">
+                      {view.advancedTechnical.unavailableReasons.join(' / ')}
+                    </p>
+                  ) : null}
+                </>
+              ) : <div className="empty-state compact-empty">テクニカル指標は未収集です。</div>}
+            </section>
+          </aside>
+        </div>
         <p className="chart-credit">
           <span>{LIGHTWEIGHT_CHARTS_NOTICE[0]}</span>
           <span>
@@ -606,36 +691,6 @@ function Dashboard({
             </a>
           </span>
         </p>
-      </Card>
-
-      <Card title="テクニカル指標" eyebrow="保存済みの最新計算値">
-        <p className="section-context">
-          調整後価格から計算されSnapshotへ保存された最新値です。各指標は単独の売買判断ではありません。
-        </p>
-        {view.advancedTechnical ? (
-          <>
-            <MetricGrid
-              guidance={{
-                'RSI 14': 'rsi',
-                MACD: 'macd',
-                'MACD シグナル': 'macd',
-                'MACD ヒストグラム': 'macd',
-                'ボリンジャー中心線': 'bollingerBands',
-                'ボリンジャー上限': 'bollingerBands',
-                'ボリンジャー下限': 'bollingerBands',
-              }}
-              metrics={view.advancedTechnical.metrics}
-              onOpenGuidance={openGlossary}
-            />
-            {view.advancedTechnical.unavailableReasons.length
-              ? (
-                  <p className="reason-list">
-                    {view.advancedTechnical.unavailableReasons.join(' / ')}
-                  </p>
-                )
-              : null}
-          </>
-        ) : <div className="empty-state">テクニカル指標は未収集です。</div>}
       </Card>
 
       <Card title="出来高価格分布（Volume Profile）" eyebrow="日足OHLCVによる推定分布">

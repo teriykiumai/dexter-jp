@@ -8,6 +8,7 @@ import {
   type BusinessDay,
   type CandlestickData,
   type HistogramData,
+  type ISeriesApi,
 } from 'lightweight-charts';
 import type { ChartBar, ChartPriceLine } from './presentation.js';
 
@@ -19,7 +20,13 @@ export const LIGHTWEIGHT_CHARTS_NOTICE = [
 interface PriceChartProps {
   bars: ChartBar[];
   priceLines: ChartPriceLine[];
+  describedBy: string;
 }
+
+export const CHART_PANE_STRETCH = {
+  price: 0.7,
+  volume: 0.3,
+} as const;
 
 function toBusinessDay(date: string): BusinessDay | null {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
@@ -31,8 +38,9 @@ function toBusinessDay(date: string): BusinessDay | null {
   };
 }
 
-export function PriceChart({ bars, priceLines }: PriceChartProps) {
+export function PriceChart({ bars, priceLines, describedBy }: PriceChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -40,11 +48,16 @@ export function PriceChart({ bars, priceLines }: PriceChartProps) {
 
     const chart = createChart(container, {
       width: container.clientWidth,
-      height: 480,
+      height: container.clientHeight || 480,
       layout: {
         background: { type: ColorType.Solid, color: '#10151c' },
         textColor: '#8e9baa',
         attributionLogo: true,
+        panes: {
+          enableResize: false,
+          separatorColor: '#2b3a49',
+          separatorHoverColor: '#2b3a49',
+        },
       },
       grid: {
         vertLines: { color: '#1c2733' },
@@ -72,13 +85,18 @@ export function PriceChart({ bars, priceLines }: PriceChartProps) {
     });
     const volume = chart.addSeries(HistogramSeries, {
       priceFormat: { type: 'volume' },
-      priceScaleId: '',
+      priceScaleId: 'right',
       priceLineVisible: false,
       lastValueVisible: false,
-    });
+      title: '日次出来高',
+    }, 1);
     volume.priceScale().applyOptions({
-      scaleMargins: { top: 0.78, bottom: 0 },
+      scaleMargins: { top: 0.1, bottom: 0.05 },
     });
+    candleSeriesRef.current = candles;
+    const [pricePane, volumePane] = chart.panes();
+    pricePane?.setStretchFactor(CHART_PANE_STRETCH.price);
+    volumePane?.setStretchFactor(CHART_PANE_STRETCH.volume);
 
     const candleData: CandlestickData<BusinessDay>[] = [];
     const volumeData: HistogramData<BusinessDay>[] = [];
@@ -103,33 +121,54 @@ export function PriceChart({ bars, priceLines }: PriceChartProps) {
     candles.setData(candleData);
     volume.setData(volumeData);
 
-    for (const line of priceLines) {
-      candles.createPriceLine({
-        price: line.price,
-        color: line.color,
-        lineWidth: 1,
-        lineStyle: LineStyle.Dashed,
-        axisLabelVisible: true,
-        title: line.label,
-      });
-    }
-
     chart.timeScale().fitContent();
     const resizeObserver = new ResizeObserver(entries => {
-      const width = entries[0]?.contentRect.width;
-      if (width) chart.applyOptions({ width });
+      const size = entries[0]?.contentRect;
+      if (size?.width && size.height) {
+        chart.applyOptions({ width: size.width, height: size.height });
+      }
     });
     resizeObserver.observe(container);
 
     return () => {
+      candleSeriesRef.current = null;
       resizeObserver.disconnect();
       chart.remove();
     };
-  }, [bars, priceLines]);
+  }, [bars]);
+
+  useEffect(() => {
+    const candles = candleSeriesRef.current;
+    if (!candles) return;
+
+    const handles = priceLines.map(line => candles.createPriceLine({
+      price: line.price,
+      color: line.color,
+      lineWidth: 1,
+      lineStyle: LineStyle.Dashed,
+      axisLabelVisible: true,
+      title: line.label,
+    }));
+
+    return () => {
+      if (candleSeriesRef.current !== candles) return;
+      for (const handle of handles) {
+        candles.removePriceLine(handle);
+      }
+    };
+  }, [priceLines]);
 
   if (bars.length === 0) {
     return <div className="empty-state chart-empty">調整済みOHLCVは利用できません。</div>;
   }
 
-  return <div className="price-chart" ref={containerRef} aria-label="調整済み株価チャート" />;
+  return (
+    <div
+      aria-describedby={describedBy}
+      aria-label="調整後日足ローソク足と日次出来高の同期チャート"
+      className="price-chart"
+      ref={containerRef}
+      role="img"
+    />
+  );
 }

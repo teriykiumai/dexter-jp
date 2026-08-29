@@ -169,6 +169,7 @@ export interface ChartPriceLine {
   label: string;
   price: number;
   color: string;
+  displayPrice: DisplayValue;
 }
 
 export interface PeerMetricRow {
@@ -395,6 +396,9 @@ export interface DashboardViewModel {
   chart: {
     bars: ChartBar[];
     priceLines: ChartPriceLine[];
+    startDate: DisplayValue;
+    endDate: DisplayValue;
+    latestClose: DisplayValue;
   };
   peer: {
     rows: PeerMetricRow[];
@@ -410,6 +414,7 @@ export interface DashboardViewModel {
     unavailableReasons: string[];
   } | null;
   advancedTechnical: {
+    dataDate: DisplayValue;
     metrics: DashboardMetric[];
     unavailableReasons: string[];
   } | null;
@@ -727,7 +732,10 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
     ? snapshot.units.volumeProfile
     : null;
 
-  const bars = (snapshot.priceHistory ?? []).flatMap(bar => (
+  const storedPriceHistory = snapshot.priceHistory ?? [];
+  const firstStoredPriceBar = storedPriceHistory.at(0);
+  const latestStoredPriceBar = storedPriceHistory.at(-1);
+  const bars = storedPriceHistory.flatMap(bar => (
     bar.open === null || bar.high === null || bar.low === null || bar.close === null
       ? []
       : [{
@@ -742,7 +750,12 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
 
   const priceLines: ChartPriceLine[] = [];
   if (snapshot.technical?.ma20 !== null && snapshot.technical?.ma20 !== undefined) {
-    priceLines.push({ label: 'SMA 20', price: snapshot.technical.ma20, color: '#5aa9ff' });
+    priceLines.push({
+      label: 'SMA 20',
+      price: snapshot.technical.ma20,
+      color: '#5aa9ff',
+      displayPrice: formatMetric(snapshot.technical.ma20, technicalUnits.ma20),
+    });
   }
   if (
     snapshot.technical?.latestSwingHigh !== null
@@ -752,6 +765,10 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
       label: 'Swing High',
       price: snapshot.technical.latestSwingHigh,
       color: '#f0b35a',
+      displayPrice: formatMetric(
+        snapshot.technical.latestSwingHigh,
+        technicalUnits.latestSwingHigh,
+      ),
     });
   }
   if (
@@ -762,6 +779,10 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
       label: 'Swing Low',
       price: snapshot.technical.latestSwingLow,
       color: '#b478ff',
+      displayPrice: formatMetric(
+        snapshot.technical.latestSwingLow,
+        technicalUnits.latestSwingLow,
+      ),
     });
   }
 
@@ -847,6 +868,7 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
   } : null;
 
   const advancedTechnicalView = advancedTechnical && advancedUnits ? {
+    dataDate: displayText(advancedTechnical.dataDate),
     metrics: [
       { label: 'RSI 14', value: formatMetric(advancedTechnical.rsi14, advancedUnits.rsi14) },
       {
@@ -1362,7 +1384,16 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
           : snapshot.technical?.trend),
       },
     ],
-    chart: { bars, priceLines },
+    chart: {
+      bars,
+      priceLines,
+      startDate: displayText(firstStoredPriceBar?.date),
+      endDate: displayText(latestStoredPriceBar?.date),
+      latestClose: formatMetric(
+        latestStoredPriceBar?.close,
+        snapshot.units.priceHistory.close,
+      ),
+    },
     peer: peerView,
     supplyDemand,
     correlations,
