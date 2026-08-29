@@ -833,7 +833,8 @@ describe('snapshot presentation mapping', () => {
   });
 
   test('passes through every V9 volume-profile bin, POC, and Value Area value', () => {
-    const snapshot = v9Snapshot(volumeProfileResult());
+    const result = volumeProfileResult();
+    const snapshot = v9Snapshot(result);
     const dashboard = mapSnapshotToDashboard(snapshot);
     const view = dashboard.volumeProfile;
 
@@ -844,18 +845,23 @@ describe('snapshot presentation mapping', () => {
     expect(view.inputBarCount).toEqual({ text: '120', available: true });
     expect(view.bins).toHaveLength(50);
     expect(view.bins.map(bin => bin.index)).toEqual(Array.from({ length: 50 }, (_, i) => i));
+    expect(view.bins.map(bin => bin.volumeShareValue)).toEqual(
+      result.bins!.map(bin => bin.volumeShare),
+    );
     expect(view.bins[0]).toEqual({
       index: 0,
       lowerPrice: { text: '¥1,000', available: true },
       upperPrice: { text: '¥1,010', available: true },
       representativePrice: { text: '¥1,005', available: true },
       allocatedVolume: { text: '0 調整後株', available: true },
+      volumeShareValue: 0,
       volumeShare: { text: '0%', available: true },
     });
     expect(view.bins[49]).toMatchObject({
       index: 49,
       representativePrice: { text: '¥1,495', available: true },
       allocatedVolume: { text: '490 調整後株', available: true },
+      volumeShareValue: 0.04,
       volumeShare: { text: '4%', available: true },
     });
     expect(view.poc).toEqual({

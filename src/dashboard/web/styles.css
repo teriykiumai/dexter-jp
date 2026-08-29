@@ -188,6 +188,31 @@ button { color: inherit; }
 .advanced-dividend-table th, .advanced-dividend-table td { min-width: 125px; }
 .investor-type-table th:first-child { min-width: 220px; }
 .investor-type-table th:not(:first-child), .investor-type-table td { min-width: 125px; }
+.volume-profile-figure { margin: 18px 0; padding: 16px; border: 1px solid #263845; background: #0b131a; }
+.volume-profile-figure figcaption { color: #b9c7d1; font-size: 11px; line-height: 1.7; }
+.volume-profile-legend { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 13px 0; color: var(--muted); font: 600 10px/1.4 "SFMono-Regular", Consolas, monospace; }
+.volume-profile-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.volume-profile-swatch { width: 18px; height: 7px; border-radius: 2px; background: #3b6077; }
+.volume-profile-swatch.value-area { background: #3b766b; }
+.volume-profile-swatch.poc { background: var(--amber); }
+.volume-profile-plot { max-height: 480px; padding: 10px 12px; overflow: auto; border: 1px solid #202f3a; background: #080e13; }
+.volume-profile-plot:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.volume-profile-plot ol { display: grid; gap: 3px; min-width: 300px; margin: 0; padding: 0; list-style: none; }
+.volume-profile-plot li { display: grid; grid-template-columns: minmax(76px, 110px) minmax(140px, 1fr) 30px; align-items: center; gap: 8px; min-height: 18px; padding: 1px 4px; }
+.volume-profile-plot li.value-area { background: #17312c99; }
+.volume-profile-plot li.poc { background: #3a2915; }
+.volume-profile-bin-price { overflow: hidden; color: #9fb0bd; font: 500 9px/1 "SFMono-Regular", Consolas, monospace; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.volume-profile-bin-marker { color: var(--muted); font: 700 9px/1 "SFMono-Regular", Consolas, monospace; }
+.volume-profile-plot li.poc .volume-profile-bin-marker { color: var(--amber); }
+.volume-profile-plot meter { width: 100%; height: 10px; border: 0; background: #17232c; }
+.volume-profile-plot meter::-webkit-meter-bar { border: 0; border-radius: 2px; background: #17232c; box-shadow: none; }
+.volume-profile-plot meter::-webkit-meter-optimum-value { border-radius: 2px; background: #3b6077; }
+.volume-profile-plot meter::-moz-meter-bar { border-radius: 2px; background: #3b6077; }
+.volume-profile-plot li.value-area meter::-webkit-meter-optimum-value { background: #3b766b; }
+.volume-profile-plot li.value-area meter::-moz-meter-bar { background: #3b766b; }
+.volume-profile-plot li.poc meter::-webkit-meter-optimum-value { background: var(--amber); }
+.volume-profile-plot li.poc meter::-moz-meter-bar { background: var(--amber); }
+.volume-profile-boundary { margin: 12px 0 0; color: var(--faint); font-size: 10px; line-height: 1.6; }
 table { width: 100%; border-collapse: collapse; white-space: nowrap; }
 th, td { padding: 11px 12px; border-bottom: 1px solid #202b36; color: #b9c4cf; font: 500 12px/1.3 "SFMono-Regular", Consolas, monospace; text-align: right; }
 thead th { color: var(--faint); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
@@ -277,6 +302,10 @@ tbody th { color: #dce4ea; }
   .stored-disclosure-content { padding: 12px; }
   .panel { padding: 16px; }
   .panel-header { align-items: flex-start; flex-direction: column-reverse; }
+  .volume-profile-figure { padding: 12px; }
+  .volume-profile-plot { padding: 8px; }
+  .volume-profile-plot ol { min-width: 0; }
+  .volume-profile-plot li { grid-template-columns: 70px minmax(80px, 1fr) 24px; gap: 6px; }
   .price-chart { height: 390px; }
   .chart-context { grid-template-columns: 1fr; }
   .correlation-grid, .scenario-grid, .risk-list { grid-template-columns: 1fr; }

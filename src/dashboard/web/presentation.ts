@@ -327,6 +327,7 @@ export interface VolumeProfileBinView {
   upperPrice: DisplayValue;
   representativePrice: DisplayValue;
   allocatedVolume: DisplayValue;
+  volumeShareValue: number;
   volumeShare: DisplayValue;
 }
 
@@ -1302,6 +1303,7 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
             bin.allocatedVolume,
             volumeProfileUnits.allocatedVolume,
           ),
+          volumeShareValue: bin.volumeShare,
           volumeShare: formatMetric(
             bin.volumeShare,
             volumeProfileUnits.volumeShare,

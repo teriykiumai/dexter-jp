@@ -379,25 +379,26 @@ function richV9Snapshot(ticker = '1010'): AnalysisSnapshotV9 {
           lowerPrice: 1_000,
           upperPrice: 1_010,
           representativePrice: 1_005,
-          allocatedVolume: 0,
-          volumeShare: 0,
+          allocatedVolume: 510,
+          volumeShare: 0.51,
         },
         {
           index: 1,
           lowerPrice: 1_010,
           upperPrice: 1_020,
           representativePrice: 1_015,
-          allocatedVolume: 500,
-          volumeShare: 1,
+          allocatedVolume: 490,
+          volumeShare: 0.49,
         },
       ],
-      poc: { binIndex: 1, price: 1_015, allocatedVolume: 500, volumeShare: 1 },
+      // Presentation sentinel: the stored POC is deliberately not the largest stored bin.
+      poc: { binIndex: 1, price: 1_015, allocatedVolume: 490, volumeShare: 0.49 },
       valueArea: {
         targetVolumeShare: 0.7,
         achievedVolumeShare: 1,
-        val: 1_010,
+        val: 1_000,
         vah: 1_020,
-        firstBinIndex: 1,
+        firstBinIndex: 0,
         lastBinIndex: 1,
       },
       unavailable: [],
@@ -1360,6 +1361,8 @@ test.describe('Dashboard detail tab browser interaction', () => {
       }))
         .toBeVisible();
       await expect(technicalPanel.getByText('¥1,015', { exact: true }).first()).toBeVisible();
+      await expect(technicalPanel.getByText('490 調整後株', { exact: true }).first())
+        .toBeVisible();
       await expect(technicalPanel.getByText('目標出来高比率', { exact: true }))
         .toBeVisible();
       await expect(methodology).not.toHaveAttribute('open', '');
@@ -1367,11 +1370,30 @@ test.describe('Dashboard detail tab browser interaction', () => {
       await expect(page.getByRole('region', { name: '出来高価格分布の価格帯別データ' }))
         .toBeHidden();
 
+      const profileChart = page.getByRole('region', {
+        name: '保存済み出来高価格分布チャート',
+      });
+      await expect(profileChart).toBeVisible();
+      const profileBins = profileChart.locator('[data-volume-profile-bin]');
+      await expect(profileBins).toHaveCount(2);
+      await expect(profileBins.nth(0)).toHaveAttribute('data-poc', 'false');
+      await expect(profileBins.nth(0)).toHaveAttribute('data-value-area', 'true');
+      await expect(profileBins.nth(0).locator('meter')).toHaveAttribute('value', '0.51');
+      await expect(profileBins.nth(0).locator('meter')).toHaveAttribute('max', '1');
+      await expect(profileBins.nth(1)).toHaveAttribute('data-poc', 'true');
+      await expect(profileBins.nth(1)).toHaveAttribute('data-value-area', 'true');
+      await expect(profileBins.nth(1).locator('meter')).toHaveAttribute('value', '0.49');
+      await expect(profileBins.nth(1).locator('meter')).toHaveAttribute('max', '1');
+      await expect(technicalPanel.getByText(
+        'POC・VAL・VAHは支持線・抵抗線や売買シグナルを意味しません。正確な保存値は下の全件表で確認できます。',
+        { exact: true },
+      )).toBeVisible();
+
       await bins.locator('summary').click();
       const binsTable = page.getByRole('region', { name: '出来高価格分布の価格帯別データ' });
       await expect(binsTable).toBeVisible();
       expect(await binsTable.locator('tbody tr th').allTextContents()).toEqual(['0', '1']);
-      await expect(binsTable.getByText('0 調整後株', { exact: true })).toBeVisible();
+      await expect(binsTable.getByText('510 調整後株', { exact: true })).toBeVisible();
 
       await page.locator('#dashboard-tab-market').click();
       await expectSelectedTab(page, 'market');
