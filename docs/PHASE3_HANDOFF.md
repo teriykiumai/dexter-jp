@@ -2,63 +2,67 @@
 
 **Purpose:** Non-normative context recovery for the Phase 3 design thread
 
+**Status:** Non-normative; this file never asserts current approval, PR, CI, or merge
+state
+
 **Repository:** `teriykiumai/dexter-jp`
 
-**Phase 2 implementation baseline:** `5639b9cd940a14ae19f101c3cb4571c3c3415d9a`
+**Phase 3 design baseline:** `b2989cd1f78fc374f433352fd6532a506fb00108`
 
-**Baseline identity:** PR #58 merge, before the Phase 2 closeout documentation commits
+**Baseline identity:** PR #73 merge; Dashboard UX closeout complete
 
-**Date:** 2026-08-27
+**Date:** 2026-08-29
 
-## 1. How to use this handoff
+## 1. Authority and use
 
-This file is a compact starting point, not a Source of Truth and not a Phase 3 design.
-The Phase 3 thread must start from the current GitHub `main` branch and verify merged
-code and tests. The baseline SHA above identifies the audited Phase 2 implementation
-tree; it is not a promise that `main` will still point to that commit after the
-closeout PRs merge.
-
-Use repository documents by their authority and subject:
+This handoff is not a Source of Truth and never overrides the current checkout,
+merged code, tests, or a normative plan. Use documents by authority and subject:
 
 1. `AGENTS.md` — repository operations, safety, validation, and Git/PR rules
 2. `docs/SPEC.md` — product scope and invariant behavior
-3. the applicable reviewed plan — phase/step contracts and approved changes
-4. merged code and tests — current implemented baseline
+3. `docs/PHASE3_PLAN.md` — the reviewed Phase 3 implementation contract
+4. merged code and tests — the implemented baseline
 5. `docs/REVIEW_POLICY.md` — Implementer/Reviewer workflow and Merge Gate
-6. this handoff — non-normative context recovery only
+6. this handoff — context recovery only
 
-If this summary conflicts with a Source of Truth, current merged code, or tests, do
-not preserve the summary. Use the authoritative source and document the conflict.
+Every implementation task starts from current GitHub `main`, confirms the
+predecessor PR is merged, and fast-forwards local `main` from `origin/main`.
+If this summary conflicts with an authoritative source, do not preserve the
+summary.
 
-## 2. Phase 2 closeout state
+## 2. Required context
+
+Before implementing a Phase 3 step, read:
+
+- `AGENTS.md`
+- `docs/SPEC.md`
+- `docs/REVIEW_POLICY.md`
+- `docs/MVP_IMPLEMENTATION_PLAN.md`
+- `docs/VISUALIZATION_MVP_PLAN.md`
+- `docs/DASHBOARD_UX_PLAN.md`
+- the relevant predecessor contracts in `docs/PHASE2_PLAN.md`
+- `docs/PHASE3_PLAN.md`
+- current Snapshot schema/repository, Dashboard API and URL helpers, LLM runtime,
+  and relevant tests
+
+An external reference may inform a later implementation only when its repository,
+path, immutable revision, and inspection date are recorded. An unpinned external
+example is not a Phase 3 contract.
+
+## 3. Phase 2 baseline
 
 Phase 2A through Phase 2F are complete:
 
-- Technical Expansion, task-aware LLM runtime profiles, Supply/Demand `mean4w`, and
-  the 20-day market-correlation window
-- public reported short positions
-- investor-type market flows
+- Technical Expansion and task-aware LLM runtime profiles
+- Supply/Demand `mean4w` and the 20-day market-correlation window
+- public reported short positions and investor-type market flows
 - TSE 33-sector benchmark and sector short-selling flow
 - Advanced Dividend analysis
 - daily-OHLCV estimated Volume Profile with POC and Value Area
 
-Snapshot V9 is the current writer. The read boundary accepts immutable V1–V9
-Snapshots; V1–V8 files are not migrated or rewritten, and unknown versions are
-rejected.
-
-## 3. Current deterministic boundary
-
-Important deterministic Engines include:
-
-- Fundamental, Valuation, and Peer Comparison calculations
-- Technical SMA/ATR/swing/trend and Advanced Technical RSI/MACD/Bollinger
-- Supply/Demand and market-correlation windows
-- Strategy Entry/Stop/Target candidates with sourced tick/resistance constraints
-- report-level public short positions
-- investor-type market flows
-- sector benchmark and sector short-selling turnover
-- fiscal/event-level Advanced Dividend analysis
-- daily-OHLCV estimated Volume Profile allocation, POC, and Value Area
+AnalysisSnapshot V9 is the current writer. The read boundary accepts immutable
+V1–V9 Snapshots; V1–V8 files are not migrated or rewritten, and unknown versions
+are rejected.
 
 The architecture remains one-way:
 
@@ -70,75 +74,144 @@ typed source results
   → Canonical AnalysisSnapshot V9
   → local persistence / read-only API
   → Dashboard presentation
-
-structured Tool results
-  → comprehensive-analysis interpretation
 ```
 
-The Standard Agent collector consumes structured tool results and does not recover
-financial values from prompts or final Markdown. The Claude Agent SDK remains a
-separate execution path and is not connected to Snapshot generation. Dashboard and
-LLM layers format or interpret stored/calculated values; they do not reimplement
-financial or statistical calculations.
+Dashboard and LLM layers format or interpret stored/calculated values. They do not
+reimplement financial or statistical calculations.
 
 ## 4. Invariants to preserve
 
-- **Code calculates, AI interprets.** Important financial/statistical calculations
-  remain deterministic and tested.
-- **No data means no claim.** Missing, unavailable, or uncollected data is not zero
-  and cannot support a substitute claim.
-- **No look-ahead.** Historical analysis respects source-specific publication,
-  eligibility, classification, and row-date boundaries.
-- Typed unavailable states, `not_collected`, and valid numeric zero remain distinct.
-- Snapshot evolution is additive and versioned. Old schemas remain immutable and
-  readable unless an explicitly approved migration says otherwise.
-- Browser and LLM consumers do not reconstruct calculations from raw data or
-  presentation text.
-- The system remains personal, local, single-user research software rather than an
-  automated trading or public advisory service.
+- Code calculates; AI interprets.
+- Missing, unavailable, uncollected, and valid zero remain distinct.
+- Historical work respects source-specific dates and never introduces look-ahead.
+- V1–V9 remain immutable and readable; Phase 3 does not create Snapshot V10.
+- History and Evaluator sidecars use the reviewed cross-process no-replace publish
+  contract. Latest state is resolved authoritatively from immutable history by
+  validated numeric `generatedAtEpochMs`; raw timestamp strings are never sorted and
+  the inherited identity permits no distinct same-millisecond tie. Legacy
+  `latest.json` is read only for a ticker with zero history files and is never
+  rewritten by Phase 3.
+- Browser and LLM consumers do not reconstruct values from presentation text.
+- Comparison maps schema-supported nullable fields without a stored metric reason to
+  the sole `missing_metric_value` synthetic state and compares only strict canonical
+  Gregorian date roles; malformed legacy dates make only that row incomparable.
+- Radar trusts stored Engine positions/unavailable state, preserves valid sparse
+  per-metric samples, and never replays peer metric eligibility in the Browser.
+- Evaluator Evidence provenance is structurally URL-free, and production plus the
+  paid gold harness share the same sole request builder/provider invocation path.
+- Phase 3 creates no Buy/Sell signal, automatic action, or runtime composite score.
+- Evaluator execution requires a tracked passed attestation whose manifest, exact
+  provider/model/reasoning/endpoint/organization/project/zero-retry tuple, versions,
+  evaluator-source/config bytes, pinned Bun/platform/architecture, and frozen
+  resolved-dependency bytes match the current runtime; no environment routing,
+  pending-manifest, SDK retry, or ungated override exists.
+- The product remains personal, local, single-user research software.
 
-See `docs/SPEC.md` and `docs/PHASE2_PLAN.md` for the normative product and Phase 2
-contracts. Do not copy detailed formulas from this summary.
+Detailed formulas and source contracts remain in `docs/SPEC.md`,
+`docs/PHASE2_PLAN.md`, and `docs/PHASE3_PLAN.md`; do not copy them from this
+summary.
 
-## 5. Representative deferred Phase 2 scope
+## 5. P3-0 durable design boundary
 
-Deferred items remain unimplemented unless a later reviewed plan adopts them:
+The design investigation began from merged `main`
+`b2989cd1f78fc374f433352fd6532a506fb00108` after the PR #73 Dashboard UX
+closeout. That SHA identifies the predecessor design baseline only; it is not a claim
+about the current checkout or current Phase 3 approval.
 
-- optional ADX and Supply/Demand Z-score
-- investor-flow rolling/cumulative ratios, Z-scores, ranks, and classifications
-- local archives for overwritten source vintages
-- split/special-aware dividend CAGR and increase/cut streaks
-- DOE, payout-policy extraction, and buyback lifecycle integration
-- rights-issue price/volume common-basis conversion
-- minute/tick Volume Profile
+Do not record a working branch, open PR number, review verdict, check result, merge
+state, or corrected candidate head in this handoff. Resolve all of those from current
+Git/GitHub state and `docs/REVIEW_POLICY.md`. After P3-0 merges, its merge commit and
+current `docs/PHASE3_PLAN.md` replace this starting-point context.
 
-Rejected Phase 2 boundaries remain rejected where specified in the plan, including
-unsupported issuer attribution or aggregation, actual-holder/true-shikori claims,
-Browser/LLM calculation, and automatic thresholds, composite signals, or Buy/Sell
-derivation from descriptive source results.
+P3-0 changes the following Source of Truth documents together:
 
-## 6. Phase 3 candidates and next task
+- `docs/SPEC.md`
+- `docs/MVP_IMPLEMENTATION_PLAN.md`
+- `docs/PHASE3_PLAN.md`
+- `docs/PHASE3_HANDOFF.md` as non-normative recovery context
 
-`docs/SPEC.md` currently lists these Phase 3 candidates:
+## 6. Phase 3 outcome
 
-- Independent Evaluator
-- advanced composite score
-- PDF
-- Radar chart
-- past-analysis diff
+Phase 3 adopts:
 
-Start Phase 3 in a new Codex thread with:
+- deterministic, explicit-registry comparison of two immutable saved Snapshots using
+  numeric epoch request/order validation, strict row date comparison, typed nullable
+  metric reasons, and typed duplicate-identity outcomes;
+- a presentation-only Radar of the seven stored peer percentiles that suppresses its
+  polygon for an internally inconsistent stored selected-peer/position state without
+  re-running Engine eligibility or imposing a five-peer per-metric threshold;
+- a bounded, record-grouped Evidence manifest that preserves exact typed facts
+  and their allowlisted non-available reasons through URL-free provenance without
+  unbounded scalar expansion;
+- an explicitly invoked qualitative Independent Evaluator whose result is stored in
+  a separate versioned sidecar, whose exact Snapshot/run URL identity is preserved,
+  whose findings reference exact available/non-available facts, and whose exact
+  source/dependency/provider-route/runtime environment and sole production/gold
+  provider call path have passed the gold gate; and
+- a docs-only composite-score evaluation plan whose runtime adoption remains gated
+  by Phase 4 validation.
+
+Phase 3 explicitly does not implement:
+
+- PDF or print export, export storage, or a download API;
+- a runtime composite score or new financial signal;
+- collection-level public-short, investor-flow, or sector-flow aggregation;
+- automatic Evaluator execution, POST generation endpoints, polling, or WebSocket;
+- Snapshot V10, migration, or backfill.
+
+PDF has no numbered target phase. Reconsider it only after a concrete sharing,
+immutable-audit, offline-printing, or PDF-accessibility need is documented in a
+separate reviewed plan. The existing Playwright/Chromium dependency remains for
+Dashboard browser tests and is not a PDF commitment.
+
+The final Dashboard registry has six stable tabs:
 
 ```text
-P3-0 — Source / Formula / Architecture Design
+report         / 概要・レポート
+evaluation     / AIレビュー
+technical      / 株価・テクニカル
+fundamentals   / 比較・配当
+supply-demand  / 需給・空売り
+market         / 市場・セクター
 ```
 
-P3-0 is docs-only. It must determine scope and architecture from current `main`, the
-Source of Truth, merged code, and tests without assuming this thread's conversation
-can be reconstructed.
+Comparison belongs at the start of `report`; Radar belongs in
+`fundamentals`; stored Evaluator results belong in `evaluation`. The Dashboard
+does not invoke an Evaluator or incur provider cost.
 
-P3-0 must not implement runtime code, an Evaluator, score calculations, weights,
-Snapshot V10, PDF generation, Radar charts, or past-analysis diff. This handoff does
-not decide evaluation formulas, score weights, Radar axes, PDF structure, diff
-semantics, or the implementation sequence beyond requiring a reviewed docs-only
-design first.
+## 7. Implementation sequence and next task
+
+Each item is a separate reviewed PR. Do not start a dependent step until its
+predecessor is merged and local `main` is fast-forwarded.
+
+1. P3-0 — Source of Truth design synchronization
+2. P3-I0 — history immutability, authoritative epoch-ordered latest resolution,
+   existing latest/history-consumer integration, canonical digest, and stored-report
+   safety
+3. P3-H1 — pure saved-analysis comparison
+4. P3-H2 — read-only Comparison API and Dashboard
+5. P3-R1 — Peer Radar
+6. P3-E1 — evidence manifest and evaluator sidecar
+7. P3-E2 — explicit evaluator runtime, CLI, and manual gold-set gate
+8. P3-E3 — evaluator read API and `evaluation` tab
+9. P3-C0 — composite-score evaluation plan only
+10. P3-X — Usage, setup, handoff, and final validation closeout
+
+After P3-0 passes independent review and is merged, the next task is:
+
+```text
+P3-I0 — History immutability, authoritative epoch-ordered history latest resolution,
+existing latest/history-consumer integration, CanonicalJsonV1 digest, and
+stored-report safety gate
+```
+
+P3-I0 updates only the existing latest/history GET, Watchlist, and saved-Snapshot
+reload integration and must not add a new route/component, Comparison
+calculation/API/UI, Radar, Evaluator runtime, PDF, score, Snapshot V10, or source
+fetch.
+
+## 8. Maintenance boundary
+
+This file is updated at P3-0 to establish recovery context and at P3-X to record
+the final merged state. It is not a per-PR progress ledger. Intermediate status
+belongs in the relevant PR and current Git history.

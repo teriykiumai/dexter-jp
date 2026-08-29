@@ -708,17 +708,20 @@ Phase 1.5は、Step 10で完成したMVPの完成条件を変更または再度�
 ## Phase 3
 
 - Evaluator
-- advanced scoring
-- PDF
 - radar charts
 - historical comparison
+- composite-score evaluation plan only; no runtime score
 
 ## Phase 4
 
 - backtest
 - strategy validation
-- score validation
+- score validation and runtime adoption decision
 - look-ahead validation
+
+PDF export is deferred without assigning it to a numbered phase. Reconsider it only
+after a concrete sharing, audit, offline-printing, or PDF-accessibility need is
+documented in a separate reviewed plan.
 
 ## Phase 5
 
