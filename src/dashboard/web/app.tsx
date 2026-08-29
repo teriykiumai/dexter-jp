@@ -928,19 +928,35 @@ function Dashboard({
         <Card title="データ基準日" eyebrow="Source dates">
           <MetricGrid metrics={view.dataDates} />
         </Card>
-        <Card title="利用不可データ" eyebrow={`${view.unavailable.length} stored records`}>
+        <Card title="データ状態" eyebrow={`${view.unavailable.length} stored records`}>
           <AvailabilityBadges counts={view.availability.global} />
-          {view.unavailable.length ? (
-            <ul className="unavailable-list">
-              {view.unavailable.map((item, index) => (
-                <li key={`${item.section}-${item.metric ?? ''}-${index}`}>
-                  <strong>{item.section}{item.metric ? ` / ${item.metric}` : ''}</strong>
-                  <span>{item.reason}</span>
-                  {item.detail ? <small>{item.detail}</small> : null}
-                </li>
-              ))}
-            </ul>
-          ) : <p className="clear-state">記録された欠損はありません。</p>}
+          <section className="data-state-group" aria-labelledby="uncollected-sections-heading">
+            <h3 id="uncollected-sections-heading">未収集セクション</h3>
+            {view.availability.uncollectedSections.length ? (
+              <ul className="unavailable-list">
+                {view.availability.uncollectedSections.map(section => (
+                  <li key={section}>
+                    <strong>{section}</strong>
+                    <span>このSnapshotでは未収集</span>
+                  </li>
+                ))}
+              </ul>
+            ) : <p className="clear-state">未収集セクションはありません。</p>}
+          </section>
+          <section className="data-state-group" aria-labelledby="stored-state-records-heading">
+            <h3 id="stored-state-records-heading">保存済みデータ状態レコード</h3>
+            {view.unavailable.length ? (
+              <ul className="unavailable-list">
+                {view.unavailable.map((item, index) => (
+                  <li key={`${item.section}-${item.metric ?? ''}-${index}`}>
+                    <strong>{item.section}{item.metric ? ` / ${item.metric}` : ''}</strong>
+                    <span>{item.reason}</span>
+                    {item.detail ? <small>{item.detail}</small> : null}
+                  </li>
+                ))}
+              </ul>
+            ) : <p className="clear-state">保存済みデータ状態レコードはありません。</p>}
+          </section>
         </Card>
       </div>
 

@@ -167,6 +167,9 @@ tbody th { color: #dce4ea; }
 .unavailable-list strong { color: #c0cbd4; font: 600 11px/1.4 "SFMono-Regular", Consolas, monospace; }
 .unavailable-list span, .unavailable-list small { min-width: 0; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
 .unavailable-list small { grid-column: 2; }
+.data-state-group { margin-top: 18px; }
+.data-state-group + .data-state-group { padding-top: 18px; border-top: 1px solid var(--border); }
+.data-state-group h3 { margin: 0 0 10px; color: var(--blue); font: 600 12px/1.3 "SFMono-Regular", Consolas, monospace; }
 .scenario-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
 .scenario { padding: 17px; border-top: 2px solid var(--blue); background: #0c141c; }
 .scenario.bull { border-color: var(--accent); }

@@ -4,6 +4,7 @@ import { expect, test, type Page } from 'playwright/test';
 import {
   AnalysisSnapshotV1Schema,
   AnalysisSnapshotV4Schema,
+  AnalysisSnapshotV8Schema,
   AnalysisSnapshotV9Schema,
   buildAnalysisSnapshot,
   type AnalysisSnapshot,
@@ -122,6 +123,47 @@ function v4Snapshot(ticker = '1004'): AnalysisSnapshotV4 {
 
 function v1Snapshot(ticker = '1001'): AnalysisSnapshot {
   return AnalysisSnapshotV1Schema.parse(legacySnapshotPayload(ticker, 1));
+}
+
+function v8Snapshot(ticker = '1008'): AnalysisSnapshot {
+  const v9 = v9Snapshot(ticker);
+  return AnalysisSnapshotV8Schema.parse({
+    ...omitProperties(v9, [
+      'schemaVersion',
+      'dataDates',
+      'provenance',
+      'units',
+      'unavailable',
+      'volumeProfile',
+    ]),
+    schemaVersion: 8,
+    dataDates: omitProperties(v9.dataDates, ['volumeProfile']),
+    provenance: omitProperties(v9.provenance, ['volumeProfile']),
+    units: omitProperties(v9.units, ['volumeProfile']),
+    unavailable: v9.unavailable.filter(item => item.section !== 'volumeProfile'),
+  });
+}
+
+function duplicateStateSnapshot(ticker = '1011'): AnalysisSnapshotV9 {
+  const snapshot = v9Snapshot(ticker);
+  return AnalysisSnapshotV9Schema.parse({
+    ...snapshot,
+    unavailable: [
+      {
+        section: 'technical',
+        metric: 'rsi14',
+        reason: 'missing_data',
+        detail: 'same stored detail',
+      },
+      {
+        section: 'technical',
+        metric: 'rsi14',
+        reason: 'missing_data',
+        detail: 'same stored detail',
+      },
+      { section: 'volumeProfile', reason: 'not_collected' },
+    ],
+  });
 }
 
 function richV9Snapshot(ticker = '1010'): AnalysisSnapshotV9 {
@@ -322,9 +364,21 @@ function richV9Snapshot(ticker = '1010'): AnalysisSnapshotV9 {
 const snapshots = new Map<string, AnalysisSnapshot>([
   ['1001', v1Snapshot()],
   ['1004', v4Snapshot()],
+  ['1008', v8Snapshot()],
   ['1009', v9Snapshot()],
   ['1010', richV9Snapshot()],
+  ['1011', duplicateStateSnapshot()],
 ]);
+
+const EXPECTED_UNCOLLECTED_SECTIONS = [
+  'advancedTechnical',
+  'volumeProfile',
+  'advancedDividend',
+  'reportedShortPositions',
+  'investorTypeFlows',
+  'sectorBenchmark',
+  'sectorShortRatio',
+] as const;
 
 function snapshotFor(ticker: string): AnalysisSnapshot {
   const snapshot = snapshots.get(ticker);
@@ -614,11 +668,11 @@ test.describe('Dashboard detail tab browser interaction', () => {
     }
   });
 
-  test('shows separate unavailable and uncollected navigation counts for V1, V4, and V9', async ({ browser }) => {
+  test('shows separate unavailable and uncollected navigation states for V1, V4, V8, and V9', async ({ browser }) => {
     const page = await browser.newPage();
     try {
       await mockSnapshotApi(page);
-      for (const ticker of ['1001', '1004', '1009']) {
+      for (const ticker of ['1001', '1004', '1008', '1009']) {
         const availability = buildDashboardAvailabilityNavigation(snapshotFor(ticker));
         await openDetail(page, ticker);
 
@@ -637,7 +691,51 @@ test.describe('Dashboard detail tab browser interaction', () => {
             await expect(button).toContainText(`未収集 ${counts.uncollected}`);
           }
         }
+
+        const uncollected = page.getByRole('region', { name: '未収集セクション' });
+        const storedRecords = page.getByRole('region', {
+          name: '保存済みデータ状態レコード',
+        });
+        await expect(uncollected).toBeVisible();
+        const uncollectedSections = await uncollected.locator('li strong').allTextContents();
+        expect(uncollectedSections).toEqual([...EXPECTED_UNCOLLECTED_SECTIONS]);
+        expect(new Set(uncollectedSections).size).toBe(7);
+        expect(await uncollected.getByText('fundamental', { exact: true }).count()).toBe(0);
+        await expect(storedRecords.locator('li').filter({ hasText: 'fundamental' }))
+          .toContainText('missing_required_section');
+        expect(await page.getByRole('heading', { name: '利用不可データ', exact: true }).count())
+          .toBe(0);
       }
+    } finally {
+      await page.close();
+    }
+  });
+
+  test('keeps exact duplicate and not-collected raw records reachable under a neutral heading', async ({ browser }) => {
+    const page = await browser.newPage();
+    try {
+      await mockSnapshotApi(page);
+      await openDetail(page, '1011');
+
+      const uncollected = page.getByRole('region', { name: '未収集セクション' });
+      const storedRecords = page.getByRole('region', {
+        name: '保存済みデータ状態レコード',
+      });
+      expect(await uncollected.locator('li strong').allTextContents()).toEqual(['volumeProfile']);
+      expect(await storedRecords.locator('li strong').allTextContents()).toEqual([
+        'technical / rsi14',
+        'technical / rsi14',
+        'volumeProfile',
+      ]);
+      expect(await storedRecords.locator('li span').allTextContents()).toEqual([
+        'missing_data',
+        'missing_data',
+        'not_collected',
+      ]);
+      expect(await storedRecords.locator('li small').allTextContents()).toEqual([
+        'same stored detail',
+        'same stored detail',
+      ]);
     } finally {
       await page.close();
     }
