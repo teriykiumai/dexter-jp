@@ -19,6 +19,18 @@ export type DashboardTabId = (typeof DASHBOARD_TABS)[number]['id'];
 export type DashboardSectionDestination = DashboardTabId | 'persistent';
 export type DashboardTabNavigationKey = 'ArrowLeft' | 'ArrowRight' | 'Home' | 'End';
 
+export interface DashboardAvailabilityCount {
+  unavailable: number;
+  uncollected: number;
+}
+
+export interface DashboardAvailabilityNavigation {
+  global: DashboardAvailabilityCount;
+  tabs: Record<DashboardTabId, DashboardAvailabilityCount>;
+  distinctUnavailable: SnapshotUnavailable[];
+  uncollectedSections: SnapshotUnavailable['section'][];
+}
+
 export const DEFAULT_DASHBOARD_TAB: DashboardTabId = 'report';
 
 export const DASHBOARD_SECTION_DESTINATIONS = {
@@ -41,6 +53,70 @@ export const DASHBOARD_SECTION_DESTINATIONS = {
   scenarios: 'report',
   risks: 'report',
 } as const satisfies Record<SnapshotUnavailable['section'], DashboardSectionDestination>;
+
+const VERSIONED_SNAPSHOT_SECTIONS = [
+  'advancedTechnical',
+  'reportedShortPositions',
+  'investorTypeFlows',
+  'sectorBenchmark',
+  'sectorShortRatio',
+  'advancedDividend',
+  'volumeProfile',
+] as const satisfies readonly SnapshotUnavailable['section'][];
+
+function emptyTabAvailability(): Record<DashboardTabId, DashboardAvailabilityCount> {
+  return Object.fromEntries(DASHBOARD_TABS.map(tab => [
+    tab.id,
+    { unavailable: 0, uncollected: 0 },
+  ])) as Record<DashboardTabId, DashboardAvailabilityCount>;
+}
+
+export function buildDashboardAvailabilityNavigation(
+  snapshot: AnalysisSnapshot,
+): DashboardAvailabilityNavigation {
+  const distinctUnavailable = [...new Map(
+    snapshot.unavailable
+      .filter(item => item.reason !== 'not_collected')
+      .map(item => [JSON.stringify([
+        item.section,
+        item.metric ?? null,
+        item.reason,
+        item.detail ?? null,
+      ]), item]),
+  ).values()];
+
+  const storedUncollected = new Set<SnapshotUnavailable['section']>(
+    snapshot.unavailable
+      .filter(item => item.reason === 'not_collected')
+      .map(item => item.section),
+  );
+  for (const section of VERSIONED_SNAPSHOT_SECTIONS) {
+    if (!(section in snapshot)) storedUncollected.add(section);
+  }
+  const uncollectedSections = (
+    Object.keys(DASHBOARD_SECTION_DESTINATIONS) as SnapshotUnavailable['section'][]
+  ).filter(section => storedUncollected.has(section));
+
+  const tabs = emptyTabAvailability();
+  for (const item of distinctUnavailable) {
+    const destination = DASHBOARD_SECTION_DESTINATIONS[item.section];
+    if (destination !== 'persistent') tabs[destination].unavailable += 1;
+  }
+  for (const section of uncollectedSections) {
+    const destination = DASHBOARD_SECTION_DESTINATIONS[section];
+    if (destination !== 'persistent') tabs[destination].uncollected += 1;
+  }
+
+  return {
+    global: {
+      unavailable: distinctUnavailable.length,
+      uncollected: uncollectedSections.length,
+    },
+    tabs,
+    distinctUnavailable,
+    uncollectedSections,
+  };
+}
 
 const DASHBOARD_TAB_IDS = new Set<string>(DASHBOARD_TABS.map(tab => tab.id));
 
@@ -135,6 +211,7 @@ export interface ReportedShortPositionReportView {
 
 export interface ReportedShortPositionsView {
   state: 'available' | 'unavailable' | 'not_collected';
+  dataDate: DisplayValue;
   reports: ReportedShortPositionReportView[];
   unavailableReasons: string[];
 }
@@ -342,6 +419,7 @@ export interface DashboardViewModel {
   sectorShortRatio: SectorShortRatioView;
   advancedDividend: AdvancedDividendView;
   volumeProfile: VolumeProfileView;
+  availability: DashboardAvailabilityNavigation;
   dataDates: DashboardMetric[];
   scenarios: AnalysisSnapshot['scenarios'];
   risks: AnalysisSnapshot['risks'];
@@ -819,6 +897,7 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
       : reportedShortPositions.reports.length > 0
         ? 'available'
         : 'unavailable',
+    dataDate: displayText(reportedShortPositions?.dataDate),
     reports: reportedShortPositions && reportedShortPositionUnits
       ? reportedShortPositions.reports.map(report => ({
           disclosedDate: displayText(report.disclosedDate),
@@ -1295,6 +1374,7 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
     sectorShortRatio: sectorShortRatioView,
     advancedDividend: advancedDividendView,
     volumeProfile: volumeProfileView,
+    availability: buildDashboardAvailabilityNavigation(snapshot),
     dataDates: dateEntries.map(([key, value]) => ({
       label: dataDateLabels[key],
       value: displayText(value),

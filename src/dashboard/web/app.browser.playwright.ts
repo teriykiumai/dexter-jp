@@ -4,13 +4,18 @@ import { expect, test, type Page } from 'playwright/test';
 import {
   AnalysisSnapshotV1Schema,
   AnalysisSnapshotV4Schema,
+  AnalysisSnapshotV9Schema,
   buildAnalysisSnapshot,
   type AnalysisSnapshot,
   type AnalysisSnapshotInput,
   type AnalysisSnapshotV4,
   type AnalysisSnapshotV9,
 } from '../../analysis/snapshot/index.js';
-import { DASHBOARD_TABS, type DashboardTabId } from './presentation.js';
+import {
+  DASHBOARD_TABS,
+  buildDashboardAvailabilityNavigation,
+  type DashboardTabId,
+} from './presentation.js';
 
 function snapshotInput(ticker: string): AnalysisSnapshotInput {
   return {
@@ -119,10 +124,206 @@ function v1Snapshot(ticker = '1001'): AnalysisSnapshot {
   return AnalysisSnapshotV1Schema.parse(legacySnapshotPayload(ticker, 1));
 }
 
+function richV9Snapshot(ticker = '1010'): AnalysisSnapshotV9 {
+  const snapshot = v9Snapshot(ticker);
+  const investorValues = { sell: 10, buy: 20, total: 777, balance: -333 };
+  const investorBreakdown = {
+    individuals: investorValues,
+    foreignInvestors: investorValues,
+    securitiesCompanies: investorValues,
+    investmentTrusts: investorValues,
+    businessCorporations: investorValues,
+    otherCorporations: investorValues,
+    insuranceCompanies: investorValues,
+    banks: investorValues,
+    trustBanks: investorValues,
+    otherFinancialInstitutions: investorValues,
+  };
+
+  return AnalysisSnapshotV9Schema.parse({
+    ...snapshot,
+    reportedShortPositions: {
+      dataDate: '2026-08-20',
+      reports: [
+        {
+          disclosedDate: '2026-08-20',
+          calculatedDate: '2026-08-18',
+          reporterName: 'Reporter A',
+          discretionaryManagerName: 'Manager A',
+          fundName: 'Fund A',
+          shortPositionRatio: 0.006,
+          shortPositionShares: 120_000,
+          previousCalculatedDate: '2026-08-11',
+          previousReportedRatio: 0.0054,
+          ratioDelta: 0.0005,
+        },
+        {
+          disclosedDate: '2026-08-21',
+          calculatedDate: '2026-08-19',
+          reporterName: 'Reporter B',
+          discretionaryManagerName: null,
+          fundName: null,
+          shortPositionRatio: 0,
+          shortPositionShares: 0,
+          previousCalculatedDate: null,
+          previousReportedRatio: null,
+          ratioDelta: null,
+        },
+      ],
+      unavailable: [],
+    },
+    investorTypeFlows: {
+      dataDate: '2026-08-20',
+      section: 'TokyoNagoya',
+      period: {
+        publishedDate: '2026-08-20',
+        periodStartDate: '2026-08-10',
+        periodEndDate: '2026-08-14',
+        section: 'TokyoNagoya',
+        summary: {
+          proprietary: investorValues,
+          brokerage: investorValues,
+          total: investorValues,
+        },
+        brokerageBreakdown: investorBreakdown,
+      },
+      unavailable: [],
+    },
+    advancedDividend: {
+      analysisAsOfDate: '2026-08-24',
+      collectedAt: '2026-08-24T03:04:05.000Z',
+      issuerCode: `${ticker}0`,
+      dataDate: '2026-08-21',
+      observations: [{
+        kind: 'actual',
+        fiscalYearEndDate: '2026-03-31',
+        disclosedDate: '2026-05-08',
+        disclosedTime: '15:00:00',
+        sourceEligibleDate: '2026-05-11',
+        disclosureNumber: 'summary-actual',
+        sourceField: 'DivAnn',
+        payoutRatioSourceField: 'PayoutRatioAnn',
+        annualDividendPerShare: 120,
+        payoutRatio: 0.321,
+      }],
+      events: [{
+        notifiedDate: '2026-08-21',
+        notifiedTime: null,
+        sourceEligibleDate: '2026-08-24',
+        referenceNumber: 'event-one',
+        corporateActionReferenceNumber: 'ca-one',
+        kind: 'fiscal_year_end',
+        decision: 'decided',
+        recordDateYearMonth: '2027-03',
+        dividendPerShare: 60,
+        ordinaryDividendPerShare: 40,
+        commemorativeDividendPerShare: 5,
+        specialDividendPerShare: 15,
+        recordDate: null,
+        rightsRecordDate: null,
+        exDate: null,
+        paymentDate: null,
+      }],
+      unavailable: [],
+      provenance: {
+        financialSummary: { source: 'jquants', endpoint: '/v2/fins/summary' },
+        dividendEvents: { source: 'jquants', endpoint: '/v2/fins/dividend' },
+        availabilityCalendar: { source: 'jquants', endpoint: '/v2/markets/calendar' },
+        calculation: { source: 'advanced_dividend_engine' },
+      },
+      units: { dividendPerShare: 'JPY_per_share', payoutRatio: 'ratio' },
+    },
+    volumeProfile: {
+      analysisAsOfDate: '2026-08-21',
+      collectedAt: '2026-08-28T03:04:05.000Z',
+      issuerCode: `${ticker}0`,
+      dataDate: '2026-08-21',
+      windowStartDate: '2026-03-03',
+      windowEndDate: '2026-08-21',
+      inputBarCount: 120,
+      priceBasis: 'jquants_corporate_action_adjusted',
+      volumeBasis: 'jquants_corporate_action_adjusted',
+      allocationMethod: 'uniform_range_overlap_v1',
+      binningMethod: {
+        id: 'fixed_count_linear_v1',
+        requestedBinCount: 50,
+        effectiveBinCount: 2,
+        minPrice: 1_000,
+        maxPrice: 1_020,
+      },
+      bins: [
+        {
+          index: 0,
+          lowerPrice: 1_000,
+          upperPrice: 1_010,
+          representativePrice: 1_005,
+          allocatedVolume: 0,
+          volumeShare: 0,
+        },
+        {
+          index: 1,
+          lowerPrice: 1_010,
+          upperPrice: 1_020,
+          representativePrice: 1_015,
+          allocatedVolume: 500,
+          volumeShare: 1,
+        },
+      ],
+      poc: { binIndex: 1, price: 1_015, allocatedVolume: 500, volumeShare: 1 },
+      valueArea: {
+        targetVolumeShare: 0.7,
+        achievedVolumeShare: 1,
+        val: 1_010,
+        vah: 1_020,
+        firstBinIndex: 1,
+        lastBinIndex: 1,
+      },
+      unavailable: [],
+      methodology: {
+        id: 'daily_ohlcv_volume_profile_proxy_v1',
+        approximation: 'uniform_daily_range',
+        actualHolderCostBasis: false,
+      },
+      provenance: {
+        source: 'jquants',
+        endpoint: '/v2/equities/bars/daily',
+        availabilityCalendarEndpoint: '/v2/markets/calendar',
+        sourceMapping: 'jquants_adjusted_ohlcv_with_corporate_actions_v1',
+        adjustmentFactorField: 'AdjFactor',
+        exRightsField: 'ExRT',
+        basisAudit: 'collection_horizon_rights_audit_v1',
+        basisAuditRequiredThroughDate: '2026-08-26',
+        basisAuditThroughDate: '2026-08-27',
+        corporateActionBasisStatus: 'supported_common_basis_established',
+        calculation: 'volume_profile_engine',
+      },
+      units: {
+        price: 'JPY',
+        allocatedVolume: 'adjusted_shares',
+        volumeShare: 'ratio',
+      },
+    },
+    dataDates: {
+      ...snapshot.dataDates,
+      reportedShortPositions: '2026-08-20',
+      investorTypeFlows: '2026-08-20',
+      advancedDividend: '2026-08-21',
+      volumeProfile: '2026-08-21',
+    },
+    unavailable: snapshot.unavailable.filter(item => ![
+      'reportedShortPositions',
+      'investorTypeFlows',
+      'advancedDividend',
+      'volumeProfile',
+    ].includes(item.section)),
+  });
+}
+
 const snapshots = new Map<string, AnalysisSnapshot>([
   ['1001', v1Snapshot()],
   ['1004', v4Snapshot()],
   ['1009', v9Snapshot()],
+  ['1010', richV9Snapshot()],
 ]);
 
 function snapshotFor(ticker: string): AnalysisSnapshot {
@@ -408,6 +609,147 @@ test.describe('Dashboard detail tab browser interaction', () => {
           if (tab.id !== DASHBOARD_TABS.at(-1)!.id) await page.keyboard.press('ArrowRight');
         }
       }
+    } finally {
+      await page.close();
+    }
+  });
+
+  test('shows separate unavailable and uncollected navigation counts for V1, V4, and V9', async ({ browser }) => {
+    const page = await browser.newPage();
+    try {
+      await mockSnapshotApi(page);
+      for (const ticker of ['1001', '1004', '1009']) {
+        const availability = buildDashboardAvailabilityNavigation(snapshotFor(ticker));
+        await openDetail(page, ticker);
+
+        const overview = page.getByLabel('Snapshotのデータ利用状況');
+        await expect(overview).toContainText(`利用不可 ${availability.global.unavailable}`);
+        await expect(overview).toContainText(`未収集 ${availability.global.uncollected}`);
+        await expect(overview).toContainText('このSnapshotでは未収集の項目です');
+
+        for (const tab of DASHBOARD_TABS) {
+          const button = page.locator(`#dashboard-tab-${tab.id}`);
+          const counts = availability.tabs[tab.id];
+          if (counts.unavailable > 0) {
+            await expect(button).toContainText(`利用不可 ${counts.unavailable}`);
+          }
+          if (counts.uncollected > 0) {
+            await expect(button).toContainText(`未収集 ${counts.uncollected}`);
+          }
+        }
+      }
+    } finally {
+      await page.close();
+    }
+  });
+
+  test('keeps summaries visible and preserves or resets native disclosures by Snapshot identity', async ({ browser }) => {
+    const page = await browser.newPage();
+    try {
+      await mockSnapshotApi(page);
+      await openDetail(page, '1010', 'technical');
+
+      const technicalPanel = page.locator('#dashboard-panel-technical');
+      const methodology = technicalPanel.locator('details').filter({
+        hasText: '算出方法・データ基準',
+      });
+      const bins = technicalPanel.locator('details').filter({
+        hasText: '価格帯別分布 2件',
+      });
+      await expect(technicalPanel.getByRole('heading', {
+        name: 'POC — stored deterministic value',
+        exact: true,
+      }))
+        .toBeVisible();
+      await expect(technicalPanel.getByText('¥1,015', { exact: true }).first()).toBeVisible();
+      await expect(technicalPanel.getByText('Target share', { exact: true }))
+        .toBeVisible();
+      await expect(methodology).not.toHaveAttribute('open', '');
+      await expect(bins).not.toHaveAttribute('open', '');
+      await expect(page.getByRole('region', { name: '出来高価格分布の価格帯別データ' }))
+        .toBeHidden();
+
+      await bins.locator('summary').click();
+      const binsTable = page.getByRole('region', { name: '出来高価格分布の価格帯別データ' });
+      await expect(binsTable).toBeVisible();
+      expect(await binsTable.locator('tbody tr th').allTextContents()).toEqual(['0', '1']);
+      await expect(binsTable.getByText('0 調整後株', { exact: true })).toBeVisible();
+
+      await page.locator('#dashboard-tab-market').click();
+      await expectSelectedTab(page, 'market');
+      const marketPanel = page.locator('#dashboard-panel-market');
+      const brokerage = marketPanel.locator('details').filter({
+        hasText: 'Brokerage breakdown 10 categories',
+      });
+      await expect(page.getByRole('region', { name: '投資部門別売買の集計' })).toBeVisible();
+      await expect(marketPanel.getByText('777 千円', { exact: true }).first()).toBeVisible();
+      await expect(brokerage).not.toHaveAttribute('open', '');
+      await brokerage.locator('summary').click();
+      const brokerageTable = page.getByRole('region', { name: '投資部門別売買の委託内訳' });
+      await expect(brokerageTable).toBeVisible();
+      expect(await brokerageTable.locator('tbody tr').count()).toBe(10);
+
+      await page.locator('#dashboard-tab-supply-demand').click();
+      await expectSelectedTab(page, 'supply-demand');
+      const shortReports = page.locator('#dashboard-panel-supply-demand details').filter({
+        hasText: '公開報告 2件',
+      });
+      await expect(shortReports).toHaveAttribute('open', '');
+      await expect(shortReports).toContainText('データ基準日 2026-08-20');
+      const reportsTable = page.getByRole('region', { name: '公開空売り残高報告の全報告' });
+      expect(await reportsTable.locator('tbody tr td:nth-child(3)').allTextContents())
+        .toEqual(['Reporter A', 'Reporter B']);
+      await expect(reportsTable.getByText('0%', { exact: true })).toBeVisible();
+      await expect(reportsTable.getByText('0 株', { exact: true })).toBeVisible();
+
+      await page.locator('#dashboard-tab-fundamentals').click();
+      await expectSelectedTab(page, 'fundamentals');
+      const advancedDividend = page.locator('#dashboard-panel-fundamentals details').filter({
+        hasText: '年間観測 1件',
+      });
+      await expect(advancedDividend).toHaveAttribute('open', '');
+      await expect(advancedDividend).toContainText('配当イベント 1件');
+      await expect(advancedDividend).toContainText('データ基準日 2026-08-21');
+      await expect(advancedDividend.getByText('¥120 / 株', { exact: true })).toBeVisible();
+      await expect(advancedDividend.getByText('¥60 / 株', { exact: true })).toBeVisible();
+      await expect(page.getByRole('region', { name: '配当分析の年間観測' })).toBeVisible();
+      await expect(page.getByRole('region', { name: '配当分析の配当イベント' })).toBeVisible();
+
+      await page.locator('#dashboard-tab-technical').click();
+      await expectSelectedTab(page, 'technical');
+      await expect(bins).toHaveAttribute('open', '');
+      await page.locator('#dashboard-tab-report').click();
+      await page.locator('#dashboard-tab-technical').click();
+      await expectSelectedTab(page, 'technical');
+      await expect(bins).toHaveAttribute('open', '');
+
+      for (const viewport of [
+        { width: 320, height: 568 },
+        { width: 390, height: 844 },
+      ]) {
+        await page.setViewportSize(viewport);
+        for (const tab of ['technical', 'fundamentals', 'supply-demand', 'market'] as const) {
+          await page.locator(`#dashboard-tab-${tab}`).click();
+          await expectSelectedTab(page, tab);
+          expect(await page.evaluate(() => (
+            document.documentElement.scrollWidth - window.innerWidth
+          ))).toBeLessThanOrEqual(0);
+        }
+      }
+      await page.evaluate(() => {
+        window.history.pushState({}, '', '/?ticker=1009&tab=technical');
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      });
+      await page.getByRole('heading', { name: '1009 テスト株式会社' }).waitFor();
+      await page.evaluate(() => {
+        window.history.pushState({}, '', '/?ticker=1010&tab=technical');
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      });
+      await page.getByRole('heading', { name: '1010 テスト株式会社' }).waitFor();
+      const resetBins = page.locator('#dashboard-panel-technical details').filter({
+        hasText: '価格帯別分布 2件',
+      });
+      await expect(resetBins).not.toHaveAttribute('open', '');
     } finally {
       await page.close();
     }
