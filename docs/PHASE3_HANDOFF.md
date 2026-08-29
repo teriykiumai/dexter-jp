@@ -4,25 +4,25 @@
 
 **Repository:** `teriykiumai/dexter-jp`
 
-**Phase 2 implementation baseline:** `5639b9cd940a14ae19f101c3cb4571c3c3415d9a`
+**Phase 3 design baseline:** `b2989cd1f78fc374f433352fd6532a506fb00108`
 
-**Baseline identity:** PR #58 merge, before the Phase 2 closeout documentation commits
+**Baseline identity:** PR #73 merge; Dashboard UX closeout complete
 
-**Date:** 2026-08-27
+**Date:** 2026-08-29
 
 ## 1. How to use this handoff
 
-This file is a compact starting point, not a Source of Truth and not a Phase 3 design.
-The Phase 3 thread must start from the current GitHub `main` branch and verify merged
-code and tests. The baseline SHA above identifies the audited Phase 2 implementation
-tree; it is not a promise that `main` will still point to that commit after the
-closeout PRs merge.
+This file is a compact starting point, not a Source of Truth. The normative Phase 3
+contract is `docs/PHASE3_PLAN.md`. Every implementation task must still start from
+the current GitHub `main` branch and verify merged code and tests. The baseline SHA
+above identifies the tree used for P3-0; it is not a promise that `main` still points
+to that commit.
 
 Use repository documents by their authority and subject:
 
 1. `AGENTS.md` — repository operations, safety, validation, and Git/PR rules
 2. `docs/SPEC.md` — product scope and invariant behavior
-3. the applicable reviewed plan — phase/step contracts and approved changes
+3. `docs/PHASE3_PLAN.md` — Phase 3 contracts and approved implementation sequence
 4. merged code and tests — current implemented baseline
 5. `docs/REVIEW_POLICY.md` — Implementer/Reviewer workflow and Merge Gate
 6. this handoff — non-normative context recovery only
@@ -117,28 +117,31 @@ unsupported issuer attribution or aggregation, actual-holder/true-shikori claims
 Browser/LLM calculation, and automatic thresholds, composite signals, or Buy/Sell
 derivation from descriptive source results.
 
-## 6. Phase 3 candidates and next task
+## 6. Phase 3 design outcome and next task
 
-`docs/SPEC.md` currently lists these Phase 3 candidates:
+P3-0 fixes the normative details in `docs/PHASE3_PLAN.md`. In summary only:
 
-- Independent Evaluator
-- advanced composite score
-- PDF
-- Radar chart
-- past-analysis diff
+- saved-analysis comparison is an explicit-registry deterministic result derived
+  from two immutable persisted Snapshots;
+- Radar renders the seven existing direction-normalized peer percentiles and creates
+  no new score;
+- Independent Evaluator output is optional qualitative AI judgment stored in a
+  separate versioned sidecar, never in the financial Snapshot;
+- PDF is an explicit local export from one selected persisted Snapshot and initially
+  reuses the installed Playwright/Chromium path; and
+- the advanced composite investment score is deferred to Phase 4 validation.
 
-Start Phase 3 in a new Codex thread with:
+Snapshot V9 remains the current writer. Phase 3 results do not by themselves require
+Snapshot V10. Dashboard placement keeps the existing five tabs: Peer Radar belongs
+with fundamentals/comparison; history diff, Evaluator, and PDF belong with
+Report/Data.
+
+After the reviewed P3-0 plan is merged, the next task is:
 
 ```text
-P3-0 — Source / Formula / Architecture Design
+P3-H1 — Pure saved-analysis comparison
 ```
 
-P3-0 is docs-only. It must determine scope and architecture from current `main`, the
-Source of Truth, merged code, and tests without assuming this thread's conversation
-can be reconstructed.
-
-P3-0 must not implement runtime code, an Evaluator, score calculations, weights,
-Snapshot V10, PDF generation, Radar charts, or past-analysis diff. This handoff does
-not decide evaluation formulas, score weights, Radar axes, PDF structure, diff
-semantics, or the implementation sequence beyond requiring a reviewed docs-only
-design first.
+P3-H1 adds only the allowlisted metric registry, typed transient comparison result,
+deterministic delta rules, and focused unit tests. It must not add the API, Dashboard,
+Evaluator, Radar, PDF, Snapshot change, score, or source fetch.
