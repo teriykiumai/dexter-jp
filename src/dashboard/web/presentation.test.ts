@@ -845,29 +845,28 @@ describe('snapshot presentation mapping', () => {
     expect(view.inputBarCount).toEqual({ text: '120', available: true });
     expect(view.bins).toHaveLength(50);
     expect(view.bins.map(bin => bin.index)).toEqual(Array.from({ length: 50 }, (_, i) => i));
-    expect(view.bins.map(bin => bin.allocatedVolumeValue)).toEqual(
-      result.bins!.map(bin => bin.allocatedVolume),
+    expect(view.bins.map(bin => bin.volumeShareValue)).toEqual(
+      result.bins!.map(bin => bin.volumeShare),
     );
     expect(view.bins[0]).toEqual({
       index: 0,
       lowerPrice: { text: '¥1,000', available: true },
       upperPrice: { text: '¥1,010', available: true },
       representativePrice: { text: '¥1,005', available: true },
-      allocatedVolumeValue: 0,
       allocatedVolume: { text: '0 調整後株', available: true },
+      volumeShareValue: 0,
       volumeShare: { text: '0%', available: true },
     });
     expect(view.bins[49]).toMatchObject({
       index: 49,
       representativePrice: { text: '¥1,495', available: true },
-      allocatedVolumeValue: 490,
       allocatedVolume: { text: '490 調整後株', available: true },
+      volumeShareValue: 0.04,
       volumeShare: { text: '4%', available: true },
     });
     expect(view.poc).toEqual({
       binIndex: 7,
       price: { text: '¥1,234.56', available: true },
-      allocatedVolumeValue: 487.5,
       allocatedVolume: { text: '487.5 調整後株', available: true },
       volumeShare: { text: '3.98%', available: true },
     });

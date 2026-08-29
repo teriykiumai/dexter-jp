@@ -347,9 +347,9 @@ function VolumeProfileChart({ profile }: { profile: VolumeProfileView }) {
   return (
     <figure className="volume-profile-figure">
       <figcaption>
-        保存済み価格帯別分布（低価格帯から高価格帯）。横棒は各価格帯の保存済み配分出来高を、
-        保存済みPOCの配分出来高を上限として表示します。値の再配分やPOC・Value Areaの
-        再選択はしていません。
+        保存済み価格帯別分布（低価格帯から高価格帯）。横棒は各価格帯の保存済み出来高比率を
+        0〜100%の固定範囲で表示します。値の再配分や最大値探索、POC・Value Areaの再選択は
+        していません。
       </figcaption>
       <div className="volume-profile-legend" aria-label="出来高価格分布の凡例">
         <span><i className="volume-profile-swatch poc" />保存済みPOC</span>
@@ -381,9 +381,9 @@ function VolumeProfileChart({ profile }: { profile: VolumeProfileView }) {
                 </span>
                 <meter
                   aria-label={`価格帯 ${bin.index}、代表価格 ${bin.representativePrice.text}、配分出来高 ${bin.allocatedVolume.text}、出来高比率 ${bin.volumeShare.text}${marker ? `、${marker}` : ''}`}
-                  max={poc.allocatedVolumeValue}
+                  max={1}
                   min={0}
-                  value={bin.allocatedVolumeValue}
+                  value={bin.volumeShareValue}
                 />
                 <span aria-hidden="true" className="volume-profile-bin-marker">
                   {marker}
