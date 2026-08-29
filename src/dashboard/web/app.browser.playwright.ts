@@ -1367,6 +1367,25 @@ test.describe('Dashboard detail tab browser interaction', () => {
       await expect(page.getByRole('region', { name: '出来高価格分布の価格帯別データ' }))
         .toBeHidden();
 
+      const profileChart = page.getByRole('region', {
+        name: '保存済み出来高価格分布チャート',
+      });
+      await expect(profileChart).toBeVisible();
+      const profileBins = profileChart.locator('[data-volume-profile-bin]');
+      await expect(profileBins).toHaveCount(2);
+      await expect(profileBins.nth(0)).toHaveAttribute('data-poc', 'false');
+      await expect(profileBins.nth(0)).toHaveAttribute('data-value-area', 'false');
+      await expect(profileBins.nth(0).locator('meter')).toHaveAttribute('value', '0');
+      await expect(profileBins.nth(0).locator('meter')).toHaveAttribute('max', '500');
+      await expect(profileBins.nth(1)).toHaveAttribute('data-poc', 'true');
+      await expect(profileBins.nth(1)).toHaveAttribute('data-value-area', 'true');
+      await expect(profileBins.nth(1).locator('meter')).toHaveAttribute('value', '500');
+      await expect(profileBins.nth(1).locator('meter')).toHaveAttribute('max', '500');
+      await expect(technicalPanel.getByText(
+        'POC・VAL・VAHは支持線・抵抗線や売買シグナルを意味しません。正確な保存値は下の全件表で確認できます。',
+        { exact: true },
+      )).toBeVisible();
+
       await bins.locator('summary').click();
       const binsTable = page.getByRole('region', { name: '出来高価格分布の価格帯別データ' });
       await expect(binsTable).toBeVisible();

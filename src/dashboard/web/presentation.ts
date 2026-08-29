@@ -326,6 +326,7 @@ export interface VolumeProfileBinView {
   lowerPrice: DisplayValue;
   upperPrice: DisplayValue;
   representativePrice: DisplayValue;
+  allocatedVolumeValue: number;
   allocatedVolume: DisplayValue;
   volumeShare: DisplayValue;
 }
@@ -349,6 +350,7 @@ export interface VolumeProfileView {
   poc: {
     binIndex: number;
     price: DisplayValue;
+    allocatedVolumeValue: number;
     allocatedVolume: DisplayValue;
     volumeShare: DisplayValue;
   } | null;
@@ -1260,6 +1262,7 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
       ? {
           binIndex: volumeProfile.poc.binIndex,
           price: formatMetric(volumeProfile.poc.price, volumeProfileUnits.price),
+          allocatedVolumeValue: volumeProfile.poc.allocatedVolume,
           allocatedVolume: formatMetric(
             volumeProfile.poc.allocatedVolume,
             volumeProfileUnits.allocatedVolume,
@@ -1298,6 +1301,7 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
             bin.representativePrice,
             volumeProfileUnits.price,
           ),
+          allocatedVolumeValue: bin.allocatedVolume,
           allocatedVolume: formatMetric(
             bin.allocatedVolume,
             volumeProfileUnits.allocatedVolume,

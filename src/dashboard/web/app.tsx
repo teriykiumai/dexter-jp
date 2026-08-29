@@ -45,6 +45,7 @@ import {
   type DashboardTabId,
   type DisplayValue,
   type InvestorTypeCategoryView,
+  type VolumeProfileView,
   type WatchlistItemView,
   type WatchlistSortKey,
 } from './presentation.js';
@@ -335,6 +336,67 @@ function StoredDisclosure({
       <summary>{summary}</summary>
       <div className="stored-disclosure-content">{children}</div>
     </details>
+  );
+}
+
+function VolumeProfileChart({ profile }: { profile: VolumeProfileView }) {
+  const poc = profile.poc;
+  const valueArea = profile.valueArea;
+  if (!poc || !valueArea) return null;
+
+  return (
+    <figure className="volume-profile-figure">
+      <figcaption>
+        保存済み価格帯別分布（低価格帯から高価格帯）。横棒は各価格帯の保存済み配分出来高を、
+        保存済みPOCの配分出来高を上限として表示します。値の再配分やPOC・Value Areaの
+        再選択はしていません。
+      </figcaption>
+      <div className="volume-profile-legend" aria-label="出来高価格分布の凡例">
+        <span><i className="volume-profile-swatch poc" />保存済みPOC</span>
+        <span><i className="volume-profile-swatch value-area" />保存済みValue Area</span>
+        <span><i className="volume-profile-swatch other" />その他の価格帯</span>
+      </div>
+      <div
+        aria-label="保存済み出来高価格分布チャート"
+        className="volume-profile-plot"
+        role="region"
+        tabIndex={0}
+      >
+        <ol>
+          {profile.bins.map(bin => {
+            const isPoc = bin.index === poc.binIndex;
+            const isValueArea = bin.index >= valueArea.firstBinIndex
+              && bin.index <= valueArea.lastBinIndex;
+            const marker = isPoc ? 'POC' : isValueArea ? 'VA' : '';
+            return (
+              <li
+                className={`${isValueArea ? 'value-area ' : ''}${isPoc ? 'poc' : ''}`.trim()}
+                data-poc={isPoc}
+                data-value-area={isValueArea}
+                data-volume-profile-bin={bin.index}
+                key={bin.index}
+              >
+                <span aria-hidden="true" className="volume-profile-bin-price">
+                  <Value value={bin.representativePrice} />
+                </span>
+                <meter
+                  aria-label={`価格帯 ${bin.index}、代表価格 ${bin.representativePrice.text}、配分出来高 ${bin.allocatedVolume.text}、出来高比率 ${bin.volumeShare.text}${marker ? `、${marker}` : ''}`}
+                  max={poc.allocatedVolumeValue}
+                  min={0}
+                  value={bin.allocatedVolumeValue}
+                />
+                <span aria-hidden="true" className="volume-profile-bin-marker">
+                  {marker}
+                </span>
+              </li>
+            );
+          })}
+        </ol>
+      </div>
+      <p className="volume-profile-boundary">
+        POC・VAL・VAHは支持線・抵抗線や売買シグナルを意味しません。正確な保存値は下の全件表で確認できます。
+      </p>
+    </figure>
   );
 }
 
@@ -800,6 +862,7 @@ function Dashboard({
                       ]} onOpenGuidance={openGlossary} />
                     </article>
                   </div>
+                  <VolumeProfileChart profile={view.volumeProfile} />
                   <StoredDisclosure
                     open={disclosures.volumeProfileBins}
                     onOpenChange={open => setDisclosure('volumeProfileBins', open)}
