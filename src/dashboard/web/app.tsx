@@ -545,9 +545,13 @@ function Dashboard({
   const visibleLineDescription = visiblePriceLines.length > 0
     ? visiblePriceLines.map(line => `${line.label} ${line.displayPrice.text}`).join('、')
     : 'なし';
-  const chartDescription = view.chart.bars.length > 0
-    ? `保存済み調整後日足 ${view.chart.startDate.text}から${view.chart.endDate.text}。最新終値 ${view.chart.latestClose.text}。表示中の価格線: ${visibleLineDescription}。`
-    : `調整後日足は利用できません。表示中の価格線: ${visibleLineDescription}。`;
+  const storedPriceDescription = view.chart.startDate.available && view.chart.endDate.available
+    ? `保存済み調整後日足 ${view.chart.startDate.text}から${view.chart.endDate.text}。保存済み最新行の終値 ${view.chart.latestClose.text}。`
+    : '保存済み調整後日足は利用できません。';
+  const drawablePriceDescription = view.chart.bars.length === 0 && view.chart.startDate.available
+    ? '完全なOHLCを持つ描画可能な行はありません。'
+    : '';
+  const chartDescription = `${storedPriceDescription}${drawablePriceDescription}表示中の価格線: ${visibleLineDescription}。`;
 
   return (
     <main className="dashboard-shell">

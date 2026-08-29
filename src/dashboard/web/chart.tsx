@@ -8,6 +8,7 @@ import {
   type BusinessDay,
   type CandlestickData,
   type HistogramData,
+  type ISeriesApi,
 } from 'lightweight-charts';
 import type { ChartBar, ChartPriceLine } from './presentation.js';
 
@@ -39,6 +40,7 @@ function toBusinessDay(date: string): BusinessDay | null {
 
 export function PriceChart({ bars, priceLines, describedBy }: PriceChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -91,6 +93,7 @@ export function PriceChart({ bars, priceLines, describedBy }: PriceChartProps) {
     volume.priceScale().applyOptions({
       scaleMargins: { top: 0.1, bottom: 0.05 },
     });
+    candleSeriesRef.current = candles;
     const [pricePane, volumePane] = chart.panes();
     pricePane?.setStretchFactor(CHART_PANE_STRETCH.price);
     volumePane?.setStretchFactor(CHART_PANE_STRETCH.volume);
@@ -118,17 +121,6 @@ export function PriceChart({ bars, priceLines, describedBy }: PriceChartProps) {
     candles.setData(candleData);
     volume.setData(volumeData);
 
-    for (const line of priceLines) {
-      candles.createPriceLine({
-        price: line.price,
-        color: line.color,
-        lineWidth: 1,
-        lineStyle: LineStyle.Dashed,
-        axisLabelVisible: true,
-        title: line.label,
-      });
-    }
-
     chart.timeScale().fitContent();
     const resizeObserver = new ResizeObserver(entries => {
       const size = entries[0]?.contentRect;
@@ -139,10 +131,32 @@ export function PriceChart({ bars, priceLines, describedBy }: PriceChartProps) {
     resizeObserver.observe(container);
 
     return () => {
+      candleSeriesRef.current = null;
       resizeObserver.disconnect();
       chart.remove();
     };
-  }, [bars, priceLines]);
+  }, [bars]);
+
+  useEffect(() => {
+    const candles = candleSeriesRef.current;
+    if (!candles) return;
+
+    const handles = priceLines.map(line => candles.createPriceLine({
+      price: line.price,
+      color: line.color,
+      lineWidth: 1,
+      lineStyle: LineStyle.Dashed,
+      axisLabelVisible: true,
+      title: line.label,
+    }));
+
+    return () => {
+      if (candleSeriesRef.current !== candles) return;
+      for (const handle of handles) {
+        candles.removePriceLine(handle);
+      }
+    };
+  }, [priceLines]);
 
   if (bars.length === 0) {
     return <div className="empty-state chart-empty">調整済みOHLCVは利用できません。</div>;

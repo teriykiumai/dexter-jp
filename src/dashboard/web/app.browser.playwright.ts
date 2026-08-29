@@ -766,7 +766,7 @@ test.describe('Dashboard detail tab browser interaction', () => {
       expect(descriptionId).toBeTruthy();
       const description = page.locator(`#${descriptionId}`);
       await expect(description).toContainText('2026-08-19から2026-08-21');
-      await expect(description).toContainText('最新終値 ¥3,050');
+      await expect(description).toContainText('保存済み最新行の終値 ¥3,050');
       await expect(description).toContainText('SMA 20 ¥2,950');
       await expect(description).toContainText('Swing High ¥3,100');
       await expect(description).toContainText('Swing Low ¥2,800');
@@ -784,6 +784,27 @@ test.describe('Dashboard detail tab browser interaction', () => {
       expect(pricePaneShare).toBeGreaterThan(0.64);
       expect(pricePaneShare).toBeLessThan(0.76);
 
+      await chart.scrollIntoViewIfNeeded();
+      const chartBox = await chart.boundingBox();
+      expect(chartBox).not.toBeNull();
+      const timeAxisClip = {
+        x: chartBox!.x + 30,
+        y: chartBox!.y + chartBox!.height - 28,
+        width: chartBox!.width - 90,
+        height: 24,
+      };
+      await page.mouse.move(1, 1);
+      const fitContentAxis = await page.screenshot({ clip: timeAxisClip });
+      await page.mouse.move(
+        chartBox!.x + chartBox!.width / 2,
+        chartBox!.y + chartBox!.height / 2,
+      );
+      await page.mouse.wheel(0, -800);
+      await page.mouse.move(1, 1);
+      await page.waitForTimeout(200);
+      const zoomedAxis = await page.screenshot({ clip: timeAxisClip });
+      expect(zoomedAxis.equals(fitContentAxis)).toBe(false);
+
       const latest = page.getByRole('region', { name: '最新値' });
       await expect(latest).toContainText('データ基準日 2026-08-21');
       await expect(latest).toContainText('crosshair日付とは連動しません');
@@ -799,6 +820,10 @@ test.describe('Dashboard detail tab browser interaction', () => {
       await expect(smaToggle).toHaveAttribute('aria-pressed', 'false');
       await expect(description).not.toContainText('SMA 20');
       await expect(description).toContainText('Swing High ¥3,100');
+      await page.mouse.move(1, 1);
+      await page.waitForTimeout(200);
+      const toggledAxis = await page.screenshot({ clip: timeAxisClip });
+      expect(toggledAxis.equals(zoomedAxis)).toBe(true);
 
       await page.locator('#dashboard-tab-report').click();
       await page.locator('#dashboard-tab-technical').click();

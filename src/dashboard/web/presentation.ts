@@ -732,7 +732,10 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
     ? snapshot.units.volumeProfile
     : null;
 
-  const bars = (snapshot.priceHistory ?? []).flatMap(bar => (
+  const storedPriceHistory = snapshot.priceHistory ?? [];
+  const firstStoredPriceBar = storedPriceHistory.at(0);
+  const latestStoredPriceBar = storedPriceHistory.at(-1);
+  const bars = storedPriceHistory.flatMap(bar => (
     bar.open === null || bar.high === null || bar.low === null || bar.close === null
       ? []
       : [{
@@ -1384,9 +1387,12 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
     chart: {
       bars,
       priceLines,
-      startDate: displayText(bars.at(0)?.date),
-      endDate: displayText(bars.at(-1)?.date),
-      latestClose: formatMetric(bars.at(-1)?.close, snapshot.units.priceHistory.close),
+      startDate: displayText(firstStoredPriceBar?.date),
+      endDate: displayText(latestStoredPriceBar?.date),
+      latestClose: formatMetric(
+        latestStoredPriceBar?.close,
+        snapshot.units.priceHistory.close,
+      ),
     },
     peer: peerView,
     supplyDemand,

@@ -1833,8 +1833,25 @@ describe('snapshot presentation mapping', () => {
       ['Swing Low', 2_650, { text: '¥2,650', available: true }],
     ]);
     expect(view.chart.startDate).toEqual({ text: '2026-08-20', available: true });
-    expect(view.chart.endDate).toEqual({ text: '2026-08-20', available: true });
-    expect(view.chart.latestClose).toEqual({ text: '¥2,780', available: true });
+    expect(view.chart.endDate).toEqual({ text: '2026-08-21', available: true });
+    expect(view.chart.latestClose).toEqual({ text: '¥2,850', available: true });
+  });
+
+  test('keeps a stored latest row with a null close unavailable in chart description metadata', () => {
+    const snapshot: AnalysisSnapshot = {
+      ...baseSnapshot(),
+      priceHistory: [
+        { date: '2026-08-20', open: 2_700, high: 2_800, low: 2_650, close: 2_780, volume: 10_000 },
+        { date: '2026-08-21', open: 2_780, high: 2_900, low: 2_700, close: null, volume: 12_000 },
+      ],
+    };
+
+    const view = mapSnapshotToDashboard(snapshot);
+
+    expect(view.chart.bars).toHaveLength(1);
+    expect(view.chart.startDate).toEqual({ text: '2026-08-20', available: true });
+    expect(view.chart.endDate).toEqual({ text: '2026-08-21', available: true });
+    expect(view.chart.latestClose).toEqual({ text: UNAVAILABLE_TEXT, available: false });
   });
 });
 
