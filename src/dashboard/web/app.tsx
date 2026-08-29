@@ -132,6 +132,7 @@ function MetricGrid({ metrics, guidance = {}, onOpenGuidance }: {
 }
 
 type GlossarySelection = 'index' | DashboardGlossaryTermId | null;
+type GlossaryFocusDestination = 'active-tab' | 'main-heading';
 
 function GlossaryDialog({ selection, onSelect, onClosed }: {
   selection: GlossarySelection;
@@ -231,15 +232,34 @@ function isVisibleFocusTarget(element: HTMLElement | null): element is HTMLEleme
     && element.getClientRects().length > 0;
 }
 
-function focusDestinationHeading(attempt = 0): void {
-  const heading = document.querySelector<HTMLElement>('[data-main-heading]');
-  if (isVisibleFocusTarget(heading)) {
-    heading.focus();
-    return;
-  }
-  if (attempt < 120) {
-    window.requestAnimationFrame(() => focusDestinationHeading(attempt + 1));
-  }
+function focusGlossaryDestination(): void {
+  const focusTarget = (): boolean => {
+    if (parseDetailTicker(window.location.search)) {
+      const activeTab = document.getElementById(
+        `dashboard-tab-${parseDetailTab(window.location.search)}`,
+      );
+      if (isVisibleFocusTarget(activeTab)) {
+        activeTab.focus();
+        return true;
+      }
+    }
+
+    const heading = document.querySelector<HTMLElement>('[data-main-heading]');
+    if (isVisibleFocusTarget(heading)) {
+      heading.focus();
+      return true;
+    }
+    return false;
+  };
+
+  if (focusTarget()) return;
+  const root = document.getElementById('root');
+  if (!root) return;
+  const observer = new MutationObserver(() => {
+    if (focusTarget()) observer.disconnect();
+  });
+  observer.observe(root, { childList: true, subtree: true });
+  if (focusTarget()) observer.disconnect();
 }
 
 function AvailabilityBadges({ counts, compact = false }: {
@@ -481,7 +501,7 @@ function Dashboard({
         activeTab.focus();
         return;
       }
-      focusDestinationHeading();
+      focusGlossaryDestination();
     });
   }, []);
 
@@ -509,7 +529,7 @@ function Dashboard({
   useEffect(() => () => {
     if (glossarySelectionRef.current === null) return;
     glossaryInvokerRef.current = null;
-    window.requestAnimationFrame(() => focusDestinationHeading());
+    window.requestAnimationFrame(() => focusGlossaryDestination());
   }, []);
 
   return (
@@ -598,11 +618,11 @@ function Dashboard({
               guidance={{
                 'RSI 14': 'rsi',
                 MACD: 'macd',
-                'MACD Signal': 'macd',
-                'MACD Histogram': 'macd',
-                'Bollinger Middle': 'bollingerBands',
-                'Bollinger Upper': 'bollingerBands',
-                'Bollinger Lower': 'bollingerBands',
+                'MACD シグナル': 'macd',
+                'MACD ヒストグラム': 'macd',
+                'ボリンジャー中心線': 'bollingerBands',
+                'ボリンジャー上限': 'bollingerBands',
+                'ボリンジャー下限': 'bollingerBands',
               }}
               metrics={view.advancedTechnical.metrics}
               onOpenGuidance={openGlossary}
@@ -1452,6 +1472,15 @@ function App() {
   const [sortKey, setSortKey] = useState<WatchlistSortKey>('latestDataDate');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const selectedTickerRef = useRef(selectedTicker);
+  const pendingGlossaryFocusRef = useRef<GlossaryFocusDestination | null>(null);
+  selectedTickerRef.current = selectedTicker;
+
+  const rememberGlossaryFocusDestination = (ticker: string | null) => {
+    if (document.querySelector<HTMLDialogElement>('dialog.glossary-dialog[open]')) {
+      pendingGlossaryFocusRef.current = ticker ? 'active-tab' : 'main-heading';
+    }
+  };
 
   useEffect(() => {
     const canonicalizeTab = (ticker: string, tab: DashboardTabId) => {
@@ -1474,6 +1503,8 @@ function App() {
         ? parseDetailTab(window.location.search)
         : DEFAULT_DASHBOARD_TAB;
       if (nextTicker) canonicalizeTab(nextTicker, nextTab);
+      rememberGlossaryFocusDestination(nextTicker);
+      if (nextTicker !== selectedTickerRef.current) setLoading(true);
       setSelectedTicker(nextTicker);
       setSelectedTab(nextTab);
       setNavigationRevision(current => current + 1);
@@ -1486,6 +1517,18 @@ function App() {
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
+
+  useEffect(() => {
+    const destination = pendingGlossaryFocusRef.current;
+    if (!destination || loading) return;
+    const target = destination === 'active-tab' && selectedTicker && snapshot && !error
+      ? document.getElementById(`dashboard-tab-${selectedTab}`)
+      : document.querySelector<HTMLElement>('[data-main-heading]');
+    if (isVisibleFocusTarget(target)) {
+      target.focus();
+      pendingGlossaryFocusRef.current = null;
+    }
+  }, [error, loading, selectedTab, selectedTicker, snapshot]);
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -1527,16 +1570,20 @@ function App() {
   }, [selectedTicker]);
 
   const navigateToTicker = (ticker: string) => {
+    rememberGlossaryFocusDestination(ticker);
     window.history.pushState(
       {},
       '',
       buildDetailPath(ticker, DEFAULT_DASHBOARD_TAB, window.location.search),
     );
+    setLoading(true);
     setSelectedTicker(ticker);
     setSelectedTab(DEFAULT_DASHBOARD_TAB);
   };
   const navigateToWatchlist = () => {
+    rememberGlossaryFocusDestination(null);
     window.history.pushState({}, '', buildWatchlistPath(window.location.search));
+    setLoading(true);
     setSelectedTicker(null);
     setSelectedTab(DEFAULT_DASHBOARD_TAB);
   };

@@ -50,7 +50,7 @@ export const DASHBOARD_GLOSSARY: Readonly<Record<
   },
   bollingerBands: {
     id: 'bollingerBands',
-    label: 'Bollinger Bands',
+    label: 'ボリンジャーバンド（Bollinger Bands）',
     measures: '20期間の調整後終値の平均とばらつきから、中心線・上限線・下限線を示します。',
     unitAndReading: '3本とも円単位です。帯が広いほど、対象期間の価格のばらつきが大きいことを示します。',
     limitation: '保存済みの最新20期間の値です。上限・下限は到達確率や支持線・抵抗線を保証しません。',

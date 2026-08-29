@@ -472,11 +472,26 @@ async function waitForServer(process: ChildProcessWithoutNullStreams): Promise<v
   throw new Error('Dashboard fixture server did not become ready.');
 }
 
-async function mockSnapshotApi(page: Page): Promise<void> {
+async function mockSnapshotApi(
+  page: Page,
+  responseDelayMs: Readonly<Record<string, number>> = {},
+): Promise<void> {
   await page.route('**/api/analyses/*', async route => {
     const ticker = new URL(route.request().url()).pathname.split('/').at(-1) ?? '';
+    const delay = responseDelayMs[ticker] ?? 0;
+    if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay));
     await route.fulfill({
       body: JSON.stringify(snapshotFor(ticker)),
+      contentType: 'application/json; charset=utf-8',
+      status: 200,
+    });
+  });
+}
+
+async function mockWatchlistApi(page: Page): Promise<void> {
+  await page.route('**/api/analyses', async route => {
+    await route.fulfill({
+      body: '[]',
       contentType: 'application/json; charset=utf-8',
       status: 200,
     });
@@ -611,7 +626,8 @@ test.describe('Dashboard detail tab browser interaction', () => {
   test('opens metric guidance accessibly and closes it across context changes', async ({ browser }) => {
     const page = await browser.newPage();
     try {
-      await mockSnapshotApi(page);
+      await mockSnapshotApi(page, { '1009': 2_500 });
+      await mockWatchlistApi(page);
       await openDetail(page, '1010', 'technical');
 
       const rsiInvoker = page.getByRole('button', { name: 'RSIの説明を開く' });
@@ -676,10 +692,21 @@ test.describe('Dashboard detail tab browser interaction', () => {
         window.history.pushState({}, '', '/?ticker=1009&tab=technical');
         window.dispatchEvent(new PopStateEvent('popstate'));
       });
-      const destinationHeading = page.getByRole('heading', { name: '1009 テスト株式会社' });
-      await expect(destinationHeading).toBeVisible();
+      await expect(page.getByText('1009 Snapshotを読み込み中…')).toBeVisible();
+      await expectSelectedTab(page, 'technical');
       await expect(page.getByRole('dialog')).toHaveCount(0);
-      await expect(destinationHeading).toBeFocused();
+      await expect(page.locator('#dashboard-tab-technical')).toBeFocused();
+
+      await page.getByRole('button', { name: '用語集', exact: true }).click();
+      await expect(page.getByRole('dialog', { name: '用語集', exact: true })).toBeVisible();
+      await page.evaluate(() => {
+        window.history.pushState({}, '', '/');
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      });
+      const watchlistHeading = page.getByRole('heading', { name: 'Saved Analysis' });
+      await expect(watchlistHeading).toBeVisible();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await expect(watchlistHeading).toBeFocused();
     } finally {
       await page.close();
     }

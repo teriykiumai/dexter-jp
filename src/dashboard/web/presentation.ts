@@ -795,7 +795,7 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
     { label: '売残', value: formatMetric(supply.sellingBalance, supplyUnits.sellingBalance) },
     { label: '信用倍率', value: formatMetric(supply.marginRatio, supplyUnits.marginRatio) },
     {
-      label: '52週Percentile',
+      label: '52週パーセンタイル',
       value: formatMetric(supply.percentile52w, supplyUnits.percentile52w, {
         ratioAsPercent: true,
       }),
@@ -854,32 +854,32 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
         value: formatMetric(advancedTechnical.macd?.value, advancedUnits['macd.value']),
       },
       {
-        label: 'MACD Signal',
+        label: 'MACD シグナル',
         value: formatMetric(advancedTechnical.macd?.signal, advancedUnits['macd.signal']),
       },
       {
-        label: 'MACD Histogram',
+        label: 'MACD ヒストグラム',
         value: formatMetric(
           advancedTechnical.macd?.histogram,
           advancedUnits['macd.histogram'],
         ),
       },
       {
-        label: 'Bollinger Middle',
+        label: 'ボリンジャー中心線',
         value: formatMetric(
           advancedTechnical.bollinger20?.middle,
           advancedUnits['bollinger20.middle'],
         ),
       },
       {
-        label: 'Bollinger Upper',
+        label: 'ボリンジャー上限',
         value: formatMetric(
           advancedTechnical.bollinger20?.upper,
           advancedUnits['bollinger20.upper'],
         ),
       },
       {
-        label: 'Bollinger Lower',
+        label: 'ボリンジャー下限',
         value: formatMetric(
           advancedTechnical.bollinger20?.lower,
           advancedUnits['bollinger20.lower'],

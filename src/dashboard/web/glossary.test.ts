@@ -11,6 +11,8 @@ describe('Dashboard glossary', () => {
       .toEqual([...DASHBOARD_GLOSSARY_TERM_IDS]);
     expect(new Set(DASHBOARD_GLOSSARY_ENTRIES.map(entry => entry.id)).size)
       .toBe(DASHBOARD_GLOSSARY_TERM_IDS.length);
+    expect(DASHBOARD_GLOSSARY.bollingerBands.label)
+      .toBe('ボリンジャーバンド（Bollinger Bands）');
   });
 
   test('keeps the four approved explanation categories as static prose', () => {

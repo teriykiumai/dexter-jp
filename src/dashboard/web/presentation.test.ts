@@ -650,11 +650,11 @@ describe('snapshot presentation mapping', () => {
     expect(view.advancedTechnical?.metrics).toEqual([
       { label: 'RSI 14', value: { text: '62.35', available: true } },
       { label: 'MACD', value: { text: '¥45.5', available: true } },
-      { label: 'MACD Signal', value: { text: '¥40.25', available: true } },
-      { label: 'MACD Histogram', value: { text: '¥5.25', available: true } },
-      { label: 'Bollinger Middle', value: { text: '¥2,950', available: true } },
-      { label: 'Bollinger Upper', value: { text: '¥3,150.5', available: true } },
-      { label: 'Bollinger Lower', value: { text: '¥2,749.5', available: true } },
+      { label: 'MACD シグナル', value: { text: '¥40.25', available: true } },
+      { label: 'MACD ヒストグラム', value: { text: '¥5.25', available: true } },
+      { label: 'ボリンジャー中心線', value: { text: '¥2,950', available: true } },
+      { label: 'ボリンジャー上限', value: { text: '¥3,150.5', available: true } },
+      { label: 'ボリンジャー下限', value: { text: '¥2,749.5', available: true } },
     ]);
     expect(view.advancedTechnical?.metrics.map(metric => metric.label)).not.toContain('Buy');
     expect(view.advancedTechnical?.metrics.map(metric => metric.label)).not.toContain('Sell');
@@ -1274,6 +1274,10 @@ describe('snapshot presentation mapping', () => {
     expect(available.supplyDemand).toContainEqual({
       label: '買残4週平均',
       value: { text: '9,500 株', available: true },
+    });
+    expect(available.supplyDemand).toContainEqual({
+      label: '52週パーセンタイル',
+      value: { text: '80%', available: true },
     });
 
     const unavailableSnapshot: AnalysisSnapshotV4 = {
