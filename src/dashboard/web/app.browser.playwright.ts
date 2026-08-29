@@ -71,6 +71,158 @@ function snapshotInput(ticker: string): AnalysisSnapshotInput {
   };
 }
 
+function completeSnapshotInput(ticker: string): AnalysisSnapshotInput {
+  const input = snapshotInput(ticker);
+  const peerPosition = (
+    metric: 'per' | 'pbr' | 'roe' | 'roic' | 'operatingMargin'
+      | 'revenueGrowth' | 'dividendYield',
+  ) => ({
+    metric,
+    direction: metric === 'per' || metric === 'pbr'
+      ? 'lower_is_better' as const
+      : 'higher_is_better' as const,
+    targetValue: 10,
+    median: 12,
+    rank: 1,
+    percentile: 1,
+    peerSampleSize: 1,
+    cohortSize: 2,
+  });
+  return {
+    ...input,
+    fundamental: {
+      periods: [{
+        fiscalYear: 2026,
+        submitDate: '2026-06-10',
+        revenue: 48_000,
+        operatingIncome: 4_000,
+        ordinaryIncome: 4_500,
+        netIncome: 3_000,
+        eps: 200,
+        roe: 0.12,
+        equityRatio: 0.4,
+        operatingCashFlow: 5_000,
+        freeCashFlow: 2_000,
+      }],
+      sourceUrls: ['https://example.test/financials'],
+    },
+    valuation: {
+      priceDataDate: '2026-08-21',
+      financialDataDate: '2026-06-10',
+      latestFiscalYear: 2026,
+      currentPrice: 3_050,
+      per: 15,
+      pbr: 1.2,
+      dividendYieldPercent: 2,
+      revenueCagrPercent: 5,
+      cagrStartFiscalYear: 2021,
+      cagrEndFiscalYear: 2026,
+      cagrPeriods: 5,
+      unavailable: [],
+    },
+    peerComparison: {
+      target: {
+        id: ticker,
+        name: `${ticker} テスト株式会社`,
+        sector: 'テスト業種',
+        marketCap: 1_000,
+        dataDate: '2026-06-10',
+        metrics: { per: 10 },
+      },
+      selection: {
+        peers: [{
+          id: '9999',
+          name: '比較株式会社',
+          sector: 'テスト業種',
+          marketCap: 900,
+          dataDate: '2026-06-11',
+          metrics: { per: 12 },
+        }],
+        sameSectorCandidateCount: 1,
+        marketCapPrioritizedPeerCount: 1,
+        sectorLeaderId: null,
+        sectorLeaderIncluded: false,
+        tooFewPeers: true,
+      },
+      targetIncludedInStatistics: true,
+      positions: {
+        per: peerPosition('per'),
+        pbr: peerPosition('pbr'),
+        roe: peerPosition('roe'),
+        roic: peerPosition('roic'),
+        operatingMargin: peerPosition('operatingMargin'),
+        revenueGrowth: peerPosition('revenueGrowth'),
+        dividendYield: peerPosition('dividendYield'),
+      },
+      unavailable: [],
+    },
+    peerCandidateMarketCapsComplete: true,
+    technical: {
+      dataDate: '2026-08-21',
+      ma20: 2_950,
+      atr14: 75,
+      averageVolume20: 12_000,
+      trend: 'uptrend',
+      latestSwingHigh: 3_100,
+      latestSwingLow: 2_800,
+      unavailable: [],
+    },
+    supplyDemand: {
+      dataDate: '2026-08-19',
+      volumeDataDate: '2026-08-21',
+      buyingBalance: 10_000,
+      sellingBalance: 5_000,
+      marginRatio: 2,
+      buyingBalanceWeeklyChange: 100,
+      sellingBalanceWeeklyChange: -100,
+      mean4w: 9_500,
+      mean13w: 9_000,
+      mean52w: 8_000,
+      deviation52w: 0.25,
+      percentile52w: 0.8,
+      averageDailyVolume20: 2_000,
+      digestionDays: 5,
+      unavailable: [],
+    },
+    marketCorrelation: {
+      benchmark: 'TOPIX',
+      dataDate: '2026-08-21',
+      alignedPriceCount: 21,
+      windows: [{
+        period: 20,
+        startDate: '2026-07-24',
+        endDate: '2026-08-21',
+        observations: 20,
+        correlation: 0.625,
+        beta: 1.1,
+        alphaAnnualized: 0.02,
+        rSquared: 0.390625,
+        stockVolatilityAnnualized: 0.25,
+        benchmarkVolatilityAnnualized: 0.18,
+        excessReturn: 0.03,
+        unavailable: [],
+      }],
+    },
+    strategy: {
+      dataDate: '2026-08-21',
+      entry: {
+        triggerPrice: 3_100,
+        price: 3_101,
+        reason: 'breakout_above_swing_high',
+        trigger: 'strictly_above',
+        tickSizeApplied: 1,
+      },
+      candidates: [],
+      unavailable: [],
+    },
+    priceHistory: [
+      { date: '2026-08-19', open: 2_900, high: 2_980, low: 2_880, close: 2_960, volume: 10_000 },
+      { date: '2026-08-20', open: 2_960, high: 3_040, low: 2_930, close: 3_010, volume: 0 },
+      { date: '2026-08-21', open: 3_010, high: 3_080, low: 2_990, close: 3_050, volume: 14_000 },
+    ],
+  };
+}
+
 function v9Snapshot(ticker = '1009'): AnalysisSnapshotV9 {
   return buildAnalysisSnapshot(snapshotInput(ticker));
 }
@@ -161,8 +313,8 @@ function duplicateStateSnapshot(ticker = '1011'): AnalysisSnapshotV9 {
   });
 }
 
-function richV9Snapshot(ticker = '1010'): AnalysisSnapshotV9 {
-  const snapshot = v9Snapshot(ticker);
+function completeV9Snapshot(ticker = '1010'): AnalysisSnapshotV9 {
+  const snapshot = buildAnalysisSnapshot(completeSnapshotInput(ticker));
   const investorValues = { sell: 10, buy: 20, total: 777, balance: -333 };
   const investorBreakdown = {
     individuals: investorValues,
@@ -456,7 +608,7 @@ const snapshots = new Map<string, AnalysisSnapshot>([
   ['1007', versionedSnapshot('1007', 7)],
   ['1008', versionedSnapshot('1008', 8)],
   ['1009', versionedSnapshot('1009', 9)],
-  ['1010', richV9Snapshot()],
+  ['1010', completeV9Snapshot()],
   ['1011', duplicateStateSnapshot()],
 ]);
 
@@ -1481,9 +1633,14 @@ test.describe('Dashboard detail tab browser interaction', () => {
     const page = await browser.newPage();
     try {
       await mockSnapshotApi(page);
+      expect(snapshotFor('1001').status).toBe('partial');
+      expect(snapshotFor('1004').status).toBe('partial');
+      expect(snapshotFor('1009').status).toBe('partial');
+      expect(snapshotFor('1010').status).toBe('complete');
       await openDetail(page, '1010');
 
       await expect(page.getByRole('heading', { name: '1010 テスト株式会社' })).toBeVisible();
+      await expect(page.locator('.status-badge.complete')).toHaveText('COMPLETE');
       await expect(page.getByLabel('Snapshotのデータ利用状況')).toBeVisible();
       await expect(page.getByRole('heading', { name: 'データ基準日', exact: true })).toBeVisible();
       await expect(page.getByRole('heading', { name: 'データ状態', exact: true })).toBeVisible();
