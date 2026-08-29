@@ -9,9 +9,10 @@ import {
   type ReactNode,
 } from 'react';
 import { createRoot } from 'react-dom/client';
-import type {
-  AnalysisSnapshot,
-  AnalysisSnapshotLatestItem,
+import {
+  AnalysisSnapshotSchema,
+  type AnalysisSnapshot,
+  type AnalysisSnapshotLatestItem,
 } from '../../analysis/snapshot/index.js';
 import { LIGHTWEIGHT_CHARTS_NOTICE, PriceChart } from './chart.js';
 import {
@@ -294,6 +295,26 @@ const DEFAULT_DISCLOSURE_STATE = {
 type DashboardDisclosureId = keyof typeof DEFAULT_DISCLOSURE_STATE;
 type DashboardDisclosureState = Record<DashboardDisclosureId, boolean>;
 
+const RELOAD_NO_REANALYSIS_NOTE = '外部ソースからの最新データ取得・再分析は実行していません';
+
+type SnapshotReloadState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'updated' }
+  | { status: 'unchanged' }
+  | { status: 'error'; detail: string };
+
+function reloadFeedbackMessage(state: SnapshotReloadState, generatedAt: string): string | null {
+  if (state.status === 'idle') return null;
+  if (state.status === 'loading') return '保存済みSnapshotを再読み込み中…';
+  const result = state.status === 'updated'
+    ? '更新'
+    : state.status === 'unchanged'
+      ? '変更なし'
+      : `エラー: ${state.detail}`;
+  return `${result}。表示中の生成日時 ${generatedAt}。${RELOAD_NO_REANALYSIS_NOTE}。`;
+}
+
 function StoredDisclosure({
   children,
   open,
@@ -454,12 +475,16 @@ function Dashboard({
   navigationRevision,
   snapshot,
   onBack,
+  onReload,
+  reloadState,
   onSelectTab,
   selectedTab,
 }: {
   navigationRevision: number;
   snapshot: AnalysisSnapshot;
   onBack: () => void;
+  onReload: () => void;
+  reloadState: SnapshotReloadState;
   onSelectTab: (tab: DashboardTabId) => void;
   selectedTab: DashboardTabId;
 }) {
@@ -552,6 +577,7 @@ function Dashboard({
     ? '完全なOHLCを持つ描画可能な行はありません。'
     : '';
   const chartDescription = `${storedPriceDescription}${drawablePriceDescription}表示中の価格線: ${visibleLineDescription}。`;
+  const reloadMessage = reloadFeedbackMessage(reloadState, view.header.generatedAt);
 
   return (
     <main className="dashboard-shell">
@@ -571,6 +597,24 @@ function Dashboard({
           <p className="generated-at">生成日時 {view.header.generatedAt}</p>
         </div>
         <div className="hero-actions">
+          <div className="snapshot-reload-control">
+            <button
+              aria-busy={reloadState.status === 'loading'}
+              className="snapshot-reload-button"
+              onClick={onReload}
+              type="button"
+            >
+              保存済みSnapshotを再読み込み
+            </button>
+            <p
+              aria-atomic="true"
+              aria-live="polite"
+              className={`snapshot-reload-feedback ${reloadState.status}`}
+              role="status"
+            >
+              {reloadMessage}
+            </p>
+          </div>
           <button
             className="glossary-open"
             onClick={event => openGlossaryIndex(event.currentTarget)}
@@ -1511,7 +1555,20 @@ async function fetchSnapshot(ticker: string, signal: AbortSignal): Promise<Analy
       ? `${ticker} の保存済みSnapshotがありません。`
       : 'Snapshotを読み込めませんでした。');
   }
-  return await response.json() as AnalysisSnapshot;
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error('Snapshot JSONを読み込めませんでした。');
+  }
+  const parsed = AnalysisSnapshotSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new Error('Snapshotの形式を検証できませんでした。');
+  }
+  if (parsed.data.canonicalTicker !== ticker) {
+    throw new Error('Snapshotの銘柄が表示中の銘柄と一致しません。');
+  }
+  return parsed.data;
 }
 
 function App() {
@@ -1527,9 +1584,19 @@ function App() {
   const [sortKey, setSortKey] = useState<WatchlistSortKey>('latestDataDate');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reloadState, setReloadState] = useState<SnapshotReloadState>({ status: 'idle' });
   const selectedTickerRef = useRef(selectedTicker);
+  const reloadAbortControllerRef = useRef<AbortController | null>(null);
+  const reloadRequestTokenRef = useRef(0);
   const pendingGlossaryFocusRef = useRef<GlossaryFocusDestination | null>(null);
   selectedTickerRef.current = selectedTicker;
+
+  const cancelSnapshotReload = useCallback(() => {
+    reloadRequestTokenRef.current += 1;
+    reloadAbortControllerRef.current?.abort();
+    reloadAbortControllerRef.current = null;
+    setReloadState({ status: 'idle' });
+  }, []);
 
   const rememberGlossaryFocusDestination = (ticker: string | null) => {
     if (document.querySelector<HTMLDialogElement>('dialog.glossary-dialog[open]')) {
@@ -1559,7 +1626,10 @@ function App() {
         : DEFAULT_DASHBOARD_TAB;
       if (nextTicker) canonicalizeTab(nextTicker, nextTab);
       rememberGlossaryFocusDestination(nextTicker);
-      if (nextTicker !== selectedTickerRef.current) setLoading(true);
+      if (nextTicker !== selectedTickerRef.current) {
+        cancelSnapshotReload();
+        setLoading(true);
+      }
       setSelectedTicker(nextTicker);
       setSelectedTab(nextTab);
       setNavigationRevision(current => current + 1);
@@ -1571,6 +1641,11 @@ function App() {
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
+  }, [cancelSnapshotReload]);
+
+  useEffect(() => () => {
+    reloadRequestTokenRef.current += 1;
+    reloadAbortControllerRef.current?.abort();
   }, []);
 
   useEffect(() => {
@@ -1626,6 +1701,7 @@ function App() {
 
   const navigateToTicker = (ticker: string) => {
     rememberGlossaryFocusDestination(ticker);
+    cancelSnapshotReload();
     window.history.pushState(
       {},
       '',
@@ -1637,6 +1713,7 @@ function App() {
   };
   const navigateToWatchlist = () => {
     rememberGlossaryFocusDestination(null);
+    cancelSnapshotReload();
     window.history.pushState({}, '', buildWatchlistPath(window.location.search));
     setLoading(true);
     setSelectedTicker(null);
@@ -1650,6 +1727,49 @@ function App() {
       buildDetailPath(selectedTicker, tab, window.location.search),
     );
     setSelectedTab(tab);
+  };
+  const reloadSnapshot = () => {
+    if (!selectedTicker || !snapshot) return;
+    const requestedTicker = selectedTicker;
+    const displayedIdentity = `${snapshot.canonicalTicker}:${snapshot.generatedAt}`;
+    reloadAbortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    const requestToken = reloadRequestTokenRef.current + 1;
+    reloadRequestTokenRef.current = requestToken;
+    reloadAbortControllerRef.current = abortController;
+    setReloadState({ status: 'loading' });
+
+    void fetchSnapshot(requestedTicker, abortController.signal)
+      .then(nextSnapshot => {
+        if (
+          abortController.signal.aborted
+          || reloadRequestTokenRef.current !== requestToken
+          || selectedTickerRef.current !== requestedTicker
+        ) return;
+        const nextIdentity = `${nextSnapshot.canonicalTicker}:${nextSnapshot.generatedAt}`;
+        if (nextIdentity === displayedIdentity) {
+          setReloadState({ status: 'unchanged' });
+          return;
+        }
+        setSnapshot(nextSnapshot);
+        setReloadState({ status: 'updated' });
+      })
+      .catch((cause: unknown) => {
+        if (
+          abortController.signal.aborted
+          || reloadRequestTokenRef.current !== requestToken
+          || selectedTickerRef.current !== requestedTicker
+        ) return;
+        setReloadState({
+          status: 'error',
+          detail: cause instanceof Error ? cause.message : 'Snapshotを読み込めませんでした。',
+        });
+      })
+      .finally(() => {
+        if (reloadRequestTokenRef.current === requestToken) {
+          reloadAbortControllerRef.current = null;
+        }
+      });
   };
 
   if (error) {
@@ -1688,6 +1808,8 @@ function App() {
         navigationRevision={navigationRevision}
         snapshot={snapshot}
         onBack={navigateToWatchlist}
+        onReload={reloadSnapshot}
+        reloadState={reloadState}
         onSelectTab={navigateToTab}
         selectedTab={selectedTab}
       />

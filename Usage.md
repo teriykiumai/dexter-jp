@@ -582,6 +582,16 @@ detail画面から:
 
 Browserのback / forward操作にも対応しています。
 
+## 保存済みSnapshotを再読み込みする
+
+detail画面の`保存済みSnapshotを再読み込み`は、ローカルに保存済みのlatest Snapshotを
+GET APIから読み直すだけです。外部ソースからの最新データ取得、Agent／LLMの実行、
+再分析、Snapshot保存は行いません。
+
+CLIで同じ銘柄を再分析して新しいSnapshotを保存した後、その保存結果を現在のタブへ
+反映したい場合に使用します。再読み込みに失敗した場合も、現在表示中のSnapshotは維持
+されます。
+
 ---
 
 # 15. Single Stock Dashboardの表示内容

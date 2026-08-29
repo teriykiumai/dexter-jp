@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createServer } from 'node:net';
 import { expect, test, type Page } from 'playwright/test';
 import {
+  AnalysisSnapshotSchema,
   AnalysisSnapshotV1Schema,
   AnalysisSnapshotV4Schema,
   AnalysisSnapshotV8Schema,
@@ -475,6 +476,18 @@ function snapshotFor(ticker: string): AnalysisSnapshot {
   return snapshot;
 }
 
+function snapshotWithIdentity(
+  ticker: string,
+  generatedAt: string,
+  companyName = `${ticker} テスト株式会社`,
+): AnalysisSnapshot {
+  return AnalysisSnapshotSchema.parse({
+    ...snapshotFor(ticker),
+    companyName,
+    generatedAt,
+  });
+}
+
 let dashboardProcess: ChildProcessWithoutNullStreams;
 let baseUrl: string;
 
@@ -526,6 +539,65 @@ async function mockSnapshotApi(
       status: 200,
     });
   });
+}
+
+interface MockReloadResponse {
+  body: unknown;
+  delayMs?: number;
+  status?: number;
+}
+
+async function mockReloadResponses(
+  page: Page,
+  responses: readonly MockReloadResponse[],
+): Promise<void> {
+  let responseIndex = 0;
+  await page.unroute('**/api/analyses/*');
+  await page.route('**/api/analyses/*', async route => {
+    const response = responses[Math.min(responseIndex, responses.length - 1)];
+    responseIndex += 1;
+    if (!response) throw new Error('No reload fixture response was configured.');
+    if (response.delayMs) {
+      await new Promise(resolve => setTimeout(resolve, response.delayMs));
+    }
+    await route.fulfill({
+      body: typeof response.body === 'string'
+        ? response.body
+        : JSON.stringify(response.body),
+      contentType: 'application/json; charset=utf-8',
+      status: response.status ?? 200,
+    });
+  });
+}
+
+async function installAbortIgnoringReloadFetch(
+  page: Page,
+  ticker: string,
+  responses: readonly Required<Pick<MockReloadResponse, 'body' | 'delayMs'>>[],
+): Promise<void> {
+  await page.evaluate(({ requestedTicker, queuedResponses }) => {
+    const originalFetch = window.fetch.bind(window);
+    let responseIndex = 0;
+    window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+      if (typeof input === 'string') {
+        const requestUrl = new URL(input, window.location.href);
+        const response = queuedResponses[responseIndex];
+        if (
+          requestUrl.pathname === `/api/analyses/${requestedTicker}`
+          && response
+        ) {
+          responseIndex += 1;
+          return new Promise<Response>(resolve => {
+            window.setTimeout(() => resolve(new Response(JSON.stringify(response.body), {
+              headers: { 'Content-Type': 'application/json; charset=utf-8' },
+              status: 200,
+            })), response.delayMs);
+          });
+        }
+      }
+      return originalFetch(input, init);
+    }) as typeof window.fetch;
+  }, { requestedTicker: ticker, queuedResponses: responses });
 }
 
 async function mockWatchlistApi(page: Page): Promise<void> {
@@ -864,6 +936,226 @@ test.describe('Dashboard detail tab browser interaction', () => {
       expect(mobileLayout.overflow).toBeLessThanOrEqual(0);
     } finally {
       await page.close();
+    }
+  });
+
+  test('reloads with GET only and preserves every local state for an unchanged identity', async ({ browser }) => {
+    const page = await browser.newPage();
+    try {
+      await mockSnapshotApi(page);
+      await openDetail(page, '1010', 'technical');
+      const requests: Array<{ method: string; pathname: string }> = [];
+      page.on('request', request => {
+        const url = new URL(request.url());
+        if (url.pathname.startsWith('/api/')) {
+          requests.push({ method: request.method(), pathname: url.pathname });
+        }
+      });
+      await mockReloadResponses(page, [{ body: snapshotFor('1010'), delayMs: 500 }]);
+
+      const bins = page.locator('#dashboard-panel-technical details').filter({
+        hasText: '価格帯別分布 2件',
+      });
+      await bins.locator('summary').click();
+      const smaToggle = page.getByRole('button', { name: /SMA 20/ });
+      await smaToggle.click();
+      const displayedGeneratedAt = (await page.locator('.generated-at').textContent())
+        ?.replace(/^生成日時\s*/, '') ?? '';
+
+      const reload = page.getByRole('button', {
+        name: '保存済みSnapshotを再読み込み',
+        exact: true,
+      });
+      await reload.click();
+      const feedback = page.locator('.snapshot-reload-feedback');
+      await expect(feedback).toHaveText('保存済みSnapshotを再読み込み中…');
+      await expect(reload).toHaveAttribute('aria-busy', 'true');
+      await page.getByRole('button', { name: '用語集', exact: true }).click();
+      await expect(page.getByRole('dialog', { name: '用語集', exact: true })).toBeVisible();
+
+      await expect(feedback).toContainText('変更なし。');
+      await expect(feedback).toContainText(`表示中の生成日時 ${displayedGeneratedAt}`);
+      await expect(feedback).toContainText('外部ソースからの最新データ取得・再分析は実行していません');
+      await expect(feedback).toHaveAttribute('aria-live', 'polite');
+      await expect(reload).toHaveAttribute('aria-busy', 'false');
+      await expectSelectedTab(page, 'technical');
+      await expect(bins).toHaveAttribute('open', '');
+      await expect(smaToggle).toHaveAttribute('aria-pressed', 'false');
+      await expect(page.getByRole('dialog', { name: '用語集', exact: true })).toBeVisible();
+      expect(requests).toEqual([{ method: 'GET', pathname: '/api/analyses/1010' }]);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test('replaces a newer identity while preserving only the selected tab', async ({ browser }) => {
+    const page = await browser.newPage();
+    try {
+      await mockSnapshotApi(page);
+      await openDetail(page, '1010', 'technical');
+      const updated = snapshotWithIdentity('1010', '2026-08-24T02:03:04.000Z');
+      await mockReloadResponses(page, [{ body: updated, delayMs: 500 }]);
+
+      const bins = page.locator('#dashboard-panel-technical details').filter({
+        hasText: '価格帯別分布 2件',
+      });
+      await bins.locator('summary').click();
+      const smaToggle = page.getByRole('button', { name: /SMA 20/ });
+      await smaToggle.click();
+      await page.getByRole('button', {
+        name: '保存済みSnapshotを再読み込み',
+        exact: true,
+      }).click();
+      await page.getByRole('button', { name: '用語集', exact: true }).click();
+      await expect(page.getByRole('dialog', { name: '用語集', exact: true })).toBeVisible();
+
+      const feedback = page.locator('.snapshot-reload-feedback');
+      await expect(feedback).toContainText('更新。');
+      await expectSelectedTab(page, 'technical');
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await expect(bins).not.toHaveAttribute('open', '');
+      await expect(page.getByRole('button', { name: /SMA 20/ }))
+        .toHaveAttribute('aria-pressed', 'true');
+      const displayedGeneratedAt = (await page.locator('.generated-at').textContent())
+        ?.replace(/^生成日時\s*/, '') ?? '';
+      await expect(feedback).toContainText(`表示中の生成日時 ${displayedGeneratedAt}`);
+      await expect(feedback).toContainText('外部ソースからの最新データ取得・再分析は実行していません');
+    } finally {
+      await page.close();
+    }
+  });
+
+  test('keeps the current Snapshot and UI state for every reload validation failure', async ({ browser }) => {
+    const page = await browser.newPage();
+    try {
+      await mockSnapshotApi(page);
+      await openDetail(page, '1010', 'technical');
+      await mockReloadResponses(page, [
+        { body: '{', delayMs: 300 },
+        { body: {} },
+        { body: snapshotFor('1009') },
+        { body: {}, status: 404 },
+        { body: {}, status: 500 },
+      ]);
+      const bins = page.locator('#dashboard-panel-technical details').filter({
+        hasText: '価格帯別分布 2件',
+      });
+      await bins.locator('summary').click();
+      const smaToggle = page.getByRole('button', { name: /SMA 20/ });
+      await smaToggle.click();
+      const generatedAt = await page.locator('.generated-at').textContent();
+      const reload = page.getByRole('button', {
+        name: '保存済みSnapshotを再読み込み',
+        exact: true,
+      });
+      const feedback = page.locator('.snapshot-reload-feedback');
+      const expectedErrors = [
+        'Snapshot JSONを読み込めませんでした。',
+        'Snapshotの形式を検証できませんでした。',
+        'Snapshotの銘柄が表示中の銘柄と一致しません。',
+        '1010 の保存済みSnapshotがありません。',
+        'Snapshotを読み込めませんでした。',
+      ];
+
+      for (const [index, expectedError] of expectedErrors.entries()) {
+        await reload.click();
+        if (index === 0) {
+          await page.getByRole('button', { name: '用語集', exact: true }).click();
+        }
+        await expect(feedback).toContainText(`エラー: ${expectedError}`);
+        await expect(feedback).toContainText('外部ソースからの最新データ取得・再分析は実行していません');
+        await expect(page.locator('.generated-at')).toHaveText(generatedAt ?? '');
+        await expectSelectedTab(page, 'technical');
+        await expect(bins).toHaveAttribute('open', '');
+        await expect(smaToggle).toHaveAttribute('aria-pressed', 'false');
+        if (index === 0) {
+          await expect(page.getByRole('dialog', { name: '用語集', exact: true })).toBeVisible();
+          await page.keyboard.press('Escape');
+        }
+      }
+    } finally {
+      await page.close();
+    }
+  });
+
+  test('ignores stale reloads after a newer request, ticker change, or list navigation', async ({ browser }) => {
+    const page = await browser.newPage();
+    const listPage = await browser.newPage();
+    try {
+      await mockSnapshotApi(page);
+      await openDetail(page, '1010', 'technical');
+      await installAbortIgnoringReloadFetch(page, '1010', [
+        {
+          body: snapshotWithIdentity(
+            '1010',
+            '2026-08-24T01:00:00.000Z',
+            '1010 stale first request',
+          ),
+          delayMs: 500,
+        },
+        {
+          body: snapshotWithIdentity(
+            '1010',
+            '2026-08-24T02:00:00.000Z',
+            '1010 latest request',
+          ),
+          delayMs: 50,
+        },
+        {
+          body: snapshotWithIdentity(
+            '1010',
+            '2026-08-24T03:00:00.000Z',
+            '1010 stale after ticker change',
+          ),
+          delayMs: 500,
+        },
+      ]);
+      const reload = page.getByRole('button', {
+        name: '保存済みSnapshotを再読み込み',
+        exact: true,
+      });
+      await reload.click();
+      await reload.click();
+      await page.getByRole('heading', { name: '1010 latest request' }).waitFor();
+      await page.waitForTimeout(600);
+      await expect(page.getByRole('heading', { name: '1010 latest request' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: '1010 stale first request' })).toHaveCount(0);
+
+      await reload.click();
+      await page.evaluate(() => {
+        window.history.pushState({}, '', '/?ticker=1009&tab=technical');
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      });
+      await page.getByRole('heading', { name: '1009 テスト株式会社' }).waitFor();
+      await page.waitForTimeout(600);
+      await expect(page.getByRole('heading', { name: '1009 テスト株式会社' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: '1010 stale after ticker change' }))
+        .toHaveCount(0);
+
+      await mockSnapshotApi(listPage);
+      await mockWatchlistApi(listPage);
+      await openDetail(listPage, '1010', 'technical');
+      await installAbortIgnoringReloadFetch(listPage, '1010', [{
+        body: snapshotWithIdentity(
+          '1010',
+          '2026-08-24T04:00:00.000Z',
+          '1010 stale after list navigation',
+        ),
+        delayMs: 500,
+      }]);
+      await listPage.getByRole('button', {
+        name: '保存済みSnapshotを再読み込み',
+        exact: true,
+      }).click();
+      await listPage.getByRole('button', { name: '← Analysis Portfolio' }).click();
+      await expect(listPage.getByRole('heading', { name: 'Saved Analysis' })).toBeVisible();
+      await listPage.waitForTimeout(600);
+      await expect(listPage.getByRole('heading', { name: 'Saved Analysis' })).toBeVisible();
+      await expect(listPage.getByRole('heading', { name: '1010 stale after list navigation' }))
+        .toHaveCount(0);
+    } finally {
+      await page.close();
+      await listPage.close();
     }
   });
 
