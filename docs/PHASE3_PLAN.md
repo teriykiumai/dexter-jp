@@ -210,6 +210,13 @@ type ArtifactInputEnvelopeV1 = Readonly<{
     providerId: string;
     modelId: string;
     reasoningEffort: string | null;
+    providerBoundary: Readonly<{
+      baseUrl: 'https://api.openai.com/v1';
+      organizationId: null;
+      projectId: null;
+      adapterMaxRetries: 0;
+      sdkMaxRetries: 0;
+    }>;
   }>;
 }>;
 ```
@@ -365,6 +372,7 @@ type ComparisonValueStateV1 =
   | 'available'
   | 'unavailable'
   | 'not_collected'
+  | 'ambiguous'
   | 'absent';
 ```
 
@@ -395,15 +403,21 @@ The two inputs must:
 - use valid ticker and Snapshot-ID syntax;
 - exist under the requested canonical ticker;
 - contain the same canonical ticker identity; and
-- satisfy `base.generatedAt < target.generatedAt`.
+- satisfy `baseGeneratedAtEpochMs < targetGeneratedAtEpochMs`, where both numeric
+  values are computed by the shared P3-I0 `LatestSnapshotOrderV1` parser/comparator
+  after Snapshot schema validation.
 
-Equal or reversed order is invalid; do not swap. Do not substitute latest. There is
-no caller-supplied historical cutoff:
+Raw timestamp/locale comparison is prohibited at the pure P3-H1 request boundary as
+well as in repository/history selection. Equal or reversed epoch order is invalid;
+do not swap. Do not substitute latest. There is no caller-supplied historical cutoff:
 
 ```text
 comparisonAsOf = target.generatedAt
 delta = targetValue - baseValue
 ```
+
+`comparisonAsOf` preserves the target Snapshot's validated stored timestamp for
+display/audit; it is not the comparison operand.
 
 Source freshness comes from each stored named date. No current source correction is
 applied retroactively.
@@ -564,6 +578,19 @@ type ComparisonObservationV1 =
       unavailableReasons: NonEmptyComparisonUnavailableReasonsV1;
     }>
   | Readonly<{
+      state: 'ambiguous';
+      value: null;
+      actualUnit: null;
+      dataDates: readonly [];
+      provenance: readonly [];
+      identity: ComparisonInstanceIdentityV1;
+      unavailableReasons: readonly [Readonly<{
+        reason: 'duplicate_instance_identity';
+        detail: null;
+      }>];
+      candidateCount: number;
+    }>
+  | Readonly<{
       state: 'absent';
       value: null;
       actualUnit: null;
@@ -604,8 +631,21 @@ type ComparisonDispositionV1 =
         | 'method_changed'
         | 'window_changed'
         | 'data_date_regressed'
-        | 'identity_changed'
-        | 'identity_ambiguous';
+        | 'identity_changed';
+    }>
+  | Readonly<{
+      state: 'incomparable';
+      mode: 'incomparable';
+      delta: null;
+      reason: 'identity_ambiguous';
+      affectedSides:
+        | readonly ['base']
+        | readonly ['target']
+        | readonly ['base', 'target'];
+      candidateCounts: Readonly<{
+        base: number | null;
+        target: number | null;
+      }>;
     }>
   | Readonly<{
       state: 'not_applicable';
@@ -757,22 +797,31 @@ Observation invariants are schema-enforced, not runtime convention:
   actual stored unit may remain present;
 - `not_collected` has null value, null actual unit, and at least one stored or
   synthetic reason;
+- `ambiguous` is valid only for a schema-supported dynamic identity with two or more
+  matching records. It selects no record/value/unit/date/provenance, preserves the
+  union identity, has exact integer `candidateCount >= 2`, and has only the fixed
+  `duplicate_instance_identity` reason;
 - `absent` is only a missing side of a schema-supported dynamic identity and has null
   value/unit, empty dates/provenance/reasons, and the union identity; and
 - `available + null`, non-finite available number, `not_collected + value`,
+  `ambiguous + candidateCount < 2`, ambiguous residual record context,
   `absent + value`, and empty required reason tuples are invalid results.
 
 Disposition uses this exact precedence:
 
-1. base `absent` and target `available` → `record_added`, affected base, present
+1. either side `ambiguous` → `identity_ambiguous`, with ambiguous sides in
+   base/target order and their exact candidate counts; a non-ambiguous side has null
+   candidate count, and no candidate value is selected even if the other side is
+   available or absent;
+2. base `absent` and target `available` → `record_added`, affected base, present
    target;
-2. base `available` and target `absent` → `record_removed`, affected target, present
+3. base `available` and target `absent` → `record_removed`, affected target, present
    base;
-3. either side `unavailable` or `not_collected`, including its pairing with
+4. either side `unavailable` or `not_collected`, including its pairing with
    `absent` → `non_available_state` with exact `sideStates` and all non-available
    `affectedSides` in base/target order;
-4. both sides `available` → registry comparison; and
-5. both sides `absent` is an impossible union-generation result and fails as an
+5. both sides `available` → registry comparison; and
+6. both sides `absent` is an impossible union-generation result and fails as an
    internal contract error rather than returning a row.
 
 The failure branch contains only the requested selectors and a sanitized allowlisted
@@ -989,10 +1038,12 @@ entry.reason + stop.reason + target.reason
 ```
 
 Match only when exactly one record on a side has the identity. Zero matches is
-`absent`; more than one is row-level `identity_ambiguous`. Never match by array
-index. `resistance_level` candidates are excluded because Snapshot V1–V9 persist no
-stable resistance-source identity and can legitimately contain multiple targets with
-the same reason tuple. Risk, reward, and tick-size fields are registry-excluded.
+`absent`; more than one produces the typed `ambiguous` side observation and the
+row-level `identity_ambiguous` disposition with exact candidate count. Never match by
+array index or copy any candidate value into an ambiguous observation.
+`resistance_level` candidates are excluded because Snapshot V1–V9 persist no stable
+resistance-source identity and can legitimately contain multiple targets with the
+same reason tuple. Risk, reward, and tick-size fields are registry-excluded.
 
 #### Advanced Dividend — V8+, six definitions
 
@@ -1018,7 +1069,9 @@ advancedDividend.event.specialDividendPerShare         JPY_per_share
 
 Match only an exact unique identity. Source-field/method changes are
 `method_changed`. Record, rights-record, ex, payment, disclosed, notified, and
-source-eligible dates remain named context. V1–V7 are `not_collected`.
+source-eligible dates remain named context. Duplicate fiscal/event identities use the
+same typed `ambiguous` observation and never select the first record. V1–V7 are
+`not_collected`.
 
 #### Volume Profile — V9, three keys
 
@@ -1113,9 +1166,12 @@ are `base` and `target`.
   no predecessor. Attempting to adopt it as target preserves the current URL, pair,
   rows, focus, and History entry and announces the same strictly ordered-pair
   requirement.
-- Starting Comparison first resolves and validates the current target and its
-  predecessor in memory, then calls `pushState` once with both IDs. Resolution
-  failure preserves the normal detail URL and shows a scoped error.
+- Starting Comparison first resolves and validates the current displayed target and
+  its predecessor in memory, then calls `pushState` once with both IDs. When the
+  detail is pinned by `evaluationSnapshot`, that same Snapshot is the Comparison
+  target and both matching Evaluation selectors are preserved. Resolution failure
+  preserves the current normal or Evaluation-pinned detail URL and shows a scoped
+  error.
 - Target pins the entire Dashboard to that exact Snapshot.
 - Changing target first resolves and validates its immediate predecessor, then calls
   `pushState` once with the complete new pair. It never emits a transient target-only
@@ -1126,8 +1182,9 @@ are `base` and `target`.
 - Ticker/list navigation removes the pair.
 - Malformed, one-sided, same-ID, or reversed deep links are not repaired or swapped;
   show an inline error and a Comparison-reset action.
-- Reset uses one `pushState` to remove both IDs, preserves ticker and `tab=report`,
-  and returns to normal latest-detail behavior.
+- Reset uses one `pushState` to remove both IDs and preserves ticker plus
+  `tab=report`. With matching Evaluation selectors it preserves them and returns to
+  the exact pinned detail; without them it returns to normal latest-detail behavior.
 - Back/Forward and reload restore the exact pair.
 - Detail and Comparison loads are atomic for the selected target.
 - Use AbortController and a monotonic request token; stale success/error cannot
@@ -1139,13 +1196,14 @@ are `base` and `target`.
 Comparison component state is keyed by:
 
 ```text
-ticker + baseSnapshotId + targetSnapshotId + registryVersion
+ticker + baseSnapshotId + targetSnapshotId + resultVersion + registryVersion
 ```
 
 The selected row filter and open `日付・比較条件` disclosures survive tab changes,
 Back/Forward, and a reload of that unchanged identity. They reset to the default
-filter and closed disclosures when ticker, either Snapshot ID, or registry version
-changes. Never carry an open disclosure from one comparison identity into another.
+filter and closed disclosures when ticker, either Snapshot ID, result version, or
+registry version changes. Never carry an open disclosure from one comparison
+identity/version into another.
 Persist this transient state only in the current History entry's `history.state`;
 do not add Page query parameters, localStorage, or another persistence layer.
 
@@ -1206,6 +1264,8 @@ P3-H1 tests:
 - V1/V2 20-day market-correlation `not_collected` versus V3+ availability, with
   60/250-day instances remaining V1+;
 - same/changed ticker, order, period, benchmark, method, window, identity, and dates;
+- no-fraction base plus fractional target is accepted by epoch order, while the
+  reverse pair is `invalid_order`; raw string comparison is a regression failure;
 - available zero, required-null `missing_required_section`, supported optional-null
   stored `not_collected`, unavailable, absent, mixed asymmetric side states with
   reason/detail preservation, and identity ambiguity;
@@ -1220,8 +1280,9 @@ P3-H1 tests:
   tuple at type and runtime-schema boundaries; an empty tuple is unrepresentable;
 - exact raw delta, metric-specific native/percent/fraction/category display metadata,
   presentation conversion, and negative-zero handling;
-- fixed dynamic instance order, duplicate identity, resistance-candidate exclusion,
-  and no array-index matching;
+- fixed dynamic instance order, one-side and both-side duplicate Strategy/Dividend
+  identities producing exact typed ambiguous observations/dispositions/counts,
+  resistance-candidate exclusion, and no array-index/value selection;
 - no recursive diff, collection aggregation, source fetch, score, or signal.
 
 P3-H2 tests:
@@ -1231,7 +1292,11 @@ P3-H2 tests:
   chronological fractional-second predecessor selection consistent with the shared
   resolver, oldest-target rejection, and no transient/invalid History entry;
 - deep link, reload, Back/Forward, ticker/list/tab transitions, and pair-keyed
-  filter/disclosure restoration and reset;
+  filter/disclosure restoration and reset, including reset on a `resultVersion`-only
+  state-key change;
+- starting/resetting Comparison from an Evaluation-pinned historical Snapshot
+  preserves the matching selectors and exact target; target adoption/change clears
+  them, and Back/Forward/reload never creates a mismatched tuple;
 - unchanged/newer/failed reload behavior, explicit target adoption, overlapping
   reload/pair requests, ignored AbortSignal, stale success/error rejection, focus,
   and no unexpected scroll;
@@ -1261,11 +1326,26 @@ For every axis require:
 
 - finite percentile in inclusive range 0–1;
 - stored metric and direction equal the expected registry entry;
-- top-level `selection.tooFewPeers === false`;
-- `peerSampleSize >= PEER_COMPARISON_DEFAULTS.minimumPeers` for every axis; the
-  inherited initial threshold is exactly 5;
+- `selection.peers` has unique IDs, excludes the target, contains only the target's
+  stored sector, and has count within the inherited 5–10 peer bounds;
+- `selection.tooFewPeers` exactly equals
+  `selection.peers.length < PEER_COMPARISON_DEFAULTS.minimumPeers` and is false for
+  a rendered polygon;
+- stored `targetValue` is finite, passes the existing engine eligibility predicate,
+  and exactly equals the corresponding stored target metric; stored `median` is
+  finite;
+- no matching entry exists in the stored top-level `unavailable` array;
+- `peerSampleSize` exactly equals the count of selected peers whose stored value for
+  that metric passes the existing `isAvailableMetricValue` engine predicate, and is
+  at least `PEER_COMPARISON_DEFAULTS.minimumPeers`; P3-R1 reuses/exposes that pure
+  helper without changing its financial eligibility behavior;
 - `cohortSize = peerSampleSize + 1`; and
-- finite rank in inclusive range 1–cohortSize.
+- finite rank in inclusive range 1–cohortSize. Fractional average ranks from ties are
+  valid and must not be rejected as non-integer.
+
+These are semantic-consistency checks over stored Peer inputs/outputs, not a
+recalculation of median, rank, percentile, or score. P3-R1 must not repair an
+inconsistent Snapshot or reimplement those calculations in the Browser.
 
 If any axis is missing or invalid, suppress the entire polygon and preserve the
 exact table with an explicit invalid/unavailable state. Do not clamp, re-rank,
@@ -1290,10 +1370,13 @@ contract.
 - Use no good/bad color interpretation.
 - Keep chart/table overflow inside labelled regions on mobile; no document overflow.
 
-Tests cover boundary 0/1, out-of-range, missing, direction mismatch, sample sizes
-0/1/4/5, top-level `tooFewPeers`, cohort mismatch, invalid rank,
-market-cap-priority limitation display, polygon suppression, exact table equivalence,
-screen-reader naming, and 320/768/1280px layout.
+Tests cover boundary 0/1, out-of-range, missing, direction mismatch, selected-peer
+count/duplicate/target/sector mismatch, sample sizes 0/1/4/5, eligibility-derived
+sample mismatch, null/mismatched target value, null median, matching unavailable
+entry, inconsistent top-level `tooFewPeers`, cohort mismatch, valid fractional and
+invalid out-of-range rank, market-cap-priority limitation display, polygon
+suppression, exact table equivalence, screen-reader naming, and 320/768/1280px
+layout.
 
 ## 6. P3-E — Independent Evaluator
 
@@ -1320,12 +1403,14 @@ bun run evaluate:snapshot
 - `--model`, saved `modelId`, and `DEFAULT_MODEL` are selectors only; after profile
   resolution the exact provider/model/effective-reasoning tuple must match an
   accepted `QualifiedEvaluatorRuntimeV1` entry.
-- The initial accepted tuple is only `openai / gpt-5.6-terra / high`. A local or
-  remote selector without a matching passed gate fails preflight with typed
+- The initial accepted tuple is only `openai / gpt-5.6-terra / high` through the
+  exact canonical OpenAI provider boundary defined in Section 6.5. A local or remote
+  selector without a matching passed gate fails preflight with typed
   `runtime_not_quality_gated`, before confirmation, dispatch, cost, or sidecar.
 
 Before confirmation, show ticker, snapshot ID, provider, effective model, reasoning
-effort, report/manifest/total input sizes, attempt limit, timeout, external-send
+effort, exact external base URL, organization/project routing (`none` initially),
+report/manifest/total input sizes, actual HTTP-request limit, timeout, external-send
 status, and possible API cost.
 
 ### 6.2 Evidence manifest
@@ -1492,8 +1577,9 @@ emit one scalar per collection field. Fixed scalar metrics use one item per metr
 A dynamic fiscal period, public-short row, investor-flow period, correlation/window,
 sector-short observation, dividend observation/event, or Strategy candidate uses one
 item per semantic record and carries every allowlisted scalar/category in a non-empty
-ordered `facts` tuple. Thus one public-short row is one evidence ref, not four or more
-independent scalar refs, while every value and unit remains exact.
+ordered `facts` tuple. Thus one public-short row remains one persisted Evidence item,
+not four or more duplicated scalar items, while a finding can identify an exact fact
+inside that item by `{ itemId, factKey }` and every value/unit remains exact.
 
 Each definition has a stable definition key, introduced Snapshot version,
 per-instance introduction version, exact accessor, scope, item granularity,
@@ -1502,13 +1588,40 @@ Do not reflectively traverse the Snapshot. A fact key is stable within its defin
 and never contains dynamic identity. The public item shape is:
 
 ```ts
-type EvidenceFactV1 = Readonly<{
+type EvidenceFactUnavailableReasonV1 = Readonly<{
+  reason: string;
+  detail: string | null;
+}>;
+
+type NonEmptyEvidenceFactUnavailableReasonsV1 = readonly [
+  EvidenceFactUnavailableReasonV1,
+  ...EvidenceFactUnavailableReasonV1[],
+];
+
+type EvidenceFactContextV1 = Readonly<{
   factKey: string;
-  state: 'available' | 'unavailable' | 'not_collected';
-  value: number | string | boolean | null;
-  unit: string | null;
   dataDates: readonly NamedDataDateV1[];
 }>;
+
+type EvidenceFactV1 =
+  | Readonly<EvidenceFactContextV1 & {
+      state: 'available';
+      value: number | string | boolean;
+      unit: string | null;
+      unavailableReasons: readonly [];
+    }>
+  | Readonly<EvidenceFactContextV1 & {
+      state: 'unavailable';
+      value: null;
+      unit: string | null;
+      unavailableReasons: NonEmptyEvidenceFactUnavailableReasonsV1;
+    }>
+  | Readonly<EvidenceFactContextV1 & {
+      state: 'not_collected';
+      value: null;
+      unit: null;
+      unavailableReasons: NonEmptyEvidenceFactUnavailableReasonsV1;
+    }>;
 
 type EvidenceItemV1 = Readonly<{
   itemId: string;
@@ -1522,8 +1635,13 @@ type EvidenceItemV1 = Readonly<{
 }>;
 ```
 
-Fact state/value/unit combinations use the same available/non-available invariants
-as Comparison; a record item may contain both available and unavailable facts.
+Fact state/value/unit/reason combinations use the same available/non-available
+invariants as Comparison; false and numeric zero are valid available values. Every
+registry definition enumerates the only accepted stored/synthetic reason values and
+their source mapping. `schema_predates_instance` is the fixed synthetic reason for a
+later fixed instance; unknown/free-form reasons fail manifest generation. A record
+item may contain available, unavailable, and not-collected facts simultaneously
+without relabelling the whole scope unavailable.
 Facts are ordered by the code-owned definition and there are at most 64 facts per
 item. Dynamic item IDs hash this exact single object:
 
@@ -1559,8 +1677,11 @@ fixtures are reviewed in P3-E1 before any provider call is introduced.
 Each item records:
 
 - stable semantic item ID;
-- scope ID and schema pointer;
+- scope ID and stable `definitionKey`; `definitionKey` is the sole code-owned
+  traceability pointer in V1, and there is no separate `schemaPointer` or JSON Pointer
+  field;
 - a non-empty ordered tuple of exact keyed values/states/units;
+- an empty or non-empty exact allowlisted reason tuple according to each fact state;
 - named dates;
 - record/window identity;
 - applicable method/coverage limitations.
@@ -1651,9 +1772,19 @@ type ReportAnchorSetLocationV1 = Readonly<{
   anchors: readonly [ReportAnchorV1, ReportAnchorV1, ...ReportAnchorV1[]];
 }>;
 
-type EvidenceRefsBasisV1 = Readonly<{
-  kind: 'evidence_refs';
-  refs: readonly string[];
+type EvidenceFactRefV1 = Readonly<{
+  itemId: string;
+  factKey: string;
+}>;
+
+type AvailableFactRefsBasisV1 = Readonly<{
+  kind: 'available_fact_refs';
+  refs: readonly [EvidenceFactRefV1, ...EvidenceFactRefV1[]];
+}>;
+
+type NonAvailableFactRefsBasisV1 = Readonly<{
+  kind: 'non_available_fact_refs';
+  refs: readonly [EvidenceFactRefV1, ...EvidenceFactRefV1[]];
 }>;
 
 type ReportContradictionBasisV1 = Readonly<{
@@ -1694,9 +1825,11 @@ type EvaluationFindingV1 =
       importance: 'advisory';
       summary: string;
       location: SingleReportAnchorLocationV1;
-      basis: ManifestAbsenceBasisV1 & Readonly<{
-        reason: 'relevant_evidence_unavailable' | 'outside_snapshot_scope';
-      }>;
+      basis:
+        | NonAvailableFactRefsBasisV1
+        | (ManifestAbsenceBasisV1 & Readonly<{
+            reason: 'relevant_evidence_unavailable' | 'outside_snapshot_scope';
+          }>);
     }>
   | Readonly<{
       findingId: string;
@@ -1716,7 +1849,7 @@ type EvaluationFindingV1 =
       importance: 'material' | 'advisory';
       summary: string;
       location: SingleReportAnchorLocationV1;
-      basis: EvidenceRefsBasisV1;
+      basis: AvailableFactRefsBasisV1;
     }>
   | Readonly<{
       findingId: string;
@@ -1734,7 +1867,7 @@ type EvaluationFindingV1 =
       importance: 'material' | 'advisory';
       summary: string;
       location: SingleReportAnchorLocationV1;
-      basis: EvidenceRefsBasisV1;
+      basis: AvailableFactRefsBasisV1;
     }>
   | Readonly<{
       findingId: string;
@@ -1743,7 +1876,10 @@ type EvaluationFindingV1 =
       importance: 'material' | 'advisory';
       summary: string;
       location: SingleReportAnchorLocationV1;
-      basis: EvidenceRefsBasisV1 | ManifestAbsenceBasisV1;
+      basis:
+        | AvailableFactRefsBasisV1
+        | NonAvailableFactRefsBasisV1
+        | ManifestAbsenceBasisV1;
     }>;
 ```
 
@@ -1754,24 +1890,28 @@ Categories:
   `available/complete_for_domain`, every finding domain is represented by at least
   one referenced scope, and no unavailable, not-collected, excluded, or outside
   scope participates;
-- `not_verifiable_from_snapshot` requires `manifest_absence` with reason
-  `relevant_evidence_unavailable` for only unavailable/not-collected scopes or
-  `outside_snapshot_scope` for only outside scopes, and importance is always
-  `advisory`;
+- `not_verifiable_from_snapshot` uses `non_available_fact_refs` when the exact
+  allowlisted fact exists inside an otherwise available scope but its state is
+  `unavailable` or `not_collected`; otherwise it requires `manifest_absence` with
+  reason `relevant_evidence_unavailable` for only unavailable/not-collected scopes or
+  `outside_snapshot_scope` for only outside scopes. Importance is always `advisory`;
 - `not_verifiable_by_evaluator` requires `manifest_absence` with reason
   `persisted_evidence_not_sent`, only
   `persisted_but_excluded/excluded_from_manifest` scopes, and advisory importance;
-- `internal_inconsistency` with `evidence_refs` means one report claim contradicts
-  available Snapshot evidence and requires one anchor plus refs covering every
-  domain; with `report_contradiction` it means two to four report spans are mutually
+- `internal_inconsistency` with `available_fact_refs` means one report claim
+  contradicts available Snapshot evidence and requires one anchor plus exact fact
+  refs covering every domain; with `report_contradiction` it means two to four report
+  spans are mutually
   inconsistent, requires no Snapshot evidence, and is valid for persisted,
   unavailable, excluded, or outside domains;
 - `unclear_reasoning` is deliberately evidence-grounded in V1: it requires one
-  report anchor and available evidence refs covering every domain. Purely rhetorical
+  report anchor and available fact refs covering every domain. Purely rhetorical
   or prose-only lack of clarity without eligible Snapshot evidence is outside this
   category and produces no fabricated ref;
-- `missing_caveat` accepts either basis; evidence refs must be available and cover
-  every domain, while a manifest-absence basis must use the same exact
+- `missing_caveat` accepts available fact refs, non-available fact refs, or manifest
+  absence. Available refs must resolve only to `available` facts; non-available refs
+  must resolve only to `unavailable`/`not_collected` facts; either fact-ref set must
+  cover every domain. A manifest-absence basis uses the same exact
   reason/state/coverage compatibility defined above for its reason.
 
 `not_verifiable_from_snapshot` says only that the persisted artifact cannot verify
@@ -1801,20 +1941,23 @@ Validation:
   `(start, end)`; duplicate, overlapping, out-of-order, or single-anchor sets reject
   the entire available artifact;
 - 1–4 unique claim domains, ordered by the closed EvidenceClaimDomain registry;
-- 1–16 unique valid evidence refs or 1–8 unique valid scope refs;
+- 1–16 unique valid available/non-available fact refs or 1–8 unique valid scope refs;
 - no empty refs, sentinel IDs, free-form paths, unknown fields, score, pass, or
   recommendation;
 - duplicate finding and finding-ID collision invalidate the available output.
 
 Category/basis/coverage incompatibility invalidates the entire available output;
-never coerce it into another category or fabricate an evidence ref. For every
-evidence or manifest-absence basis,
-the set of domains reached through referenced Evidence items or scopes must equal
-`claimDomains`: no domain may be omitted, and no referenced item/scope may belong to
-another domain. `evidence_refs` requires at least one available referenced item for
-each domain. `manifest_absence` requires at least one referenced scope for each
-domain and the exact category-compatible state/coverage above. In particular, an
-unavailable, not-collected, excluded, or outside scope cannot satisfy
+never coerce it into another category or fabricate a fact ref. Every fact ref must
+resolve to exactly one stored manifest item and one definition-declared `factKey`.
+`available_fact_refs` accepts only `available` facts;
+`non_available_fact_refs` accepts only `unavailable` or `not_collected` facts and
+preserves their exact allowlisted reasons in the manifest. For every fact or
+manifest-absence basis, the set of domains reached through referenced fact items or
+scopes must equal `claimDomains`: no domain may be omitted, and no referenced
+item/scope may belong to another domain. Each fact-ref basis requires at least one
+referenced fact for every domain. `manifest_absence` requires at least one referenced
+  scope for each domain and the exact category-compatible state/coverage above. In
+  particular, an unavailable, not-collected, excluded, or outside scope cannot satisfy
 `unsupported_claim`, and an excluded scope cannot satisfy
 `not_verifiable_from_snapshot`. More than four domains requires splitting at an
 anchor into separately valid findings.
@@ -1828,8 +1971,9 @@ scope is complete.
 
 The provider wire schema mirrors this category-sensitive union but omits
 `findingId`. The model does not supply it. Before hashing, validate the complete
-finding, deduplicate refs, order evidence refs by manifest item order, and order scope
-refs by the manifest scope registry. Hash this exact normalized single object:
+finding, deduplicate fact refs, order them by manifest item and definition fact order,
+and order scope refs by the manifest scope registry. Hash this exact normalized
+single object:
 
 ```ts
 type EvaluationFindingIdEnvelopeV1 = Readonly<{
@@ -1840,7 +1984,8 @@ type EvaluationFindingIdEnvelopeV1 = Readonly<{
   importance: 'material' | 'advisory';
   location: SingleReportAnchorLocationV1 | ReportAnchorSetLocationV1;
   basis:
-    | EvidenceRefsBasisV1
+    | AvailableFactRefsBasisV1
+    | NonAvailableFactRefsBasisV1
     | ManifestAbsenceBasisV1
     | ReportContradictionBasisV1;
 }>;
@@ -1849,8 +1994,9 @@ findingId = 'f_' + sha256Hex(CanonicalJsonV1(envelope)).slice(0, 24)
 ```
 
 `sha256Hex` produces all 64 lowercase hex characters before truncation. Never hash
-provider ref order or an unvalidated location/wire object; anchor sets must first
-pass the canonical-order contract above. After IDs exist, normalize findings by
+provider ref order or an unvalidated location/wire object. Fact refs are deduplicated
+and ordered by manifest item order, then that definition's fact order; anchor sets
+must first pass the canonical-order contract above. After IDs exist, normalize findings by
 material before advisory, then first location-anchor start, category order, and
 finding ID.
 
@@ -1897,10 +2043,11 @@ ArtifactInputEnvelopeV1 with zero snapshot digest; one manifest digest; two gate
 manifest digest; three gate-attestation digest; four evaluator-source digest; five
 dependency-manifest digest; Bun 1.3.14 revision 1.3.14+0d9b296af on win32/x64; 40
 lowercase `a` gate commit; qualityGateId=qg_v1_terra_high; and
-openai/gpt-5.6-terra/high
-  = {"evaluatorSchemaVersion":1,"evaluatorSourceDigest":"sha256:4444444444444444444444444444444444444444444444444444444444444444","evidenceManifestDigest":"sha256:1111111111111111111111111111111111111111111111111111111111111111","evidenceManifestVersion":1,"executionEnvironment":{"arch":"x64","bunRevision":"1.3.14+0d9b296af","bunVersion":"1.3.14","dependencyManifestDigest":"sha256:5555555555555555555555555555555555555555555555555555555555555555","platform":"win32"},"gateAttestationDigest":"sha256:3333333333333333333333333333333333333333333333333333333333333333","gateEvaluatedCommitSha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","gateManifestDigest":"sha256:2222222222222222222222222222222222222222222222222222222222222222","kind":"dexter_evaluator_input","promptVersion":1,"qualityGateId":"qg_v1_terra_high","rubricVersion":1,"runtime":{"modelId":"gpt-5.6-terra","providerId":"openai","reasoningEffort":"high"},"safetyPolicyVersion":1,"snapshotDigest":"sha256:0000000000000000000000000000000000000000000000000000000000000000","version":1}
+openai/gpt-5.6-terra/high with canonical OpenAI route, null organization/project,
+and zero adapter/SDK retries
+  = {"evaluatorSchemaVersion":1,"evaluatorSourceDigest":"sha256:4444444444444444444444444444444444444444444444444444444444444444","evidenceManifestDigest":"sha256:1111111111111111111111111111111111111111111111111111111111111111","evidenceManifestVersion":1,"executionEnvironment":{"arch":"x64","bunRevision":"1.3.14+0d9b296af","bunVersion":"1.3.14","dependencyManifestDigest":"sha256:5555555555555555555555555555555555555555555555555555555555555555","platform":"win32"},"gateAttestationDigest":"sha256:3333333333333333333333333333333333333333333333333333333333333333","gateEvaluatedCommitSha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","gateManifestDigest":"sha256:2222222222222222222222222222222222222222222222222222222222222222","kind":"dexter_evaluator_input","promptVersion":1,"qualityGateId":"qg_v1_terra_high","rubricVersion":1,"runtime":{"modelId":"gpt-5.6-terra","providerBoundary":{"adapterMaxRetries":0,"baseUrl":"https://api.openai.com/v1","organizationId":null,"projectId":null,"sdkMaxRetries":0},"providerId":"openai","reasoningEffort":"high"},"safetyPolicyVersion":1,"snapshotDigest":"sha256:0000000000000000000000000000000000000000000000000000000000000000","version":1}
 artifactInputDigest
-  = sha256:a646bd34a55aa315717916499ed965773688e40ebbc32fcf26c89b1e0aed5603
+  = sha256:7a0fd8c7bd15c3b9a197bc316e6ba1d63a7f094682a8b80ba9df88433cfcc86e
 ```
 
 ### 6.4 Sidecar
@@ -1953,6 +2100,7 @@ Persist:
   SHA;
 - exact Bun version/revision, platform/architecture, and resolved runtime-dependency
   manifest digest;
+- exact provider base URL, organization/project routing, and adapter/SDK retry limits;
 - created/completed timestamps;
 - provider, effective model, task profile, nullable reasoning effort;
 - attempt count, timeout, duration;
@@ -2010,6 +2158,13 @@ type QualifiedEvaluatorRuntimeV1 = Readonly<{
   providerId: string;
   modelId: string;
   reasoningEffort: string | null;
+  providerBoundary: Readonly<{
+    baseUrl: 'https://api.openai.com/v1';
+    organizationId: null;
+    projectId: null;
+    adapterMaxRetries: 0;
+    sdkMaxRetries: 0;
+  }>;
   evaluatorSchemaVersion: 1;
   evidenceManifestVersion: 1;
   rubricVersion: 1;
@@ -2021,16 +2176,33 @@ type QualifiedEvaluatorRuntimeV1 = Readonly<{
 `qualityGateId` matches `^qg_[a-z0-9][a-z0-9_-]{0,63}$`; the manifest,
 attestation, and source digests are full lowercase `sha256:` digests; and
 `gateEvaluatedCommitSha` is exactly 40 lowercase hex characters. The initial
+provider boundary is exact base URL `https://api.openai.com/v1`, null organization,
+null project, adapter retry limit 0, and provider-SDK retry limit 0. The initial
 execution tuple is Bun `1.3.14`, revision `1.3.14+0d9b296af`, on `win32/x64`;
-another Bun build, platform, or architecture requires its own passed gate. Duplicate
-IDs, digest mismatch, pending-only manifest, failed attestation, tuple/version,
-execution-environment, installed-dependency, or current-source mismatch fails as
+another provider route/retry policy, Bun build, platform, or architecture requires
+its own passed gate. Duplicate IDs, digest mismatch, pending-only manifest, failed
+attestation, tuple/version/provider-boundary/execution-environment,
+installed-dependency, or current-source mismatch fails as
 `runtime_not_quality_gated` before confirmation or provider dispatch.
 
-Use that immutable provider/model/reasoning and version tuple for the entire run.
+Use that immutable provider/model/reasoning/provider-boundary and version tuple for
+the entire run.
 There is no ungated/experimental mode, compatibility fallback, or reasoning
 downgrade. The CLI and Dashboard detail display gate ID, source/dependency digests,
-exact Bun/platform/architecture, and evaluated commit.
+exact endpoint/organization/project/retry policy, Bun/platform/architecture, and
+evaluated commit.
+
+The Evaluator provider boundary passes every routing option explicitly and never
+inherits OpenAI/LangChain routing defaults. It sets the exact base URL above,
+`organization: null`, `project: null`, adapter `maxRetries: 0`, and OpenAI SDK
+`maxRetries: 0`. The environment variables `OPENAI_BASE_URL`,
+`OPENAI_ORGANIZATION`, `OPENAI_ORG_ID`, and `OPENAI_PROJECT_ID` must all be absent.
+Any one being present—even as an empty string—returns sanitized typed
+`provider_routing_override_detected` during initial preflight and again immediately
+before dispatch, creates no sidecar, and sends no request. An alternative endpoint,
+organization, project, gateway, or retry policy requires a separately reviewed gate
+ID and paid campaign; it must never be mislabeled `providerId: openai` under this
+initial tuple.
 
 P3-E2 introduces an Evaluator-only `invokeEvaluatorOnce` provider boundary. It must
 not call the current generic `callLlm` or `withRetry` paths, because those paths have
@@ -2039,8 +2211,9 @@ contract. Existing callers remain unchanged. The new boundary:
 
 - provider attempt limit: 1;
 - hard timeout: 180 seconds;
-- no retry or repair call;
-- one provider dispatch and an AbortSignal propagated through the provider adapter;
+- no adapter, SDK-internal, transport, or repair retry;
+- exactly one outbound HTTP request and an AbortSignal propagated through the
+  provider adapter;
 - tools: none;
 - maximum output tokens: 16,384;
 - provider-native strict structured output for every qualified runtime, followed by
@@ -2049,10 +2222,13 @@ contract. Existing callers remain unchanged. The new boundary:
   Raw error/message/cause, response, prompt, request ID, credential, and path are
   never logged.
 
-Timeout or cancellation cannot start another provider request. Cancellation wins
-over a late response. A provider adapter that cannot enforce native strict output,
-AbortSignal, empty tools, and the output-token limit is not eligible for a quality
-gate.
+The attempt count is the actual outbound HTTP-request count, not merely calls to
+`invokeEvaluatorOnce`. A retryable network/408/409/429/5xx failure therefore still
+produces exactly one request. Timeout or cancellation cannot start another provider
+request. Cancellation wins over a late response. A provider adapter that cannot
+enforce native strict output,
+AbortSignal, empty tools, both zero-retry layers, exact route, and the output-token
+limit is not eligible for a quality gate.
 
 ### 6.6 Read API and URL state
 
@@ -2111,8 +2287,12 @@ Page query:
   and preserves the pinned Snapshot/list. An explicit `現在の分析に戻る` action
   removes both selectors with one `pushState`.
 - Tab changes use `replaceState` and preserve both Evaluation selectors.
-- Target/ticker/list changes clear both Evaluation selectors. A base-only change
-  preserves them because the target is unchanged.
+- Starting Comparison from an Evaluation-pinned detail preserves both Evaluation
+  selectors only when that pinned Snapshot becomes the exact Comparison target.
+  Resetting that Comparison preserves the selectors and returns to the same pinned
+  detail. Adopting a different target clears both selectors before the new request.
+- Other target/ticker/list changes clear both Evaluation selectors. A base-only
+  change preserves them because the target is unchanged.
 - Syntactically invalid `evaluationSnapshot` or `evaluation`, and an evaluation ID
   without its Snapshot selector, are removed together before a request with one
   `replaceState`.
@@ -2149,7 +2329,8 @@ The tab displays:
 - material/advisory plain-text importance;
 - the escaped exact report excerpt in a blockquote, or every ordered contradictory
   excerpt in separately labelled blockquotes;
-- evidence value/unit/date/state/method/limitation table; or
+- exact referenced fact key/value/unit/date/state/reason plus its record
+  identity/method/limitation table; or
 - manifest-absence scope and reason.
 
 It displays no execution/retry/delete control, score, percentage, pass/fail,
@@ -2168,7 +2349,10 @@ Create a versioned Japanese set of 64 cases:
   not-verifiable-by-Evaluator, inconsistency, missing-caveat, and unclear-reasoning
   cases;
 - at least four locked report-to-report inconsistency cases, including at least two
-  outside/unavailable Snapshot domains that have no eligible Evidence ref;
+  outside/unavailable Snapshot domains that have no eligible available fact ref;
+- mixed-state available scopes including V1/V2 20-day correlation `not_collected`,
+  Advanced Technical single-metric unavailable, and Supply/Demand record facts with
+  both available and unavailable states;
 - V1–V9, zero, unavailable, not-collected, partial, compound, Japanese, and
   injection cases;
 - fixed input digests;
@@ -2188,7 +2372,7 @@ Finding matching is maximum one-to-one within category:
 - single locations require report-anchor intersection-over-union at least 0.5;
 - report-anchor sets require the same anchor count and a maximum one-to-one ordered
   match in which every paired anchor has intersection-over-union at least 0.5;
-- evidence-ref set F1 at least 0.5;
+- available/non-available fact-ref set F1 at least 0.5;
 - manifest-absence reason exact match plus at least one overlapping scope;
 - importance exact match for material metrics.
 
@@ -2201,8 +2385,8 @@ Locked-holdout gate:
 - not-verifiable-from-Snapshot precision and recall: each at least 90%;
 - not-verifiable-by-Evaluator precision and recall: each at least 90%;
 - missing-caveat recall: at least 85%;
-- evidence/manifest/report-contradiction basis and matched-location accuracy: each at
-  least 95%;
+- available-fact/non-available-fact/manifest/report-contradiction basis and
+  matched-location accuracy: each at least 95%;
 - ref/location integrity for available artifacts: 100%;
 - material false positives across 12 clean cases: zero;
 - clean cases with an advisory false positive: at most 1/12;
@@ -2300,8 +2484,9 @@ hashing all unrelated `node_modules` content is neither required nor allowed.
 P3-E2 pins root `packageManager` and CI setup to Bun `1.3.14`; CI must not use
 `bun-version: latest`. The pending gate manifest binds Bun version, full
 `bun --revision` output, platform, architecture, dependency manifest/digest, source
-digest/copy, provider/model/reasoning, all Evaluator versions, gold-set version,
-pricing/cost cap, and campaign parameters. `gateManifestDigest` is the full
+digest/copy, provider/model/reasoning, exact endpoint/organization/project and both
+retry limits, all Evaluator versions, gold-set version, pricing/cost cap, and campaign
+parameters. `gateManifestDigest` is the full
 CanonicalJsonV1 digest of the manifest.
 
 The qualification-verification CI job runs on the attested `win32/x64` platform with
@@ -2320,7 +2505,8 @@ Evaluation sidecar and writes its proposed passed attestation only below
 
 - state `passed`, quality-gate ID, gate-manifest digest, evaluator-source digest,
   dependency-manifest digest, and exact Bun/platform/architecture tuple;
-- exact runtime and Evaluator versions;
+- exact provider/model/reasoning/endpoint/organization/project/retry policy and
+  Evaluator versions;
 - evaluated commit SHA as audit metadata, start/completion times, aggregate metrics,
   per-case result digests, injection/stability results, and charged/reserved cost; and
 - a full campaign-result digest, but no prompt, response, credential, private text,
@@ -2346,8 +2532,9 @@ tracked attestation satisfying those checks. The initial tuple is
 execution config, resolved dependency file, dependency manifest/lockfile, prompt,
 evidence registry, finding schema, rubric, safety code, harness, or gold fixture
 invalidates qualification. A new provider/model/reasoning, Bun/revision/platform/
-architecture, dependency, or Evaluator-version tuple requires a new gate ID and paid
-campaign. The evaluated commit SHA remains auditable metadata; source, dependency,
+architecture, provider endpoint/organization/project/retry policy, dependency, or
+Evaluator-version tuple requires a new gate ID and paid campaign. The evaluated
+commit SHA remains auditable metadata; source, dependency,
 and execution-environment digests are the mechanical runtime binding that survives
 the attestation-only qualification commit and merge commit.
 
@@ -2359,8 +2546,10 @@ dispatch, it uses the actual current filesystem and pinned Bun resolver to:
 2. hash every attested local source/config path from working-tree bytes and require
    exact source-manifest equality;
 3. resolve the actual external closure, hash the installed reachable files, and
-   require exact dependency-manifest equality; and
-4. reject missing/extra resolution inputs, symlinks/reparse targets, dirty relevant
+   require exact dependency-manifest equality;
+4. require all four routing environment variables to be absent and construct the
+   exact attested provider boundary with both retry limits zero; and
+5. reject missing/extra resolution inputs, symlinks/reparse targets, dirty relevant
    bytes, or resolution outside the attested manifests.
 
 Unrelated working-tree files outside both closures do not invalidate the run. Any
@@ -2392,8 +2581,15 @@ P3-E1 tests include:
   multi-fact item per public-short/dividend/sector-short record; scalar-per-field
   expansion is rejected as a registry contract violation, and 101st sector-short or
   17th Strategy record fails preflight without truncation;
+- every fact-state union rejects invalid value/unit/reason combinations and unknown
+  reasons; `definitionKey` is the only schema traceability pointer and no separate
+  path-like pointer is persisted;
 - a claim with no matching evidence inside a `complete_for_domain` scope can be
-  represented as `unsupported_claim` with exact absence basis and no evidence refs;
+  represented as `unsupported_claim` with exact absence basis and no fact refs;
+- V1/V2 20-day correlation, one unavailable Advanced Technical metric, and a grouped
+  record mixing available/unavailable facts each resolve through exact
+  `non_available_fact_refs` without relabelling their available scope; wrong item,
+  fact key, state, reason, order, or domain rejects the entire available artifact;
 - filing-derived or otherwise outside-scope claims map to
   `not_verifiable_from_snapshot` or an applicable `missing_caveat`, never to
   `unsupported_claim` solely because evidence was not persisted;
@@ -2408,8 +2604,8 @@ P3-E1 tests include:
   category/basis/importance mismatches, fabricated refs, invalid anchors, unknown
   fields, and duplicate IDs; cross-domain findings require complete exact coverage;
 - report-to-report inconsistency accepts exactly 2–4 ordered non-overlapping anchors
-  without Evidence refs, while evidence-based inconsistency and unclear reasoning
-  require exact available Evidence-domain coverage;
+  without fact refs, while evidence-based inconsistency and unclear reasoning require
+  exact available-fact domain coverage;
 - exact persisted manifest loading across evaluator code-version change, without
   regeneration from the target Snapshot; and
 - malformed/missing targets and preflight safety failures create no sidecar and
@@ -2432,11 +2628,15 @@ P3-E2 tests include:
 - the manual gate uses a fresh checkout plus `bun install --frozen-lockfile`, normal
   CI pins Bun 1.3.14 rather than latest, and production accepts only the exact
   attested resolved-dependency manifest;
+- the canonical OpenAI base URL plus null organization/project and both zero-retry
+  layers pass; any routing environment variable, changed route/policy, or retryable
+  network/408/409/429/5xx fixture rejects before dispatch or produces exactly one
+  outbound HTTP request with no SDK/adapter retry;
 - report/manifest prompt-injection fixtures remain inert quoted data with an empty
   tool list;
 - qualified runtime acceptance, `--model`/saved/default ungated rejection before
-  confirmation, default-No and non-interactive confirmation, one provider dispatch,
-  no generic `callLlm`/retry path, timeout, cancel, late response,
+  confirmation, default-No and non-interactive confirmation, exactly one outbound
+  HTTP request, no generic `callLlm`/retry path, timeout, cancel, late response,
   provider/schema/reference failure, sanitized logs, and save-after-cost behavior;
 - correct closed-domain classification of unsupported versus
   not-verifiable-from-Snapshot versus not-verifiable-by-Evaluator cases, including
@@ -2459,6 +2659,7 @@ P3-E3 tests include:
 - separate list/detail abort tokens reject reversed stale success/error for another
   ticker/Snapshot/run tuple; and
 - zero runs, available zero findings, unavailable run, report-anchor-set display,
+  exact available/non-available fact key/value/unit/date/state/reason rendering,
   keyboard/focus behavior, and mobile layout.
 
 ## 7. P3-C — Composite-score evaluation plan
@@ -2567,12 +2768,12 @@ Additional gates:
 | Step | Required focused validation |
 | --- | --- |
 | P3-I0 | cross-process no-clobber/idempotency, hard-link unsupported path, epoch-ordered authoritative latest/no legacy rewrite, existing GET error mapping/reload preservation, canonical golden vectors, exact safety grammar, V1–V9 readability |
-| P3-H1 | 67 definitions/accessors, definition/instance versions, discriminated observation invariants, added/removed/non-available reachability, display/provenance, V1–V9, dates/identities/zero |
-| P3-H2 | exact HTTP union, URL lifecycle, disclosure/reload races, focus, responsive |
-| P3-R1 | range/direction/sample/cohort/rank, SVG/table accessibility, mobile |
-| P3-E1 | grouped-record cardinality budget, closed claim-domain sets, strict category/domain/basis/location coverage, persisted-but-excluded scopes, canonical IDs, V1–V9 manifest, no-replace sidecar |
-| P3-E2 | pinned Bun/frozen resolved dependencies, working-tree source/config preflight, qualified tuple, pending-manifest rejection, source/attestation binding, injection, confirmation, one dispatch/timeout/cancel, sanitized logs, stub CI, manual paid gate |
-| P3-E3 | `evaluationSnapshot` exact identity, cursor, gate/runtime metadata, unselected/no-fallback, zero/unavailable/findings, race/keyboard |
+| P3-H1 | 67 definitions/accessors, epoch request order, definition/instance versions, discriminated observation including duplicate ambiguity, added/removed/non-available reachability, display/provenance, V1–V9, dates/identities/zero |
+| P3-H2 | exact HTTP union, Evaluation-pinned cross-feature URL lifecycle, result/registry-version state key, disclosure/reload races, focus, responsive |
+| P3-R1 | selected-peer/target/unavailable semantic consistency, range/direction/eligible sample/cohort/fractional rank, SVG/table accessibility, mobile |
+| P3-E1 | grouped-record cardinality budget, fact state/reason and exact available/non-available fact refs, closed claim-domain sets, strict category/domain/basis/location coverage, persisted-but-excluded scopes, canonical IDs, V1–V9 manifest, no-replace sidecar |
+| P3-E2 | pinned endpoint/org/project/zero-retry policy, Bun/frozen resolved dependencies, working-tree source/config preflight, qualified tuple, pending-manifest rejection, source/attestation binding, injection, confirmation, one outbound request/timeout/cancel, sanitized logs, stub CI, manual paid gate |
+| P3-E3 | `evaluationSnapshot` exact identity, cursor, gate/runtime metadata, unselected/no-fallback, exact fact state/reason display, zero/unavailable/findings, race/keyboard |
 | P3-C0 | no-look-ahead, gate completeness, absence of runtime score |
 | P3-X | full regression, Playwright, CI/review/merge/main and docs synchronization |
 

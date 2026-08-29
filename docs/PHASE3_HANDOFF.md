@@ -94,9 +94,10 @@ reimplement financial or statistical calculations.
 - Browser and LLM consumers do not reconstruct values from presentation text.
 - Phase 3 creates no Buy/Sell signal, automatic action, or runtime composite score.
 - Evaluator execution requires a tracked passed attestation whose manifest, exact
-  provider/model/reasoning tuple, versions, evaluator-source/config bytes, pinned
-  Bun/platform/architecture, and frozen resolved-dependency bytes match the current
-  runtime; no pending-manifest or ungated override exists.
+  provider/model/reasoning/endpoint/organization/project/zero-retry tuple, versions,
+  evaluator-source/config bytes, pinned Bun/platform/architecture, and frozen
+  resolved-dependency bytes match the current runtime; no environment routing,
+  pending-manifest, SDK retry, or ungated override exists.
 - The product remains personal, local, single-user research software.
 
 Detailed formulas and source contracts remain in `docs/SPEC.md`,
@@ -126,13 +127,16 @@ P3-0 changes the following Source of Truth documents together:
 
 Phase 3 adopts:
 
-- deterministic, explicit-registry comparison of two immutable saved Snapshots;
-- a presentation-only Radar of the seven stored peer percentiles;
+- deterministic, explicit-registry comparison of two immutable saved Snapshots using
+  numeric epoch request/order validation and typed duplicate-identity outcomes;
+- a presentation-only Radar of the seven stored peer percentiles that suppresses its
+  polygon for an internally inconsistent selected-peer/position state;
 - a bounded, record-grouped Evidence manifest that preserves exact typed facts
-  without unbounded scalar expansion;
+  and their allowlisted non-available reasons without unbounded scalar expansion;
 - an explicitly invoked qualitative Independent Evaluator whose result is stored in
   a separate versioned sidecar, whose exact Snapshot/run URL identity is preserved,
-  and whose exact source/dependency/runtime environment has passed the gold gate; and
+  whose findings reference exact available/non-available facts, and whose exact
+  source/dependency/provider-route/runtime environment has passed the gold gate; and
 - a docs-only composite-score evaluation plan whose runtime adoption remains gated
   by Phase 4 validation.
 
