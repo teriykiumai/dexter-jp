@@ -33,6 +33,7 @@ import {
   SECTOR_SHORT_RATIO_CONTEXT_NOTE,
   VOLUME_PROFILE_CONTEXT_NOTE,
   WATCHLIST_STALE_AFTER_DAYS,
+  buildDashboardAvailabilityNavigation,
   buildDetailPath,
   buildWatchlistPath,
   displayText,
@@ -874,6 +875,9 @@ describe('snapshot presentation mapping', () => {
       label: '出来高価格分布',
       value: { text: '2026-08-21', available: true },
     });
+    expect(dashboard.availability.uncollectedSections).not.toContain('volumeProfile');
+    expect(dashboard.availability.distinctUnavailable
+      .filter(item => item.section === 'volumeProfile')).toEqual([]);
     expect(JSON.stringify(view)).not.toContain('2026-08-26');
     expect(JSON.stringify(view)).not.toContain('2026-08-27');
     expect(JSON.stringify(view)).not.toContain('basisAuditThroughDate');
@@ -1249,6 +1253,7 @@ describe('snapshot presentation mapping', () => {
       const view = mapSnapshotToDashboard(snapshot);
       expect(view.reportedShortPositions).toEqual({
         state: 'not_collected',
+        dataDate: { text: UNAVAILABLE_TEXT, available: false },
         reports: [],
         unavailableReasons: [],
       });
@@ -2033,6 +2038,95 @@ describe('watchlist presentation mapping', () => {
       scenarios: 'report',
       risks: 'report',
     });
+  });
+
+  test('keeps fixed unavailable and uncollected navigation counts across V1, V4, V8, and V9 fixtures', () => {
+    for (const snapshot of [v1Snapshot(), baseSnapshot(), v8Snapshot(), v9Snapshot()]) {
+      const availability = buildDashboardAvailabilityNavigation(snapshot);
+
+      expect(availability.global).toEqual({ unavailable: 10, uncollected: 7 });
+      expect(availability.tabs).toEqual({
+        report: { unavailable: 2, uncollected: 0 },
+        technical: { unavailable: 3, uncollected: 2 },
+        fundamentals: { unavailable: 1, uncollected: 1 },
+        'supply-demand': { unavailable: 1, uncollected: 1 },
+        market: { unavailable: 1, uncollected: 3 },
+      });
+    }
+  });
+
+  test('de-duplicates only exact unavailable identities without changing the stored list', () => {
+    const snapshot: AnalysisSnapshotV9 = {
+      ...v9Snapshot(),
+      unavailable: [
+        {
+          section: 'technical',
+          metric: 'rsi14',
+          reason: 'missing_data',
+          detail: 'same detail',
+        },
+        {
+          section: 'technical',
+          metric: 'rsi14',
+          reason: 'missing_data',
+          detail: 'same detail',
+        },
+        { section: 'technical', reason: 'missing_data', detail: 'same detail' },
+        {
+          section: 'technical',
+          metric: 'rsi14',
+          reason: 'missing_data',
+          detail: 'different detail',
+        },
+        { section: 'fundamental', reason: 'missing_required_section' },
+        { section: 'volumeProfile', reason: 'not_collected' },
+        { section: 'volumeProfile', reason: 'not_collected' },
+      ],
+    };
+
+    const view = mapSnapshotToDashboard(snapshot);
+
+    expect(view.availability.global).toEqual({ unavailable: 4, uncollected: 1 });
+    expect(view.availability.tabs.technical).toEqual({ unavailable: 3, uncollected: 1 });
+    expect(Object.values(view.availability.tabs)
+      .reduce((count, tab) => count + tab.unavailable, 0)).toBe(3);
+    expect(view.unavailable).toHaveLength(7);
+    expect(view.unavailable).toEqual(snapshot.unavailable);
+  });
+
+  test('does not infer uncollected from a null field', () => {
+    const snapshot: AnalysisSnapshotV9 = {
+      ...v9Snapshot(),
+      fundamental: null,
+      unavailable: [{ section: 'fundamental', reason: 'missing_required_section' }],
+    };
+
+    const availability = buildDashboardAvailabilityNavigation(snapshot);
+
+    expect(availability.global).toEqual({ unavailable: 1, uncollected: 0 });
+    expect(Object.values(availability.tabs)).toEqual([
+      { unavailable: 0, uncollected: 0 },
+      { unavailable: 0, uncollected: 0 },
+      { unavailable: 0, uncollected: 0 },
+      { unavailable: 0, uncollected: 0 },
+      { unavailable: 0, uncollected: 0 },
+    ]);
+  });
+
+  test('counts schema absence and stored not-collected as one section each', () => {
+    const v1Availability = buildDashboardAvailabilityNavigation(v1Snapshot());
+    expect(v1Availability.uncollectedSections.filter(section => section === 'volumeProfile'))
+      .toHaveLength(1);
+
+    const v9: AnalysisSnapshotV9 = {
+      ...v9Snapshot(),
+      volumeProfile: null,
+      unavailable: [{ section: 'volumeProfile', reason: 'not_collected' }],
+    };
+    const v9Availability = buildDashboardAvailabilityNavigation(v9);
+    expect(v9Availability.global).toEqual({ unavailable: 0, uncollected: 1 });
+    expect(v9Availability.uncollectedSections.filter(section => section === 'volumeProfile'))
+      .toHaveLength(1);
   });
 
   test('moves automatic tab activation with wrapping and Home/End behavior', () => {

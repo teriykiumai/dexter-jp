@@ -34,6 +34,7 @@ import {
   parseDetailTicker,
   sortWatchlistItems,
   type DashboardMetric,
+  type DashboardAvailabilityCount,
   type DashboardTabId,
   type DisplayValue,
   type InvestorTypeCategoryView,
@@ -76,9 +77,67 @@ function MetricGrid({ metrics }: { metrics: DashboardMetric[] }) {
   );
 }
 
-function InvestorTypeTable({ rows }: { rows: InvestorTypeCategoryView[] }) {
+function AvailabilityBadges({ counts, compact = false }: {
+  counts: DashboardAvailabilityCount;
+  compact?: boolean;
+}) {
+  if (counts.unavailable === 0 && counts.uncollected === 0) return null;
   return (
-    <div className="table-scroll">
+    <span className={compact ? 'availability-badges compact' : 'availability-badges'}>
+      {counts.unavailable > 0 ? (
+        <span className="availability-badge unavailable-count">
+          利用不可 {counts.unavailable}
+        </span>
+      ) : null}
+      {counts.uncollected > 0 ? (
+        <span className="availability-badge uncollected-count">
+          未収集 {counts.uncollected}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+const DEFAULT_DISCLOSURE_STATE = {
+  volumeProfileMethodology: false,
+  volumeProfileBins: false,
+  investorBrokerage: false,
+  reportedShortPositions: true,
+  advancedDividend: true,
+} as const;
+
+type DashboardDisclosureId = keyof typeof DEFAULT_DISCLOSURE_STATE;
+type DashboardDisclosureState = Record<DashboardDisclosureId, boolean>;
+
+function StoredDisclosure({
+  children,
+  open,
+  onOpenChange,
+  summary,
+}: {
+  children: ReactNode;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  summary: ReactNode;
+}) {
+  return (
+    <details
+      className="stored-disclosure"
+      onToggle={event => onOpenChange(event.currentTarget.open)}
+      open={open}
+    >
+      <summary>{summary}</summary>
+      <div className="stored-disclosure-content">{children}</div>
+    </details>
+  );
+}
+
+function InvestorTypeTable({ label, rows }: {
+  label: string;
+  rows: InvestorTypeCategoryView[];
+}) {
+  return (
+    <div aria-label={label} className="table-scroll" role="region" tabIndex={0}>
       <table className="investor-type-table">
         <thead>
           <tr><th>Source category</th><th>Sell</th><th>Buy</th><th>Total</th><th>Balance</th></tr>
@@ -100,9 +159,11 @@ function InvestorTypeTable({ rows }: { rows: InvestorTypeCategoryView[] }) {
 }
 
 function DashboardTabs({
+  availability,
   selectedTab,
   onSelect,
 }: {
+  availability: Record<DashboardTabId, DashboardAvailabilityCount>;
   selectedTab: DashboardTabId;
   onSelect: (tab: DashboardTabId) => void;
 }) {
@@ -172,7 +233,8 @@ function DashboardTabs({
             tabIndex={selectedTab === tab.id ? 0 : -1}
             type="button"
           >
-            {tab.label}
+            <span className="detail-tab-label">{tab.label}</span>
+            <AvailabilityBadges compact counts={availability[tab.id]} />
           </button>
         ))}
       </div>
@@ -215,6 +277,12 @@ function Dashboard({
   selectedTab: DashboardTabId;
 }) {
   const view = mapSnapshotToDashboard(snapshot);
+  const [disclosures, setDisclosures] = useState<DashboardDisclosureState>({
+    ...DEFAULT_DISCLOSURE_STATE,
+  });
+  const setDisclosure = (id: DashboardDisclosureId, open: boolean) => {
+    setDisclosures(current => current[id] === open ? current : { ...current, [id]: open });
+  };
 
   return (
     <main className="dashboard-shell">
@@ -248,7 +316,23 @@ function Dashboard({
         ))}
       </section>
 
-      <DashboardTabs selectedTab={selectedTab} onSelect={onSelectTab} />
+      <section className="availability-overview" aria-label="Snapshotのデータ利用状況">
+        <div>
+          <strong>データ利用状況</strong>
+          <AvailabilityBadges counts={view.availability.global} />
+        </div>
+        {view.availability.global.uncollected > 0 ? (
+          <p>未収集は、このSnapshotでは未収集の項目です。0やSnapshotの失敗を意味しません。</p>
+        ) : view.availability.global.unavailable === 0 ? (
+          <p>利用不可・未収集として記録された項目はありません。</p>
+        ) : null}
+      </section>
+
+      <DashboardTabs
+        availability={view.availability.tabs}
+        selectedTab={selectedTab}
+        onSelect={onSelectTab}
+      />
 
       {DASHBOARD_TABS.map(tab => (
         <DashboardTabPanel key={tab.id} selectedTab={selectedTab} tab={tab.id}>
@@ -293,21 +377,29 @@ function Dashboard({
               { label: 'Window start', value: view.volumeProfile.windowStartDate },
               { label: 'Window end', value: view.volumeProfile.windowEndDate },
               { label: 'Input bars', value: view.volumeProfile.inputBarCount },
-              { label: 'Price basis', value: view.volumeProfile.priceBasis },
-              { label: 'Volume basis', value: view.volumeProfile.volumeBasis },
-              { label: 'Allocation', value: view.volumeProfile.allocationMethod },
-              { label: 'Binning', value: view.volumeProfile.binningMethod },
-              { label: 'Requested bins', value: view.volumeProfile.requestedBinCount },
-              { label: 'Effective bins', value: view.volumeProfile.effectiveBinCount },
-              { label: 'Minimum price', value: view.volumeProfile.minPrice },
-              { label: 'Maximum price', value: view.volumeProfile.maxPrice },
-              { label: 'Methodology', value: view.volumeProfile.methodology },
-              { label: 'Approximation', value: view.volumeProfile.approximation },
-              {
-                label: 'Corporate-action basis',
-                value: view.volumeProfile.corporateActionBasisStatus,
-              },
             ]} />
+            <StoredDisclosure
+              open={disclosures.volumeProfileMethodology}
+              onOpenChange={open => setDisclosure('volumeProfileMethodology', open)}
+              summary="算出方法・データ基準"
+            >
+              <MetricGrid metrics={[
+                { label: 'Price basis', value: view.volumeProfile.priceBasis },
+                { label: 'Volume basis', value: view.volumeProfile.volumeBasis },
+                { label: 'Allocation', value: view.volumeProfile.allocationMethod },
+                { label: 'Binning', value: view.volumeProfile.binningMethod },
+                { label: 'Requested bins', value: view.volumeProfile.requestedBinCount },
+                { label: 'Effective bins', value: view.volumeProfile.effectiveBinCount },
+                { label: 'Minimum price', value: view.volumeProfile.minPrice },
+                { label: 'Maximum price', value: view.volumeProfile.maxPrice },
+                { label: 'Methodology', value: view.volumeProfile.methodology },
+                { label: 'Approximation', value: view.volumeProfile.approximation },
+                {
+                  label: 'Corporate-action basis',
+                  value: view.volumeProfile.corporateActionBasisStatus,
+                },
+              ]} />
+            </StoredDisclosure>
             {view.volumeProfile.state === 'available'
               && view.volumeProfile.poc
               && view.volumeProfile.valueArea ? (
@@ -334,28 +426,39 @@ function Dashboard({
                       ]} />
                     </article>
                   </div>
-                  <div className="table-scroll">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Bin</th><th>Lower</th><th>Upper</th><th>Representative</th>
-                          <th>Allocated volume</th><th>Volume share</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {view.volumeProfile.bins.map(bin => (
-                          <tr key={bin.index}>
-                            <th>{bin.index}</th>
-                            <td><Value value={bin.lowerPrice} /></td>
-                            <td><Value value={bin.upperPrice} /></td>
-                            <td><Value value={bin.representativePrice} /></td>
-                            <td><Value value={bin.allocatedVolume} /></td>
-                            <td><Value value={bin.volumeShare} /></td>
+                  <StoredDisclosure
+                    open={disclosures.volumeProfileBins}
+                    onOpenChange={open => setDisclosure('volumeProfileBins', open)}
+                    summary={`価格帯別分布 ${view.volumeProfile.bins.length}件`}
+                  >
+                    <div
+                      aria-label="出来高価格分布の価格帯別データ"
+                      className="table-scroll"
+                      role="region"
+                      tabIndex={0}
+                    >
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Bin</th><th>Lower</th><th>Upper</th><th>Representative</th>
+                            <th>Allocated volume</th><th>Volume share</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                        </thead>
+                        <tbody>
+                          {view.volumeProfile.bins.map(bin => (
+                            <tr key={bin.index}>
+                              <th>{bin.index}</th>
+                              <td><Value value={bin.lowerPrice} /></td>
+                              <td><Value value={bin.upperPrice} /></td>
+                              <td><Value value={bin.representativePrice} /></td>
+                              <td><Value value={bin.allocatedVolume} /></td>
+                              <td><Value value={bin.volumeShare} /></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </StoredDisclosure>
                 </>
               ) : (
                 <div className="empty-state">
@@ -384,7 +487,12 @@ function Dashboard({
                   ? <small>{view.peer.marketCapPriorityReason}</small>
                   : null}
               </div>
-              <div className="table-scroll">
+              <div
+                aria-label="同業比較の指標一覧"
+                className="table-scroll"
+                role="region"
+                tabIndex={0}
+              >
                 <table>
                   <thead>
                     <tr><th>Metric</th><th>Target</th><th>Peer median</th><th>Rank</th><th>Percentile</th></tr>
@@ -433,10 +541,28 @@ function Dashboard({
               ]} />
             </div>
 
+            <StoredDisclosure
+              open={disclosures.advancedDividend}
+              onOpenChange={open => setDisclosure('advancedDividend', open)}
+              summary={(
+                <>
+                  年間観測 {view.advancedDividend.observations.length}件
+                  {' / '}配当イベント {view.advancedDividend.events === null
+                    ? '利用不可'
+                    : `${view.advancedDividend.events.length}件`}
+                  {' / '}データ基準日 <Value value={view.advancedDividend.dataDate} />
+                </>
+              )}
+            >
             <section className="dividend-group">
               <h3>Fiscal observations</h3>
               {view.advancedDividend.observations.length ? (
-                <div className="table-scroll">
+                <div
+                  aria-label="配当分析の年間観測"
+                  className="table-scroll"
+                  role="region"
+                  tabIndex={0}
+                >
                   <table className="advanced-dividend-table">
                     <thead>
                       <tr>
@@ -474,7 +600,12 @@ function Dashboard({
                   event-level配当内訳は利用できません。利用不可はordinary-onlyや0を意味しません。
                 </div>
               ) : view.advancedDividend.events.length ? (
-                <div className="table-scroll">
+                <div
+                  aria-label="配当分析の配当イベント"
+                  className="table-scroll"
+                  role="region"
+                  tabIndex={0}
+                >
                   <table className="advanced-dividend-table">
                     <thead>
                       <tr>
@@ -514,6 +645,7 @@ function Dashboard({
                 <div className="empty-state">Snapshotのreplay後event rowsは0件です。</div>
               )}
             </section>
+            </StoredDisclosure>
 
             {view.advancedDividend.unavailableReasons.length ? (
               <p className="reason-list">
@@ -529,40 +661,56 @@ function Dashboard({
       <Card title="公開空売り残高報告" eyebrow="J-Quants disclosure ≥ 0.5%">
         <p className="disclosure-note">{REPORTED_SHORT_POSITION_DISCLOSURE_NOTE}</p>
         {view.reportedShortPositions.reports.length > 0 ? (
-          <div className="table-scroll">
-            <table className="short-position-table">
-              <thead>
-                <tr>
-                  <th>Disclosed</th>
-                  <th>Calculated</th>
-                  <th>Reporter</th>
-                  <th>Discretionary manager</th>
-                  <th>Fund</th>
-                  <th>Ratio</th>
-                  <th>Shares</th>
-                  <th>Previous calculated</th>
-                  <th>Previous ratio</th>
-                  <th>Ratio delta</th>
-                </tr>
-              </thead>
-              <tbody>
-                {view.reportedShortPositions.reports.map((report, index) => (
-                  <tr key={`${report.disclosedDate.text}-${report.calculatedDate.text}-${index}`}>
-                    <td><Value value={report.disclosedDate} /></td>
-                    <td><Value value={report.calculatedDate} /></td>
-                    <td><Value value={report.reporterName} /></td>
-                    <td><Value value={report.discretionaryManagerName} /></td>
-                    <td><Value value={report.fundName} /></td>
-                    <td><Value value={report.shortPositionRatio} /></td>
-                    <td><Value value={report.shortPositionShares} /></td>
-                    <td><Value value={report.previousCalculatedDate} /></td>
-                    <td><Value value={report.previousReportedRatio} /></td>
-                    <td><Value value={report.ratioDelta} /></td>
+          <StoredDisclosure
+            open={disclosures.reportedShortPositions}
+            onOpenChange={open => setDisclosure('reportedShortPositions', open)}
+            summary={(
+              <>
+                公開報告 {view.reportedShortPositions.reports.length}件
+                {' / '}データ基準日 <Value value={view.reportedShortPositions.dataDate} />
+              </>
+            )}
+          >
+            <div
+              aria-label="公開空売り残高報告の全報告"
+              className="table-scroll"
+              role="region"
+              tabIndex={0}
+            >
+              <table className="short-position-table">
+                <thead>
+                  <tr>
+                    <th>Disclosed</th>
+                    <th>Calculated</th>
+                    <th>Reporter</th>
+                    <th>Discretionary manager</th>
+                    <th>Fund</th>
+                    <th>Ratio</th>
+                    <th>Shares</th>
+                    <th>Previous calculated</th>
+                    <th>Previous ratio</th>
+                    <th>Ratio delta</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {view.reportedShortPositions.reports.map((report, index) => (
+                    <tr key={`${report.disclosedDate.text}-${report.calculatedDate.text}-${index}`}>
+                      <td><Value value={report.disclosedDate} /></td>
+                      <td><Value value={report.calculatedDate} /></td>
+                      <td><Value value={report.reporterName} /></td>
+                      <td><Value value={report.discretionaryManagerName} /></td>
+                      <td><Value value={report.fundName} /></td>
+                      <td><Value value={report.shortPositionRatio} /></td>
+                      <td><Value value={report.shortPositionShares} /></td>
+                      <td><Value value={report.previousCalculatedDate} /></td>
+                      <td><Value value={report.previousReportedRatio} /></td>
+                      <td><Value value={report.ratioDelta} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </StoredDisclosure>
         ) : (
           <div className="empty-state">
             {view.reportedShortPositions.state === 'not_collected'
@@ -588,12 +736,24 @@ function Dashboard({
             </div>
             <section className="investor-flow-group">
               <h3>Summary</h3>
-              <InvestorTypeTable rows={view.investorTypeFlows.summary} />
+              <InvestorTypeTable
+                label="投資部門別売買の集計"
+                rows={view.investorTypeFlows.summary}
+              />
             </section>
-            <section className="investor-flow-group">
-              <h3>Brokerage breakdown</h3>
-              <InvestorTypeTable rows={view.investorTypeFlows.brokerageBreakdown} />
+            <StoredDisclosure
+              open={disclosures.investorBrokerage}
+              onOpenChange={open => setDisclosure('investorBrokerage', open)}
+              summary={`Brokerage breakdown ${view.investorTypeFlows.brokerageBreakdown.length} categories`}
+            >
+              <section className="investor-flow-group">
+                <h3 className="visually-hidden">Brokerage breakdown</h3>
+                <InvestorTypeTable
+                  label="投資部門別売買の委託内訳"
+                  rows={view.investorTypeFlows.brokerageBreakdown}
+                />
             </section>
+            </StoredDisclosure>
           </>
         ) : (
           <div className="empty-state">
@@ -690,8 +850,14 @@ function Dashboard({
               { label: 'Sector name', value: view.sectorShortRatio.sectorName },
               { label: 'Data date', value: view.sectorShortRatio.dataDate },
             ]} />
+            <p className="record-count">保存済み観測 {view.sectorShortRatio.observations.length}件</p>
             {view.sectorShortRatio.observations.length ? (
-              <div className="table-scroll">
+              <div
+                aria-label="業種別空売り売買代金の観測一覧"
+                className="table-scroll"
+                role="region"
+                tabIndex={0}
+              >
                 <table>
                   <thead>
                     <tr>
@@ -762,18 +928,35 @@ function Dashboard({
         <Card title="データ基準日" eyebrow="Source dates">
           <MetricGrid metrics={view.dataDates} />
         </Card>
-        <Card title="利用不可データ" eyebrow={`${view.unavailable.length} recorded gaps`}>
-          {view.unavailable.length ? (
-            <ul className="unavailable-list">
-              {view.unavailable.map((item, index) => (
-                <li key={`${item.section}-${item.metric ?? ''}-${index}`}>
-                  <strong>{item.section}{item.metric ? ` / ${item.metric}` : ''}</strong>
-                  <span>{item.reason}</span>
-                  {item.detail ? <small>{item.detail}</small> : null}
-                </li>
-              ))}
-            </ul>
-          ) : <p className="clear-state">記録された欠損はありません。</p>}
+        <Card title="データ状態" eyebrow={`${view.unavailable.length} stored records`}>
+          <AvailabilityBadges counts={view.availability.global} />
+          <section className="data-state-group" aria-labelledby="uncollected-sections-heading">
+            <h3 id="uncollected-sections-heading">未収集セクション</h3>
+            {view.availability.uncollectedSections.length ? (
+              <ul className="unavailable-list">
+                {view.availability.uncollectedSections.map(section => (
+                  <li key={section}>
+                    <strong>{section}</strong>
+                    <span>このSnapshotでは未収集</span>
+                  </li>
+                ))}
+              </ul>
+            ) : <p className="clear-state">未収集セクションはありません。</p>}
+          </section>
+          <section className="data-state-group" aria-labelledby="stored-state-records-heading">
+            <h3 id="stored-state-records-heading">保存済みデータ状態レコード</h3>
+            {view.unavailable.length ? (
+              <ul className="unavailable-list">
+                {view.unavailable.map((item, index) => (
+                  <li key={`${item.section}-${item.metric ?? ''}-${index}`}>
+                    <strong>{item.section}{item.metric ? ` / ${item.metric}` : ''}</strong>
+                    <span>{item.reason}</span>
+                    {item.detail ? <small>{item.detail}</small> : null}
+                  </li>
+                ))}
+              </ul>
+            ) : <p className="clear-state">保存済みデータ状態レコードはありません。</p>}
+          </section>
         </Card>
       </div>
 
@@ -1110,6 +1293,7 @@ function App() {
   if (selectedTicker && snapshot) {
     return (
       <Dashboard
+        key={`${snapshot.canonicalTicker}:${snapshot.generatedAt}`}
         snapshot={snapshot}
         onBack={navigateToWatchlist}
         onSelectTab={navigateToTab}
