@@ -656,6 +656,7 @@ describe('snapshot presentation mapping', () => {
       { label: 'ボリンジャー上限', value: { text: '¥3,150.5', available: true } },
       { label: 'ボリンジャー下限', value: { text: '¥2,749.5', available: true } },
     ]);
+    expect(view.advancedTechnical?.dataDate).toEqual({ text: '2026-08-21', available: true });
     expect(view.advancedTechnical?.metrics.map(metric => metric.label)).not.toContain('Buy');
     expect(view.advancedTechnical?.metrics.map(metric => metric.label)).not.toContain('Sell');
     expect(view.dataDates).toContainEqual({
@@ -1826,11 +1827,14 @@ describe('snapshot presentation mapping', () => {
       close: 2_780,
       volume: 10_000,
     }]);
-    expect(view.chart.priceLines.map(line => [line.label, line.price])).toEqual([
-      ['SMA 20', 2_800],
-      ['Swing High', 2_900],
-      ['Swing Low', 2_650],
+    expect(view.chart.priceLines.map(line => [line.label, line.price, line.displayPrice])).toEqual([
+      ['SMA 20', 2_800, { text: '¥2,800', available: true }],
+      ['Swing High', 2_900, { text: '¥2,900', available: true }],
+      ['Swing Low', 2_650, { text: '¥2,650', available: true }],
     ]);
+    expect(view.chart.startDate).toEqual({ text: '2026-08-20', available: true });
+    expect(view.chart.endDate).toEqual({ text: '2026-08-20', available: true });
+    expect(view.chart.latestClose).toEqual({ text: '¥2,780', available: true });
   });
 });
 
