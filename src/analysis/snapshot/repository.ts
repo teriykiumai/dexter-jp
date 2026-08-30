@@ -1,6 +1,5 @@
 import { mkdir, readFile, readdir, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import { z } from 'zod';
 import { dexterPath } from '../../utils/paths.js';
 import {
   canonicalJsonV1,
@@ -14,6 +13,7 @@ import {
   type CreateOnlyLinkFile,
 } from './create-only-file.js';
 import { AnalysisSnapshotPersistenceError } from './errors.js';
+import { createSnapshotId, SnapshotIdSchema, type SnapshotId } from './id.js';
 import {
   compareLatestSnapshotOrderV1,
   resolveLatestSnapshotV1,
@@ -35,12 +35,8 @@ import {
   type AnalysisSnapshot,
 } from './schema.js';
 
-export const SnapshotIdSchema = z.string().regex(
-  /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/,
-  'snapshotId must be a Windows-safe UTC timestamp.',
-);
-
-export type SnapshotId = z.infer<typeof SnapshotIdSchema>;
+export { createSnapshotId, SnapshotIdSchema } from './id.js';
+export type { SnapshotId } from './id.js';
 
 export interface SavedAnalysisSnapshot {
   snapshotId: SnapshotId;
@@ -183,17 +179,6 @@ function assertSnapshotId(value: string): SnapshotId {
     );
   }
   return parsed.data;
-}
-
-export function createSnapshotId(generatedAt: string): SnapshotId {
-  const timestamp = new Date(generatedAt);
-  if (!generatedAt.endsWith('Z') || Number.isNaN(timestamp.getTime())) {
-    throw new AnalysisSnapshotPersistenceError(
-      'unsafe_snapshot_id',
-      `Cannot create snapshot ID from generatedAt: ${generatedAt}`,
-    );
-  }
-  return assertSnapshotId(timestamp.toISOString().replace(/[:.]/g, '-'));
 }
 
 function parseSnapshotJson(contents: string, source: string): AnalysisSnapshot {

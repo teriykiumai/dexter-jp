@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { Phase3SnapshotInput, SnapshotDigest } from '../snapshot/canonical-json.js';
-import { SnapshotIdSchema } from '../snapshot/repository.js';
+import { SnapshotIdSchema } from '../snapshot/id.js';
 import { CanonicalTickerSchema, type AnalysisSnapshot } from '../snapshot/schema.js';
 
 export const COMPARISON_RESULT_VERSION = 1 as const;

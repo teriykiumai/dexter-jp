@@ -666,6 +666,21 @@ export function buildDetailPath(
   const parameters = new URLSearchParams(currentSearch);
   parameters.set('ticker', ticker);
   parameters.set('tab', tab);
+  parameters.delete('base');
+  parameters.delete('target');
+  parameters.delete('evaluationSnapshot');
+  parameters.delete('evaluation');
+  return `/?${parameters.toString()}`;
+}
+
+export function buildDashboardTabPath(
+  ticker: string,
+  tab: DashboardTabId,
+  currentSearch = '',
+): string {
+  const parameters = new URLSearchParams(currentSearch);
+  parameters.set('ticker', ticker);
+  parameters.set('tab', tab);
   return `/?${parameters.toString()}`;
 }
 
@@ -673,6 +688,10 @@ export function buildWatchlistPath(currentSearch = ''): string {
   const parameters = new URLSearchParams(currentSearch);
   parameters.delete('ticker');
   parameters.delete('tab');
+  parameters.delete('base');
+  parameters.delete('target');
+  parameters.delete('evaluationSnapshot');
+  parameters.delete('evaluation');
   const search = parameters.toString();
   return search ? `/?${search}` : '/';
 }
