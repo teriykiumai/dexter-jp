@@ -992,7 +992,7 @@ function marketCorrelationDefinition(metric: Exclude<WindowMetric,
       const matches = result.windows.filter(window => window.period === period);
       const observationIdentity = identity(['benchmark', result.benchmark], ['period', period]);
       if (matches.length > 1) {
-        return { kind: 'ambiguous', identity: instance.identity, candidateCount: matches.length };
+        throw new ComparisonCorruptSnapshotError();
       }
       if (matches.length === 0) {
         return {
@@ -1076,7 +1076,7 @@ function sectorBenchmarkDefinition(metric: WindowMetric): InternalDefinitionV1 {
         ['calculationSource', result.provenance.calculation.source],
       );
       if (matches.length > 1) {
-        return { kind: 'ambiguous', identity: instance.identity, candidateCount: matches.length };
+        throw new ComparisonCorruptSnapshotError();
       }
       if (matches.length === 0) {
         const sectionReasons = storedSectionReasons(snapshot, 'sectorBenchmark')

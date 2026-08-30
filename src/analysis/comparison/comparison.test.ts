@@ -445,6 +445,39 @@ describe('Comparison observations and dispositions', () => {
     });
   });
 
+  test('fails closed on duplicate fixed Market and Sector window periods', () => {
+    const base = comparisonSnapshot('2026-08-22T01:00:00.000Z');
+    for (const period of [20, 60, 250] as const) {
+      const duplicateMarketWindow = mutateV9(
+        comparisonSnapshot('2026-08-22T02:00:00.000Z'),
+        value => {
+          if (value.marketCorrelation === null) throw new Error('fixture');
+          const window = value.marketCorrelation.windows.find(item => item.period === period);
+          if (window === undefined) throw new Error('fixture');
+          value.marketCorrelation.windows.push(structuredClone(window));
+        },
+      );
+      expect(failure(
+        phase3Input(base),
+        phase3Input(duplicateMarketWindow),
+      ).error.code).toBe('corrupt_snapshot');
+
+      const duplicateSectorWindow = mutateV9(
+        comparisonSnapshot('2026-08-22T02:00:00.000Z'),
+        value => {
+          if (value.sectorBenchmark === null) throw new Error('fixture');
+          const window = value.sectorBenchmark.windows.find(item => item.period === period);
+          if (window === undefined) throw new Error('fixture');
+          value.sectorBenchmark.windows.push(structuredClone(window));
+        },
+      );
+      expect(failure(
+        phase3Input(base),
+        phase3Input(duplicateSectorWindow),
+      ).error.code).toBe('corrupt_snapshot');
+    }
+  });
+
   test('preserves exact reasons, uses only missing_metric_value fallback, and keeps zero available', () => {
     const base = comparisonSnapshot('2026-08-22T01:00:00.000Z');
     const target = mutateV9(comparisonSnapshot('2026-08-22T02:00:00.000Z'), value => {
