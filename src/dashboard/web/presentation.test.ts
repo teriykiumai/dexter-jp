@@ -2121,15 +2121,15 @@ describe('watchlist presentation mapping', () => {
     expect(buildDetailPath(
       '6758',
       'report',
-      '?ticker=7203&tab=market&base=old&target=new&evaluationSnapshot=new&evaluation=run&future=keep',
+      '?ticker=7203&tab=market&base=old&target=new&future=keep',
     )).toBe('/?ticker=6758&tab=report&future=keep');
     expect(buildDashboardTabPath(
       '7203',
       'technical',
-      '?ticker=7203&tab=report&base=old&target=new&evaluationSnapshot=new&evaluation=run',
-    )).toBe('/?ticker=7203&tab=technical&base=old&target=new&evaluationSnapshot=new&evaluation=run');
+      '?ticker=7203&tab=report&base=old&target=new&future=keep',
+    )).toBe('/?ticker=7203&tab=technical&base=old&target=new&future=keep');
     expect(buildWatchlistPath(
-      '?ticker=7203&tab=report&base=old&target=new&evaluationSnapshot=new&evaluation=run&future=keep',
+      '?ticker=7203&tab=report&base=old&target=new&future=keep',
     )).toBe('/?future=keep');
     expect(parseDetailTicker('?ticker=7203')).toBe('7203');
     expect(parseDetailTicker('?ticker=130A')).toBe('130A');

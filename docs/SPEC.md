@@ -401,7 +401,6 @@ Phase 1.5の非目標:
 - しこり玉 / Volume Profile / POC / VAH / VAL
 
 ### Phase 3
-- Independent Evaluator
 - Radar chart
 - 過去分析との差分
 - 総合スコアの評価計画（runtime scoreは実装しない）
@@ -415,6 +414,11 @@ Phase 1.5の非目標:
 PDF exportはPhase 3の対象としない。Dashboard外共有、immutableな監査提出、
 定常的なoffline保存・印刷、またはPDF固有のaccessibility要件が具体化した
 場合に、Phase番号を先に割り当てず独立した計画で再評価する。
+
+Independent Evaluatorのruntime、CLI、API、Dashboard表示、gold-set gateは
+Phase 3の対象としない。保存済み分析に対する具体的なレビュー需要、許容する
+誤検出率、継続評価予算が定義された場合に、使用済みholdoutを再利用せず、
+新しいversioned gold setとgate IDを含む独立した計画で再評価する。
 
 ### Phase 5
 - Portfolio分析

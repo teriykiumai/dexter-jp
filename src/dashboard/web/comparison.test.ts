@@ -63,40 +63,25 @@ describe('comparison Dashboard controller helpers', () => {
     expect(COMPARISON_PAIR_REQUIREMENT).toContain('2件以上');
   });
 
-  test('preserves matching future Evaluation selectors only for the same target', () => {
+  test('builds and resets a pair while preserving unrelated query state', () => {
     const base = '2026-08-22T01-02-03-000Z';
     const target = '2026-08-23T01-02-03-000Z';
-    const evaluation = '123e4567-e89b-42d3-a456-426614174000';
-    const current = `?ticker=7203&tab=evaluation&evaluationSnapshot=${target}&evaluation=${evaluation}&future=keep`;
-    const preserved = new URL(buildComparisonPath(
+    const current = '?ticker=7203&tab=technical&future=keep';
+    const comparison = new URL(buildComparisonPath(
       '7203',
       { baseSnapshotId: base, targetSnapshotId: target },
       current,
-      true,
     ), 'http://localhost');
-    expect(preserved.searchParams.get('evaluationSnapshot')).toBe(target);
-    expect(preserved.searchParams.get('evaluation')).toBe(evaluation);
-    expect(preserved.searchParams.get('future')).toBe('keep');
+    expect(comparison.searchParams.get('tab')).toBe('report');
+    expect(comparison.searchParams.get('base')).toBe(base);
+    expect(comparison.searchParams.get('target')).toBe(target);
+    expect(comparison.searchParams.get('future')).toBe('keep');
 
-    const changed = new URL(buildComparisonPath(
-      '7203',
-      { baseSnapshotId: base, targetSnapshotId: '2026-08-24T01-02-03-000Z' },
-      current,
-      false,
-    ), 'http://localhost');
-    expect(changed.searchParams.has('evaluationSnapshot')).toBeFalse();
-    expect(changed.searchParams.has('evaluation')).toBeFalse();
-  });
-
-  test('reset preserves only an Evaluation tuple matching the former target', () => {
-    const target = '2026-08-23T01-02-03-000Z';
-    const evaluation = '123e4567-e89b-42d3-a456-426614174000';
-    const current = `?ticker=7203&base=2026-08-22T01-02-03-000Z&target=${target}&evaluationSnapshot=${target}&evaluation=${evaluation}`;
-    const reset = new URL(buildComparisonResetPath('7203', current, target), 'http://localhost');
+    const reset = new URL(buildComparisonResetPath('7203', comparison.search), 'http://localhost');
     expect(reset.searchParams.has('base')).toBeFalse();
     expect(reset.searchParams.has('target')).toBeFalse();
-    expect(reset.searchParams.get('evaluationSnapshot')).toBe(target);
-    expect(reset.searchParams.get('evaluation')).toBe(evaluation);
+    expect(reset.searchParams.get('tab')).toBe('report');
+    expect(reset.searchParams.get('future')).toBe('keep');
   });
 
   test('row filters keep changed and issue semantics distinct', () => {

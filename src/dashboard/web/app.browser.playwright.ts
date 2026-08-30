@@ -1428,44 +1428,22 @@ test.describe('saved-analysis Comparison browser interaction', () => {
     }
   });
 
-  test('preserves matching future Evaluation selectors and clears them only when target changes', async ({ browser }) => {
+  test('treats deferred Evaluation query parameters as inert unknown state', async ({ browser }) => {
     const page = await browser.newPage();
     const oldest = snapshotWithIdentity('1010', '2026-08-21T01:02:03.000Z');
-    const pinned = snapshotWithIdentity('1010', '2026-08-22T01:02:03.000Z');
-    const newest = snapshotWithIdentity('1010', '2026-08-23T01:02:03.000Z');
-    const pinnedId = createSnapshotId(pinned.generatedAt);
-    const evaluationId = '123e4567-e89b-42d3-a456-426614174000';
+    const latest = snapshotWithIdentity('1010', '2026-08-22T01:02:03.000Z');
     try {
-      await mockComparisonApi(page, [oldest, pinned, newest]);
+      await mockComparisonApi(page, [oldest, latest]);
       await openDetail(
         page,
         '1010',
         'report',
-        `&evaluationSnapshot=${pinnedId}&evaluation=${evaluationId}`,
+        `&evaluationSnapshot=${createSnapshotId(oldest.generatedAt)}`
+          + '&evaluation=123e4567-e89b-42d3-a456-426614174000',
       );
-      await expect(page.locator('.generated-at')).toContainText('2026');
       await page.getByRole('button', { name: '比較を開始' }).click();
       await expect(page.locator('.comparison-table').first()).toBeVisible();
-      let url = new URL(page.url());
-      expect(url.searchParams.get('target')).toBe(pinnedId);
-      expect(url.searchParams.get('evaluationSnapshot')).toBe(pinnedId);
-      expect(url.searchParams.get('evaluation')).toBe(evaluationId);
-
-      await page.getByRole('button', { name: '比較を解除' }).first().click();
-      await expect(page.getByRole('button', { name: '比較を開始' })).toBeEnabled();
-      url = new URL(page.url());
-      expect(url.searchParams.has('base')).toBe(false);
-      expect(url.searchParams.get('evaluationSnapshot')).toBe(pinnedId);
-      expect(url.searchParams.get('evaluation')).toBe(evaluationId);
-
-      await page.getByRole('button', { name: '比較を開始' }).click();
-      await expect(page.locator('.comparison-table').first()).toBeVisible();
-      await page.locator('.comparison-selectors label').filter({ hasText: '対象Snapshot' })
-        .locator('select').selectOption(createSnapshotId(newest.generatedAt));
-      await expect(page.locator('.comparison-table').first()).toBeVisible();
-      url = new URL(page.url());
-      expect(url.searchParams.has('evaluationSnapshot')).toBe(false);
-      expect(url.searchParams.has('evaluation')).toBe(false);
+      expect(new URL(page.url()).searchParams.get('target')).toBe(createSnapshotId(latest.generatedAt));
     } finally {
       await page.close();
     }

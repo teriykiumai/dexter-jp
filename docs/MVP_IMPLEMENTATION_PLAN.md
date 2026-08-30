@@ -707,7 +707,6 @@ Phase 1.5は、Step 10で完成したMVPの完成条件を変更または再度�
 
 ## Phase 3
 
-- Evaluator
 - radar charts
 - historical comparison
 - composite-score evaluation plan only; no runtime score
@@ -722,6 +721,12 @@ Phase 1.5は、Step 10で完成したMVPの完成条件を変更または再度�
 PDF export is deferred without assigning it to a numbered phase. Reconsider it only
 after a concrete sharing, audit, offline-printing, or PDF-accessibility need is
 documented in a separate reviewed plan.
+
+The Independent Evaluator runtime, CLI, API, Dashboard surface, and paid quality
+gate are also deferred without a numbered target phase. Reconsider them only after
+a concrete review workflow, acceptable error rates, and an ongoing evaluation
+budget are defined in a separate reviewed plan with a new versioned holdout and
+gate ID.
 
 ## Phase 5
 

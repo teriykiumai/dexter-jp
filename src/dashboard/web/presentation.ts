@@ -693,8 +693,6 @@ export function buildDetailPath(
   parameters.set('tab', tab);
   parameters.delete('base');
   parameters.delete('target');
-  parameters.delete('evaluationSnapshot');
-  parameters.delete('evaluation');
   return `/?${parameters.toString()}`;
 }
 
@@ -715,8 +713,6 @@ export function buildWatchlistPath(currentSearch = ''): string {
   parameters.delete('tab');
   parameters.delete('base');
   parameters.delete('target');
-  parameters.delete('evaluationSnapshot');
-  parameters.delete('evaluation');
   const search = parameters.toString();
   return search ? `/?${search}` : '/';
 }
