@@ -1875,11 +1875,6 @@ function matchingHistorySnapshotId(
   ))?.snapshotId ?? null;
 }
 
-function parseEvaluationSnapshotId(search: string): string | null {
-  const values = new URLSearchParams(search).getAll('evaluationSnapshot');
-  return values.length === 1 && isSnapshotId(values[0]) ? values[0]! : null;
-}
-
 function App() {
   const [selectedTicker, setSelectedTicker] = useState<string | null>(() => (
     parseDetailTicker(window.location.search)
@@ -1889,9 +1884,6 @@ function App() {
   ));
   const [comparisonSelection, setComparisonSelection] = useState<ComparisonPageSelection>(() => (
     parseComparisonPageSelection(window.location.search)
-  ));
-  const [evaluationSnapshotId, setEvaluationSnapshotId] = useState<string | null>(() => (
-    parseEvaluationSnapshotId(window.location.search)
   ));
   const [navigationRevision, setNavigationRevision] = useState(0);
   const [loadRevision, setLoadRevision] = useState(0);
@@ -1913,7 +1905,6 @@ function App() {
   const [reloadState, setReloadState] = useState<SnapshotReloadState>({ status: 'idle' });
   const selectedTickerRef = useRef(selectedTicker);
   const comparisonSelectionRef = useRef(comparisonSelection);
-  const evaluationSnapshotIdRef = useRef(evaluationSnapshotId);
   const snapshotRef = useRef(snapshot);
   const mainRequestTokenRef = useRef(0);
   const reloadAbortControllerRef = useRef<AbortController | null>(null);
@@ -1921,7 +1912,6 @@ function App() {
   const pendingGlossaryFocusRef = useRef<GlossaryFocusDestination | null>(null);
   selectedTickerRef.current = selectedTicker;
   comparisonSelectionRef.current = comparisonSelection;
-  evaluationSnapshotIdRef.current = evaluationSnapshotId;
   snapshotRef.current = snapshot;
   const selectionKey = comparisonSelectionKey(comparisonSelection);
 
@@ -1957,12 +1947,10 @@ function App() {
       const nextTicker = parseDetailTicker(window.location.search);
       const nextTab = nextTicker ? parseDetailTab(window.location.search) : DEFAULT_DASHBOARD_TAB;
       const nextComparison = parseComparisonPageSelection(window.location.search);
-      const nextEvaluationSnapshotId = parseEvaluationSnapshotId(window.location.search);
       if (nextTicker) canonicalizeTab(nextTicker, nextTab);
       rememberGlossaryFocusDestination(nextTicker);
       const loadIdentityChanged = nextTicker !== selectedTickerRef.current
-        || comparisonSelectionKey(nextComparison) !== comparisonSelectionKey(comparisonSelectionRef.current)
-        || nextEvaluationSnapshotId !== evaluationSnapshotIdRef.current;
+        || comparisonSelectionKey(nextComparison) !== comparisonSelectionKey(comparisonSelectionRef.current);
       if (loadIdentityChanged) {
         cancelSnapshotReload();
         setComparison(null);
@@ -1980,7 +1968,6 @@ function App() {
       setSelectedTicker(nextTicker);
       setSelectedTab(nextTab);
       setComparisonSelection(nextComparison);
-      setEvaluationSnapshotId(nextEvaluationSnapshotId);
       setNavigationRevision(current => current + 1);
       if (nextTicker && focusWasInTablist) {
         window.requestAnimationFrame(() => {
@@ -2093,16 +2080,11 @@ function App() {
         }
 
         setComparisonPair(null);
-        const pinnedSnapshotId = comparisonSelection.kind === 'none'
-          ? evaluationSnapshotId
-          : null;
-        const displayed = pinnedSnapshotId
-          ? await fetchSnapshot(selectedTicker, abortController.signal, pinnedSnapshotId)
-          : await fetchSnapshot(selectedTicker, abortController.signal);
+        const displayed = await fetchSnapshot(selectedTicker, abortController.signal);
         if (!isCurrent()) return;
         setHistoryItems(history);
         setSnapshot(displayed);
-        setDisplayedSnapshotId(pinnedSnapshotId ?? matchingHistorySnapshotId(history, displayed));
+        setDisplayedSnapshotId(matchingHistorySnapshotId(history, displayed));
         if (comparisonSelection.kind !== 'none') {
           setComparisonIssue({
             message: comparisonSelection.kind === 'invalid'
@@ -2162,9 +2144,9 @@ function App() {
       });
     }
     return () => abortController.abort();
-  }, [evaluationSnapshotId, loadRevision, selectedTicker, selectionKey]);
+  }, [loadRevision, selectedTicker, selectionKey]);
 
-  const commitComparisonPair = (pair: ComparisonPair, preserveEvaluationForTarget: boolean) => {
+  const commitComparisonPair = (pair: ComparisonPair) => {
     if (!selectedTicker) return;
     rememberGlossaryFocusDestination(selectedTicker);
     cancelSnapshotReload();
@@ -2172,7 +2154,6 @@ function App() {
       selectedTicker,
       pair,
       window.location.search,
-      preserveEvaluationForTarget,
     );
     window.history.pushState({}, '', path);
     setComparison(null);
@@ -2180,7 +2161,6 @@ function App() {
     setComparisonIssue(null);
     setTargetSnapshotIssue(null);
     setComparisonSelection({ kind: 'valid', pair });
-    setEvaluationSnapshotId(parseEvaluationSnapshotId(new URL(path, window.location.origin).search));
     setSelectedTab(DEFAULT_DASHBOARD_TAB);
     setComparisonNotice(null);
     setComparisonLoading(true);
@@ -2201,7 +2181,6 @@ function App() {
     setSelectedTicker(ticker);
     setSelectedTab(DEFAULT_DASHBOARD_TAB);
     setComparisonSelection({ kind: 'none' });
-    setEvaluationSnapshotId(null);
   };
   const navigateToWatchlist = () => {
     rememberGlossaryFocusDestination(null);
@@ -2213,7 +2192,6 @@ function App() {
     setSelectedTicker(null);
     setSelectedTab(DEFAULT_DASHBOARD_TAB);
     setComparisonSelection({ kind: 'none' });
-    setEvaluationSnapshotId(null);
   };
   const navigateToTab = (tab: DashboardTabId) => {
     if (!selectedTicker) return;
@@ -2234,18 +2212,14 @@ function App() {
       setComparisonNotice(COMPARISON_PAIR_REQUIREMENT);
       return;
     }
-    commitComparisonPair(pair, true);
+    commitComparisonPair(pair);
   };
   const resetComparison = () => {
     if (!selectedTicker) return;
-    const targetSnapshotId = comparisonSelection.kind === 'valid'
-      ? comparisonSelection.pair.targetSnapshotId
-      : null;
     cancelSnapshotReload();
     const path = buildComparisonResetPath(
       selectedTicker,
       window.location.search,
-      targetSnapshotId,
     );
     window.history.pushState({}, '', path);
     setComparison(null);
@@ -2253,7 +2227,6 @@ function App() {
     setComparisonIssue(null);
     setTargetSnapshotIssue(null);
     setComparisonSelection({ kind: 'none' });
-    setEvaluationSnapshotId(parseEvaluationSnapshotId(new URL(path, window.location.origin).search));
     setSelectedTab(DEFAULT_DASHBOARD_TAB);
     setComparisonLoading(true);
     if (!snapshot || targetSnapshotIssue) setLoading(true);
@@ -2266,7 +2239,7 @@ function App() {
       setComparisonNotice('基準Snapshotは対象Snapshotより前である必要があります。');
       return;
     }
-    commitComparisonPair(pair, true);
+    commitComparisonPair(pair);
   };
   const changeComparisonTarget = (targetSnapshotId: string) => {
     const pair = resolveComparisonPair(historyItems, targetSnapshotId);
@@ -2274,7 +2247,7 @@ function App() {
       setComparisonNotice(COMPARISON_PAIR_REQUIREMENT);
       return;
     }
-    commitComparisonPair(pair, false);
+    commitComparisonPair(pair);
   };
   const retryComparison = () => {
     if (comparisonSelection.kind !== 'valid') return;
@@ -2289,7 +2262,6 @@ function App() {
     if (!selectedTicker || !snapshot) return;
     const requestedTicker = selectedTicker;
     const requestedSelectionKey = comparisonSelectionKey(comparisonSelection);
-    const requestedEvaluationSnapshotId = evaluationSnapshotId;
     const displayedIdentity = `${snapshot.canonicalTicker}:${snapshot.generatedAt}`;
     reloadAbortControllerRef.current?.abort();
     const abortController = new AbortController();
@@ -2307,7 +2279,6 @@ function App() {
         || reloadRequestTokenRef.current !== requestToken
         || selectedTickerRef.current !== requestedTicker
         || comparisonSelectionKey(comparisonSelectionRef.current) !== requestedSelectionKey
-        || evaluationSnapshotIdRef.current !== requestedEvaluationSnapshotId
       ) return;
       setHistoryItems(nextHistory);
       const nextSnapshotId = matchingHistorySnapshotId(nextHistory, nextSnapshot);
@@ -2318,16 +2289,6 @@ function App() {
           setReloadState({ status: 'newer', snapshotId: nextSnapshotId });
         } else {
           setReloadState({ status: 'error', detail: COMPARISON_PAIR_REQUIREMENT });
-        }
-        return;
-      }
-      if (requestedEvaluationSnapshotId) {
-        if (nextSnapshotId === requestedEvaluationSnapshotId) {
-          setReloadState({ status: 'unchanged', pinned: true });
-        } else if (nextSnapshotId && resolveComparisonPair(nextHistory, nextSnapshotId)) {
-          setReloadState({ status: 'newer', snapshotId: nextSnapshotId });
-        } else {
-          setReloadState({ status: 'unchanged', pinned: true });
         }
         return;
       }
@@ -2364,7 +2325,7 @@ function App() {
       setComparisonNotice(COMPARISON_PAIR_REQUIREMENT);
       return;
     }
-    commitComparisonPair(pair, false);
+    commitComparisonPair(pair);
   };
 
   if (error) {

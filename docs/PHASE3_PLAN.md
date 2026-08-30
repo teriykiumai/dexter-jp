@@ -1,26 +1,32 @@
 # Phase 3 Implementation Plan
 
-**Status:** P3-0 design contract; approval is determined only by the current
-`docs/REVIEW_POLICY.md` Merge Gate and merged Git history
+**Status:** Phase 3 normative contract; P3-EF freezes P3-E2/P3-E3; approval is
+determined only by the current `docs/REVIEW_POLICY.md` Merge Gate and merged Git
+history
 
 **Repository baseline:** `b2989cd1f78fc374f433352fd6532a506fb00108`
 
 **Baseline identity:** PR #73 merge; Dashboard UX closeout complete
 
-**Date:** 2026-08-29
+**Date:** 2026-08-30
 
 ## 1. Purpose and authority
 
-This document is the normative implementation plan for Phase 3. P3-0 fixes the
+This document is the normative implementation plan for Phase 3. P3-0 fixed the
 source, ownership, formula, identity, safety, persistence, presentation, and
-PR-boundary contracts before runtime implementation begins.
+PR-boundary contracts before runtime implementation began. P3-EF narrows the active
+scope after the Evaluator candidate failed its manual quality gate.
 
-Phase 3 adds four independently reviewable outcomes:
+Phase 3 adds three independently reviewable product outcomes:
 
 1. deterministic comparison of two saved analyses;
 2. a visual rendering of the seven existing peer percentiles;
-3. an explicitly invoked independent qualitative review of a saved analysis; and
-4. a docs-only composite-score evaluation plan.
+3. a docs-only composite-score evaluation plan.
+
+The merged P3-E1 evidence-manifest and sidecar repository remain as dormant internal
+foundation. Phase 3 does not add an Evaluator runtime, CLI, API, Dashboard surface,
+or executable quality gate. P3-E2 and P3-E3 are frozen after the candidate runtime
+failed its locked-holdout campaign; no passed attestation exists.
 
 Phase 3 does not implement PDF export or a runtime composite score. PDF has no
 numbered target phase and may be reconsidered only in a separate reviewed plan
@@ -35,7 +41,7 @@ This plan inherits and does not weaken:
 - `docs/VISUALIZATION_MVP_PLAN.md` for Snapshot, persistence, local API, and
   Dashboard boundaries;
 - `docs/DASHBOARD_UX_PLAN.md` for Presentation Layer, responsive, URL, and
-  accessibility contracts, except for the explicitly reviewed sixth tab added here;
+  accessibility contracts;
 - the applicable contracts in `docs/PHASE2_PLAN.md`; and
 - `docs/REVIEW_POLICY.md` for the Merge Gate.
 
@@ -60,8 +66,8 @@ Existing Playwright/Chromium remains a browser-test dependency. It is not a Phas
 PDF runtime or export commitment.
 
 Phase 3 introduces no new EDINET, J-Quants, market-data, or web source. Financial
-values come only from validated persisted Snapshots. Evaluator narrative review may
-also receive the exact stored report, but the report is never a numeric source.
+values come only from validated persisted Snapshots. No Phase 3 path sends a stored
+report or evidence manifest to an Evaluator provider.
 
 ## 3. Cross-cutting contract
 
@@ -82,7 +88,7 @@ Rules:
 - Preserve ticker, schema version, generated time, data dates, units, provenance,
   unavailable reasons, and stored values.
 - `generatedAt` identifies an analysis run. It is not a source publication date.
-- Do not fetch current data while comparing, reviewing, or drawing a saved Snapshot.
+- Do not fetch current data while comparing or drawing a saved Snapshot.
 - Do not recover values from prompts, tool arguments, Dashboard text, or the report.
 - Do not forward-fill, interpolate, infer aggregation, or convert missing data to
   zero.
@@ -266,12 +272,13 @@ units; byte limits use UTF-8 bytes.
 
 At V9 save time, scan the complete stored report and reject an exact credential,
 marker, disallowed control, more than 50,000 UTF-16 code units, or more than 200,000
-UTF-8 bytes. Before Evaluator confirmation and dispatch, repeat that scan over the
-report and scan the complete logical input; also reject a logical input above 200,000
-UTF-16 code units.
+UTF-8 bytes. P3-I0 also retains dormant pre-dispatch report/logical-input scanners,
+but Phase 3 has no caller that may confirm or dispatch an Evaluator request. Any
+future Evaluator plan must re-review those scanners before use.
 
-Evaluator-only `FilesystemPathPolicyV1` scans the report and every manifest string
-value before JSON serialization. It splits with
+Dormant Evaluator-facing `FilesystemPathPolicyV1` scans the report and every manifest
+string value before JSON serialization. It is not an authorization to dispatch in
+Phase 3. It splits with
 ``/[\s"'`<>()\[\]{}]+/u``, strips only trailing
 `/[.,;:!?。、，；：！？]+$/u`, and applies these rules in order:
 
@@ -348,7 +355,8 @@ P3-I0 acceptance tests include:
 - required output headings with bare `/`, every allowlisted Snapshot endpoint,
   `http:`/`https:`, relative paths, and punctuation boundaries pass; Windows
   drive/UNC, `/home/user`, `/tmp`, another POSIX absolute path, and `file:` reject;
-  all failures occur before provider dispatch; and
+  no Phase 3 provider dispatch exists, and any future integration must fail before
+  dispatch; and
 - V9 remains the only writer, V1–V9 remain readable, and no old history file is
   rewritten or backfilled.
 
@@ -358,12 +366,12 @@ P3-I0 acceptance tests include:
 | --- | --- | --- | --- |
 | History comparison | pure deterministic Comparison module | no | read-only GET/controller |
 | Peer Radar | Dashboard presentation of stored values | no | presentation only |
-| Independent evaluation | versioned Evaluator sidecar | no | explicit CLI/controller |
+| Evaluator foundation | versioned evidence/sidecar contracts | no | P3-E1 repository only; no producer or consumer |
 | Composite score | not adopted | no | prohibited until Phase 4 decision |
 | PDF/export artifact | deferred | no | no Phase 3 surface |
 
-Dashboard routes remain GET-only. The Browser does not create an evaluation, incur
-provider cost, mutate a Snapshot, or write an artifact.
+Dashboard routes remain GET-only. The Browser has no evaluation route or tab, does
+not incur provider cost, mutate a Snapshot, or write an artifact.
 
 ### 3.6 Shared value semantics
 
@@ -1233,11 +1241,8 @@ are `base` and `target`.
   rows, focus, and History entry and announces the same strictly ordered-pair
   requirement.
 - Starting Comparison first resolves and validates the current displayed target and
-  its predecessor in memory, then calls `pushState` once with both IDs. When the
-  detail is pinned by `evaluationSnapshot`, that same Snapshot is the Comparison
-  target and both matching Evaluation selectors are preserved. Resolution failure
-  preserves the current normal or Evaluation-pinned detail URL and shows a scoped
-  error.
+  its predecessor in memory, then calls `pushState` once with both IDs. Resolution
+  failure preserves the current detail URL and shows a scoped error.
 - Target pins the entire Dashboard to that exact Snapshot.
 - Changing target first resolves and validates its immediate predecessor, then calls
   `pushState` once with the complete new pair. It never emits a transient target-only
@@ -1248,9 +1253,8 @@ are `base` and `target`.
 - Ticker/list navigation removes the pair.
 - Malformed, one-sided, same-ID, or reversed deep links are not repaired or swapped;
   show an inline error and a Comparison-reset action.
-- Reset uses one `pushState` to remove both IDs and preserves ticker plus
-  `tab=report`. With matching Evaluation selectors it preserves them and returns to
-  the exact pinned detail; without them it returns to normal latest-detail behavior.
+- Reset uses one `pushState` to remove both IDs, preserves ticker plus `tab=report`,
+  and returns to normal latest-detail behavior.
 - Back/Forward and reload restore the exact pair.
 - Detail and Comparison loads are atomic for the selected target.
 - Use AbortController and a monotonic request token; stale success/error cannot
@@ -1465,50 +1469,34 @@ that differ only in selected peers' raw metric values but have identical stored
 positions/unavailable state must render identically, proving chart visibility and
 sample-size display do not replay eligibility.
 
-## 6. P3-E — Independent Evaluator
+## 6. P3-E — Dormant Evaluator foundation
 
-### 6.1 Responsibility and invocation
+### 6.1 Frozen scope
 
-Evaluator is optional qualitative AI review of one exact persisted Snapshot and its
-stored report. It is not a financial Engine, report editor, score, or investment
-judge.
+P3-E1 implemented only deterministic evidence-manifest, finding, digest, and
+create-only sidecar repository contracts. That merged foundation remains internal
+and has no Phase 3 producer or consumer.
 
-```text
-bun run evaluate:snapshot
-  --ticker <ticker>
-  --snapshot-id <id>
-  [--model <model>]
-  [--confirm-external-send]
-```
+P3-E2 and P3-E3 are deferred. Phase 3 has no `evaluate:snapshot` CLI, provider
+dispatch, qualification attestation, evaluation GET API, URL selector, or
+`evaluation / AIレビュー` tab. No pending manifest or failed campaign authorizes
+runtime use, and no unavailable sidecar may be fabricated to represent an Evaluator
+that did not run.
 
-- There is no latest alias.
-- Dashboard has no run/re-run/delete button.
-- No automatic execution occurs after analysis or save.
-- Remote provider confirmation defaults to No every run.
-- Non-interactive remote execution requires `--confirm-external-send`.
-- There is no persistent, config, or environment bypass.
-- `--model`, saved `modelId`, and `DEFAULT_MODEL` are selectors only; after profile
-  resolution the exact provider/model/effective-reasoning tuple must match an
-  accepted `QualifiedEvaluatorRuntimeV1` entry.
-- The initial accepted tuple is only `openai / gpt-5.6-terra / high` through the
-  exact canonical OpenAI provider boundary defined in Section 6.5. A local or remote
-  selector without a matching passed gate fails preflight with typed
-  `runtime_not_quality_gated`, before confirmation, dispatch, cost, or sidecar.
-
-Before confirmation, show ticker, snapshot ID, provider, effective model, reasoning
-effort, exact external base URL, organization/project routing (`none` initially),
-report/manifest/total input sizes, actual HTTP-request limit, timeout, external-send
-status, and possible API cost.
+The contracts below through Section 6.4 document the retained P3-E1 storage
+foundation. Section 6.5 records why runtime and presentation are deferred; the
+rejected candidate implementation remains available only in closed-PR history.
 
 ### 6.2 Evidence manifest
 
-Evaluator receives:
+The dormant provider-neutral foundation defines a possible future input consisting
+of:
 
 - an instruction-isolated exact stored report;
 - a deterministic, versioned evidence manifest; and
 - a strict output schema.
 
-It receives no tools and cannot fetch data.
+No Phase 3 runtime sends this input, uses tools, or fetches data.
 
 The provider request has fixed code-owned instructions and one structured JSON data
 object whose separate fields contain `report` and `evidenceManifest`. Both fields
@@ -2241,567 +2229,26 @@ an allowlisted sanitized failure code/message. It does not claim a verified targ
 schemaVersion, generatedAt, digest, manifest, or provider attempt when those facts
 were not established.
 
-### 6.5 Runtime
-
-Runtime selection first resolves:
-
-1. explicit `--model`;
-2. saved `modelId`;
-3. `DEFAULT_MODEL`.
-
-Resolve once with `deep_analysis`, then require an exact match in a validated tracked
-qualification attestation:
-
-```ts
-type QualifiedEvaluatorRuntimeV1 = Readonly<{
-  qualityGateId: string;
-  gateManifestDigest: `sha256:${string}`;
-  gateAttestationDigest: `sha256:${string}`;
-  evaluatorSourceDigest: `sha256:${string}`;
-  gateEvaluatedCommitSha: string;
-  state: 'qualified';
-  executionEnvironment: Readonly<{
-    bunVersion: string;
-    bunRevision: string;
-    platform: string;
-    arch: string;
-    dependencyManifestDigest: `sha256:${string}`;
-  }>;
-  providerId: string;
-  modelId: string;
-  reasoningEffort: string | null;
-  providerBoundary: Readonly<{
-    baseUrl: 'https://api.openai.com/v1';
-    organizationId: null;
-    projectId: null;
-    adapterMaxRetries: 0;
-    sdkMaxRetries: 0;
-  }>;
-  evaluatorSchemaVersion: 1;
-  evidenceManifestVersion: 1;
-  rubricVersion: 1;
-  promptVersion: 1;
-  safetyPolicyVersion: 1;
-}>;
-```
-
-`qualityGateId` matches `^qg_[a-z0-9][a-z0-9_-]{0,63}$`; the manifest,
-attestation, and source digests are full lowercase `sha256:` digests; and
-`gateEvaluatedCommitSha` is exactly 40 lowercase hex characters. The initial
-provider boundary is exact base URL `https://api.openai.com/v1`, null organization,
-null project, adapter retry limit 0, and provider-SDK retry limit 0. The initial
-execution tuple is Bun `1.3.14`, revision `1.3.14+0d9b296af`, on `win32/x64`;
-another provider route/retry policy, Bun build, platform, or architecture requires
-its own passed gate. Duplicate IDs, digest mismatch, pending-only manifest, failed
-attestation, tuple/version/provider-boundary/execution-environment,
-installed-dependency, or current-source mismatch fails as
-`runtime_not_quality_gated` before confirmation or provider dispatch.
-
-Use that immutable provider/model/reasoning/provider-boundary and version tuple for
-the entire run.
-There is no ungated/experimental mode, compatibility fallback, or reasoning
-downgrade. The CLI and Dashboard detail display gate ID, source/dependency digests,
-exact endpoint/organization/project/retry policy, Bun/platform/architecture, and
-evaluated commit.
-
-The Evaluator provider boundary passes every routing option explicitly and never
-inherits OpenAI/LangChain routing defaults. It sets the exact base URL above,
-`organization: null`, `project: null`, adapter `maxRetries: 0`, and OpenAI SDK
-`maxRetries: 0`. The environment variables `OPENAI_BASE_URL`,
-`OPENAI_ORGANIZATION`, `OPENAI_ORG_ID`, and `OPENAI_PROJECT_ID` must all be absent.
-Any one being present—even as an empty string—returns sanitized typed
-`provider_routing_override_detected` during initial preflight and again immediately
-before dispatch, creates no sidecar, and sends no request. An alternative endpoint,
-organization, project, gateway, or retry policy requires a separately reviewed gate
-ID and paid campaign; it must never be mislabeled `providerId: openai` under this
-initial tuple.
-
-P3-E2 introduces an Evaluator-only `invokeEvaluatorOnce` provider boundary. It must
-not call the current generic `callLlm` or `withRetry` paths, because those paths have
-retry, permissive-structured-output, and raw-error logging behavior outside this
-contract. Existing callers remain unchanged. The new boundary:
-
-- provider attempt limit: 1;
-- hard timeout: 180 seconds;
-- no adapter, SDK-internal, transport, or repair retry;
-- exactly one outbound HTTP request and an AbortSignal propagated through the
-  provider adapter;
-- tools: none;
-- maximum output tokens: 16,384;
-- provider-native strict structured output for every qualified runtime, followed by
-  exact local category-sensitive validation with unknown fields rejected; and
-- logging limited to allowlisted provider ID, fixed failure code, and attempt number.
-  Raw error/message/cause, response, prompt, request ID, credential, and path are
-  never logged.
-
-`buildEvaluatorProviderRequestV1` is the sole code-owned normalizer for instructions,
-quoted report/manifest data, strict output schema, tools, token limit, timeout signal,
-and provider boundary. `invokeEvaluatorOnce` is the sole owner of provider-client
-construction and the sole function allowed to issue an outbound Evaluator request.
-Both production evaluation and every paid gold-case invocation must call these exact
-same functions. Gate authorization metadata is validated before this builder and is
-not added to the provider payload; given the same logical report/manifest and runtime,
-both modes produce a deep-equal normalized outbound request and adapter configuration.
-
-The gold harness may add fixture/campaign orchestration, authorize an exact pending
-manifest after paid confirmation, collect gate metrics, and suppress sidecar
-persistence. It must not construct a provider client, duplicate prompt/request
-building, bypass `invokeEvaluatorOnce`, or alter instructions/schema/tool/token/
-timeout/route/retry settings. Production differs only by requiring the matching
-passed attestation and enabling the already-defined sidecar lifecycle.
-
-The attempt count is the actual outbound HTTP-request count, not merely calls to
-`invokeEvaluatorOnce`. A retryable network/408/409/429/5xx failure therefore still
-produces exactly one request. Timeout or cancellation cannot start another provider
-request. Cancellation wins over a late response. A provider adapter that cannot
-enforce native strict output,
-AbortSignal, empty tools, both zero-retry layers, exact route, and the output-token
-limit is not eligible for a quality gate.
-
-### 6.6 Read API and URL state
-
-```text
-GET /api/analyses/:ticker/history/:snapshotId/evaluations
-GET /api/analyses/:ticker/history/:snapshotId/evaluations/:evaluationId
-```
-
-List:
-
-- target existence is checked even when there are zero runs;
-- metadata only, not the report or full manifest;
-- default limit 20, maximum 100;
-- sort `completedAt desc, evaluationId asc`;
-- opaque strict base64url cursor containing version, completedAt, and evaluation ID;
-- exact detail may be loaded even if not present on the current list page;
-- a corrupt/unknown/digest-mismatched sidecar fails the list; do not skip it.
-
-HTTP mapping:
-
-- malformed ticker/snapshot/evaluation/cursor → 400;
-- target Snapshot missing → 404 `snapshot_not_found`;
-- evaluation missing → 404 `evaluation_not_found`;
-- zero runs for an existing target → 200 with an empty page;
-- corrupt/version/digest/filesystem failure → 500 `evaluation_unavailable`;
-- non-GET → 405 with `Allow: GET`.
-
-Preserve local Host restrictions, no CORS, `Cache-Control: no-store`, and
-`nosniff`.
-
-Page query:
-
-```text
-/?ticker=<ticker>&tab=evaluation
-  [&base=<base-id>&target=<target-id>]
-  [&evaluationSnapshot=<snapshot-id>]
-  [&evaluation=<evaluation-id>]
-```
-
-- `evaluationSnapshot` is an Evaluation-only selector and does not satisfy or alter
-  the Comparison rule that `base` and `target` must appear together. When present,
-  it pins the entire Dashboard detail—including the exact stored report used for
-  excerpts—to that history Snapshot across tab changes.
-- Missing both Evaluation selectors means an unpinned, unselected list for the
-  currently displayed Snapshot: the validated latest Snapshot in normal detail or
-  the exact `target` in Comparison.
-- `evaluationSnapshot` without `evaluation` is a legal pinned-unselected state.
-  `evaluation` without `evaluationSnapshot` is invalid and is removed before any
-  Evaluation request.
-- When a Comparison pair and `evaluationSnapshot` coexist, the Evaluation Snapshot
-  must equal `target`; a mismatch is an inline invalid-selection state and starts no
-  Evaluation request. It is never repaired by changing the Comparison pair.
-- Never auto-select even when exactly one run exists.
-- Selecting a run uses one `pushState` that writes both the displayed Snapshot ID as
-  `evaluationSnapshot` and the run ID. Clearing the run removes only `evaluation`
-  and preserves the pinned Snapshot/list. An explicit `現在の分析に戻る` action
-  removes both selectors with one `pushState`.
-- Tab changes use `replaceState` and preserve both Evaluation selectors.
-- Starting Comparison from an Evaluation-pinned detail preserves both Evaluation
-  selectors only when that pinned Snapshot becomes the exact Comparison target.
-  Resetting that Comparison preserves the selectors and returns to the same pinned
-  detail. Adopting a different target clears both selectors before the new request.
-- Other target/ticker/list changes clear both Evaluation selectors. A base-only
-  change preserves them because the target is unchanged.
-- Syntactically invalid `evaluationSnapshot` or `evaluation`, and an evaluation ID
-  without its Snapshot selector, are removed together before a request with one
-  `replaceState`.
-- A syntactically valid 404 Snapshot or evaluation ID remains in the URL and shows
-  its scoped inline error; do not fall back to latest, another Snapshot, or another
-  run.
-- Initial load, bookmark, reload, and Back/Forward restore the exact tuple
-  `ticker + evaluationSnapshot + evaluation`. A newly saved latest Snapshot never
-  retargets a pinned tuple; an unpinned view follows the normal validated latest
-  reload contract.
-- List and detail use separate AbortControllers and monotonic request tokens.
-- Their request identity includes ticker, effective Snapshot ID, and applicable
-  evaluation ID; stale success/error from another tuple cannot replace the panel.
-- Evaluation-panel failure does not replace the saved Snapshot page with a global
-  error.
-
-### 6.7 Dashboard
-
-Evaluator has its own stable tab:
-
-```text
-evaluation / AIレビュー
-```
-
-The tab displays:
-
-- an explicit non-deterministic AI-review label and statement that Snapshot/report
-  are not modified;
-- a native run selector;
-- run time, provider, model, reasoning, schema/rubric/prompt/manifest versions;
-- target Snapshot identity and digest;
-- distinct states for no stored run, unselected, available zero findings,
-  unavailable run, and available findings;
-- material/advisory plain-text importance;
-- the escaped exact report excerpt in a blockquote, or every ordered contradictory
-  excerpt in separately labelled blockquotes;
-- exact referenced fact key/value/unit/date/state/reason plus its record
-  identity/method/limitation table; or
-- manifest-absence scope and reason.
-
-It displays no execution/retry/delete control, score, percentage, pass/fail,
-Buy/Sell, or gauge. Selecting a run does not steal focus or scroll. Loading uses
-`role=status`; failure uses `role=alert`; status and importance are not conveyed
-by color alone.
-
-### 6.8 Gold set and release gate
-
-Create a versioned Japanese set of 64 cases:
-
-- 16 development and 48 locked holdout cases;
-- two independent annotators plus adjudication;
-- 12 clean holdout cases;
-- balanced unsupported, not-verifiable-from-Snapshot,
-  not-verifiable-by-Evaluator, inconsistency, missing-caveat, and unclear-reasoning
-  cases;
-- at least four locked report-to-report inconsistency cases, including at least two
-  outside/unavailable Snapshot domains that have no eligible available fact ref;
-- mixed-state available scopes including V1/V2 20-day correlation `not_collected`,
-  Advanced Technical single-metric unavailable, and Supply/Demand record facts with
-  both available and unavailable states;
-- V1–V9, zero, unavailable, not-collected, partial, compound, Japanese, and
-  injection cases;
-- fixed input digests;
-- a 12-case stability subset;
-- no telemetry or external eval service.
-
-All 64 cases must use synthetic or explicitly redistributable fixture content and
-must be safe to track in the repository. They contain no real credential, private
-report, local path, proprietary payload, or unlicensed source text. The locked
-holdout is immutable after adjudication and is not used for prompt tuning; "locked"
-does not mean secret or unreviewable.
-
-Finding matching is maximum one-to-one within category:
-
-- exact `claimDomains` set equality is a prerequisite; a category/location match with
-  missing or extra domains is not a match;
-- single locations require report-anchor intersection-over-union at least 0.5;
-- report-anchor sets require the same anchor count and a maximum one-to-one ordered
-  match in which every paired anchor has intersection-over-union at least 0.5;
-- available/non-available fact-ref set F1 at least 0.5;
-- manifest-absence reason exact match plus at least one overlapping scope;
-- importance exact match for material metrics.
-
-Locked-holdout gate:
-
-- validated available: at least 46/48;
-- material precision and recall: each at least 90%;
-- per-category recall: each at least 80%;
-- unsupported-claim precision and recall: each at least 90%;
-- not-verifiable-from-Snapshot precision and recall: each at least 90%;
-- not-verifiable-by-Evaluator precision and recall: each at least 90%;
-- missing-caveat recall: at least 85%;
-- available-fact/non-available-fact/manifest/report-contradiction basis and
-  matched-location accuracy: each at least 95%;
-- ref/location integrity for available artifacts: 100%;
-- material false positives across 12 clean cases: zero;
-- clean cases with an advisory false positive: at most 1/12;
-- timeouts: at most 1/48;
-- successful-case p95 latency: below 180 seconds.
-
-Run the stability subset three times:
-
-- at least 90% of gold material findings appear in at least two runs;
-- clean material false positives remain zero in all repetitions.
-
-Eight injected pairs must:
-
-- retain seeded material detection in 8/8;
-- produce zero unknown refs, invalid anchors, summary canary leaks, scores, Buy/Sell,
-  or tool calls; and
-- not reduce material recall versus the paired baseline.
-
-The gate lifecycle is deliberately non-self-referential. Tracked paths are:
-
-```text
-src/evaluator/quality-gates/manifests/<qualityGateId>.json
-src/evaluator/quality-gates/attestations/<qualityGateId>.json
-```
-
-The manifest exists before the paid run and has state `pending`. The attestation does
-not exist until that campaign passes. Production CLI reads pending manifests only to
-verify an attestation and never treats `pending` as executable qualification.
-
-`EvaluatorSourceManifestV1` is a canonical sorted list of repository-relative POSIX
-paths plus SHA-256 of each exact Git blob. It contains:
-
-- every tracked file under `src/evaluator/**` except the two quality-gate manifest /
-  attestation directories;
-- the complete transitive tracked local-import closure of the Evaluator CLI and gold
-  harness when a dependency lives outside `src/evaluator/**`; and
-- `package.json`, `bun.lock`, root `tsconfig.json`, every recursively extended
-  TypeScript config, and any tracked Bun/module-resolution config that affects that
-  closure.
-
-The current execution-config set is exactly `package.json`, `bun.lock`, and
-`tsconfig.json`. A discovery guard fails if a tracked `tsconfig*.json`,
-`bunfig.toml`, `.bunfig.toml`, `bun.lockb`, workspace/package manifest, or another
-code-owned resolver config can affect the closure but is not classified and hashed.
-Adding one requires a reviewed source-manifest/version update; it is never silently
-ignored.
-
-Generation requires a clean checkout at one exact commit, hashes bytes from that Git
-commit rather than mutable working-tree reads, rejects symlinks/untracked imports,
-and fails if an imported local file or gold fixture is absent from the list. Paths
-are unique and sorted by UTF-16 code-unit order. The source digest hashes this exact
-object:
-
-```ts
-type EvaluatorSourceDigestEnvelopeV1 = Readonly<{
-  kind: 'dexter_evaluator_source';
-  version: 1;
-  files: readonly Readonly<{
-    path: string;
-    blobDigest: `sha256:${string}`;
-  }>[];
-}>;
-```
-
-External installed code is bound separately. Starting from the Evaluator CLI and
-gold-harness entrypoints, the pinned Bun resolver walks the complete literal
-static/dynamic import closure. For every loaded package it records package name,
-exact installed version, lockfile package key, exact resolved entry/submodule paths,
-and SHA-256 of every JavaScript/TypeScript/JSON/native file actually reachable at
-runtime. Package metadata that controls `exports`, conditional resolution, or module
-type is included. Non-literal dynamic imports, unresolved optional fallbacks, a
-symlink/reparse target, a package outside the frozen lock, or an unclassified loaded
-file makes the runtime ineligible rather than weakening the manifest.
-
-```ts
-type EvaluatorDependencyDigestEnvelopeV1 = Readonly<{
-  kind: 'dexter_evaluator_dependencies';
-  version: 1;
-  packages: readonly Readonly<{
-    packageName: string;
-    packageVersion: string;
-    lockfilePackageKey: string;
-    files: readonly Readonly<{
-      packageRelativePath: string;
-      byteDigest: `sha256:${string}`;
-    }>[];
-  }>[];
-}>;
-```
-
-Packages and files use unique POSIX paths and UTF-16 code-unit sort order.
-`dependencyManifestDigest` is the CanonicalJsonV1 SHA-256 of that complete envelope;
-hashing all unrelated `node_modules` content is neither required nor allowed.
-
-P3-E2 pins root `packageManager` and CI setup to Bun `1.3.14`; CI must not use
-`bun-version: latest`. The pending gate manifest binds Bun version, full
-`bun --revision` output, platform, architecture, dependency manifest/digest, source
-digest/copy, provider/model/reasoning, exact endpoint/organization/project and both
-retry limits, all Evaluator versions, gold-set version, pricing/cost cap, and campaign
-parameters. `gateManifestDigest` is the full
-CanonicalJsonV1 digest of the manifest.
-
-The qualification-verification CI job runs on the attested `win32/x64` platform with
-that exact Bun build and a frozen install. A Linux or different-architecture job may
-validate pure schemas/fixtures but cannot qualify or revalidate the initial Windows
-attestation. Another supported execution platform requires a separate gate ID,
-campaign, attestation, and matching-platform verification job.
-
-Only the manual gold harness may execute a pending manifest. It starts from a fresh
-disposable clean checkout of the evaluated commit, verifies the pinned Bun
-version/revision/platform/architecture, runs `bun install --frozen-lockfile`, derives
-the dependency manifest from those installed bytes, requires both exact source and
-dependency digests, and then requires explicit paid confirmation. Each case passes
-through the same `buildEvaluatorProviderRequestV1` and `invokeEvaluatorOnce` used by
-production; the harness has no second provider client or request path. It writes no
-Evaluation sidecar and writes its proposed passed attestation only below
-`.dexter/evaluator-gates/<qualityGateId>/`. The proposed attestation contains:
-
-- state `passed`, quality-gate ID, gate-manifest digest, evaluator-source digest,
-  dependency-manifest digest, and exact Bun/platform/architecture tuple;
-- exact provider/model/reasoning/endpoint/organization/project/retry policy and
-  Evaluator versions;
-- evaluated commit SHA as audit metadata, start/completion times, aggregate metrics,
-  per-case result digests, injection/stability results, and charged/reserved cost; and
-- a full campaign-result digest, but no prompt, response, credential, private text,
-  or provider request ID.
-
-After independent inspection, the sole permitted post-gate repository change is to
-copy that exact attestation into the tracked attestation path. The attestation
-directory is excluded from the source digest, so adding the record does not change
-the evaluated source. CI on that qualification commit must prove:
-
-1. the difference from `gateEvaluatedCommitSha` contains only the matching new
-   attestation file;
-2. the attestation's CanonicalJsonV1 bytes hash to `gateAttestationDigest`;
-3. its manifest/runtime/version/source/dependency/execution fields exactly match the
-   pending manifest;
-4. recomputing current tracked source/config bytes and the frozen resolved-
-   dependency manifest produces the attested digests; and
-5. every locked gate threshold passed within the cost cap.
-
-Production derives `QualifiedEvaluatorRuntimeV1` only from a manifest plus a passed
-tracked attestation satisfying those checks. The initial tuple is
-`openai / gpt-5.6-terra / high`. A one-byte change to any source-manifest file,
-execution config, resolved dependency file, dependency manifest/lockfile, prompt,
-evidence registry, finding schema, rubric, safety code, harness, or gold fixture
-invalidates qualification. A new provider/model/reasoning, Bun/revision/platform/
-architecture, provider endpoint/organization/project/retry policy, dependency, or
-Evaluator-version tuple requires a new gate ID and paid campaign. The evaluated
-commit SHA remains auditable metadata; source, dependency,
-and execution-environment digests are the mechanical runtime binding that survives
-the attestation-only qualification commit and merge commit.
-
-Production does not trust Git blobs while executing mutable working-tree files. At
-initial preflight and again immediately after external-send confirmation before
-dispatch, it uses the actual current filesystem and pinned Bun resolver to:
-
-1. verify exact Bun version/revision/platform/architecture;
-2. hash every attested local source/config path from working-tree bytes and require
-   exact source-manifest equality;
-3. resolve the actual external closure, hash the installed reachable files, and
-   require exact dependency-manifest equality;
-4. require all four routing environment variables to be absent and construct the
-   exact attested provider boundary with both retry limits zero; and
-5. reject missing/extra resolution inputs, symlinks/reparse targets, dirty relevant
-   bytes, or resolution outside the attested manifests.
-
-Unrelated working-tree files outside both closures do not invalidate the run. Any
-relevant mismatch returns `runtime_not_quality_gated` before provider dispatch and
-creates no sidecar, even if the tracked Git blobs still match the attestation.
-
-One campaign has a USD 25 hard cap. The gate manifest pins currency, input/output
-unit prices, source, and verification date. Before each call reserve a safe upper
-bound using input UTF-8 bytes as the maximum input-token count plus 16,384 output
-tokens. Reconcile to returned usage after success; if usage is absent, retain the
-reservation. Do not dispatch a call whose reservation exceeds remaining budget.
-Raising the cap requires a reviewed manifest change.
-
-The paid gate is manual and never runs in normal CI. Passing it does not authorize
-automatic/default-on evaluation. P3-E2 cannot merge until the pinned locked-holdout
-campaign passes all gates within the cost cap; P3-E3 cannot begin before that merge.
-Unsupported-claim metrics exclude `not_verifiable_from_snapshot` and
-`not_verifiable_by_evaluator` gold labels and predictions so absent Snapshot
-evidence and intentionally unsent persisted evidence cannot be counted as
-unsupported.
-
-### 6.9 Evaluator acceptance
-
-P3-E1 tests include:
-
-- deterministic V1–V9 manifests with exact scope domain/state/coverage/reason,
-  stable item IDs, limits, and no silent truncation;
-- the exact all-maxima fixture produces 343 grouped Evidence items, including one
-  multi-fact item per public-short/dividend/sector-short record; scalar-per-field
-  expansion is rejected as a registry contract violation, and 101st sector-short or
-  17th Strategy record fails preflight without truncation;
-- every fact-state union rejects invalid value/unit/reason combinations and unknown
-  reasons; `definitionKey` is the only schema traceability pointer and no separate
-  path-like pointer is persisted;
-- nullable Fundamental/current-price/dividend facts with no exact stored reason use
-  only `missing_metric_value`, while a stored exact reason takes precedence and valid
-  numeric zero remains available;
-- a Snapshot fixture with non-empty provenance `sourceUrls` produces a manifest and
-  provider input containing none of those URL strings; Evidence provenance has no
-  `sourceUrls` field, and an unknown/non-relative endpoint qualifier fails preflight;
-- a claim with no matching evidence inside a `complete_for_domain` scope can be
-  represented as `unsupported_claim` with exact absence basis and no fact refs;
-- V1/V2 20-day correlation, one unavailable Advanced Technical metric, and a grouped
-  record mixing available/unavailable facts each resolve through exact
-  `non_available_fact_refs` without relabelling their available scope; wrong item,
-  fact key, state, reason, order, or domain rejects the entire available artifact;
-- filing-derived or otherwise outside-scope claims map to
-  `not_verifiable_from_snapshot` or an applicable `missing_caveat`, never to
-  `unsupported_claim` solely because evidence was not persisted;
-- stored price-history/Volume Profile-bin claims map to
-  `not_verifiable_by_evaluator` or an applicable `missing_caveat`, never to
-  `not_verifiable_from_snapshot` or `unsupported_claim` solely because those
-  collections are intentionally excluded from the manifest;
-- schema-invalid empty `priceHistory` or available Volume Profile-bin arrays are
-  rejected at Snapshot load and never added as an Evidence state/test branch;
-- unavailable and partial scopes cannot be promoted to complete coverage;
-- every category rejects missing-domain, extra-domain, wrong-domain, missing-scope,
-  category/basis/importance mismatches, fabricated refs, invalid anchors, unknown
-  fields, and duplicate IDs; cross-domain findings require complete exact coverage;
-- report-to-report inconsistency accepts exactly 2–4 ordered non-overlapping anchors
-  without fact refs, while evidence-based inconsistency and unclear reasoning require
-  exact available-fact domain coverage;
-- exact persisted manifest loading across evaluator code-version change, without
-  regeneration from the target Snapshot; and
-- malformed/missing targets and preflight safety failures create no sidecar and
-  return no fabricated verified metadata.
-
-P3-E2 tests include:
-
-- production rejects a pending-only manifest while the manual harness accepts only
-  that pending state with explicit paid confirmation; adding the exact passed
-  attestation leaves the recomputed evaluator-source/dependency digests unchanged and
-  qualifies only its exact manifest/runtime/version/source/execution tuple;
-- a spied provider adapter proves both a pending-manifest gold case and a production
-  run traverse the same `buildEvaluatorProviderRequestV1` and sole
-  `invokeEvaluatorOnce` outbound boundary; equal logical report/manifest and runtime
-  produce a deep-equal normalized outbound request/configuration after authorization,
-  and a harness-owned client/request builder is structurally absent;
-- a stale/wrong attestation, an attestation hash mismatch, a repository diff beyond
-  the one expected attestation file, a missing transitive source file, or a one-byte
-  change to any source-manifest file rejects qualification before confirmation or
-  dispatch;
-- `tsconfig.json` path mapping and every discovered execution config affect the
-  source digest; an unclassified config, dirty relevant working-tree byte, changed
-  resolved dependency file, symlink/reparse target, Bun version/revision, platform,
-  or architecture rejects both initial and immediate-pre-dispatch preflight;
-- the manual gate uses a fresh checkout plus `bun install --frozen-lockfile`, normal
-  CI pins Bun 1.3.14 rather than latest, and production accepts only the exact
-  attested resolved-dependency manifest;
-- the canonical OpenAI base URL plus null organization/project and both zero-retry
-  layers pass; any routing environment variable, changed route/policy, or retryable
-  network/408/409/429/5xx fixture rejects before dispatch or produces exactly one
-  outbound HTTP request with no SDK/adapter retry;
-- report/manifest prompt-injection fixtures remain inert quoted data with an empty
-  tool list;
-- qualified runtime acceptance, `--model`/saved/default ungated rejection before
-  confirmation, default-No and non-interactive confirmation, exactly one outbound
-  HTTP request, no generic `callLlm`/retry path, timeout, cancel, late response,
-  provider/schema/reference failure, sanitized logs, and save-after-cost behavior;
-- correct closed-domain classification of unsupported versus
-  not-verifiable-from-Snapshot versus not-verifiable-by-Evaluator cases, including
-  filing, company/management, competitor/industry, macro/news, undeclared EV/EBITDA,
-  source-totality, raw price history, Volume Profile bins, and other outside-context
-  fixtures;
-- no fabricated evidence, score, pass/fail, Buy/Sell, unknown ref, or invalid anchor;
-- deterministic stub-provider tests in normal CI; and
-- the versioned manual Japanese gold-set campaign as the merge gate above.
-
-P3-E3 tests include:
-
-- an evaluation selection writes both `evaluationSnapshot` and `evaluation`; a
-  bookmark/reload after a newer latest Snapshot appears still loads the exact pinned
-  sidecar and never performs a global evaluation-ID lookup;
-- pinned-unselected, clear-run, return-to-current, tab, target/ticker/list, and
-  base-only transitions use the exact push/replace/clear rules above;
-- evaluation-without-Snapshot, Comparison-target mismatch, malformed selectors,
-  valid 404 selectors, Back/Forward, and no-fallback behavior;
-- separate list/detail abort tokens reject reversed stale success/error for another
-  ticker/Snapshot/run tuple; and
-- zero runs, available zero findings, unavailable run, report-anchor-set display,
-  exact available/non-available fact key/value/unit/date/state/reason rendering,
-  keyboard/focus behavior, and mobile layout.
+### 6.5 Deferred runtime and presentation decision
+
+The candidate P3-E2 runtime completed deterministic/stub validation but failed its
+single manually approved locked-holdout campaign. No passed attestation was created,
+the candidate PR was closed without merge, and P3-E3 was not started. Aggregate
+failure evidence showed material precision/recall, missing-caveat recall, available-
+fact basis accuracy, matched-location accuracy, stability, and injection integrity
+below the reviewed thresholds.
+
+The used locked holdout is retired for runtime/prompt/model selection. Do not lower
+the reviewed thresholds, tune against its aggregate results, rerun it as a release
+gate, or merge a pending/failed qualification. A future Evaluator requires a
+separate reviewed plan, new versioned development and locked-holdout sets, two
+independent annotations plus adjudication, a new gate ID, explicit provider/model/
+runtime binding, a new cost decision, and a concrete user workflow demonstrating
+that the expected review benefit justifies ongoing qualification maintenance.
+
+Until then, there is no Evaluator CLI, provider request, attestation, read API, URL
+state, Dashboard tab, or Phase 3 acceptance test beyond preserving the dormant P3-E1
+foundation and proving those surfaces are absent.
 
 ## 7. P3-C — Composite-score evaluation plan
 
@@ -2837,23 +2284,22 @@ Runtime adoption is a separate Phase 4 decision. If adopted, update
 
 ## 8. Dashboard information architecture
 
-Phase 3 extends the reviewed registry from five to six stable tabs:
+Phase 3 keeps the reviewed registry at five stable tabs:
 
 | ID | Exact Japanese label | Phase 3 placement |
 | --- | --- | --- |
 | `report` | 概要・レポート | Comparison first, then existing report content |
-| `evaluation` | AIレビュー | stored Evaluator runs only |
 | `technical` | 株価・テクニカル | unchanged |
 | `fundamentals` | 比較・配当 | Radar with existing peer/dividend content |
 | `supply-demand` | 需給・空売り | unchanged |
 | `market` | 市場・セクター | unchanged |
 
-All six tabs exist for every readable V1–V9 Snapshot. `report` remains the default.
+All five tabs exist for every readable V1–V9 Snapshot. `report` remains the default.
 The automatic ARIA tabs pattern, keyboard wrap/Home/End behavior, sticky horizontal
 mobile tablist, selected-tab visibility, History API, focus restoration, and
 unknown-tab canonicalization remain inherited.
 
-No Router, POST analysis/evaluation endpoint, polling, WebSocket, source refresh,
+No Router, evaluation endpoint/tab/URL state, polling, WebSocket, source refresh,
 PDF control, or provider-cost action is introduced.
 
 ## 9. Implementation sequence
@@ -2882,15 +2328,14 @@ dependent step before the predecessor is independently reviewed and merged.
 6. **P3-E1 — Evidence and sidecar foundation**
    - manifest/finding schemas, repository, digest, failure contracts;
    - no LLM call.
-7. **P3-E2 — Explicit Evaluator runtime**
-   - controller/CLI, confirmation, one-attempt call, validation, manual gold gate;
-   - no Dashboard cost trigger.
-8. **P3-E3 — Evaluator read presentation**
-   - cursor GET routes, URL selection, sixth Dashboard tab;
-   - no report/Snapshot mutation.
-9. **P3-C0 — Composite-score evaluation design**
+7. **P3-EF — Evaluator freeze and roadmap synchronization**
+   - retain merged P3-E1 as dormant internal foundation;
+   - defer P3-E2/P3-E3, runtime, CLI, paid gate, API, URL state, and Dashboard tab;
+   - remove only the unused H2 `evaluationSnapshot`/`evaluation` URL scaffolding;
+   - do not merge the failed candidate runtime.
+8. **P3-C0 — Composite-score evaluation design**
    - docs-only Phase 4 evidence gate; no runtime score.
-10. **P3-X — Final closeout**
+9. **P3-X — Final closeout**
     - Usage, applicable setup guidance, merged PR/validation record, handoff, and
       Phase 4 boundary.
 
@@ -2910,11 +2355,10 @@ Additional gates:
 | --- | --- |
 | P3-I0 | cross-process no-clobber/idempotency, hard-link unsupported path, epoch-ordered authoritative latest/no legacy rewrite, existing GET error mapping/reload preservation, canonical golden vectors, exact safety grammar, V1–V9 readability |
 | P3-H1 | 67 definitions/accessors, epoch request order, definition/instance versions, nullable-value synthetic reason, discriminated observation including duplicate ambiguity, added/removed/non-available reachability, strict canonical date-role comparison, display/provenance, V1–V9, identities/zero |
-| P3-H2 | exact HTTP union, Evaluation-pinned cross-feature URL lifecycle, result/registry-version state key, disclosure/reload races, focus, responsive |
+| P3-H2 | exact HTTP union, Comparison URL lifecycle, result/registry-version state key, disclosure/reload races, focus, responsive |
 | P3-R1 | selected-peer/target/unavailable structural consistency, stored sparse sample/cohort/fractional rank without Engine eligibility replay, SVG/table accessibility, mobile |
 | P3-E1 | grouped-record cardinality budget, fact state/stored-or-synthetic reason, URL-free provenance, exact available/non-available fact refs, closed claim-domain sets, strict category/domain/basis/location coverage, persisted-but-excluded scopes, canonical IDs, V1–V9 manifest, no-replace sidecar |
-| P3-E2 | sole shared production/gold provider boundary, pinned endpoint/org/project/zero-retry policy, Bun/frozen resolved dependencies, working-tree source/config preflight, qualified tuple, pending-manifest rejection, source/attestation binding, injection, confirmation, one outbound request/timeout/cancel, sanitized logs, stub CI, manual paid gate |
-| P3-E3 | `evaluationSnapshot` exact identity, cursor, gate/runtime metadata, unselected/no-fallback, exact fact state/reason display, zero/unavailable/findings, race/keyboard |
+| P3-EF | Source of Truth agreement, no Evaluator runtime/CLI/API/UI/attestation or reserved Evaluation URL behavior on `main`, retained P3-E1 compatibility, five-tab Dashboard |
 | P3-C0 | no-look-ahead, gate completeness, absence of runtime score |
 | P3-X | full regression, Playwright, CI/review/merge/main and docs synchronization |
 
@@ -2928,12 +2372,17 @@ does not contact a paid provider.
 
 - exact-registry deterministic saved-analysis Comparison;
 - presentation-only Radar of seven existing peer percentiles;
-- explicit qualitative Evaluator with separate versioned sidecars;
+- dormant P3-E1 evidence/sidecar foundation with no runtime or presentation surface;
 - docs-only composite-score evaluation design.
 
 ### Explicitly defer
 
 - PDF/print view/export storage/download API;
+- Evaluator runtime, CLI/controller, provider dispatch, qualification attestation,
+  paid gate, GET API, URL state, and `evaluation / AIレビュー` Dashboard tab;
+- any reuse of the failed candidate's locked holdout for prompt/model tuning or a
+  second qualification attempt; a future independent plan requires a new versioned
+  development set, locked holdout, gate ID, annotation, and cost decision;
 - composite score implementation and weights pending Phase 4;
 - collection-level public-short, investor-flow, or sector-flow diffs;
 - Strategy `resistance_level` candidate Comparison until a stable persisted
@@ -2946,6 +2395,11 @@ does not contact a paid provider.
 PDF is reconsidered only after a concrete use case is documented. At that time,
 create an independent feasibility, safety, runtime, accessibility, and test plan;
 do not reopen or append it implicitly to Phase 3.
+
+Evaluator is reconsidered only after a concrete review workflow, acceptable error
+rates, and ongoing evaluation budget are documented. At that time, create an
+independent safety, runtime, gold-set, maintenance, and UI plan; do not reactivate
+P3-E2/P3-E3 or reuse the consumed locked holdout implicitly.
 
 ### Reject
 
@@ -2965,29 +2419,38 @@ Declare Phase 3 complete only when:
 
 - every step PR is independently reviewed and merged in sequence;
 - local `main` is fast-forwarded to `origin/main`;
-- required CI, focused Browser tests, and manual Evaluator gate pass;
+- required CI and focused Browser tests pass;
 - `Usage.md`, applicable setup guidance, this plan, and the handoff match reality;
 - V9 remains the only Snapshot writer and V1–V9 remain readable without backfill;
 - P3-I0's reviewed no-replace history acceptance, collision, digest, and report-safety
   changes pass without changing Snapshot schema version;
 - valid zero/unavailable/not-collected semantics and existing signals regressions pass;
 - no runtime composite score or new financial signal exists;
-- Evaluator creation remains explicit CLI/controller-only;
+- no Evaluator runtime, CLI, API, URL selector, Dashboard tab, provider dispatch, or
+  passed attestation exists on `main`;
+- the five-tab Dashboard contract remains unchanged apart from reviewed Comparison
+  and Radar placement;
 - Dashboard remains GET-only; and
 - no `.dexter` artifact, credential, proprietary/private gold item, or secret is
   tracked.
 
-## 13. P3-0 review contract
+## 13. P3-EF review contract
 
-P3-0 changes only:
+P3-EF changes only:
 
 - `docs/SPEC.md`;
 - `docs/MVP_IMPLEMENTATION_PLAN.md`;
 - `docs/PHASE3_PLAN.md`; and
-- `docs/PHASE3_HANDOFF.md`.
+- `docs/PHASE3_HANDOFF.md`;
+- `src/dashboard/web/app.tsx`;
+- `src/dashboard/web/comparison.ts` and its colocated test;
+- `src/dashboard/web/presentation.ts` and its colocated test; and
+- the focused Comparison Playwright test file.
 
-It changes no application code, tests, dependency, CI, Snapshot schema, Dashboard
-runtime, Engine, tool, or skill.
+The only application behavior removed is the unused H2 reservation of
+`evaluationSnapshot`/`evaluation` query state and its ability to pin a detail
+Snapshot. P3-EF changes no dependency, CI, Snapshot schema, Engine, tool, or skill.
+The closed P3-E2 candidate is not merged, and P3-E1 is neither reverted nor exposed.
 
 Self-review verifies:
 
@@ -2997,23 +2460,28 @@ Self-review verifies:
 - exact separation of deterministic, presentation, AI, and deferred ownership;
 - complete Comparison key/unit/date/identity/API/URL contracts;
 - metric-specific Comparison display and pair/reload/disclosure lifecycle;
-- exact Evaluator safety grammar, closed evidence domains, canonical byte envelopes,
-  no-replace persistence, qualified runtime, cost, API, and UI contracts;
+- retained P3-E1 safety, evidence, digest, and no-replace sidecar contracts without a
+  runtime producer or Dashboard consumer;
+- explicit deferral of P3-E2/P3-E3, the failed/consumed holdout, paid gate, API, URL,
+  and sixth-tab candidate contracts;
+- no Evaluation-specific query parsing/preservation, reload identity, or pinned-detail
+  behavior remains in production Dashboard code; a focused browser regression proves
+  the retired parameters are inert while generic unknown-query preservation remains
+  unchanged;
 - no score implementation before Phase 4 validation;
-- PDF removed from Phase 3 implementation/Done/sequence while existing Browser-test
-  Playwright remains;
+- PDF and Evaluator runtime removed from Phase 3 implementation/Done/sequence while
+  existing Browser-test Playwright and the merged P3-E1 foundation remain;
 - reviewable step boundaries; and
 - Handoff remains non-normative and does not claim approval.
 
 ## 14. Next task after merge
 
-After the exact P3-0 head passes independent review and is merged:
+After the exact P3-EF head passes independent review and is merged:
 
 ```text
-P3-I0 — History immutability, authoritative epoch-ordered latest resolution,
-         CanonicalJsonV1 digest, and stored-report safety gate
+P3-C0 — Create docs/PHASE3_SCORE_EVALUATION_PLAN.md only
 ```
 
-Implement only that prerequisite and its existing latest/history GET, Watchlist, and
-reload integration. Do not add a new route/component, Comparison calculation/API/UI,
-Radar, Evaluator runtime, score, PDF, Snapshot V10, or source fetch in P3-I0.
+Implement only the composite-score evaluation design. Do not add a runtime score,
+weight, Snapshot field, Dashboard score, Evaluator runtime/API/UI, PDF, Snapshot V10,
+or source fetch in P3-C0.

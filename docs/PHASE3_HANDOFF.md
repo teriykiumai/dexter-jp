@@ -11,7 +11,7 @@ state
 
 **Baseline identity:** PR #73 merge; Dashboard UX closeout complete
 
-**Date:** 2026-08-29
+**Date:** 2026-08-30
 
 ## 1. Authority and use
 
@@ -85,26 +85,24 @@ reimplement financial or statistical calculations.
 - Missing, unavailable, uncollected, and valid zero remain distinct.
 - Historical work respects source-specific dates and never introduces look-ahead.
 - V1–V9 remain immutable and readable; Phase 3 does not create Snapshot V10.
-- History and Evaluator sidecars use the reviewed cross-process no-replace publish
-  contract. Latest state is resolved authoritatively from immutable history by
-  validated numeric `generatedAtEpochMs`; raw timestamp strings are never sorted and
-  the inherited identity permits no distinct same-millisecond tie. Legacy
-  `latest.json` is read only for a ticker with zero history files and is never
-  rewritten by Phase 3.
+- History and the dormant P3-E1 sidecar repository use the reviewed cross-process
+  no-replace publish contract. Latest state is resolved authoritatively from
+  immutable history by validated numeric `generatedAtEpochMs`; raw timestamp strings
+  are never sorted and the inherited identity permits no distinct same-millisecond
+  tie. Legacy `latest.json` is read only for a ticker with zero history files and is
+  never rewritten by Phase 3.
 - Browser and LLM consumers do not reconstruct values from presentation text.
 - Comparison maps schema-supported nullable fields without a stored metric reason to
   the sole `missing_metric_value` synthetic state and compares only strict canonical
   Gregorian date roles; malformed legacy dates make only that row incomparable.
 - Radar trusts stored Engine positions/unavailable state, preserves valid sparse
   per-metric samples, and never replays peer metric eligibility in the Browser.
-- Evaluator Evidence provenance is structurally URL-free, and production plus the
-  paid gold harness share the same sole request builder/provider invocation path.
+- P3-E1 Evidence provenance is structurally URL-free; it remains dormant internal
+  foundation with no Phase 3 runtime producer or Dashboard consumer.
 - Phase 3 creates no Buy/Sell signal, automatic action, or runtime composite score.
-- Evaluator execution requires a tracked passed attestation whose manifest, exact
-  provider/model/reasoning/endpoint/organization/project/zero-retry tuple, versions,
-  evaluator-source/config bytes, pinned Bun/platform/architecture, and frozen
-  resolved-dependency bytes match the current runtime; no environment routing,
-  pending-manifest, SDK retry, or ungated override exists.
+- Phase 3 has no Evaluator execution, CLI, provider dispatch, qualification
+  attestation, API, URL selector, or Dashboard tab. A failed or pending candidate
+  gate never authorizes execution.
 - The product remains personal, local, single-user research software.
 
 Detailed formulas and source contracts remain in `docs/SPEC.md`,
@@ -143,17 +141,15 @@ Phase 3 adopts:
 - a bounded, record-grouped Evidence manifest that preserves exact typed facts
   and their allowlisted non-available reasons through URL-free provenance without
   unbounded scalar expansion;
-- an explicitly invoked qualitative Independent Evaluator whose result is stored in
-  a separate versioned sidecar, whose exact Snapshot/run URL identity is preserved,
-  whose findings reference exact available/non-available facts, and whose exact
-  source/dependency/provider-route/runtime environment and sole production/gold
-  provider call path have passed the gold gate; and
+- a dormant, create-only P3-E1 sidecar/evidence foundation with no Phase 3 producer
+  or consumer; and
 - a docs-only composite-score evaluation plan whose runtime adoption remains gated
   by Phase 4 validation.
 
 Phase 3 explicitly does not implement:
 
 - PDF or print export, export storage, or a download API;
+- Evaluator runtime, CLI, paid quality gate, read API, URL state, or Dashboard tab;
 - a runtime composite score or new financial signal;
 - collection-level public-short, investor-flow, or sector-flow aggregation;
 - automatic Evaluator execution, POST generation endpoints, polling, or WebSocket;
@@ -164,11 +160,10 @@ immutable-audit, offline-printing, or PDF-accessibility need is documented in a
 separate reviewed plan. The existing Playwright/Chromium dependency remains for
 Dashboard browser tests and is not a PDF commitment.
 
-The final Dashboard registry has six stable tabs:
+The final Dashboard registry keeps five stable tabs:
 
 ```text
 report         / 概要・レポート
-evaluation     / AIレビュー
 technical      / 株価・テクニカル
 fundamentals   / 比較・配当
 supply-demand  / 需給・空売り
@@ -176,8 +171,8 @@ market         / 市場・セクター
 ```
 
 Comparison belongs at the start of `report`; Radar belongs in
-`fundamentals`; stored Evaluator results belong in `evaluation`. The Dashboard
-does not invoke an Evaluator or incur provider cost.
+`fundamentals`. The Dashboard has no Evaluator surface and incurs no Evaluator
+provider cost.
 
 ## 7. Implementation sequence and next task
 
@@ -192,26 +187,23 @@ predecessor is merged and local `main` is fast-forwarded.
 4. P3-H2 — read-only Comparison API and Dashboard
 5. P3-R1 — Peer Radar
 6. P3-E1 — evidence manifest and evaluator sidecar
-7. P3-E2 — explicit evaluator runtime, CLI, and manual gold-set gate
-8. P3-E3 — evaluator read API and `evaluation` tab
-9. P3-C0 — composite-score evaluation plan only
-10. P3-X — Usage, setup, handoff, and final validation closeout
+7. P3-EF — freeze P3-E2/P3-E3 and synchronize the roadmap without merging the
+   failed runtime candidate; remove the unused H2 Evaluation URL reservation
+8. P3-C0 — composite-score evaluation plan only
+9. P3-X — Usage, setup, handoff, and final validation closeout
 
-After P3-0 passes independent review and is merged, the next task is:
+After P3-EF passes independent review and is merged, the next task is:
 
 ```text
-P3-I0 — History immutability, authoritative epoch-ordered history latest resolution,
-existing latest/history-consumer integration, CanonicalJsonV1 digest, and
-stored-report safety gate
+P3-C0 — Create docs/PHASE3_SCORE_EVALUATION_PLAN.md only
 ```
 
-P3-I0 updates only the existing latest/history GET, Watchlist, and saved-Snapshot
-reload integration and must not add a new route/component, Comparison
-calculation/API/UI, Radar, Evaluator runtime, PDF, score, Snapshot V10, or source
-fetch.
+P3-C0 must not add a runtime score, weight, Snapshot field, Dashboard score,
+Evaluator runtime/API/UI, PDF, Snapshot V10, or source fetch.
 
 ## 8. Maintenance boundary
 
-This file is updated at P3-0 to establish recovery context and at P3-X to record
-the final merged state. It is not a per-PR progress ledger. Intermediate status
-belongs in the relevant PR and current Git history.
+This file is updated at P3-0 to establish recovery context, at P3-EF to record the
+Evaluator freeze, and at P3-X to record the final merged state. It is not a per-PR
+progress ledger. Intermediate status belongs in the relevant PR and current Git
+history.

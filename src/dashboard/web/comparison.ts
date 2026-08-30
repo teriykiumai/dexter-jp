@@ -95,51 +95,28 @@ export function isValidComparisonPair(
   return baseIndex >= 0 && targetIndex >= 0 && baseIndex < targetIndex;
 }
 
-const EVALUATION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-function hasMatchingEvaluationSelectors(parameters: URLSearchParams, targetSnapshotId: string): boolean {
-  const snapshot = parameters.get('evaluationSnapshot');
-  const evaluation = parameters.get('evaluation');
-  return snapshot === targetSnapshotId
-    && isSnapshotId(snapshot)
-    && (evaluation === null || EVALUATION_ID_PATTERN.test(evaluation));
-}
-
-function clearEvaluationSelectors(parameters: URLSearchParams): void {
-  parameters.delete('evaluationSnapshot');
-  parameters.delete('evaluation');
-}
-
 export function buildComparisonPath(
   ticker: string,
   pair: ComparisonPair,
   currentSearch: string,
-  preserveEvaluationForTarget = false,
 ): string {
   const parameters = new URLSearchParams(currentSearch);
   parameters.set('ticker', ticker);
   parameters.set('tab', 'report');
   parameters.set('base', pair.baseSnapshotId);
   parameters.set('target', pair.targetSnapshotId);
-  if (!preserveEvaluationForTarget || !hasMatchingEvaluationSelectors(parameters, pair.targetSnapshotId)) {
-    clearEvaluationSelectors(parameters);
-  }
   return `/?${parameters.toString()}`;
 }
 
 export function buildComparisonResetPath(
   ticker: string,
   currentSearch: string,
-  targetSnapshotId: string | null,
 ): string {
   const parameters = new URLSearchParams(currentSearch);
   parameters.set('ticker', ticker);
   parameters.set('tab', 'report');
   parameters.delete('base');
   parameters.delete('target');
-  if (targetSnapshotId === null || !hasMatchingEvaluationSelectors(parameters, targetSnapshotId)) {
-    clearEvaluationSelectors(parameters);
-  }
   return `/?${parameters.toString()}`;
 }
 
