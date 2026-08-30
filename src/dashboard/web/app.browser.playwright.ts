@@ -31,6 +31,9 @@ import {
 } from './presentation.js';
 import { COMPARISON_PAIR_REQUIREMENT } from './comparison.js';
 
+type RadarMetric = 'per' | 'pbr' | 'roe' | 'roic' | 'operatingMargin'
+  | 'revenueGrowth' | 'dividendYield';
+
 function snapshotInput(ticker: string): AnalysisSnapshotInput {
   return {
     identity: {
@@ -645,6 +648,109 @@ function snapshotWithIdentity(
     ...snapshotFor(ticker),
     companyName,
     generatedAt,
+  });
+}
+
+function peerRadarSnapshot(
+  rawMetricVariant: 'first' | 'second' = 'first',
+  issue: 'none' | 'out_of_range' | 'zero_sample' = 'none',
+): AnalysisSnapshot {
+  const snapshot = structuredClone(snapshotFor('1010'));
+  const metrics: Readonly<Record<RadarMetric, number>> = {
+    per: 12,
+    pbr: 1.2,
+    roe: 0.12,
+    roic: 0.09,
+    operatingMargin: 0.08,
+    revenueGrowth: 0.05,
+    dividendYield: 0.025,
+  };
+  const radarMetrics = Object.keys(metrics) as RadarMetric[];
+  const percentiles = [0, 1, 1 / 3, 0.25, 0.75, 0.4, 0.6] as const;
+  const positions = Object.fromEntries(radarMetrics.map((metric, index) => {
+    const peerSampleSize = metric === 'per' ? 1 : metric === 'pbr' ? 4 : metric === 'roe' ? 3 : 5;
+    return [metric, {
+      metric,
+      direction: metric === 'per' || metric === 'pbr'
+        ? 'lower_is_better' as const
+        : 'higher_is_better' as const,
+      targetValue: metrics[metric],
+      median: metrics[metric] + 0.5,
+      rank: metric === 'pbr' ? 2.5 : 1,
+      percentile: percentiles[index],
+      peerSampleSize,
+      cohortSize: peerSampleSize + 1,
+    }];
+  })) as Record<RadarMetric, {
+    metric: RadarMetric;
+    direction: 'higher_is_better' | 'lower_is_better';
+    targetValue: number;
+    median: number;
+    rank: number;
+    percentile: number;
+    peerSampleSize: number;
+    cohortSize: number;
+  }>;
+  const unavailable: Array<{
+    metric: RadarMetric;
+    reason: 'missing_target_metric' | 'insufficient_peer_data';
+  }> = [];
+  if (issue === 'out_of_range') positions.roe.percentile = 1.2;
+  if (issue === 'zero_sample') {
+    Object.assign(positions.roe, {
+      median: null,
+      rank: null,
+      percentile: null,
+      peerSampleSize: 0,
+      cohortSize: 1,
+    });
+    unavailable.push({ metric: 'roe', reason: 'insufficient_peer_data' });
+  }
+
+  return AnalysisSnapshotSchema.parse({
+    ...snapshot,
+    dataDates: { ...snapshot.dataDates, peerComparison: '2026-08-21' },
+    unavailable: issue === 'zero_sample'
+      ? [...snapshot.unavailable, {
+          section: 'peerComparison',
+          metric: 'roe',
+          reason: 'insufficient_peer_data',
+        }]
+      : snapshot.unavailable,
+    peerComparison: {
+      result: {
+        target: {
+          id: '1010',
+          name: '1010 テスト株式会社',
+          sector: 'テスト業種',
+          marketCap: 50_000,
+          dataDate: '2026-08-21',
+          metrics,
+        },
+        selection: {
+          peers: Array.from({ length: 5 }, (_, index) => ({
+            id: `98${index}0`,
+            name: `比較企業${index + 1}`,
+            sector: 'テスト業種',
+            marketCap: 20_000 - index * 1_000,
+            dataDate: '2026-08-21',
+            metrics: rawMetricVariant === 'first'
+              ? { per: -10 - index, roe: null }
+              : { per: 100 + index, roe: 100 + index },
+          })),
+          sameSectorCandidateCount: 5,
+          marketCapPrioritizedPeerCount: 5,
+          sectorLeaderId: '1010',
+          sectorLeaderIncluded: true,
+          tooFewPeers: false,
+        },
+        targetIncludedInStatistics: true,
+        positions,
+        unavailable,
+      },
+      marketCapPriorityApplied: false,
+      marketCapPriorityUnavailableReason: 'incomplete_peer_market_cap',
+    },
   });
 }
 
@@ -1421,6 +1527,89 @@ test.describe('saved-analysis Comparison browser interaction', () => {
       await page.getByRole('button', { name: '比較を再試行' }).click();
       await expect.poll(() => attempts).toBe(2);
       expect(new URL(page.url()).searchParams.get('target')).toBe(pair.targetSnapshotId);
+    } finally {
+      await page.close();
+    }
+  });
+});
+
+test.describe('Peer Radar browser presentation', () => {
+  test('renders accessible sparse stored positions identically without raw-metric replay', async ({ browser }) => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    try {
+      await mockComparisonApi(page, [peerRadarSnapshot('first')]);
+      await openDetail(page, '1010', 'fundamentals');
+
+      const chart = page.getByRole('img', { name: '保存済みPeer percentileのRadar' });
+      const exactTable = page.getByRole('region', { name: 'Peer Radarの正確な値' });
+      await expect(chart).toBeVisible();
+      await expect(chart).not.toHaveAttribute('tabindex');
+      await expect(chart.locator('desc')).toContainText('正確な値と利用状態は直後の表');
+      await expect(chart.locator('[data-peer-radar-polygon="visible"]')).toHaveCount(1);
+      await expect(exactTable.locator('tbody tr')).toHaveCount(7);
+      await expect(exactTable).toContainText('1 / 選定 5 社');
+      await expect(exactTable).toContainText('4 / 選定 5 社');
+      await expect(exactTable).toContainText(`${String(1 / 3)} / ${String((1 / 3) * 100)}%`);
+      await expect(exactTable).toContainText('lower_is_better');
+      await expect(exactTable).toContainText('2026-08-21');
+      await expect(exactTable).toContainText('利用可能');
+      await expect(page.locator('.peer-radar-figure figcaption')).toContainText(
+        '時価総額priority: 未適用 — incomplete peer market cap',
+      );
+      await expect(page.locator('.peer-radar-table-limitation')).toContainText(
+        '時価総額priority: 未適用 — incomplete peer market cap',
+      );
+
+      const firstPresentation = {
+        points: await chart.locator('[data-peer-radar-polygon="visible"]').getAttribute('points'),
+        table: await exactTable.locator('table').innerText(),
+      };
+      await page.unroute('**/api/analyses/**');
+      await mockComparisonApi(page, [peerRadarSnapshot('second')]);
+      await page.reload();
+      await waitForSelectedTab(page, 'fundamentals');
+      await expect(chart.locator('[data-peer-radar-polygon="visible"]')).toHaveCount(1);
+      expect({
+        points: await chart.locator('[data-peer-radar-polygon="visible"]').getAttribute('points'),
+        table: await exactTable.locator('table').innerText(),
+      }).toEqual(firstPresentation);
+
+      for (const width of [320, 768, 1280]) {
+        await page.setViewportSize({ width, height: 900 });
+        expect(await page.evaluate(() => ({
+          clientWidth: document.documentElement.clientWidth,
+          scrollWidth: document.documentElement.scrollWidth,
+        }))).toMatchObject({ clientWidth: width, scrollWidth: width });
+      }
+      await page.setViewportSize({ width: 320, height: 900 });
+      expect(await exactTable.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test('suppresses the complete polygon while preserving invalid and unavailable rows', async ({ browser }) => {
+    const page = await browser.newPage();
+    try {
+      await mockComparisonApi(page, [peerRadarSnapshot('first', 'out_of_range')]);
+      await openDetail(page, '1010', 'fundamentals');
+      const chart = page.getByRole('img', { name: '保存済みPeer percentileのRadar' });
+      const exactTable = page.getByRole('region', { name: 'Peer Radarの正確な値' });
+      await expect(chart.locator('[data-peer-radar-polygon="visible"]')).toHaveCount(0);
+      await expect(page.locator('.peer-radar-unavailable')).toContainText('polygonを表示しません');
+      await expect(exactTable.locator('tr[data-radar-state="invalid"]')).toContainText('120%');
+      await expect(exactTable.locator('tr[data-radar-state="invalid"]')).toContainText(
+        '保存値不整合 (position_structure_mismatch)',
+      );
+
+      await page.unroute('**/api/analyses/**');
+      await mockComparisonApi(page, [peerRadarSnapshot('first', 'zero_sample')]);
+      await page.reload();
+      await waitForSelectedTab(page, 'fundamentals');
+      await expect(chart.locator('[data-peer-radar-polygon="visible"]')).toHaveCount(0);
+      const unavailableRow = exactTable.locator('tr[data-radar-state="unavailable"]');
+      await expect(unavailableRow).toContainText('0 / 選定 5 社');
+      await expect(unavailableRow).toContainText('利用不可 (insufficient_peer_data)');
     } finally {
       await page.close();
     }

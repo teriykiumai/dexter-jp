@@ -206,6 +206,23 @@ button { color: inherit; }
 .priority-line small { flex-basis: 100%; color: var(--faint); text-align: right; }
 .table-scroll { overflow-x: auto; }
 .table-scroll:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.peer-radar-meta { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin: 0 0 18px; padding: 1px; background: var(--border); }
+.peer-radar-meta div { min-width: 0; padding: 11px 12px; background: #101820; }
+.peer-radar-meta dt { color: var(--faint); font: 700 9px/1.4 "SFMono-Regular", Consolas, monospace; letter-spacing: .05em; }
+.peer-radar-meta dd { margin: 5px 0 0; overflow-wrap: anywhere; color: #dbe4ea; font: 600 11px/1.5 "SFMono-Regular", Consolas, monospace; }
+.peer-radar-figure { min-width: 0; margin: 0 0 20px; padding: 16px; overflow: hidden; border: 1px solid #263845; background: #0b131a; }
+.peer-radar-chart { display: block; width: min(100%, 520px); height: auto; margin: 0 auto; }
+.peer-radar-grid { fill: none; stroke: #2d3b47; stroke-width: 1; }
+.peer-radar-axis { stroke: #344552; stroke-width: 1; }
+.peer-radar-polygon { fill: #6aa8cc33; stroke: #7fb7d4; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.peer-radar-chart text { fill: #aab9c4; font: 600 9px/1 "SFMono-Regular", Consolas, monospace; }
+.peer-radar-unavailable { margin: 4px auto 12px; max-width: 620px; color: var(--amber); font-size: 11px; line-height: 1.6; text-align: center; }
+.peer-radar-figure figcaption, .peer-radar-table-limitation { color: var(--faint); font-size: 10px; line-height: 1.6; }
+.peer-radar-figure figcaption { margin-top: 10px; text-align: center; }
+.peer-radar-table-region { width: 100%; max-width: 100%; }
+.peer-radar-table-limitation { margin: 0 0 8px; }
+.peer-radar-table { min-width: 1160px; }
+.peer-radar-table td:last-child { min-width: 230px; white-space: normal; }
 .stored-disclosure { margin: 16px 0; border: 1px solid var(--border); background: #0d151d; }
 .stored-disclosure > summary { padding: 12px 14px; color: #dce5eb; cursor: pointer; font: 700 11px/1.4 "SFMono-Regular", Consolas, monospace; }
 .stored-disclosure > summary:hover { background: #12202a; }
@@ -347,6 +364,8 @@ tbody th { color: #dce4ea; }
   .stored-disclosure-content { padding: 12px; }
   .panel { padding: 16px; }
   .panel-header { align-items: flex-start; flex-direction: column-reverse; }
+  .peer-radar-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .peer-radar-figure { padding: 10px 6px; }
   .volume-profile-figure { padding: 12px; }
   .volume-profile-plot { padding: 8px; }
   .volume-profile-plot ol { min-width: 0; }

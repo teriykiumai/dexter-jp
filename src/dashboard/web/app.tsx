@@ -74,6 +74,7 @@ import {
   type WatchlistItemView,
   type WatchlistSortKey,
 } from './presentation.js';
+import { PeerRadarPresentation } from './peer-radar-view.js';
 
 function Value({ value }: { value: DisplayValue }) {
   return <span className={value.available ? undefined : 'unavailable'}>{value.text}</span>;
@@ -1026,38 +1027,7 @@ function Dashboard({
           {tab.id === 'fundamentals' ? (
         <Card title="同業比較" eyebrow="保存済みの決定論的比較">
           {view.peer ? (
-            <>
-              <div className="priority-line">
-                <span>時価総額priority</span>
-                <Value value={view.peer.marketCapPriority} />
-                {view.peer.marketCapPriorityReason
-                  ? <small>{view.peer.marketCapPriorityReason}</small>
-                  : null}
-              </div>
-              <div
-                aria-label="同業比較の指標一覧"
-                className="table-scroll"
-                role="region"
-                tabIndex={0}
-              >
-                <table>
-                  <thead>
-                    <tr><th>指標</th><th>対象企業</th><th>同業中央値</th><th>順位</th><th>パーセンタイル</th></tr>
-                  </thead>
-                  <tbody>
-                    {view.peer.rows.map(row => (
-                      <tr key={row.label}>
-                        <th>{row.label}</th>
-                        <td><Value value={row.target} /></td>
-                        <td><Value value={row.median} /></td>
-                        <td><Value value={row.rank} /></td>
-                        <td><Value value={row.percentile} /></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
+            <PeerRadarPresentation peer={view.peer} />
           ) : <div className="empty-state">Peer比較は利用できません。</div>}
         </Card>
           ) : null}
