@@ -1,0 +1,1143 @@
+# Dexter JP Phase 4 Implementation Plan
+
+**Plan version:** `phase4_strategy_validation_plan_v1`
+
+**Status:** Candidate — requires independent review and merge before runtime work
+
+**Last Updated:** 2026-08-31
+
+## 1. Purpose and authority
+
+Phase 4 adds a research-only point-in-time foundation and validates the observable
+outcomes of deterministic Entry / Stop / Target candidates. It answers two bounded
+questions:
+
+1. what happened after a candidate already persisted in an immutable Analysis
+   Snapshot; and
+2. what candidates the current deterministic Engine reconstructs from official data
+   bounded at a declared historical anchor, and what happened afterward.
+
+The two questions have different evidentiary strength. Every case therefore carries
+exactly one confidence value:
+
+```text
+precommitted | reconstructed_as_of
+```
+
+`precommitted` means the candidate existed in a saved Snapshot before its outcome
+window. `reconstructed_as_of` means the candidate was rebuilt later from source rows
+whose dates were bounded at the anchor. J-Quants can return historical rows but does
+not establish the exact correction vintage originally delivered on that historical
+day. A reconstructed case is not described as a fully reproduced historical record,
+and its aggregate is never merged with a precommitted aggregate.
+
+This plan inherits and does not weaken:
+
+- `AGENTS.md` for repository operation, safety, validation, and review;
+- `docs/SPEC.md` for deterministic calculation, missing-data, no-look-ahead,
+  AI-responsibility, and local-use invariants;
+- `docs/MVP_IMPLEMENTATION_PLAN.md` for the completed Strategy and technical Engine;
+- `docs/VISUALIZATION_MVP_PLAN.md` and `docs/DASHBOARD_UX_PLAN.md` for Snapshot,
+  repository, local API, URL, accessibility, and responsive-Dashboard contracts;
+- `docs/PHASE3_PLAN.md` for immutable Snapshot V1-V9, canonical digest, current
+  five-tab Dashboard, and deferred-scope boundaries; and
+- `docs/REVIEW_POLICY.md` for independent review and the Merge Gate.
+
+`docs/PHASE3_SCORE_EVALUATION_PLAN.md` remains a historical, docs-only score protocol.
+This plan neither executes it nor authorizes a runtime score.
+
+## 2. Scope and baseline
+
+### 2.1 Adopted scope
+
+Phase 4 implements only:
+
+- strict official-session, as-of, source-date, adjustment, and tick-size primitives;
+- a J-Quants adapter dedicated to historical Strategy validation;
+- a pure daily-OHLC Entry / Stop / Target outcome validator;
+- immutable local research runs and normalized source evidence;
+- a saved-Snapshot audit CLI;
+- a strict manifest-driven historical reconstruction CLI;
+- one bounded local background job and its same-origin API;
+- a sixth Dashboard tab for explicit run and case inspection; and
+- user setup, usage, handoff, and final validation for that surface.
+
+### 2.2 Preserved baseline
+
+- Analysis Snapshot V9 remains the only writer schema. V1-V9 remain readable.
+- No Snapshot migration, V10, or backfill is introduced.
+- `.dexter/analysis/` and `.dexter/evaluations/` are not modified by Phase 4.
+- `analyzeTechnical` and `analyzeStrategy` remain the calculation authority.
+- Strategy candidate reasons and `STRATEGY_DEFAULTS` are unchanged.
+- The production analysis path still accepts one sourced `tickSize`; Phase 4 does
+  not change that public Strategy interface or re-round stored candidates.
+- Existing Analysis, Comparison, Radar, URL, and five-tab behavior remains a
+  regression contract until the sixth tab is deliberately added at P4-D1.
+- No new runtime dependency or non-Bun runtime is planned.
+
+### 2.3 Product interpretation boundary
+
+Phase 4 records observed outcomes and explicit limitations. It does not:
+
+- declare a Strategy, stop reason, target reason, or resistance source PASS/FAIL;
+- issue Buy / Sell / Hold recommendations or a new financial signal;
+- claim causal or predictive validity from an observed rate;
+- calculate portfolio performance, capital allocation, overlapping-position P&L,
+  transaction costs, taxes, dividends, borrow, or slippage; or
+- adopt, calculate, weight, or display a composite score.
+
+## 3. Point-in-time type system
+
+### 3.1 Branded value contracts
+
+P4-I0 introduces pure parsers and branded values equivalent to:
+
+```ts
+type TseSessionDate = string;
+type AsOfCutoff = string;
+type SourceDate = string;
+type SourceEffectiveDate = string;
+type SourceEligibleDate = string;
+
+type PointInTimeConfidence = 'precommitted' | 'reconstructed_as_of';
+
+interface PointInTimeObservationV1<T> {
+  value: T;
+  sourceDate: SourceDate;
+  sourceEffectiveDate: SourceEffectiveDate;
+  sourceEligibleDate: SourceEligibleDate;
+  asOfCutoff: AsOfCutoff;
+}
+```
+
+All dates are strict `YYYY-MM-DD` Gregorian calendar dates. `AsOfCutoff` is a UTC
+ISO-8601 instant with a trailing `Z`. A date-only source row is eligible only under
+the endpoint-specific rule fixed in this plan; merely having `sourceDate <= anchor`
+is insufficient when the source has a later effective or eligible boundary.
+
+### 3.2 No-look-ahead order of operations
+
+Every external response is handled in this order:
+
+1. decode JSON without coercing unknown fields;
+2. select only rows whose endpoint-specific eligible date is at or before the
+   requested cutoff;
+3. reject duplicate identities, impossible dates, and rows outside the requested
+   ticker/date envelope;
+4. validate the allowlisted fields and values; and
+5. map to normalized domain observations.
+
+Rows after the cutoff are filtered before domain parsing or calculation so a future
+row cannot affect validation, duplicate detection, adjustment, sorting, or fallback.
+There is no forward fill, interpolation, nearest-row substitution, stale-price
+substitution, weekend inference, or inference of official sessions from price rows.
+
+### 3.3 Official-session calendar
+
+`TseSessionCalendarV1` is built only from `/v2/markets/calendar` rows. `HolDiv` must
+be exactly `"0" | "1" | "2" | "3"`; `"1"` (business day) and `"2"` (TSE half-day
+session) are TSE sessions, while `"0"` and `"3"` are not. Unknown `HolDiv`, duplicate
+dates with unequal values, missing dates inside a required window, non-monotonic
+output, or an unavailable source plan fails closed as `calendar_incomplete` or
+`source_response_invalid`.
+
+The calendar owns predecessor/successor and ordinal-session arithmetic. JavaScript
+weekday logic and the existence of an OHLC row never create a session. A required
+window must include every official session from its first through last boundary,
+including no-trade sessions.
+
+## 4. Official source and normalization contract
+
+### 4.1 Endpoint allowlist and fields
+
+Only these J-Quants V2 GET endpoints may feed Phase 4:
+
+| Endpoint | Exact used fields | Purpose |
+| --- | --- | --- |
+| `/v2/markets/calendar` | `Date`, `HolDiv` | official TSE session sequence |
+| `/v2/equities/master` | `Date`, `Code`, `ScaleCat`, `Mkt`, `ProdCat` | point-in-time security and tick category |
+| `/v2/equities/bars/daily` | `Date`, `Code`, `O`, `H`, `L`, `C`, `UL`, `LL`, `AdjFactor`, `ExRT` | t0 technical input and later outcome bars |
+
+The adapter is separate from the interactive `get_stock_price` Tool and exposes no
+LLM tool. It uses the existing `JQUANTS_API_KEY` lookup and error-sanitization
+conventions but adds strict response schemas, abort support, attempt accounting,
+rate limiting, and bounded retry. No endpoint, field, enum, plan availability, or
+default is guessed.
+
+"Exact used fields" does not mean the API must omit its other documented fields.
+The mapper minimally extracts identity/date first, then validates every used field
+strictly and ignores all unused properties without evaluating or persisting them.
+An added unused property therefore cannot affect a calculation or digest; a missing,
+renamed, malformed, or contradictory used property fails closed.
+
+Only `ProdCat === "011"` is eligible. The requested canonical ticker must match the
+existing `CanonicalTickerSchema` (including supported JPX alphanumeric codes) and
+the canonical four-character portion of returned `Code`; multiple unequal rows
+for the same effective identity fail. An empty row is unavailable, not a false or
+zero value. `Mkt` is stored as evidence and must be a non-empty official code, but
+Phase 4 does not infer market history beyond the returned dated row.
+
+### 4.2 Source-date and eligible-date mapping
+
+| Observation | `sourceDate` | `sourceEffectiveDate` | `sourceEligibleDate` |
+| --- | --- | --- | --- |
+| calendar | `Date` | `Date` | `Date` |
+| master | requested official session | returned `Date` | returned `Date` |
+| daily bar | `Date` | `Date` | `Date` |
+
+For a reconstruction anchor, `asOfCutoff` is the final instant of the anchor's Tokyo
+calendar date: `23:59:59.999+09:00`, canonically serialized as the equivalent UTC
+instant, under `tokyo_end_of_day_v1`. This is an after-close research decision, not a
+claim that the data was available at the exchange's closing bell. It deliberately
+avoids back-applying today's market-close time to historical sessions.
+
+For reconstructed rows, `sourceEligibleDate` is the earliest economic as-of date
+represented by the endpoint's dated row, not proof of its original publication
+timestamp or correction vintage. That limitation is why the confidence is
+`reconstructed_as_of`. A future effective row still cannot enter the t0 calculation.
+
+Calendar rows are planning facts and may be fetched later, but only dates at or
+before a calculation boundary may influence the t0 calculation. Outcome rows are
+intentionally post-decision observations; they are isolated from Strategy input and
+cannot be read until the candidate is frozen and digested.
+
+Every t0 daily-bar request ends at t0. Outcome bars use a separate request beginning
+at t1; an adapter response spanning both sides is prohibited. Candidate-input
+observations carry the t0 end-of-day cutoff. Outcome observations carry the immutable
+job `startedAt` cutoff and must satisfy both `Date > decisionDate` and
+`Date <= TokyoDate(startedAt)`. The orchestrator persists the candidate digest before
+it passes any outcome row to the pure validator. This data-flow separation is tested,
+not left as a caller convention.
+
+### 4.3 Daily-bar schema
+
+`O/H/L/C` are either all finite positive numbers with `H >= max(O,C)`,
+`L <= min(O,C)`, and `H >= L`, or all `null` for an official no-trade session. Mixed
+nullability, non-finite values, non-positive prices, impossible ranges, an unknown
+`UL`/`LL` value, a non-positive/non-finite `AdjFactor`, or unknown `ExRT` is
+`source_response_invalid`.
+
+On a complete traded row, `UL` and `LL` are strict strings `"0" | "1"`. On an
+all-null-OHLC no-trade row, each flag may be `null` or `"0"` but not `"1"`. `ExRT` is
+`null | "1" | "2" | "3"`. No-trade rows count as sessions but cannot trigger or fill
+an order and cannot supply a mark price. Missing an official-session row is not
+equivalent to a returned all-null row and fails the required window as
+`price_history_incomplete`.
+
+### 4.4 t0-relative price basis
+
+Current API `AdjO/AdjH/AdjL/AdjC` values are not used because they may include
+actions after the intended anchor. For each raw price `P(d)` with `d <= t0`, Phase 4
+computes:
+
+```text
+CumAdj(d, t0) = product(AdjFactor(a)) for every action row d < a <= t0
+P_t0(d)       = roundToOneDecimal(P(d) * CumAdj(d, t0))
+```
+
+`roundToOneDecimal` follows the J-Quants rule that the second decimal place is
+rounded, producing one decimal place. The action-date row itself has cumulative
+factor 1 for that event; the factor affects only earlier rows. Multiplication order,
+decimal rounding, duplicate factor rows, and golden vectors are versioned as
+`jquants_t0_adjustment_v1`.
+
+The normalized t0 rows supplied to `analyzeTechnical` contain only `date`, adjusted
+`open/high/low/close`, and `volume: null`. Strategy uses high, low, close, and ATR;
+Phase 4 does not invent historical volume. If any of the exact 251 required rows has
+incomplete OHLC, any required `analyzeTechnical` Strategy input is null, or the
+Engine returns no candidate, that anchor is recorded as unavailable/invalid rather
+than shortened or padded.
+
+### 4.5 Outcome-window corporate actions
+
+Outcome bars use raw `O/H/L/C` on the candidate's t0 price basis. For every observed
+session after t0 through that case's evaluation end, `ExRT` equal to `"1"`, `"2"`,
+or `"3"`, or `AdjFactor !== 1`, makes the case unavailable with
+`corporate_action_in_outcome_window`. Unknown or malformed action metadata is
+`source_response_invalid`.
+
+Evaluation end is the first terminal outcome day, the twentieth entry-wait session
+for `not_triggered`, the sixtieth holding session for `horizon_expired`, or the last
+observed session used to establish `outcome_not_matured`. An action after a completed
+evaluation does not retroactively alter that case.
+
+This deliberately fails closed rather than attempting to transform frozen order
+levels across a corporate action.
+
+### 4.6 Tick resolver
+
+`TseTickRuleV1` supports only 2015-09-24 through 2027-02-28 inclusive:
+
+- 2015-09-24 through 2023-06-04: the fine table applies to `TOPIX Core30` and
+  `TOPIX Large70`;
+- 2023-06-05 through 2027-02-28: it also applies to `TOPIX Mid400`; and
+- all other `ScaleCat` values use the ordinary domestic-share table.
+
+Before the supported start or after the supported end returns
+`tick_rule_period_unsupported`. Missing, unknown, or contradictory category evidence
+returns `tick_category_unavailable`. The 2027 STR-based regime is not inferred.
+
+| Price upper bound (JPY, inclusive) | Fine tick | Other tick |
+| ---: | ---: | ---: |
+| 1,000 | 0.1 | 1 |
+| 3,000 | 0.5 | 1 |
+| 5,000 | 1 | 5 |
+| 10,000 | 1 | 10 |
+| 30,000 | 5 | 10 |
+| 50,000 | 10 | 50 |
+| 100,000 | 10 | 100 |
+| 300,000 | 50 | 100 |
+| 500,000 | 100 | 500 |
+| 1,000,000 | 100 | 1,000 |
+| 3,000,000 | 500 | 1,000 |
+| 5,000,000 | 1,000 | 5,000 |
+| 10,000,000 | 1,000 | 10,000 |
+| 30,000,000 | 5,000 | 10,000 |
+| 50,000,000 | 10,000 | 50,000 |
+| infinity | 10,000 | 100,000 |
+
+Band boundaries are evaluated against the submitted price itself. A price is
+executable only when it is an exact integer multiple of the tick for its own band,
+using decimal-safe integer arithmetic rather than binary-floating epsilon.
+
+For reconstructed candidates, resolve the first quote strictly above the swing high
+with the anchor's category and supply that entry tick to the unchanged
+`analyzeStrategy`. Then independently validate the generated entry, stop, and target
+against the market tick for each level's own price band. A cross-band level that the
+current single-tick Engine rounded to an invalid quote is `non_executable_tick`; it
+is not re-rounded and Strategy V2 is not created. Stored Snapshot candidates are
+also audited as stored and never rewritten.
+
+Master evidence is required for t0 and for any prospective fill date on which the
+applicable category would change quote validity. The source layer may identify
+prospective touch dates from frozen candidate levels before requesting those master
+rows, but such later rows cannot change the candidate. A missing or conflicting row
+fails closed.
+
+### 4.7 Normalized source envelope
+
+Every accepted source set is persisted in a strict `PointInTimeSourceEnvelopeV1`
+containing:
+
+- schema and source-mapping versions;
+- endpoint literal and normalized query parameters excluding credentials;
+- requested ticker/date envelope and `asOfCutoff`;
+- fetched-at UTC timestamp;
+- exact normalized, sorted used rows;
+- source-plan/error classification when unavailable; and
+- canonical digest `sha256:<lowercase hex>` using `CanonicalJsonV1`.
+
+Raw HTTP bodies, headers, API keys, pagination tokens, request IDs, absolute local
+paths, and unused response fields are never persisted. Equal canonical content
+deduplicates by digest. A digest collision or unequal content at an existing digest
+is a typed persistence failure.
+
+`PointInTimeSourceManifestV1` records the ordered unique envelope digests used by a
+case and their calculation role. It never substitutes a digest for schema
+validation: envelopes are revalidated and redigested when loaded.
+
+## 5. Inputs and candidate creation
+
+### 5.1 CLI surface
+
+```text
+bun run validate:strategy --ticker <ticker> --snapshot-id <snapshotId> [--confirm-external-fetch]
+bun run validate:strategy --manifest <campaign.json> [--confirm-external-fetch]
+```
+
+Exactly one mode is required. Duplicate flags, unknown flags, missing values, unsafe
+ticker/Snapshot IDs, nonexistent or non-regular manifest files, or extra positional
+arguments are rejected before external access or artifact creation.
+
+Every execution that would contact J-Quants displays the target, date range, bounded
+request estimate, configured rate, timeout, attempt cap, and local destination, then
+asks a default-No confirmation. Non-interactive execution requires the exact
+`--confirm-external-fetch` flag. Confirmation is authorization for that invocation
+only. A preflight or declined/cancelled confirmation writes no run or job artifact.
+
+CLI executes the shared orchestrator in the foreground and does not create a
+Dashboard job JSON. `SIGINT`/`SIGTERM` abort the active request, prevent publication,
+clean attributable temporary data, and exit nonzero with a sanitized message. The
+Dashboard is the only producer of `jobs/<jobId>.json`.
+
+### 5.2 Saved-Snapshot audit mode
+
+The repository loads exactly the requested V1-V9 history item and verifies ticker,
+Snapshot ID, schema, canonical digest, and immutable history identity. There is no
+latest fallback. The mode audits every persisted deterministic Strategy candidate,
+including both `risk_reward_2R` and `resistance_level`, without regenerating or
+repairing it.
+
+Stored 2R candidates use resistance tier `none`. Stored `resistance_level`
+candidates use `precommitted_source_unknown`: persistence proves the level was fixed
+before evaluation, but V1-V9 does not preserve a source identity that Phase 4 can
+upgrade to source-verified evidence.
+
+Candidate identity is the canonical digest of:
+
+```text
+snapshotDigest + strategy.dataDate + entry.reason + entry.price +
+stop.reason + stop.price + target.reason + target.price + stable duplicate ordinal
+```
+
+The duplicate ordinal is assigned only after stable sorting by the complete tuple;
+identical duplicates remain separate cases and are explicitly marked. A Snapshot
+with `strategy === null`, no candidates, malformed chronology, or a future Strategy
+date produces an unavailable case/run record rather than a fabricated candidate.
+
+Let `generatedTokyoDate` be the Tokyo calendar date containing the exact
+`generatedAt` instant. If `strategy.dataDate > generatedTokyoDate`, reason is
+`future_strategy_data`. Otherwise the decision date is the later of
+`strategy.dataDate` and `generatedTokyoDate`. The first eligible evaluation session
+is the first official TSE session strictly after that decision date. Confidence is
+`precommitted`.
+
+### 5.3 Campaign manifest
+
+The only accepted shape is:
+
+```json
+{
+  "schemaVersion": "strategy_validation_campaign_v1",
+  "name": "example",
+  "anchors": [
+    {
+      "ticker": "7203",
+      "anchorDate": "2025-03-31",
+      "resistanceEvidence": [
+        { "kind": "analysis_snapshot", "snapshotId": "..." }
+      ]
+    }
+  ]
+}
+```
+
+The JSON file must be UTF-8 without BOM, at most 1,048,576 bytes, and contain no
+duplicate JSON object keys. Schemas are strict and reject unknown fields. `name` is
+1-64 Unicode scalar values after NFC normalization and rejects Unicode `Cc`/`Cf`,
+both path separators, `.`/`..` segments, Windows/POSIX absolute-path forms, and the
+credential/private-key markers already fixed by `SafetyPolicyV1`.
+There are 1-500 anchors. Tickers use the existing canonical Japanese security-code
+schema; anchor dates are strict official TSE sessions. Duplicate `(ticker, anchorDate)`
+pairs are rejected. There is no truncation.
+
+Each anchor accepts 0-8 Snapshot references. Each reference must load by exact ID,
+match the ticker, pass schema/digest validation, have `generatedAt` no later than the
+anchor cutoff, and have `strategy.dataDate === anchorDate`. At most 16 unique finite
+positive resistance prices survive exact deduplication across accepted evidence.
+Invalid evidence makes that anchor unavailable with `resistance_evidence_invalid`;
+it is never silently ignored.
+
+The anchor's technical window is exactly t0 plus the preceding 250 official TSE
+sessions: 251 sessions in ascending order, ending at `anchorDate`. All rows are
+normalized to the t0-relative price basis before calling the unchanged
+`analyzeTechnical`, then `analyzeStrategy` with the resolved entry tick and accepted
+resistance levels. No current Snapshot technical values, current prices, or later
+bars may enter candidate creation. Confidence is `reconstructed_as_of`.
+
+Campaign resistance evidence has two tiers:
+
+```text
+none | precommitted_source_unknown
+```
+
+`none` produces only 2R candidates. A valid historical Snapshot may supply a stored
+resistance value, but current V1-V9 data does not prove the original resistance
+producer identity, so it is labeled `precommitted_source_unknown` and aggregated
+separately. Phase 4 never invents a resistance level or describes this tier as
+source-verified.
+
+## 6. Outcome validator
+
+### 6.1 Windows and maturity
+
+Campaign t0 is an after-close decision. Evaluation begins at t1. Snapshot audit uses
+the first official session after its decision date. In both modes:
+
+- entry may trigger on sessions 1 through 20 inclusive;
+- the entry session is holding day 1;
+- a filled position is observed through holding day 60 inclusive; and
+- therefore a latest-possible t20 entry can require data through evaluation session
+  79.
+
+If session 20 completes with no entry, result is `not_triggered`; no extra 60-session
+wait is required. A terminal stop, target, gap error, limit-queue ambiguity, or fully
+bounded intraday ambiguity may complete earlier. If the entry window is incomplete,
+or an open position has not reached holding day 60 and no terminal result is proven,
+result is unavailable with `outcome_not_matured`.
+
+### 6.2 Candidate preconditions
+
+Before reading an outcome bar, the validator requires finite positive entry, stop,
+and target; `stop < entry < target`; positive planned risk; supported reasons; and an
+executable tick for each level. Failure is `invalid_candidate` or
+`non_executable_tick`. The input candidate and source arrays are never mutated.
+
+### 6.3 Daily fill algorithm
+
+No-trade rows consume an official session but cause no touch or fill. For a complete
+bar before entry:
+
+1. `H < entry` means no trigger.
+2. `O >= target` is `entry_gap_beyond_target`; no entry is assumed.
+3. `O >= entry && O < target` fills the entry at `O`.
+4. `O < entry && H >= entry` fills the entry at the candidate entry price.
+
+After entry, including the entry bar where sequence is provable:
+
+1. `O <= stop` fills the stop at `O`.
+2. `O >= target` fills the target conservatively at the target price.
+3. with the open between levels, a stop-only touch fills at stop;
+4. a target-only touch fills at target; and
+5. touching both levels without intraday sequence is `ambiguous_intraday`.
+
+For an `O < entry` entry bar, a target touch proves the price crossed entry before
+target. A stop touch on the same bar does not prove whether the low occurred before
+or after entry. The validator therefore runs two deterministic branches: pessimistic
+assumes entry then stop; optimistic assumes the low preceded entry and continues
+from the close of that session. If both stop and target are touched, pessimistic is
+stop and optimistic is target. Later dual-touch bars use stop and target as the two
+bounds. Branches use the same later rows and cannot read beyond the common horizon.
+
+If `UL === "1"` or `LL === "1"` on a row whose entry or exit fill would otherwise be
+selected, daily data cannot establish queue execution. The result is unavailable
+with `limit_queue_ambiguous`. A limit flag on a no-touch row or on a final mark-only
+row does not by itself change the result.
+
+### 6.4 Result union and reason vocabulary
+
+Every case has exactly one result kind:
+
+```text
+not_triggered
+stop_hit
+target_hit
+horizon_expired
+ambiguous_intraday
+unavailable
+```
+
+The closed unavailable-reason registry is:
+
+```text
+outcome_not_matured
+source_plan_unavailable
+source_history_unavailable
+source_response_invalid
+calendar_incomplete
+price_history_incomplete
+corporate_action_in_outcome_window
+tick_rule_period_unsupported
+tick_category_unavailable
+non_executable_tick
+entry_gap_beyond_target
+future_strategy_data
+invalid_candidate
+resistance_evidence_invalid
+limit_queue_ambiguous
+```
+
+Storage, API, UI, and aggregation switch exhaustively on this union. Unknown future
+values make the artifact corrupt rather than rendering as another state.
+
+### 6.5 R calculations
+
+`plannedRisk = candidateEntry - stop`. After entry:
+
+```text
+actualRisk = entryFill - stop
+realizedR  = (exitFill - entryFill) / actualRisk
+markR      = (horizonClose - entryFill) / actualRisk
+```
+
+`actualRisk` must be finite and strictly positive. `realizedR` exists only for
+`stop_hit` and `target_hit`. `markR` exists only for `horizon_expired` with a finite
+day-60 close. A returned all-null day-60 bar yields `horizon_expired` with mark state
+`unavailable`; no prior close substitutes. `not_triggered` has no R.
+
+`ambiguous_intraday` stores pessimistic and optimistic result kinds, exit identities,
+and exact R values when each branch terminates. An unresolved optimistic branch at
+the currently available horizon carries an unavailable bound reason; it is never
+converted to zero. Primary exact-outcome aggregates exclude ambiguous cases, while
+separate lower/upper-bound aggregates retain their information.
+
+## 7. Artifact schemas, identity, and repository
+
+### 7.1 Storage layout
+
+```text
+.dexter/research/strategy-validation/
+  runs/<runId>/
+    run.json
+    cases/<caseId>.json
+    sources/<sourceDigest>.json
+  jobs/<jobId>.json
+```
+
+`runId`, `caseId`, and `jobId` are lowercase canonical UUIDv4 values. URL and
+filesystem schemas reject separators, dot-segments, encoded traversal, mixed case,
+non-canonical UUIDs, and overlong inputs before path resolution. Every resolved path
+must remain under the configured research root. The configured root is server-side
+only and is never returned to the Browser.
+
+### 7.2 Case artifact
+
+`StrategyValidationCaseV1` is first discriminated by:
+
+```text
+anchor_unavailable | candidate
+```
+
+`anchor_unavailable` represents a valid requested anchor for which no candidate can
+be produced or audited, for example missing source history, invalid resistance
+evidence, `strategy === null`, or null required technical input. It contains the
+anchor/selector identity, confidence, exact unavailable reason, applicable evidence
+digests, and versions, but no invented candidate, price, fill, or R field.
+
+`candidate` is then discriminated by the Section 6 result union. It contains:
+
+- `schemaVersion: "strategy_validation_case_v1"`;
+- case/run identity, mode, confidence, ticker, and anchor/decision dates;
+- Snapshot ID/schema/digest or campaign manifest digest, as applicable;
+- technical/Strategy/tick/source-contract version literals;
+- canonical candidate identity and duplicate ordinal;
+- exact entry, stop, and target values and reason literals;
+- tick category/effective date, per-level tick, and executability state;
+- resistance evidence tier and only the accepted evidence Snapshot digests;
+- entry-wait and holding-window boundaries;
+- result union, exact fill/mark dates and prices, planned/actual risk, R values,
+  ambiguity bounds, and unavailable reasons; and
+- ordered unique source-envelope digest references.
+
+It does not contain a report body, raw prompt/response, API key, HTTP header, request
+ID, absolute path, or unnormalized source body. Snapshot report text is not copied.
+
+An anchor-level failure produces exactly one `anchor_unavailable` case. Once
+candidates are frozen, each candidate produces exactly one `candidate` case even if
+its outcome is unavailable. An anchor never mixes an anchor-level failure with
+candidate cases.
+
+### 7.3 Run artifact
+
+`StrategyValidationRunV1` contains:
+
+- `schemaVersion: "strategy_validation_run_v1"`;
+- run ID, mode, confidence, campaign-normalized name or `null` for Snapshot mode,
+  lifecycle timestamps, and producer version;
+- exact input selector and canonical Snapshot or manifest digest;
+- source/technical/Strategy/outcome/tick/aggregation version literals;
+- ordered case IDs and case digests;
+- aggregate strata and metrics from Section 8;
+- counted request attempts, cache hits, duration, rate configuration, and termination
+  state; and
+- warnings that describe reconstruction vintage, resistance tier, ambiguity, and
+  unavailable coverage without making an investment claim.
+
+Only a complete run is published. A failed, timed-out, or cancelled execution does
+not publish a partial `run.json` or cases. Diagnostic information belongs in the job
+artifact or sanitized CLI error, not a research result.
+
+### 7.4 Atomic create-only publication
+
+A run is assembled under a sibling temporary directory with a random non-secret
+name. Every JSON file is strictly serialized, reread, schema-validated, and digested;
+files are closed and the directory is atomically promoted without replacing an
+existing run. If the platform cannot guarantee no-replace publication, the operation
+fails with a typed persistence error. Temporary directories are removed on handled
+failure/cancel and on startup recovery when safely attributable to this repository.
+
+Rerunning equal input creates a new run ID. Content digests expose equality; no run
+ID is reused and no `latest` alias is created. Existing artifacts are never mutated.
+Malformed JSON, unsupported versions, digest mismatch, missing referenced cases or
+sources, identity mismatch, and filesystem failures are surfaced; listing never
+silently skips corruption.
+
+### 7.5 Source placement and deduplication
+
+Each run is self-contained: `sources/<sourceDigest>.json` contains every normalized
+source envelope referenced by a case in that run. Equal source content within a run
+is written once. Cross-run hard-linking or a mutable global cache is not required in
+version 1. An implementation may use an in-memory request cache during one job, but
+the run must not depend on it after publication.
+
+The filename uses only the lowercase hex portion after `sha256:`. The envelope body
+retains the prefixed digest. Loader recomputation must match both.
+
+### 7.6 Job artifact
+
+`StrategyValidationJobV1` is the only mutable Phase 4 artifact. It stores no source
+rows or secrets and is rewritten atomically. Its status is one of:
+
+```text
+preparing
+collecting
+validating
+publishing
+completed
+failed
+cancel_requested
+cancelled
+interrupted
+```
+
+Allowed transitions are:
+
+```text
+preparing -> collecting | cancel_requested | failed
+collecting -> validating | cancel_requested | failed
+validating -> publishing | cancel_requested | failed
+publishing -> completed | failed
+cancel_requested -> cancelled | failed
+```
+
+`publishing` is not interruptible once atomic promotion starts. On server startup,
+any persisted nonterminal job becomes `interrupted`; its attributable temp directory
+is cleaned and it is never automatically resumed. Completed jobs reference exactly
+one run ID. Failed/cancelled/interrupted jobs have no published run ID and expose only
+a fixed sanitized code/message, counts, and timestamps.
+
+## 8. Aggregation and interpretation
+
+### 8.1 Mandatory strata
+
+Every aggregate is partitioned by all applicable values of:
+
+- confidence (`precommitted` or `reconstructed_as_of`);
+- target reason (`risk_reward_2R` or `resistance_level`);
+- stop reason (`latest_swing_low` or `entry_minus_1_5_atr`); and
+- resistance evidence tier (`none` or `precommitted_source_unknown`).
+
+No single all-candidate win rate or R value is emitted. Snapshot-audit and campaign
+cases are never combined. Duplicate candidates remain counted and their duplicate
+count is visible.
+
+### 8.2 Metrics
+
+For every stratum the run records integer numerators and denominators as well as
+display ratios:
+
+- anchor count and anchor coverage;
+- anchors with at least one executable candidate and anchor entry rate;
+- candidate count and entered-candidate count;
+- `not_triggered`, `stop_hit`, `target_hit`, `horizon_expired`,
+  `ambiguous_intraday`, and `unavailable` counts/rates;
+- exact realized-R count, arithmetic mean, and median;
+- horizon mark-R count, arithmetic mean, and median; and
+- pessimistic/optimistic ambiguous-bound counts, means, and medians when defined.
+
+Rates always name their denominator. Unavailable and ambiguous rows never enter the
+exact realized-R denominator. Valid zero and negative R remain values. Empty metric
+sets are an explicit unavailable state, not zero. Median uses the deterministic
+midpoint of the two central values for an even count. All calculations use finite
+numbers, candidate-ID order for summation, and a versioned stable sort; negative zero
+is serialized as zero and non-finite aggregate output fails validation.
+
+These descriptive metrics have no significance test, confidence claim, PASS/FAIL,
+P&L, cost-adjusted result, or recommendation. The UI must put coverage and unavailable
+rates before target/stop rates so selection and data limitations are visible.
+
+## 9. External-fetch execution controls
+
+### 9.1 Rate, attempts, retries, and timeout
+
+The default rate is 5 actual request attempts per rolling minute. An optional
+`JQUANTS_REQUESTS_PER_MINUTE` accepts only an integer from 1 through 500; missing uses
+5, and malformed/out-of-range configuration fails before dispatch. All original and
+retry HTTP attempts consume both rate and campaign-attempt budgets.
+
+One invocation/job permits at most 250 actual attempts and 90 minutes wall-clock
+time. Each HTTP attempt has a 30-second timeout. There are at most two retries after
+the first attempt, only for network errors, HTTP 429, or HTTP 5xx. HTTP 4xx other than
+429, schema errors, plan restrictions, and logical/data errors are not retried.
+`Retry-After` accepts only a non-negative integer number of seconds or a valid HTTP
+date. It is honored when it falls within the remaining 90-minute budget; a value
+beyond the budget terminates the job without another attempt. Missing or malformed
+`Retry-After` uses deterministic delays of 1 second before retry one and 2 seconds
+before retry two, with no jitter. Timeout or cancellation always takes precedence
+over a scheduled retry.
+
+The existing interactive J-Quants client is not silently changed globally. P4-I1
+either adds these controls behind a compatible optional transport or creates the
+dedicated adapter on top of the existing credential/error primitives.
+
+### 9.2 Request planning and cache
+
+Preflight computes `estimatedMinimumAttempts` from unique initial endpoint/query
+pairs after same-job deduplication and returns `hardMaximumAttempts: 250`. It does not
+contact J-Quants and does not guess actual page count. A selector whose minimum alone
+exceeds 250 is rejected before user confirmation. Pagination and retries may raise
+the actual count above the minimum but can never pass the hard runtime cap.
+
+Within one job, identical normalized endpoint/query pairs share one in-flight or
+completed response. A cache hit does not count as an attempt. Failed responses are
+not cached across retries. There is no cross-process or indefinite source cache in
+version 1.
+
+### 9.3 Cancellation and failure publication
+
+Cancellation aborts the current fetch, prevents retries, stops new calculation, and
+cleans unpublished temporary data. Source errors are mapped to the fixed unavailable
+reason vocabulary where a complete case can still be described. A transport,
+persistence, internal invariant, timeout, attempt-cap, or cancellation failure that
+prevents a complete run aborts the entire run; Phase 4 never publishes a partial
+campaign.
+
+Normal CI and browser tests use deterministic stubs and make zero external calls.
+The live source smoke is manual, default-No, uses at most 10 actual attempts, prints
+no response body or credential, and is not a substitute for unit/integration tests.
+
+## 10. Local API and Dashboard contract
+
+### 10.1 Tab and URL state
+
+P4-D1 appends, without reordering the first five tabs:
+
+```text
+validation / 戦略検証
+```
+
+The canonical detail query is:
+
+```text
+?ticker=<ticker>&tab=validation&validationRun=<runId>&validationCase=<caseId>
+```
+
+`validationRun` and `validationCase` are optional as a pair hierarchy: case requires
+run; run may stand alone. Malformed, duplicate, or orphaned parameters show a scoped
+error and are not repaired. There is no automatic run selection, `latest` fallback,
+or auto-open after a job completes. Explicit user selection uses History API state;
+Back/Forward and reload restore the exact valid selection. Ticker/list navigation
+removes run/case state. A run whose ticker scope excludes the current ticker is not
+adopted.
+
+Latest-request-wins guards all list, run, case, job, and Snapshot transitions.
+Stale responses and abort errors cannot overwrite newer content or move focus.
+Keyboard tab navigation, returned-focus destination, loading announcements, and
+320/768/1280 px document-level overflow follow the inherited Dashboard contract.
+
+### 10.2 Read API
+
+```text
+GET /api/strategy-validation/runs?ticker=<ticker>&cursor=<cursor>&limit=<limit>
+GET /api/strategy-validation/runs/:runId
+GET /api/strategy-validation/runs/:runId/cases?ticker=<ticker>&cursor=<cursor>&limit=<limit>
+GET /api/strategy-validation/runs/:runId/cases/:caseId
+GET /api/strategy-validation/jobs/active
+GET /api/strategy-validation/jobs/:jobId
+```
+
+List default is 20 and maximum is 100. Limits must be canonical base-10 integers.
+Cursors are the unpadded base64url encoding of `CanonicalJsonV1` containing a version
+literal, route kind, normalized filter digest, and the last complete sort tuple. They
+are at most 1,024 ASCII bytes. Decode/schema/canonical-reencode mismatch, malformed,
+duplicate, or cross-query cursors are 400. Runs sort by `completedAt desc, runId asc`.
+Cases sort by `ticker asc, anchor/decisionDate asc, caseKind asc` with
+`anchor_unavailable` before `candidate`, then nullable candidate ID ascending.
+Pagination has no duplicate or omission at equal sort keys.
+
+The run and case lists each accept zero or one canonical `ticker`; the case filter
+must also belong to the selected run's ticker scope. Unknown query parameters or
+duplicate singleton parameters are 400. Loaders revalidate all referenced artifacts;
+corruption is 500 and is never silently skipped. A run/case identity mismatch is 500,
+not 404.
+
+List successes are exactly:
+
+```ts
+interface StrategyValidationListResponseV1<T> {
+  schemaVersion: 'strategy_validation_list_v1';
+  items: T[];
+  nextCursor: string | null;
+}
+```
+
+Run and case detail return the validated persisted artifact directly. Job reads
+return a sanitized `StrategyValidationJobViewV1`; `/jobs/active` returns
+`{ schemaVersion: "strategy_validation_active_job_v1", job: JobView | null }`.
+Summaries never include source rows or the absolute repository root.
+
+### 10.3 Session and mutations
+
+```text
+GET    /api/session
+POST   /api/strategy-validation/preflights
+POST   /api/strategy-validation/jobs
+DELETE /api/strategy-validation/jobs/:jobId
+```
+
+`GET /api/session` returns exactly
+`{ schemaVersion: "dashboard_session_v1", csrfHeader: "X-Dexter-CSRF", csrfToken }`.
+The token is 32 cryptographically random bytes encoded as unpadded base64url. It
+returns no API credential, filesystem path, environment value, or external-provider
+capability detail. The token rotates on process restart, is held only in Browser
+memory, and is sent as `X-Dexter-CSRF` on every POST/DELETE.
+
+All mutation requests require:
+
+- exact allowed `Host` and exact same-origin `Origin` matching the request scheme,
+  host, and port;
+- no CORS response headers;
+- media type `application/json` for POST, with no parameter or only
+  `charset=utf-8` (case-insensitive); any other media type/charset is 415;
+- valid `X-Dexter-CSRF` using constant-time comparison;
+- a body length limit checked before JSON parsing; and
+- strict JSON with duplicate keys and unknown fields rejected.
+
+The UTF-8 request-body caps are 1,100,000 bytes for preflight and 4,096 bytes for job
+creation. DELETE must have zero body bytes. Chunked bodies are counted while reading
+and aborted at the same caps; `Content-Length` is not trusted by itself.
+
+The preflight body is exactly one of:
+
+```json
+{ "mode": "snapshot", "ticker": "7203", "snapshotId": "..." }
+```
+
+```json
+{ "mode": "campaign", "manifest": { "schemaVersion": "strategy_validation_campaign_v1", "name": "...", "anchors": [] } }
+```
+
+The response includes a UUIDv4 preflight ID, normalized input digest, counts,
+`estimatedMinimumAttempts`, `hardMaximumAttempts`, rate/timeout/cap, warnings, and
+`expiresAt`. It performs local validation only and expires after 10 minutes. It is
+one-time: accepting a job consumes it atomically. Expired, already-used, mismatched,
+or process-restart preflights cannot start a job. Preflights live only in bounded
+process memory and are never written under `.dexter`.
+
+The job body is exactly:
+
+```json
+{ "preflightId": "...", "confirmExternalFetch": true }
+```
+
+The boolean must literally be true. Server recomputes the normalized input digest
+and refuses any mismatch. One global nonterminal job is allowed. Accepted creation
+returns 202 with the job identity/status URL. The Browser never supplies or receives
+`JQUANTS_API_KEY`.
+
+DELETE has no body. It is idempotent only while the identified job is
+`cancel_requested` or `cancelled`; completed/failed/interrupted/publishing jobs return
+409 because cancellation cannot change them. Missing job is 404. Cancellation
+returns 202 until terminal, then 200 for an already-cancelled job.
+
+### 10.4 HTTP status and failure union
+
+Phase 4 domain responses use these statuses:
+
+| Status | Meaning |
+| ---: | --- |
+| 200 | successful read/preflight or already-cancelled response |
+| 202 | job accepted or cancellation accepted |
+| 400 | malformed route/query/body/schema/selector/cursor |
+| 403 | Host, Origin, or CSRF failure |
+| 404 | exact run/case/job/Snapshot not found |
+| 409 | active-job conflict, stale/used preflight, invalid lifecycle action |
+| 413 | body exceeds the route limit |
+| 415 | unsupported media type |
+| 500 | artifact corruption, filesystem failure, or internal invariant failure |
+
+Every response is a strict success or `{ "error": { "code", "message" } }` union,
+uses `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`, and never embeds
+raw exception text. Unsupported methods return 405 with exact `Allow`; 405 is the
+inherited routing response outside the domain-status table.
+
+The closed public error-code mapping is:
+
+| Status | Codes |
+| ---: | --- |
+| 400 | `invalid_route_parameter`, `invalid_query`, `invalid_cursor`, `invalid_json`, `invalid_request` |
+| 403 | `forbidden_host`, `forbidden_origin`, `csrf_failed` |
+| 404 | `snapshot_not_found`, `run_not_found`, `case_not_found`, `job_not_found` |
+| 409 | `active_job_conflict`, `preflight_expired`, `preflight_consumed`, `preflight_mismatch`, `invalid_job_transition` |
+| 413 | `payload_too_large` |
+| 415 | `unsupported_media_type` |
+| 500 | `artifact_unavailable`, `internal_failure` |
+
+Internal source/provider detail stays in typed server-side control flow and is not
+appended to these messages.
+
+### 10.5 Dashboard operation and presentation
+
+The tab offers two explicit forms:
+
+- a saved Snapshot selector constrained to the current ticker; and
+- a client-side JSON file picker that reads at most 1,048,576 bytes, applies the same
+  UTF-8/BOM/duplicate-key/strict-schema parser as CLI before ordinary object
+  serialization, and sends only the validated manifest value, never a local path.
+
+The flow is `local preflight -> visible request/cost/time warning -> unchecked
+confirmation -> start -> poll every 2 seconds -> explicit open-results action`.
+Changing the form invalidates the prior preflight and clears confirmation. Refresh
+during a job recovers `/jobs/active`; it does not auto-resume an interrupted server
+job. There is no scheduled run, automatic execution, or hidden external request.
+
+Only the three Phase 4 query keys receive Phase 4 validation. Existing unrelated
+query-key preservation remains unchanged. Ticker/list navigation removes Phase 4
+keys but does not opportunistically delete unrelated preserved keys.
+
+The warning states that the job transmits ticker/date selectors to the configured
+J-Quants account and may consume subscription quota. It shows attempts and time, but
+does not fabricate a per-call monetary estimate when the configured plan has no
+verified per-call price contract.
+
+Run and case views present semantic tables before decorative charts. They show
+confidence, coverage, reconstruction-vintage warning, resistance tier, source dates,
+candidate/fill facts, tick validity, exact/unavailable/ambiguous state, and named
+denominators. Ambiguity bounds are visually and semantically distinct from exact R.
+No PASS badge, score, ranking, color-only direction, or Buy/Sell wording is allowed.
+
+Tables remain usable with keyboard and screen reader, status changes use an
+appropriate live region, focus moves only after explicit navigation or a scoped
+validation error, and charts (if any) are supplemental to exact accessible tables.
+
+## 11. Implementation sequence and Merge Gates
+
+Each step begins only after the prior PR's exact head passes independent review and
+CI, is merged, and local `main` is fast-forwarded. Every implementation PR runs at
+least `bun test`, `bun run typecheck`, and `git diff --check`; Browser steps also run
+the repository Playwright suite.
+
+1. **P4-0 — Source of Truth and detailed design**
+   - update `docs/SPEC.md`;
+   - add this normative plan and non-normative handoff;
+   - change no runtime, dependency, Snapshot, API, Dashboard, Usage, or setup file.
+2. **P4-I0 — Pure point-in-time primitives**
+   - date/cutoff types, calendar arithmetic, t0 adjustment, tick resolver,
+     source-envelope schemas/digests;
+   - no network or repository writer.
+3. **P4-I1 — J-Quants validation adapter and feasibility gate**
+   - strict endpoint mappers, rate/retry/timeout/cancel/attempt controls;
+   - stubbed integration plus a manual live smoke;
+   - must prove at least one matured anchor has usable calendar, master, raw OHLC,
+     `UL/LL`, `AdjFactor`, and `ExRT` under the configured plan before P4-V1.
+4. **P4-V1 — Pure outcome validator**
+   - maturity, daily fills, gaps, no-trade rows, limit ambiguity, dual-touch branches,
+     corporate actions, exact R and bounds;
+   - no I/O.
+5. **P4-R1 — Manifest, immutable run repository, and aggregation**
+   - strict manifest/preflight schemas, cases/runs/sources, atomic create-only publish,
+     corruption handling, and strata.
+6. **P4-S1 — Saved-Snapshot audit CLI**
+   - exact Snapshot selection/digest, all persisted candidates, confirmation,
+     source collection, run publication.
+7. **P4-C1 — Historical reconstruction CLI**
+   - 251-session input, t0 normalization, unchanged Engines, evidence-qualified
+     resistance, candidate freezing, outcome collection.
+8. **P4-J1 — Local job and security API**
+   - process CSRF, preflight, one job, polling, cancel, startup interruption,
+     GET repositories and exact HTTP mapping.
+9. **P4-D1 — Dashboard Strategy-validation tab**
+   - sixth tab, forms, explicit confirmation, job progress, run/case URL state,
+     accessible exact tables, responsive/race/focus behavior.
+10. **P4-X — Usage, setup, handoff, and closeout**
+    - CLI/Dashboard operation, J-Quants limits/configuration, manual smoke evidence,
+      full validation, no-score/no-signal regression, and final handoff.
+
+P4-I1 feasibility failure is an accepted stop outcome. Do not implement a fallback
+source, relax source semantics, or continue dependent runtime steps without a new
+reviewed plan and user decision.
+
+## 12. Step validation matrix
+
+| Step | Mandatory focused validation |
+| --- | --- |
+| P4-0 | Source of Truth agreement; predecessor docs unchanged; no runtime/dependency/Snapshot/UI diff |
+| P4-I0 | strict dates/time zones; future-row isolation; official-session arithmetic; null/no-row distinction; cumulative factor boundaries and rounding golden vectors; corporate-action flags; all tick bands/dates/categories; decimal executability; canonical source digest; input immutability |
+| P4-I1 | exact endpoint/query/field schemas; `ProdCat`; master/date identity; pagination duplicate/repeat; 4xx/429/5xx/network retry matrix; `Retry-After`; rate and 250-attempt accounting; 30s/90m timeout; abort priority; no secret/body logging; stub CI; manual <=10-attempt matured-anchor smoke |
+| P4-V1 | t1/t20/t60/t79 boundaries; no-trade sessions; every entry/open/threshold gap branch; entry-bar stop-only branching; dual touch; `UL/LL`; all corporate-action boundaries; invalid ticks/candidates; immature outcomes; actual-risk zero; exact/mark/ambiguous R; no input mutation |
+| P4-R1 | 1 MiB/UTF-8/duplicate keys/strict fields; 1/500 anchors; duplicate anchor; 0/8 refs; 16 resistance dedup; UUID/path containment; canonical manifest/case/run/source digests; atomic no-replace and temp cleanup; rerun new ID; corruption never skipped; aggregation denominators/median/strata |
+| P4-S1 | V1-V9 exact history load; ticker/ID/digest; no latest fallback; generatedAt Tokyo date; future strategy date; all stored 2R/resistance and duplicates; default-No/noninteractive confirmation; error/cancel no run |
+| P4-C1 | exact 251 t0-bounded sessions; no current AdjOHLC/future influence; missing OHLC/no candidate; unchanged Engine parity; entry-tick injection and per-level validation; Snapshot evidence date/ticker/dataDate/digest; resistance tiers; latest t20 entry through holding day60 |
+| P4-J1 | Host/Origin/CSRF; token restart/constant-time check; JSON/media/body limits; preflight expiry/one-time/digest mismatch; one global job; every lifecycle transition; startup interruption; cancel during wait/fetch/validate/publish; 200/202/400/403/404/409/413/415/500 and inherited 405; pagination ties; corruption 500; no credential/path response |
+| P4-D1 | six stable tabs/label/order; no auto selection/open; Snapshot picker/file size; default-No confirmation; polling/cancel/recovery; deep link/Back/Forward/reload; invalid/orphan URL; ticker/list transitions; latest-request-wins; focus/live region/keyboard; exact tables and ambiguity; 320/768/1280 px; document overflow; Playwright |
+| P4-X | full Bun tests/typecheck/diff check/Playwright; manual smoke evidence; CI/review/merge/main; Usage/setup/handoff; absence of Snapshot V10, runtime score, PASS/FAIL, Buy/Sell, external CI, and partial runs |
+
+Fixtures include valid zero, negative R, equality at every price/tick/date boundary,
+one value beyond each boundary, malformed and duplicated source identities, no-trade
+sessions, Japanese manifest names, and Windows/POSIX path-like attacks. Tests must not
+assert only happy-path coverage or incidental serialization whitespace.
+
+## 13. Done conditions
+
+Phase 4 is Done only when:
+
+- P4-0 through P4-X each have an independently reviewed and merged PR in order;
+- local `main` is fast-forwarded to the final merged exact head;
+- all required unit/integration/Playwright validation and CI pass;
+- P4-I1 records a successful bounded manual feasibility smoke, with no credential or
+  response body in Git/PR/test output;
+- Snapshot audit and reconstructed campaign each produce and reload at least one
+  matured deterministic fixture/run under their distinct confidence labels;
+- cancellation, crash recovery, corruption, no-look-ahead, action, tick, gap, and
+  ambiguity failure paths are proven;
+- Usage/setup/handoff match the implemented surface; and
+- no runtime score, Strategy PASS/FAIL, Buy/Sell signal, partial campaign, Snapshot
+  migration, or scheduled external job exists.
+
+If source feasibility fails, the implementation sequence stops at P4-I1 and Phase 4
+is not declared Done. The failure and evidence are documented without substituting
+another source or weakening the contract.
+
+## 14. Explicitly deferred scope
+
+- all-TSE universe generation or broad cross-sectional backtest;
+- portfolio construction, overlapping positions, capital allocation, P&L, fees,
+  taxes, dividends, borrow, slippage, liquidity, and order-book simulation;
+- minute/tick data, intraday sequence inference, MFE, and MAE;
+- source-verified historical resistance producer;
+- Strategy V2, per-level re-rounding, or production Strategy-interface changes;
+- the 2027 STR-based tick regime;
+- exact historical source correction-vintage reproduction;
+- composite-score validation execution, runtime score, weights, or adoption;
+- Strategy/parameter PASS/FAIL, statistical adoption thresholds, new Buy/Sell/Hold
+  signal, ranking, recommendation, or automatic reanalysis;
+- scheduled runs, POST polling alternatives, WebSocket/SSE, concurrent job queue,
+  distributed workers, or automatic interrupted-job resume;
+- Snapshot V10/backfill or writing research results into Analysis Snapshots;
+- Evaluator runtime and PDF/export work deferred by Phase 3.
+
+Any deferred item requires its own reviewed plan and must not be inferred from this
+plan's types, artifacts, job mechanism, or Dashboard tab.
+
+## 15. Normative external references
+
+The following primary sources were checked on 2026-08-31. P4-I1 must recheck their
+current revisions and freeze any code-relevant mapping version before implementation:
+
+- J-Quants daily bars and exact `O/H/L/C`, `UL/LL`, `AdjFactor`, and `ExRT` semantics:
+  <https://jpx-jquants.com/ja/spec/eq-bars-daily>
+- J-Quants cumulative adjustment method:
+  <https://jpx-jquants.com/ja/spec/eq-bars-daily/adj>
+- J-Quants historical master semantics and fields:
+  <https://jpx-jquants.com/ja/spec/eq-master>
+- J-Quants product category `011`:
+  <https://jpx-jquants.com/ja/spec/eq-master/product-category>
+- J-Quants official market calendar:
+  <https://jpx-jquants.com/ja/spec/mkt-cal>
+- J-Quants holiday/session division values:
+  <https://jpx-jquants.com/ja/spec/mkt-cal/holiday-division>
+- JPX domestic-equity tick tables and announced 2027 regime:
+  <https://www.jpx.co.jp/equities/trading/domestic/07.html>
+- JPX Mid400 fine-tick start on 2023-06-05:
+  <https://www.jpx.co.jp/news/1030/20230309-01.html>
+- JPX tick-size Phase III historical start evidence:
+  <https://www.jpx.co.jp/news/1030/nlsgeu0000016dib-att/Japanese1.pdf>
+- J-Quants CLI model definitions used only as a secondary schema cross-check:
+  <https://raw.githubusercontent.com/J-Quants/jquants-cli/main/src/models.rs>
+
+If a source changes or conflicts, the official endpoint/JPX document controls over
+the CLI cross-check. Do not silently update a versioned contract: stop, document the
+conflict, and review a migration.
+
+## 16. P4-0 delivery boundary
+
+P4-0 changes only `docs/SPEC.md`, this plan, and `docs/PHASE4_HANDOFF.md`. It does not
+change `docs/MVP_IMPLEMENTATION_PLAN.md`, `docs/VISUALIZATION_MVP_PLAN.md`,
+`docs/DASHBOARD_UX_PLAN.md`, `docs/PHASE3_PLAN.md`,
+`docs/PHASE3_SCORE_EVALUATION_PLAN.md`, or `docs/PHASE3_HANDOFF.md`; those preserve
+their historical reviewed scope.
+
+P4-0 adds no command, API route, environment variable, dependency, source request,
+research directory, Snapshot field, tab, or user-visible runtime behavior. The next
+authorized implementation step is P4-I0 only after the exact P4-0 PR head passes the
+independent Merge Gate, is merged, and local `main` is fast-forwarded.
