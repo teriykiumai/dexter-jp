@@ -28,7 +28,11 @@ button { color: inherit; }
 .back-button { margin: 0 0 18px; padding: 8px 0; border: 0; background: transparent; color: #8fa6b8; cursor: pointer; font: 700 11px/1 "SFMono-Regular", Consolas, monospace; letter-spacing: .05em; }
 .back-button:hover { color: var(--accent); }
 .back-button.centered { margin: 12px auto 0; }
-.hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding: 20px 0 30px; border-bottom: 1px solid var(--border); }
+.hero { position: relative; display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding: 20px 0 30px; border-bottom: 1px solid var(--border); }
+.snapshot-detail-mask { display: contents; }
+.target-snapshot-unavailable .snapshot-detail-mask { visibility: hidden; pointer-events: none; }
+.target-snapshot-status { position: absolute; inset: 20px 0 30px; display: flex; align-items: flex-end; }
+.target-snapshot-id { margin: 14px 0 0; color: var(--muted); font: 600 12px/1.5 "SFMono-Regular", Consolas, monospace; }
 .brand-line { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; }
 .brand-mark { color: var(--accent); font-family: "SFMono-Regular", Consolas, monospace; font-size: 12px; font-weight: 800; letter-spacing: .18em; }
 .local-badge { padding: 4px 7px; border: 1px solid #335368; color: #89a8bd; font: 700 10px/1 "SFMono-Regular", Consolas, monospace; letter-spacing: .1em; }

@@ -359,10 +359,11 @@ export function formatComparisonDelta(row: SnapshotComparisonMetricRowV1): strin
       row.comparison.delta,
       row.displaySemantics === 'category' ? 'native' : row.displaySemantics,
     );
-    const unit = row.displaySemantics === 'fraction_as_percent'
-      || row.displaySemantics === 'percent_value'
-      ? 'percent'
-      : row.comparison.deltaUnit;
+    if (row.displaySemantics === 'fraction_as_percent'
+      || row.displaySemantics === 'percent_value') {
+      return `${formattedNumber(delta, 'exceptZero')} pt`;
+    }
+    const unit = row.comparison.deltaUnit;
     return `${formattedNumber(delta, 'exceptZero')}${unitSuffix(unit)}`;
   }
   if (row.comparison.mode === 'from_to') {

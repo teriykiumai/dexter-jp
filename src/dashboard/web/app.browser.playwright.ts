@@ -761,7 +761,15 @@ async function mockComparisonApi(
       const base = byId.get(baseSnapshotId);
       const target = byId.get(targetSnapshotId);
       if (!base || !target) {
-        await route.fulfill({ body: '{}', contentType: 'application/json', status: 404 });
+        const response = comparisonFailureV1(
+          { ticker, baseSnapshotId, targetSnapshotId },
+          base ? 'target_snapshot_not_found' : 'base_snapshot_not_found',
+        );
+        await route.fulfill({
+          body: JSON.stringify(response),
+          contentType: 'application/json; charset=utf-8',
+          status: 404,
+        });
         return;
       }
       const response = compareAnalysisSnapshotsV1({
@@ -925,6 +933,30 @@ async function expectSelectedTab(page: Page, tab: DashboardTabId): Promise<void>
 }
 
 test.describe('saved-analysis Comparison browser interaction', () => {
+  test('pins an existing target when a valid-form base is missing instead of falling back to latest', async ({ browser }) => {
+    const page = await browser.newPage();
+    const target = snapshotWithIdentity('1010', '2026-08-22T01:02:03.000Z', '対象Snapshot株式会社');
+    const latest = snapshotWithIdentity('1010', '2026-08-23T01:02:03.000Z', '最新Snapshot株式会社');
+    const baseSnapshotId = createSnapshotId('2026-08-21T01:02:03.000Z');
+    const targetSnapshotId = createSnapshotId(target.generatedAt);
+    try {
+      await mockComparisonApi(page, [target, latest]);
+      await page.goto(
+        `${baseUrl}/?ticker=1010&tab=report&base=${baseSnapshotId}&target=${targetSnapshotId}`,
+      );
+      await waitForSelectedTab(page, 'report');
+
+      await expect(page.getByRole('heading', { name: '対象Snapshot株式会社' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: '最新Snapshot株式会社' })).toHaveCount(0);
+      await expect(page.getByText('基準Snapshotが見つかりません。')).toBeVisible();
+      const url = new URL(page.url());
+      expect(url.searchParams.get('base')).toBe(baseSnapshotId);
+      expect(url.searchParams.get('target')).toBe(targetSnapshotId);
+    } finally {
+      await page.close();
+    }
+  });
+
   test('shows both Observation identities for period and benchmark mismatches', async ({ browser }) => {
     const page = await browser.newPage();
     const base = comparisonSnapshot('2026-08-22T01:02:03.000Z');
@@ -1120,6 +1152,47 @@ test.describe('saved-analysis Comparison browser interaction', () => {
       await expect(page.locator('.comparison-table').first()).toBeVisible();
       await expect(targetSelect).toBeFocused();
       expect(Math.abs(await page.evaluate(() => window.scrollY) - initialScroll)).toBeLessThanOrEqual(2);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test('hides the previous Snapshot when an exact target transition fails', async ({ browser }) => {
+    const page = await browser.newPage();
+    const oldest = snapshotWithIdentity('1010', '2026-08-21T01:02:03.000Z', '基準Snapshot株式会社');
+    const current = snapshotWithIdentity('1010', '2026-08-22T01:02:03.000Z', '旧対象Snapshot株式会社');
+    const failing = snapshotWithIdentity('1010', '2026-08-23T01:02:03.000Z', '失敗対象Snapshot株式会社');
+    const failingSnapshotId = createSnapshotId(failing.generatedAt);
+    try {
+      await mockComparisonApi(page, [oldest, current, failing]);
+      await openDetail(
+        page,
+        '1010',
+        'report',
+        `&base=${createSnapshotId(oldest.generatedAt)}&target=${createSnapshotId(current.generatedAt)}`,
+      );
+      await expect(page.locator('.comparison-table').first()).toBeVisible();
+      await expect(page.getByRole('heading', { name: '旧対象Snapshot株式会社' })).toBeVisible();
+      await page.route(`**/api/analyses/1010/history/${failingSnapshotId}`, async route => {
+        await route.fulfill({ body: '{}', contentType: 'application/json', status: 404 });
+      });
+
+      const targetSelect = page.locator('.comparison-selectors label').filter({ hasText: '対象Snapshot' })
+        .locator('select');
+      await targetSelect.focus();
+      await targetSelect.selectOption(failingSnapshotId);
+      await expect(page.getByRole('heading', { name: '対象Snapshotを表示できません' })).toBeVisible();
+      await expect(page.getByRole('alert')).toContainText('保存済みSnapshotがありません');
+      await expect(targetSelect).toBeFocused();
+      await expect(page.getByRole('heading', { name: '旧対象Snapshot株式会社' })).toHaveCount(0);
+      await expect(page.locator('.generated-at')).not.toBeVisible();
+      await expect(page.locator('.kpi-grid')).not.toBeVisible();
+      await expect(page.locator('.report-markdown')).not.toBeVisible();
+      expect(new URL(page.url()).searchParams.get('target')).toBe(failingSnapshotId);
+
+      await page.getByRole('button', { name: '比較を解除' }).click();
+      await expect(page.getByRole('heading', { name: '失敗対象Snapshot株式会社' })).toBeVisible();
+      expect(new URL(page.url()).searchParams.has('target')).toBe(false);
     } finally {
       await page.close();
     }

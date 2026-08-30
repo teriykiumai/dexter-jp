@@ -8,6 +8,8 @@ import {
   comparisonMetricLabel,
   comparisonRowMatchesFilter,
   formatComparisonIdentity,
+  formatComparisonDelta,
+  formatComparisonObservation,
   isValidComparisonPair,
   parseComparisonPageSelection,
   restoreComparisonHistoryState,
@@ -129,6 +131,52 @@ describe('comparison Dashboard controller helpers', () => {
       { name: 'indexCode', value: '0040' },
       { name: 'benchmark', value: null },
     ])).toBe('latestFiscalYear=2026 / indexCode=0040 / benchmark=null');
+  });
+
+  test('distinguishes percentage values from signed percentage-point deltas', () => {
+    const percentValueRow = {
+      displaySemantics: 'percent_value',
+      comparison: {
+        state: 'comparable',
+        mode: 'absolute_delta',
+        delta: 0.5,
+        deltaUnit: 'percent',
+        changed: true,
+      },
+    } as const;
+    const fractionRow = {
+      displaySemantics: 'fraction_as_percent',
+      comparison: {
+        state: 'comparable',
+        mode: 'absolute_delta',
+        delta: -0.02,
+        deltaUnit: 'ratio',
+        changed: true,
+      },
+    } as const;
+    const percentObservation = {
+      state: 'available',
+      value: 3,
+      actualUnit: 'percent',
+    } as never;
+    const fractionObservation = {
+      state: 'available',
+      value: 0.12,
+      actualUnit: 'ratio',
+    } as never;
+
+    expect(formatComparisonObservation(percentObservation, percentValueRow as never)).toBe('3%');
+    expect(formatComparisonDelta(percentValueRow as never)).toBe('+0.5 pt');
+    expect(formatComparisonDelta({
+      ...percentValueRow,
+      comparison: { ...percentValueRow.comparison, delta: 0, changed: false },
+    } as never)).toBe('0 pt');
+    expect(formatComparisonObservation(fractionObservation, fractionRow as never)).toBe('12%');
+    expect(formatComparisonDelta(fractionRow as never)).toBe('-2 pt');
+    expect(formatComparisonDelta({
+      ...fractionRow,
+      comparison: { ...fractionRow.comparison, delta: -0, changed: false },
+    } as never)).toBe('0 pt');
   });
 
   test('restores transient UI state only for the exact pair and result versions', () => {
