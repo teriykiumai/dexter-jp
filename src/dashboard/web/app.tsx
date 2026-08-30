@@ -1737,6 +1737,20 @@ function Watchlist({
   );
 }
 
+class DashboardHttpError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'DashboardHttpError';
+    this.status = status;
+  }
+}
+
+function isRetryablePairLoadFailure(cause: unknown): boolean {
+  return cause instanceof DashboardHttpError && cause.status === 500;
+}
+
 async function fetchSnapshot(
   ticker: string,
   signal: AbortSignal,
@@ -1750,7 +1764,7 @@ async function fetchSnapshot(
     signal,
   });
   if (!response.ok) {
-    throw new Error(response.status === 404
+    throw new DashboardHttpError(response.status, response.status === 404
       ? `${ticker} の保存済みSnapshotがありません。`
       : 'Snapshotを読み込めませんでした。');
   }
@@ -1813,7 +1827,9 @@ async function fetchSnapshotHistory(
     headers: { Accept: 'application/json' },
     signal,
   });
-  if (!response.ok) throw new Error('保存済み分析履歴を読み込めませんでした。');
+  if (!response.ok) {
+    throw new DashboardHttpError(response.status, '保存済み分析履歴を読み込めませんでした。');
+  }
   let payload: unknown;
   try {
     payload = await response.json();
@@ -2067,7 +2083,10 @@ function App() {
               ? targetResult.reason.message
               : '対象Snapshotを読み込めませんでした。';
             setComparisonPair(comparisonSelection.pair);
-            setComparisonIssue({ message, retryable: false });
+            setComparisonIssue({
+              message,
+              retryable: isRetryablePairLoadFailure(targetResult.reason),
+            });
             setTargetSnapshotIssue({
               snapshotId: comparisonSelection.pair.targetSnapshotId,
               message,
@@ -2127,7 +2146,10 @@ function App() {
           const message = cause instanceof Error ? cause.message : 'Snapshotを読み込めませんでした。';
           if (comparisonSelection.kind === 'valid') {
             setComparison(null);
-            setComparisonIssue({ message, retryable: false });
+            setComparisonIssue({
+              message,
+              retryable: isRetryablePairLoadFailure(cause),
+            });
             setTargetSnapshotIssue({
               snapshotId: comparisonSelection.pair.targetSnapshotId,
               message,
@@ -2411,6 +2433,9 @@ function App() {
         <h1 data-main-heading tabIndex={-1}>対象Snapshotを表示できません</h1>
         <p>対象Snapshot {targetSnapshotIssue.snapshotId}</p>
         <p role="alert">{targetSnapshotIssue.message}</p>
+        {comparisonIssue?.retryable ? (
+          <button type="button" onClick={retryComparison}>比較を再試行</button>
+        ) : null}
         <button type="button" onClick={resetComparison}>比較を解除して最新へ戻る</button>
         <button className="back-button centered" type="button" onClick={navigateToWatchlist}>
           ← Analysis Portfolio

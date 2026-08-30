@@ -1188,11 +1188,101 @@ test.describe('saved-analysis Comparison browser interaction', () => {
       await expect(page.locator('.generated-at')).not.toBeVisible();
       await expect(page.locator('.kpi-grid')).not.toBeVisible();
       await expect(page.locator('.report-markdown')).not.toBeVisible();
+      await expect(page.getByRole('button', { name: '比較を再試行' })).toHaveCount(0);
       expect(new URL(page.url()).searchParams.get('target')).toBe(failingSnapshotId);
 
       await page.getByRole('button', { name: '比較を解除' }).click();
       await expect(page.getByRole('heading', { name: '失敗対象Snapshot株式会社' })).toBeVisible();
       expect(new URL(page.url()).searchParams.has('target')).toBe(false);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test('retries the same pinned pair after an exact target HTTP 500', async ({ browser }) => {
+    const page = await browser.newPage();
+    const oldest = snapshotWithIdentity('1010', '2026-08-21T01:02:03.000Z', '基準Snapshot株式会社');
+    const current = snapshotWithIdentity('1010', '2026-08-22T01:02:03.000Z', '旧対象Snapshot株式会社');
+    const recovered = snapshotWithIdentity('1010', '2026-08-23T01:02:03.000Z', '復旧対象Snapshot株式会社');
+    const recoveredSnapshotId = createSnapshotId(recovered.generatedAt);
+    const requestLog: string[] = [];
+    let targetAttempts = 0;
+    try {
+      await mockComparisonApi(page, [oldest, current, recovered], requestLog);
+      await openDetail(
+        page,
+        '1010',
+        'report',
+        `&base=${createSnapshotId(oldest.generatedAt)}&target=${createSnapshotId(current.generatedAt)}`,
+      );
+      await expect(page.locator('.comparison-table').first()).toBeVisible();
+      await page.route(`**/api/analyses/1010/history/${recoveredSnapshotId}`, async route => {
+        targetAttempts += 1;
+        if (targetAttempts === 1) {
+          await route.fulfill({ body: '{}', contentType: 'application/json', status: 500 });
+          return;
+        }
+        await route.fallback();
+      });
+
+      const targetSelect = page.locator('.comparison-selectors label').filter({ hasText: '対象Snapshot' })
+        .locator('select');
+      await targetSelect.selectOption(recoveredSnapshotId);
+      await expect(page.getByRole('heading', { name: '対象Snapshotを表示できません' })).toBeVisible();
+      await expect(page.getByRole('alert')).toContainText('Snapshotを読み込めませんでした');
+      await expect(page.getByRole('heading', { name: '旧対象Snapshot株式会社' })).toHaveCount(0);
+      const pinnedUrl = page.url();
+      expect(new URL(pinnedUrl).searchParams.get('target')).toBe(recoveredSnapshotId);
+
+      await page.getByRole('button', { name: '比較を再試行' }).click();
+      await expect(page.getByRole('heading', { name: '復旧対象Snapshot株式会社' })).toBeVisible();
+      await expect(page.locator('.comparison-table').first()).toBeVisible();
+      await expect(page.getByRole('button', { name: '比較を再試行' })).toHaveCount(0);
+      expect(page.url()).toBe(pinnedUrl);
+      expect(targetAttempts).toBe(2);
+      expect(requestLog.filter(entry => {
+        const url = new URL(entry, 'http://localhost');
+        return url.pathname === '/api/analyses/1010/comparison'
+          && url.searchParams.get('targetSnapshotId') === recoveredSnapshotId;
+      })).toHaveLength(2);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test('retries an initial pinned pair after a history-list HTTP 500', async ({ browser }) => {
+    const page = await browser.newPage();
+    const oldest = snapshotWithIdentity('1010', '2026-08-21T01:02:03.000Z', '基準Snapshot株式会社');
+    const target = snapshotWithIdentity('1010', '2026-08-22T01:02:03.000Z', '復旧対象Snapshot株式会社');
+    const latest = snapshotWithIdentity('1010', '2026-08-23T01:02:03.000Z', '最新Snapshot株式会社');
+    const baseSnapshotId = createSnapshotId(oldest.generatedAt);
+    const targetSnapshotId = createSnapshotId(target.generatedAt);
+    let historyAttempts = 0;
+    try {
+      await mockComparisonApi(page, [oldest, target, latest]);
+      await page.route('**/api/analyses/1010/history', async route => {
+        historyAttempts += 1;
+        if (historyAttempts <= 2) {
+          await route.fulfill({ body: '{}', contentType: 'application/json', status: 500 });
+          return;
+        }
+        await route.fallback();
+      });
+
+      await page.goto(
+        `${baseUrl}/?ticker=1010&tab=report&base=${baseSnapshotId}&target=${targetSnapshotId}`,
+      );
+      await expect(page.getByRole('heading', { name: '対象Snapshotを表示できません' })).toBeVisible();
+      await expect(page.getByRole('alert')).toContainText('保存済み分析履歴を読み込めませんでした');
+      await expect(page.getByRole('button', { name: '比較を再試行' })).toBeVisible();
+      const pinnedUrl = page.url();
+
+      await page.getByRole('button', { name: '比較を再試行' }).click();
+      await expect(page.getByRole('heading', { name: '復旧対象Snapshot株式会社' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: '最新Snapshot株式会社' })).toHaveCount(0);
+      await expect(page.locator('.comparison-table').first()).toBeVisible();
+      expect(page.url()).toBe(pinnedUrl);
+      expect(historyAttempts).toBe(3);
     } finally {
       await page.close();
     }
