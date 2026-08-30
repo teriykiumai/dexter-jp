@@ -2,14 +2,17 @@
 
 **Purpose:** Non-normative context recovery for the Phase 3 design thread
 
-**Status:** Non-normative; this file never asserts current approval, PR, CI, or merge
-state
+**Status:** Non-normative; this file records immutable merged baselines but never
+substitutes for current approval, PR, CI, checkout, or merge-state verification
 
 **Repository:** `teriykiumai/dexter-jp`
 
 **Phase 3 design baseline:** `b2989cd1f78fc374f433352fd6532a506fb00108`
 
 **Baseline identity:** PR #73 merge; Dashboard UX closeout complete
+
+**Merged implementation baseline before P3-X:**
+`656781ae197a4480f90e9be964cebeb37e8449d0` (PR #82 merge; P3-C0 complete)
 
 **Date:** 2026-08-30
 
@@ -109,24 +112,28 @@ Detailed formulas and source contracts remain in `docs/SPEC.md`,
 `docs/PHASE2_PLAN.md`, and `docs/PHASE3_PLAN.md`; do not copy them from this
 summary.
 
-## 5. P3-0 durable design boundary
+## 5. Merged Phase 3 record before P3-X
 
 The design investigation began from merged `main`
 `b2989cd1f78fc374f433352fd6532a506fb00108` after the PR #73 Dashboard UX
-closeout. That SHA identifies the predecessor design baseline only; it is not a claim
-about the current checkout or current Phase 3 approval.
+closeout. The following predecessor merges are immutable Git-history facts verified
+when P3-X began:
 
-Do not record a working branch, open PR number, review verdict, check result, merge
-state, or corrected candidate head in this handoff. Resolve all of those from current
-Git/GitHub state and `docs/REVIEW_POLICY.md`. After P3-0 merges, its merge commit and
-current `docs/PHASE3_PLAN.md` replace this starting-point context.
+| Step | PR | Merge commit | Outcome |
+| --- | --- | --- | --- |
+| P3-0 | #74 | `938e7c543d316a7463f8cd0102d283b99179888c` | design synchronization merged |
+| P3-I0 | #75 | `3b1b88cd84d18aa6e8f4adaa5f27213a6f810cc2` | immutable history/digest/safety merged |
+| P3-H1 | #76 | `7f4621827f7d9456596fc214f3c3b0a877380f73` | pure Comparison merged |
+| P3-H2 | #77 | `0ad9157fe1df54c5fc8c946a8a710e00475c9f5a` | Comparison API/Dashboard merged |
+| P3-R1 | #78 | `23714763a4beb7c44347d8637345895ff3dbdb5e` | Peer Radar merged |
+| P3-E1 | #79 | `be218bcbfa60afb6d45ef7ae4f91838e1d66eea9` | dormant evidence/sidecar foundation merged |
+| P3-E2 candidate | #80 | — | closed without merge after failed quality gate |
+| P3-EF | #81 | `b071a08505401bdacf9e4fcae4a6ab58105abfc9` | Evaluator freeze merged |
+| P3-C0 | #82 | `656781ae197a4480f90e9be964cebeb37e8449d0` | score evaluation plan merged |
 
-P3-0 changes the following Source of Truth documents together:
-
-- `docs/SPEC.md`
-- `docs/MVP_IMPLEMENTATION_PLAN.md`
-- `docs/PHASE3_PLAN.md`
-- `docs/PHASE3_HANDOFF.md` as non-normative recovery context
+This table does not assert that a P3-X candidate is approved, passing, or merged.
+Resolve the current branch, exact head, PR, checks, independent review, and Merge Gate
+from Git/GitHub and `docs/REVIEW_POLICY.md`.
 
 ## 6. Phase 3 outcome
 
@@ -192,18 +199,30 @@ predecessor is merged and local `main` is fast-forwarded.
 8. P3-C0 — composite-score evaluation plan only
 9. P3-X — Usage, setup, handoff, and final validation closeout
 
-After P3-EF passes independent review and is merged, the next task is:
+Steps P3-0 through P3-C0 are merged at the baseline recorded in Section 5. The only
+remaining Phase 3 candidate is:
 
 ```text
-P3-C0 — Create docs/PHASE3_SCORE_EVALUATION_PLAN.md only
+P3-X — Usage, handoff, and final validation closeout
 ```
 
-P3-C0 must not add a runtime score, weight, Snapshot field, Dashboard score,
-Evaluator runtime/API/UI, PDF, Snapshot V10, or source fetch.
+P3-X updates `Usage.md`, `docs/PHASE3_PLAN.md`, and this handoff only.
+`docs/USER_SETUP.md` needs no update because the merged Phase 3 scope adds no required
+runtime, dependency, credential, environment variable, font, or browser setup.
+
+The candidate must pass full tests, type-check, diff check, Dashboard Playwright,
+independent review, CI, and the Merge Gate. Only after its exact head is merged and
+local `main` is fast-forwarded may Phase 3 be declared complete. No further Phase 3
+feature step follows it.
+
+Phase 4 remains a separate decision. It may execute the protocol in
+`docs/PHASE3_SCORE_EVALUATION_PLAN.md` only under a new reviewed implementation plan;
+it does not inherit authorization for a runtime score. Evaluator and PDF remain
+deferred independent work and do not become Phase 4 requirements automatically.
 
 ## 8. Maintenance boundary
 
-This file is updated at P3-0 to establish recovery context, at P3-EF to record the
-Evaluator freeze, and at P3-X to record the final merged state. It is not a per-PR
-progress ledger. Intermediate status belongs in the relevant PR and current Git
-history.
+This file was updated at P3-0 to establish recovery context, at P3-EF to record the
+Evaluator freeze, and at P3-X to record the final predecessor baseline and closeout
+boundary. It is not a live status ledger. Current candidate and post-merge status
+belong in the relevant PR and current Git history.
