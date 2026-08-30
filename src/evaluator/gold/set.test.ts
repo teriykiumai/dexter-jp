@@ -48,6 +48,10 @@ describe('Evaluator Japanese gold-set candidate V1', () => {
     expect(tags.has('v1_v2_20d_not_collected')).toBe(true);
     expect(tags.has('advanced_technical_metric_unavailable')).toBe(true);
     expect(tags.has('supply_demand_mixed_record')).toBe(true);
+    expect(GOLD_SET_CANDIDATE_V1.cases.filter(value => (
+      value.split === 'locked_holdout'
+      && value.coverageTags.includes('non_available_fact_basis')
+    ))).toHaveLength(2);
     expect(tags.has('valid_zero')).toBe(true);
     const v1 = GOLD_SET_CANDIDATE_V1.cases.find(value => value.caseId === 'gold_v1_dev_01')!;
     const correlation = v1.evidenceManifest.items.find(value => (

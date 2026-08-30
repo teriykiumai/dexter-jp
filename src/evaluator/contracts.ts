@@ -6,6 +6,7 @@ export const EVALUATOR_RUBRIC_VERSION = 1 as const;
 export const EVALUATOR_TIMEOUT_MS = 180_000 as const;
 export const EVALUATOR_MAX_OUTPUT_TOKENS = 16_384 as const;
 export const EVALUATOR_ATTEMPT_LIMIT = 1 as const;
+export const EVALUATOR_HTTP_REQUEST_LIMIT = 1 as const;
 export const EVALUATOR_HTTP_REQUEST_MAX_UTF8_BYTES = 1_000_000 as const;
 export const EVALUATOR_GOLD_SET_VERSION = 1 as const;
 export const EVALUATOR_GOLD_CASE_COUNT = 64 as const;
@@ -149,7 +150,11 @@ export const GoldGateMetricsV1Schema = z.object({
   notVerifiableByEvaluatorPrecision: z.number().min(0).max(1),
   notVerifiableByEvaluatorRecall: z.number().min(0).max(1),
   missingCaveatRecall: z.number().min(0).max(1),
-  basisAndLocationAccuracy: z.number().min(0).max(1),
+  availableFactBasisAccuracy: z.number().min(0).max(1),
+  nonAvailableFactBasisAccuracy: z.number().min(0).max(1),
+  manifestAbsenceBasisAccuracy: z.number().min(0).max(1),
+  reportContradictionBasisAccuracy: z.number().min(0).max(1),
+  matchedLocationAccuracy: z.number().min(0).max(1),
   refLocationIntegrity: z.number().min(0).max(1),
   cleanMaterialFalsePositives: z.number().int().nonnegative(),
   cleanAdvisoryFalsePositiveCases: z.number().int().nonnegative(),

@@ -18,6 +18,7 @@ import {
   digestGateCampaignV1,
   goldGateMetricsPassV1,
   resolveQualifiedEvaluatorRuntimeV1,
+  validateGateAttestationV1,
 } from './quality-gate.js';
 
 const directories: string[] = [];
@@ -47,7 +48,11 @@ function passingMetrics(): GoldGateMetricsV1 {
     notVerifiableByEvaluatorPrecision: 0.9,
     notVerifiableByEvaluatorRecall: 0.9,
     missingCaveatRecall: 0.85,
-    basisAndLocationAccuracy: 0.95,
+    availableFactBasisAccuracy: 0.95,
+    nonAvailableFactBasisAccuracy: 0.95,
+    manifestAbsenceBasisAccuracy: 0.95,
+    reportContradictionBasisAccuracy: 0.95,
+    matchedLocationAccuracy: 0.95,
     refLocationIntegrity: 1,
     cleanMaterialFalsePositives: 0,
     cleanAdvisoryFalsePositiveCases: 1,
@@ -168,6 +173,33 @@ describe('Evaluator quality gate', () => {
     expect(goldGateMetricsPassV1({ ...passingMetrics(), injectionSeededDetectionCount: 7 })).toBe(false);
   });
 
+  test('requires every basis and location accuracy gate independently', () => {
+    const accuracyFields = [
+      'availableFactBasisAccuracy',
+      'nonAvailableFactBasisAccuracy',
+      'manifestAbsenceBasisAccuracy',
+      'reportContradictionBasisAccuracy',
+      'matchedLocationAccuracy',
+    ] as const;
+    for (const field of accuracyFields) {
+      const otherwisePerfect = {
+        ...passingMetrics(),
+        availableFactBasisAccuracy: 1,
+        nonAvailableFactBasisAccuracy: 1,
+        manifestAbsenceBasisAccuracy: 1,
+        reportContradictionBasisAccuracy: 1,
+        matchedLocationAccuracy: 1,
+        [field]: 0.949,
+      };
+      const aggregate = accuracyFields.reduce(
+        (sum, accuracyField) => sum + otherwisePerfect[accuracyField],
+        0,
+      ) / accuracyFields.length;
+      expect(aggregate).toBeGreaterThan(0.95);
+      expect(goldGateMetricsPassV1(otherwisePerfect)).toBe(false);
+    }
+  });
+
   test('rejects a pending manifest without a passed attestation', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dexter-gate-'));
     directories.push(root);
@@ -208,5 +240,21 @@ describe('Evaluator quality gate', () => {
       rootDirectory: root,
       verifyBindings: async () => {},
     })).rejects.toMatchObject({ code: 'runtime_not_quality_gated' });
+  });
+
+  test('rejects charged and reserved cost whose combined total exceeds the hard cap', () => {
+    const gate = manifest();
+    const overCapDraft = {
+      ...attestation(gate),
+      chargedCostUsd: 20,
+      reservedCostUsd: 20,
+      campaignResultDigest: `sha256:${'0'.repeat(64)}` as const,
+    };
+    const overCap = {
+      ...overCapDraft,
+      campaignResultDigest: digestGateCampaignV1(overCapDraft),
+    };
+    expect(() => validateGateAttestationV1(gate, overCap))
+      .toThrow('Evaluator quality-gate attestation does not match its manifest.');
   });
 });

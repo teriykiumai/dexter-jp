@@ -86,7 +86,11 @@ export function goldGateMetricsPassV1(metrics: GoldGateMetricsV1): boolean {
     && metrics.notVerifiableByEvaluatorPrecision >= 0.9
     && metrics.notVerifiableByEvaluatorRecall >= 0.9
     && metrics.missingCaveatRecall >= 0.85
-    && metrics.basisAndLocationAccuracy >= 0.95
+    && metrics.availableFactBasisAccuracy >= 0.95
+    && metrics.nonAvailableFactBasisAccuracy >= 0.95
+    && metrics.manifestAbsenceBasisAccuracy >= 0.95
+    && metrics.reportContradictionBasisAccuracy >= 0.95
+    && metrics.matchedLocationAccuracy >= 0.95
     && metrics.refLocationIntegrity === 1
     && metrics.cleanMaterialFalsePositives === 0
     && metrics.cleanAdvisoryFalsePositiveCases <= 1
@@ -128,6 +132,8 @@ export function validateGateAttestationV1(
     || Date.parse(attestation.completedAt) < Date.parse(attestation.startedAt)
     || attestation.chargedCostUsd > manifest.campaign.hardCap
     || attestation.reservedCostUsd > manifest.campaign.hardCap
+    || attestation.chargedCostUsd + attestation.reservedCostUsd
+      > manifest.campaign.hardCap
     || attestation.caseResultDigests.length < EVALUATOR_GOLD_HOLDOUT_COUNT
     || new Set(attestation.caseResultDigests.map(item => item.caseId)).size
       !== attestation.caseResultDigests.length

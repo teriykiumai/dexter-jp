@@ -53,7 +53,9 @@ export function parseEvaluatorCliArguments(
   };
 }
 
-function formatConfirmationSummary(summary: EvaluatorConfirmationSummaryV1): string {
+export function formatEvaluatorConfirmationSummary(
+  summary: EvaluatorConfirmationSummaryV1,
+): string {
   return [
     'Evaluator external-send confirmation',
     `ticker: ${summary.ticker}`,
@@ -66,6 +68,7 @@ function formatConfirmationSummary(summary: EvaluatorConfirmationSummaryV1): str
     `manifest: ${summary.manifestUtf16Units} UTF-16 units`,
     `logical input: ${summary.totalLogicalInputUtf16Units} UTF-16 units`,
     `HTTP body: ${summary.httpRequestUtf8Bytes} / ${summary.httpRequestMaxUtf8Bytes} UTF-8 bytes`,
+    `HTTP request limit: ${summary.httpRequestLimit}`,
     `timeout: ${summary.timeoutMs} ms`,
     'external send: yes',
     'API cost: may be charged',
@@ -76,7 +79,7 @@ async function confirmExternalSend(
   summary: EvaluatorConfirmationSummaryV1,
   confirmedByFlag: boolean,
 ): Promise<boolean> {
-  process.stdout.write(`${formatConfirmationSummary(summary)}\n`);
+  process.stdout.write(`${formatEvaluatorConfirmationSummary(summary)}\n`);
   if (confirmedByFlag) return true;
   if (!process.stdin.isTTY || !process.stdout.isTTY) return false;
   const reader = createInterface({ input: process.stdin, output: process.stdout });

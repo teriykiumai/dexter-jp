@@ -113,6 +113,7 @@ describe('Evaluator runtime controller', () => {
       ticker: state.saved.canonicalTicker,
       snapshotId: state.saved.snapshotId,
       baseUrl: 'https://api.openai.com/v1',
+      httpRequestLimit: 1,
       externalSend: true,
       apiCostPossible: true,
     });

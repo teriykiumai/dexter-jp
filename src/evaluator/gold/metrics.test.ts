@@ -62,6 +62,13 @@ describe('Evaluator gold campaign scoring', () => {
     expect(metrics.validatedAvailable).toBe(48);
     expect(metrics.materialPrecision).toBe(1);
     expect(metrics.materialRecall).toBe(1);
+    expect(metrics).toMatchObject({
+      availableFactBasisAccuracy: 1,
+      nonAvailableFactBasisAccuracy: 1,
+      manifestAbsenceBasisAccuracy: 1,
+      reportContradictionBasisAccuracy: 1,
+      matchedLocationAccuracy: 1,
+    });
     expect(metrics.injectionSeededDetectionCount).toBe(8);
     expect(metrics.cleanMaterialFalsePositives).toBe(0);
     expect(goldGateMetricsPassV1(metrics)).toBe(true);

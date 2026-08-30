@@ -25,6 +25,7 @@ import {
 } from '../analysis/snapshot/safety.js';
 import { CanonicalTickerSchema } from '../analysis/snapshot/schema.js';
 import {
+  EVALUATOR_HTTP_REQUEST_LIMIT,
   EVALUATOR_HTTP_REQUEST_MAX_UTF8_BYTES,
   EVALUATOR_TIMEOUT_MS,
   EvaluatorPreflightError,
@@ -109,6 +110,7 @@ export type EvaluatorConfirmationSummaryV1 = Readonly<{
   totalLogicalInputUtf16Units: number;
   httpRequestUtf8Bytes: number;
   httpRequestMaxUtf8Bytes: number;
+  httpRequestLimit: 1;
   timeoutMs: number;
   externalSend: true;
   apiCostPossible: true;
@@ -309,6 +311,7 @@ export async function evaluatePersistedSnapshotV1(
     totalLogicalInputUtf16Units: logicalInput.length,
     httpRequestUtf8Bytes: providerRequest.bodyUtf8Bytes,
     httpRequestMaxUtf8Bytes: EVALUATOR_HTTP_REQUEST_MAX_UTF8_BYTES,
+    httpRequestLimit: EVALUATOR_HTTP_REQUEST_LIMIT,
     timeoutMs: EVALUATOR_TIMEOUT_MS,
     externalSend: true,
     apiCostPossible: true,

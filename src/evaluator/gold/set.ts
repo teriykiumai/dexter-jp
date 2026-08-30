@@ -219,6 +219,8 @@ function manifestForCategory(
       ? { scope: 'advanced_technical' as const, item: unavailableAdvancedTechnicalItem() }
       : ordinal === 3
         ? { scope: 'reported_short_positions' as const, item: mixedReportedShortItem() }
+        : category === 'not_verifiable_from_snapshot' && (ordinal === 25 || ordinal === 26)
+          ? { scope: 'advanced_technical' as const, item: unavailableAdvancedTechnicalItem() }
         : null;
   const raw = {
     manifestVersion: 1,
@@ -261,7 +263,24 @@ function findingForCategory(
           reason: 'no_matching_allowlisted_evidence',
         },
       };
-    case 'not_verifiable_from_snapshot':
+    case 'not_verifiable_from_snapshot': {
+      const nonAvailableItem = manifest.items.find(item => (
+        item.facts.some(fact => fact.state !== 'available')
+      ));
+      const nonAvailableFact = nonAvailableItem?.facts.find(fact => fact.state !== 'available');
+      if (nonAvailableItem !== undefined && nonAvailableFact !== undefined) {
+        return {
+          category,
+          claimDomains: [EVIDENCE_SCOPE_DOMAIN_V1[nonAvailableItem.scopeId]],
+          summary: '保存済みSnapshotの利用不能な観測に依存する主張です。',
+          importance: 'advisory',
+          location,
+          basis: {
+            kind: 'non_available_fact_refs',
+            refs: [{ itemId: nonAvailableItem.itemId, factKey: nonAvailableFact.factKey }],
+          },
+        };
+      }
       return {
         category,
         claimDomains: ['outside_filing_narrative'],
@@ -274,6 +293,7 @@ function findingForCategory(
           reason: 'outside_snapshot_scope',
         },
       };
+    }
     case 'not_verifiable_by_evaluator':
       return {
         category,
@@ -385,6 +405,10 @@ function createCase(input: Readonly<{
     input.ordinal === 1 ? 'v1_v2_20d_not_collected' : 'synthetic',
     input.ordinal === 2 ? 'advanced_technical_metric_unavailable' : 'synthetic',
     input.ordinal === 3 ? 'supply_demand_mixed_record' : 'synthetic',
+    input.category === 'not_verifiable_from_snapshot'
+      && (input.ordinal === 25 || input.ordinal === 26)
+      ? 'non_available_fact_basis'
+      : 'synthetic',
   ];
   const withoutDigest: Omit<GoldCaseV1, 'inputDigest'> = {
     version: 1,
@@ -465,7 +489,7 @@ export const GOLD_SET_CANDIDATE_V1_DIGEST = sha256CanonicalJsonV1({
 } as CanonicalJsonValue);
 
 export const REVIEWED_GOLD_SET_CANDIDATE_V1_DIGEST =
-  'sha256:28906e57b50e2ecb6a59b4d0d1969438dc88f545d1a4aa3c8dcdbbf83821a755' as const;
+  'sha256:a8f424fbd54ae0e0aeabd8734461aa0b48277278e717bde90177774553a83243' as const;
 
 if (GOLD_SET_CANDIDATE_V1_DIGEST !== REVIEWED_GOLD_SET_CANDIDATE_V1_DIGEST) {
   throw new Error('Gold-set candidate changed without updating its reviewed digest.');
