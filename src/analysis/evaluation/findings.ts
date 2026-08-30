@@ -105,6 +105,50 @@ function validateLocation(
   }
 }
 
+function resolveUniqueAnchorOffset(
+  anchor: ReportAnchorV1,
+  report: string,
+): ReportAnchorV1 {
+  if (
+    anchor.start >= 0
+    && anchor.start < anchor.end
+    && anchor.end <= report.length
+    && report.slice(anchor.start, anchor.end) === anchor.excerpt
+  ) {
+    return anchor;
+  }
+  const start = report.indexOf(anchor.excerpt);
+  if (start < 0 || report.indexOf(anchor.excerpt, start + 1) >= 0) return anchor;
+  return { ...anchor, start, end: start + anchor.excerpt.length };
+}
+
+export function resolveUniqueReportAnchorOffsetsV1(
+  findings: readonly EvaluationFindingWireV1[],
+  report: string,
+): readonly EvaluationFindingWireV1[] {
+  return findings.map(finding => {
+    if (finding.location.kind === 'single_anchor') {
+      return EvaluationFindingWireV1Schema.parse({
+        ...finding,
+        location: {
+          kind: 'single_anchor',
+          anchor: resolveUniqueAnchorOffset(finding.location.anchor, report),
+        },
+      });
+    }
+    const anchors = finding.location.anchors
+      .map(anchor => resolveUniqueAnchorOffset(anchor, report))
+      .sort((left, right) => left.start - right.start || left.end - right.end);
+    return EvaluationFindingWireV1Schema.parse({
+      ...finding,
+      location: {
+        kind: 'report_anchor_set',
+        anchors: anchors as ReportAnchorSetLocationV1['anchors'],
+      },
+    });
+  });
+}
+
 function assertRegistryOrder<T extends string>(
   values: readonly T[],
   registry: readonly T[],

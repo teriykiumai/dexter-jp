@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
 import {
+  resolveUniqueReportAnchorOffsetsV1,
   validateEvaluationFindingsWireV1,
 } from '../../analysis/evaluation/findings.js';
 import {
@@ -210,7 +211,10 @@ export async function runGoldCampaignV1(
         apiKey,
       });
       const findings = validateEvaluationFindingsWireV1(
-        providerResult.findings,
+        resolveUniqueReportAnchorOffsetsV1(
+          providerResult.findings,
+          goldCase.input.report,
+        ),
         goldCase.input.report,
         goldCase.input.evidenceManifest,
       );

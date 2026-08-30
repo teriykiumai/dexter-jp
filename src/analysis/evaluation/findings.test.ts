@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { comparisonSnapshot, snapshotAtVersion } from '../comparison/test-fixtures.js';
 import {
   EvaluationFindingValidationError,
+  resolveUniqueReportAnchorOffsetsV1,
   validateEvaluationFindingsWireV1,
   validateEvaluationFindingWireV1,
   validatePersistedEvaluationFindingsV1,
@@ -9,6 +10,53 @@ import {
 import { buildEvidenceManifestV1 } from './manifest.js';
 
 describe('Evaluation finding V1 validation', () => {
+  test('resolves only unique exact excerpts and orders an anchor set mechanically', () => {
+    const report = '株価は上昇します。一方、株価は低下します。';
+    const [resolved] = resolveUniqueReportAnchorOffsetsV1([{
+      category: 'internal_inconsistency',
+      claimDomains: ['outside_other_context'],
+      importance: 'material',
+      summary: '同じ株価に相反する説明があります。',
+      location: {
+        kind: 'report_anchor_set',
+        anchors: [
+          { start: 0, end: 1, excerpt: '株価は低下します' },
+          { start: 0, end: 1, excerpt: '株価は上昇します' },
+        ],
+      },
+      basis: { kind: 'report_contradiction' },
+    }], report);
+    expect(resolved?.location).toEqual({
+      kind: 'report_anchor_set',
+      anchors: [
+        { start: 0, end: 8, excerpt: '株価は上昇します' },
+        { start: 12, end: 20, excerpt: '株価は低下します' },
+      ],
+    });
+    expect(() => validateEvaluationFindingsWireV1(
+      resolved === undefined ? [] : [resolved],
+      report,
+      buildEvidenceManifestV1(comparisonSnapshot()),
+    )).not.toThrow();
+
+    const [ambiguous] = resolveUniqueReportAnchorOffsetsV1([{
+      category: 'unsupported_claim',
+      claimDomains: ['valuation_metrics'],
+      importance: 'material',
+      summary: '根拠がありません。',
+      location: { kind: 'single_anchor', anchor: { start: 1, end: 2, excerpt: '重複' } },
+      basis: {
+        kind: 'manifest_absence',
+        scopeRefs: ['valuation'],
+        reason: 'no_matching_allowlisted_evidence',
+      },
+    }], '重複と重複');
+    expect(ambiguous?.location).toEqual({
+      kind: 'single_anchor',
+      anchor: { start: 1, end: 2, excerpt: '重複' },
+    });
+  });
+
   test('implements the reviewed unsupported-claim finding ID golden vector', () => {
     const manifest = buildEvidenceManifestV1(comparisonSnapshot());
     const finding = validateEvaluationFindingWireV1({

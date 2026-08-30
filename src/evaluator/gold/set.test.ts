@@ -88,7 +88,7 @@ describe('Evaluator Japanese gold-set candidate V1', () => {
 
     expect(reportsFor('unsupported_claim').every(report => report.includes('保存済みPERは8倍'))).toBe(true);
     expect(reportsFor('not_verifiable_from_snapshot').every(report => (
-      report.includes('保存済みSnapshot外の有価証券報告書本文')
+      report.includes('日銀は次回会合で政策金利を引き上げます')
       || report.includes('保存済みSnapshotのRSI14')
     ))).toBe(true);
     expect(reportsFor('not_verifiable_by_evaluator').every(report => (
@@ -120,8 +120,8 @@ describe('Evaluator Japanese gold-set candidate V1', () => {
       annotatorAId: string;
       annotatorBId: string;
       cases: Array<{
-        annotatorAFindings: Array<{ summary: string; [key: string]: unknown }>;
-        annotatorBFindings: Array<{ summary: string; [key: string]: unknown }>;
+        annotatorAFindings: Array<{ summary: string; location: unknown; [key: string]: unknown }>;
+      annotatorBFindings: Array<{ summary: string; location: unknown; [key: string]: unknown }>;
         adjudicatedFindings: unknown[];
       }>;
     };
@@ -130,10 +130,37 @@ describe('Evaluator Japanese gold-set candidate V1', () => {
     expect(validated.cases).toHaveLength(64);
     expect(validated.cases.reduce((count, value) => count + value.expectedFindings.length, 0)).toBe(52);
 
-    const withoutSummary = ({ summary: _summary, ...finding }: { summary: string; [key: string]: unknown }) => finding;
+    const withoutSummaryAndLocation = ({
+      summary: _summary,
+      location: _location,
+      ...finding
+    }: { summary: string; location: unknown; [key: string]: unknown }) => finding;
+    const anchorIoU = (
+      left: { start: number; end: number },
+      right: { start: number; end: number },
+    ) => Math.max(0, Math.min(left.end, right.end) - Math.max(left.start, right.start))
+      / (Math.max(left.end, right.end) - Math.min(left.start, right.start));
     for (const [index, annotation] of raw.cases.entries()) {
-      expect(annotation.annotatorAFindings.map(withoutSummary))
-        .toEqual(annotation.annotatorBFindings.map(withoutSummary));
+      expect(annotation.annotatorAFindings.map(withoutSummaryAndLocation))
+        .toEqual(annotation.annotatorBFindings.map(withoutSummaryAndLocation));
+      for (const [findingIndex, left] of annotation.annotatorAFindings.entries()) {
+        const right = annotation.annotatorBFindings[findingIndex]!;
+        const leftLocation = left.location as {
+          kind: 'single_anchor' | 'report_anchor_set';
+          anchor?: { start: number; end: number };
+          anchors?: Array<{ start: number; end: number }>;
+        };
+        const rightLocation = right.location as typeof leftLocation;
+        expect(leftLocation.kind).toBe(rightLocation.kind);
+        if (leftLocation.kind === 'single_anchor') {
+          expect(anchorIoU(leftLocation.anchor!, rightLocation.anchor!)).toBeGreaterThanOrEqual(0.5);
+        } else {
+          expect(leftLocation.anchors).toHaveLength(rightLocation.anchors!.length);
+          leftLocation.anchors!.forEach((anchor, anchorIndex) => {
+            expect(anchorIoU(anchor, rightLocation.anchors![anchorIndex]!)).toBeGreaterThanOrEqual(0.5);
+          });
+        }
+      }
       expect(annotation.adjudicatedFindings)
         .toEqual(GOLD_SET_CANDIDATE_V1.cases[index]!.annotation.proposedFindings);
     }

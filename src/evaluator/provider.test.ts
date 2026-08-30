@@ -61,8 +61,10 @@ describe('Evaluator provider boundary', () => {
     expect(built.body.max_output_tokens).toBe(16_384);
     expect(built.body.input[0]!.content[0]!.text).toContain(injection);
     expect(built.body.instructions).not.toContain(injection);
-    expect(built.body.instructions).toContain('Source attribution or an explicit scope disclaimer');
+    expect(built.body.instructions).toContain('correctly source-caveated outside-scope claim');
     expect(built.body.instructions).toContain('do not double-label that same omission as unclear_reasoning');
+    expect(built.body.instructions).toContain('never call that value unsupported');
+    expect(built.body.instructions).toContain('unique exact excerpts may have their offsets resolved mechanically');
     expect(buildEvaluatorProviderRequestV1({
       report: injection,
       evidenceManifest: buildEvidenceManifestV1(comparisonSnapshot()),

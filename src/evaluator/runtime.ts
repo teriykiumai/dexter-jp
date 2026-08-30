@@ -10,6 +10,7 @@ import {
   digestArtifactInputV1,
   digestEvidenceManifestV1,
   EvaluationRepository,
+  resolveUniqueReportAnchorOffsetsV1,
   validateEvaluationFindingsWireV1,
 } from '../analysis/evaluation/index.js';
 import {
@@ -355,7 +356,10 @@ export async function evaluatePersistedSnapshotV1(
     result = {
       state: 'available',
       findings: [...validateEvaluationFindingsWireV1(
-        providerResult.findings,
+        resolveUniqueReportAnchorOffsetsV1(
+          providerResult.findings,
+          snapshot.finalReportMarkdown,
+        ),
         snapshot.finalReportMarkdown,
         manifest,
       )],

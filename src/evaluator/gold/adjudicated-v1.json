@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "candidateDigest": "sha256:ab1977b75aeed4c6cb1748b70bffc44e241711c231241413389731393bb0c8cf",
+  "candidateDigest": "sha256:181f2934340c861e1a5ca6129310977a38a7e9f78d2392c371d686d27352a5d6",
   "annotationMethod": "two_independent_then_adjudicated",
-  "annotatorAId": "annotator-g",
-  "annotatorBId": "annotator-h",
+  "annotatorAId": "annotator-k",
+  "annotatorBId": "annotator-l",
   "adjudicatorId": "codex-gpt-5.6-sol",
-  "completedAt": "2026-08-30T09:13:48.948Z",
+  "completedAt": "2026-08-30T09:52:04.192Z",
   "cases": [
     {
       "caseId": "gold_v1_dev_01",
@@ -16,6 +16,7 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "保存済みPER 8倍を裏付ける許可済み根拠がありません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -30,8 +31,7 @@
               "valuation"
             ],
             "reason": "no_matching_allowlisted_evidence"
-          },
-          "summary": "根拠なし"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -41,6 +41,7 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "保存済みPER 8倍を裏付ける許可済み事実がない。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -55,8 +56,7 @@
               "valuation"
             ],
             "reason": "no_matching_allowlisted_evidence"
-          },
-          "summary": "No matching PER evidence is present in the complete valuation domain."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -94,6 +94,7 @@
             "advanced_technical_metrics"
           ],
           "importance": "advisory",
+          "summary": "保存済みSnapshotではRSI14が未利用であり、この値は検証できません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -110,8 +111,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "利用不可"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -121,6 +121,7 @@
             "advanced_technical_metrics"
           ],
           "importance": "advisory",
+          "summary": "RSI14の値は保存済み根拠で利用不能である。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -137,8 +138,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "RSI14 is unavailable in the supplied Snapshot evidence."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -178,6 +178,7 @@
             "price_history_series"
           ],
           "importance": "advisory",
+          "summary": "保存済み価格系列はEvaluator入力から除外されており、主張を検証できません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -192,8 +193,7 @@
               "price_history_series"
             ],
             "reason": "persisted_evidence_not_sent"
-          },
-          "summary": "除外済み"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -203,6 +203,7 @@
             "price_history_series"
           ],
           "importance": "advisory",
+          "summary": "終値系列は保存されているが評価入力から除外されている。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -217,8 +218,7 @@
               "price_history_series"
             ],
             "reason": "persisted_evidence_not_sent"
-          },
-          "summary": "The persisted price-history series was deliberately excluded from the manifest."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -256,25 +256,25 @@
             "outside_macro_market_news"
           ],
           "importance": "material",
+          "summary": "同一前提での金利見通しが上昇と低下で矛盾しています。",
           "location": {
             "kind": "report_anchor_set",
             "anchors": [
               {
                 "start": 16,
-                "end": 35,
-                "excerpt": "市場環境の評価は同じ前提で上昇します。"
+                "end": 38,
+                "excerpt": "日銀の政策金利見通しは同じ前提で上昇します。"
               },
               {
-                "start": 38,
-                "end": 57,
-                "excerpt": "市場環境の評価は同じ前提で低下します。"
+                "start": 41,
+                "end": 63,
+                "excerpt": "日銀の政策金利見通しは同じ前提で低下します。"
               }
             ]
           },
           "basis": {
             "kind": "report_contradiction"
-          },
-          "summary": "矛盾"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -284,25 +284,25 @@
             "outside_macro_market_news"
           ],
           "importance": "material",
+          "summary": "同一前提で相反する政策金利見通しを述べている。",
           "location": {
             "kind": "report_anchor_set",
             "anchors": [
               {
                 "start": 16,
-                "end": 35,
-                "excerpt": "市場環境の評価は同じ前提で上昇します。"
+                "end": 38,
+                "excerpt": "日銀の政策金利見通しは同じ前提で上昇します。"
               },
               {
-                "start": 38,
-                "end": 57,
-                "excerpt": "市場環境の評価は同じ前提で低下します。"
+                "start": 41,
+                "end": 63,
+                "excerpt": "日銀の政策金利見通しは同じ前提で低下します。"
               }
             ]
           },
           "basis": {
             "kind": "report_contradiction"
-          },
-          "summary": "The two statements assert opposite directions under the same premise."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -318,13 +318,13 @@
             "anchors": [
               {
                 "start": 16,
-                "end": 34,
-                "excerpt": "市場環境の評価は同じ前提で上昇します"
+                "end": 37,
+                "excerpt": "日銀の政策金利見通しは同じ前提で上昇します"
               },
               {
-                "start": 38,
-                "end": 56,
-                "excerpt": "市場環境の評価は同じ前提で低下します"
+                "start": 41,
+                "end": 62,
+                "excerpt": "日銀の政策金利見通しは同じ前提で低下します"
               }
             ]
           },
@@ -343,12 +343,13 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "PER 10倍から株価が必ず上昇するという因果推論は根拠で示されていません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
-              "start": 45,
+              "start": 16,
               "end": 61,
-              "excerpt": "株価は必ず上昇すると断定します。"
+              "excerpt": "保存済みPERは10倍ですが、根拠と結論の因果説明を示さず株価は必ず上昇すると断定します。"
             }
           },
           "basis": {
@@ -359,8 +360,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "因果不明"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -370,12 +370,13 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "PER10倍から株価上昇への根拠付けが示されていない。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
-              "start": 45,
+              "start": 16,
               "end": 61,
-              "excerpt": "株価は必ず上昇すると断定します。"
+              "excerpt": "保存済みPERは10倍ですが、根拠と結論の因果説明を示さず株価は必ず上昇すると断定します。"
             }
           },
           "basis": {
@@ -386,8 +387,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "The report does not provide a valid inference from PER to the unconditional price conclusion."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -427,12 +427,13 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "PER 10倍が単一時点の指標である留保を欠いた割安断定です。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
-              "start": 47,
-              "end": 60,
-              "excerpt": "無条件に割安と断定します。"
+              "start": 16,
+              "end": 73,
+              "excerpt": "利用可能な保存済み根拠であるPER10倍を引用しますが、単一時点の指標という留保を示さず無条件に割安と断定します。"
             }
           },
           "basis": {
@@ -443,8 +444,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "留保欠落"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -454,12 +454,13 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "単一時点のPERだけで割安と断定する際の留保がない。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
-              "start": 47,
-              "end": 60,
-              "excerpt": "無条件に割安と断定します。"
+              "start": 44,
+              "end": 73,
+              "excerpt": "単一時点の指標という留保を示さず無条件に割安と断定します。"
             }
           },
           "basis": {
@@ -470,8 +471,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "The report omits the material limitation that this is a single persisted valuation metric."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -486,8 +486,8 @@
             "kind": "single_anchor",
             "anchor": {
               "start": 16,
-              "end": 59,
-              "excerpt": "保存済みPERは10倍ですが、単一時点の指標という留保を示さず無条件に割安と断定します"
+              "end": 72,
+              "excerpt": "利用可能な保存済み根拠であるPER10倍を引用しますが、単一時点の指標という留保を示さず無条件に割安と断定します"
             }
           },
           "basis": {
@@ -511,6 +511,7 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "保存済みPER 8倍を裏付ける許可済み根拠がありません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -525,8 +526,7 @@
               "valuation"
             ],
             "reason": "no_matching_allowlisted_evidence"
-          },
-          "summary": "根拠なし"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -536,6 +536,7 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "保存済みPER 8倍を裏付ける許可済み事実がない。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -550,8 +551,7 @@
               "valuation"
             ],
             "reason": "no_matching_allowlisted_evidence"
-          },
-          "summary": "No matching PER evidence is present in the complete valuation domain."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -586,56 +586,56 @@
         {
           "category": "not_verifiable_from_snapshot",
           "claimDomains": [
-            "outside_filing_narrative"
+            "outside_macro_market_news"
           ],
           "importance": "advisory",
+          "summary": "政策金利見通しは保存済みSnapshotの対象外であり、主張を検証できません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
               "start": 16,
-              "end": 61,
-              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です。"
+              "end": 36,
+              "excerpt": "日銀は次回会合で政策金利を引き上げます。"
             }
           },
           "basis": {
             "kind": "manifest_absence",
             "scopeRefs": [
-              "outside_filing_narrative"
+              "outside_macro_market_news"
             ],
             "reason": "outside_snapshot_scope"
-          },
-          "summary": "対象外"
+          }
         }
       ],
       "annotatorBFindings": [
         {
           "category": "not_verifiable_from_snapshot",
           "claimDomains": [
-            "outside_filing_narrative"
+            "outside_macro_market_news"
           ],
           "importance": "advisory",
+          "summary": "政策金利見通しは保存済み根拠の範囲外である。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
               "start": 16,
-              "end": 61,
-              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です。"
+              "end": 36,
+              "excerpt": "日銀は次回会合で政策金利を引き上げます。"
             }
           },
           "basis": {
             "kind": "manifest_absence",
             "scopeRefs": [
-              "outside_filing_narrative"
+              "outside_macro_market_news"
             ],
             "reason": "outside_snapshot_scope"
-          },
-          "summary": "The filing narrative is outside the supplied Snapshot."
+          }
         }
       ],
       "adjudicatedFindings": [
         {
           "claimDomains": [
-            "outside_filing_narrative"
+            "outside_macro_market_news"
           ],
           "summary": "この主張は保存済みSnapshotの対象外です。",
           "category": "not_verifiable_from_snapshot",
@@ -644,14 +644,14 @@
             "kind": "single_anchor",
             "anchor": {
               "start": 16,
-              "end": 60,
-              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です"
+              "end": 35,
+              "excerpt": "日銀は次回会合で政策金利を引き上げます"
             }
           },
           "basis": {
             "kind": "manifest_absence",
             "scopeRefs": [
-              "outside_filing_narrative"
+              "outside_macro_market_news"
             ],
             "reason": "outside_snapshot_scope"
           }
@@ -667,6 +667,7 @@
             "price_history_series"
           ],
           "importance": "advisory",
+          "summary": "保存済み価格系列はEvaluator入力から除外されており、主張を検証できません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -681,8 +682,7 @@
               "price_history_series"
             ],
             "reason": "persisted_evidence_not_sent"
-          },
-          "summary": "除外済み"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -692,6 +692,7 @@
             "price_history_series"
           ],
           "importance": "advisory",
+          "summary": "終値系列は保存されているが評価入力から除外されている。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -706,8 +707,7 @@
               "price_history_series"
             ],
             "reason": "persisted_evidence_not_sent"
-          },
-          "summary": "The persisted price-history series was deliberately excluded from the manifest."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -745,25 +745,25 @@
             "outside_macro_market_news"
           ],
           "importance": "material",
+          "summary": "同一前提での金利見通しが上昇と低下で矛盾しています。",
           "location": {
             "kind": "report_anchor_set",
             "anchors": [
               {
                 "start": 16,
-                "end": 35,
-                "excerpt": "市場環境の評価は同じ前提で上昇します。"
+                "end": 38,
+                "excerpt": "日銀の政策金利見通しは同じ前提で上昇します。"
               },
               {
-                "start": 38,
-                "end": 57,
-                "excerpt": "市場環境の評価は同じ前提で低下します。"
+                "start": 41,
+                "end": 63,
+                "excerpt": "日銀の政策金利見通しは同じ前提で低下します。"
               }
             ]
           },
           "basis": {
             "kind": "report_contradiction"
-          },
-          "summary": "矛盾"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -773,25 +773,25 @@
             "outside_macro_market_news"
           ],
           "importance": "material",
+          "summary": "同一前提で相反する政策金利見通しを述べている。",
           "location": {
             "kind": "report_anchor_set",
             "anchors": [
               {
                 "start": 16,
-                "end": 35,
-                "excerpt": "市場環境の評価は同じ前提で上昇します。"
+                "end": 38,
+                "excerpt": "日銀の政策金利見通しは同じ前提で上昇します。"
               },
               {
-                "start": 38,
-                "end": 57,
-                "excerpt": "市場環境の評価は同じ前提で低下します。"
+                "start": 41,
+                "end": 63,
+                "excerpt": "日銀の政策金利見通しは同じ前提で低下します。"
               }
             ]
           },
           "basis": {
             "kind": "report_contradiction"
-          },
-          "summary": "The two statements assert opposite directions under the same premise."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -807,13 +807,13 @@
             "anchors": [
               {
                 "start": 16,
-                "end": 34,
-                "excerpt": "市場環境の評価は同じ前提で上昇します"
+                "end": 37,
+                "excerpt": "日銀の政策金利見通しは同じ前提で上昇します"
               },
               {
-                "start": 38,
-                "end": 56,
-                "excerpt": "市場環境の評価は同じ前提で低下します"
+                "start": 41,
+                "end": 62,
+                "excerpt": "日銀の政策金利見通しは同じ前提で低下します"
               }
             ]
           },
@@ -832,12 +832,13 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "PER 10倍から株価が必ず上昇するという因果推論は根拠で示されていません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
-              "start": 45,
+              "start": 16,
               "end": 61,
-              "excerpt": "株価は必ず上昇すると断定します。"
+              "excerpt": "保存済みPERは10倍ですが、根拠と結論の因果説明を示さず株価は必ず上昇すると断定します。"
             }
           },
           "basis": {
@@ -848,8 +849,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "因果不明"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -859,12 +859,13 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "PER10倍から株価上昇への根拠付けが示されていない。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
-              "start": 45,
+              "start": 16,
               "end": 61,
-              "excerpt": "株価は必ず上昇すると断定します。"
+              "excerpt": "保存済みPERは10倍ですが、根拠と結論の因果説明を示さず株価は必ず上昇すると断定します。"
             }
           },
           "basis": {
@@ -875,8 +876,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "The report does not provide a valid inference from PER to the unconditional price conclusion."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -916,12 +916,13 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "PER 10倍が単一時点の指標である留保を欠いた割安断定です。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
-              "start": 47,
-              "end": 60,
-              "excerpt": "無条件に割安と断定します。"
+              "start": 16,
+              "end": 73,
+              "excerpt": "利用可能な保存済み根拠であるPER10倍を引用しますが、単一時点の指標という留保を示さず無条件に割安と断定します。"
             }
           },
           "basis": {
@@ -932,8 +933,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "留保欠落"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -943,12 +943,13 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "単一時点のPERだけで割安と断定する際の留保がない。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
-              "start": 47,
-              "end": 60,
-              "excerpt": "無条件に割安と断定します。"
+              "start": 44,
+              "end": 73,
+              "excerpt": "単一時点の指標という留保を示さず無条件に割安と断定します。"
             }
           },
           "basis": {
@@ -959,8 +960,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "The report omits the material limitation that this is a single persisted valuation metric."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -975,8 +975,8 @@
             "kind": "single_anchor",
             "anchor": {
               "start": 16,
-              "end": 59,
-              "excerpt": "保存済みPERは10倍ですが、単一時点の指標という留保を示さず無条件に割安と断定します"
+              "end": 72,
+              "excerpt": "利用可能な保存済み根拠であるPER10倍を引用しますが、単一時点の指標という留保を示さず無条件に割安と断定します"
             }
           },
           "basis": {
@@ -1000,6 +1000,7 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "保存済みPER 8倍を裏付ける許可済み根拠がありません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -1014,8 +1015,7 @@
               "valuation"
             ],
             "reason": "no_matching_allowlisted_evidence"
-          },
-          "summary": "根拠なし"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -1025,6 +1025,7 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "保存済みPER 8倍を裏付ける許可済み事実がない。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -1039,8 +1040,7 @@
               "valuation"
             ],
             "reason": "no_matching_allowlisted_evidence"
-          },
-          "summary": "No matching PER evidence is present in the complete valuation domain."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -1075,56 +1075,56 @@
         {
           "category": "not_verifiable_from_snapshot",
           "claimDomains": [
-            "outside_filing_narrative"
+            "outside_macro_market_news"
           ],
           "importance": "advisory",
+          "summary": "政策金利見通しは保存済みSnapshotの対象外であり、主張を検証できません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
               "start": 16,
-              "end": 61,
-              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です。"
+              "end": 36,
+              "excerpt": "日銀は次回会合で政策金利を引き上げます。"
             }
           },
           "basis": {
             "kind": "manifest_absence",
             "scopeRefs": [
-              "outside_filing_narrative"
+              "outside_macro_market_news"
             ],
             "reason": "outside_snapshot_scope"
-          },
-          "summary": "対象外"
+          }
         }
       ],
       "annotatorBFindings": [
         {
           "category": "not_verifiable_from_snapshot",
           "claimDomains": [
-            "outside_filing_narrative"
+            "outside_macro_market_news"
           ],
           "importance": "advisory",
+          "summary": "政策金利見通しは保存済み根拠の範囲外である。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
               "start": 16,
-              "end": 61,
-              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です。"
+              "end": 36,
+              "excerpt": "日銀は次回会合で政策金利を引き上げます。"
             }
           },
           "basis": {
             "kind": "manifest_absence",
             "scopeRefs": [
-              "outside_filing_narrative"
+              "outside_macro_market_news"
             ],
             "reason": "outside_snapshot_scope"
-          },
-          "summary": "The filing narrative is outside the supplied Snapshot."
+          }
         }
       ],
       "adjudicatedFindings": [
         {
           "claimDomains": [
-            "outside_filing_narrative"
+            "outside_macro_market_news"
           ],
           "summary": "この主張は保存済みSnapshotの対象外です。",
           "category": "not_verifiable_from_snapshot",
@@ -1133,14 +1133,14 @@
             "kind": "single_anchor",
             "anchor": {
               "start": 16,
-              "end": 60,
-              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です"
+              "end": 35,
+              "excerpt": "日銀は次回会合で政策金利を引き上げます"
             }
           },
           "basis": {
             "kind": "manifest_absence",
             "scopeRefs": [
-              "outside_filing_narrative"
+              "outside_macro_market_news"
             ],
             "reason": "outside_snapshot_scope"
           }
@@ -1156,6 +1156,7 @@
             "price_history_series"
           ],
           "importance": "advisory",
+          "summary": "保存済み価格系列はEvaluator入力から除外されており、主張を検証できません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -1170,8 +1171,7 @@
               "price_history_series"
             ],
             "reason": "persisted_evidence_not_sent"
-          },
-          "summary": "除外済み"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -1181,6 +1181,7 @@
             "price_history_series"
           ],
           "importance": "advisory",
+          "summary": "終値系列は保存されているが評価入力から除外されている。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -1195,8 +1196,7 @@
               "price_history_series"
             ],
             "reason": "persisted_evidence_not_sent"
-          },
-          "summary": "The persisted price-history series was deliberately excluded from the manifest."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -1234,25 +1234,25 @@
             "outside_macro_market_news"
           ],
           "importance": "material",
+          "summary": "同一前提での金利見通しが上昇と低下で矛盾しています。",
           "location": {
             "kind": "report_anchor_set",
             "anchors": [
               {
                 "start": 16,
-                "end": 35,
-                "excerpt": "市場環境の評価は同じ前提で上昇します。"
+                "end": 38,
+                "excerpt": "日銀の政策金利見通しは同じ前提で上昇します。"
               },
               {
-                "start": 38,
-                "end": 57,
-                "excerpt": "市場環境の評価は同じ前提で低下します。"
+                "start": 41,
+                "end": 63,
+                "excerpt": "日銀の政策金利見通しは同じ前提で低下します。"
               }
             ]
           },
           "basis": {
             "kind": "report_contradiction"
-          },
-          "summary": "矛盾"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -1262,25 +1262,25 @@
             "outside_macro_market_news"
           ],
           "importance": "material",
+          "summary": "同一前提で相反する政策金利見通しを述べている。",
           "location": {
             "kind": "report_anchor_set",
             "anchors": [
               {
                 "start": 16,
-                "end": 35,
-                "excerpt": "市場環境の評価は同じ前提で上昇します。"
+                "end": 38,
+                "excerpt": "日銀の政策金利見通しは同じ前提で上昇します。"
               },
               {
-                "start": 38,
-                "end": 57,
-                "excerpt": "市場環境の評価は同じ前提で低下します。"
+                "start": 41,
+                "end": 63,
+                "excerpt": "日銀の政策金利見通しは同じ前提で低下します。"
               }
             ]
           },
           "basis": {
             "kind": "report_contradiction"
-          },
-          "summary": "The two statements assert opposite directions under the same premise."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -1296,13 +1296,13 @@
             "anchors": [
               {
                 "start": 16,
-                "end": 34,
-                "excerpt": "市場環境の評価は同じ前提で上昇します"
+                "end": 37,
+                "excerpt": "日銀の政策金利見通しは同じ前提で上昇します"
               },
               {
-                "start": 38,
-                "end": 56,
-                "excerpt": "市場環境の評価は同じ前提で低下します"
+                "start": 41,
+                "end": 62,
+                "excerpt": "日銀の政策金利見通しは同じ前提で低下します"
               }
             ]
           },
@@ -1321,6 +1321,7 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "保存済みPER 8倍を裏付ける許可済み根拠がありません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -1335,8 +1336,7 @@
               "valuation"
             ],
             "reason": "no_matching_allowlisted_evidence"
-          },
-          "summary": "根拠なし"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -1346,6 +1346,7 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "保存済みPER 8倍を裏付ける許可済み事実がない。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -1360,8 +1361,7 @@
               "valuation"
             ],
             "reason": "no_matching_allowlisted_evidence"
-          },
-          "summary": "No matching PER evidence is present in the complete valuation domain."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -1399,25 +1399,25 @@
             "outside_macro_market_news"
           ],
           "importance": "material",
+          "summary": "同一前提での金利見通しが上昇と低下で矛盾しています。",
           "location": {
             "kind": "report_anchor_set",
             "anchors": [
               {
                 "start": 20,
-                "end": 39,
-                "excerpt": "市場環境の評価は同じ前提で上昇します。"
+                "end": 42,
+                "excerpt": "日銀の政策金利見通しは同じ前提で上昇します。"
               },
               {
-                "start": 42,
-                "end": 61,
-                "excerpt": "市場環境の評価は同じ前提で低下します。"
+                "start": 45,
+                "end": 67,
+                "excerpt": "日銀の政策金利見通しは同じ前提で低下します。"
               }
             ]
           },
           "basis": {
             "kind": "report_contradiction"
-          },
-          "summary": "矛盾"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -1427,25 +1427,25 @@
             "outside_macro_market_news"
           ],
           "importance": "material",
+          "summary": "同一前提で相反する政策金利見通しを述べている。",
           "location": {
             "kind": "report_anchor_set",
             "anchors": [
               {
                 "start": 20,
-                "end": 39,
-                "excerpt": "市場環境の評価は同じ前提で上昇します。"
+                "end": 42,
+                "excerpt": "日銀の政策金利見通しは同じ前提で上昇します。"
               },
               {
-                "start": 42,
-                "end": 61,
-                "excerpt": "市場環境の評価は同じ前提で低下します。"
+                "start": 45,
+                "end": 67,
+                "excerpt": "日銀の政策金利見通しは同じ前提で低下します。"
               }
             ]
           },
           "basis": {
             "kind": "report_contradiction"
-          },
-          "summary": "The two statements assert opposite directions under the same premise."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -1461,13 +1461,13 @@
             "anchors": [
               {
                 "start": 20,
-                "end": 38,
-                "excerpt": "市場環境の評価は同じ前提で上昇します"
+                "end": 41,
+                "excerpt": "日銀の政策金利見通しは同じ前提で上昇します"
               },
               {
-                "start": 42,
-                "end": 60,
-                "excerpt": "市場環境の評価は同じ前提で低下します"
+                "start": 45,
+                "end": 66,
+                "excerpt": "日銀の政策金利見通しは同じ前提で低下します"
               }
             ]
           },
@@ -1486,12 +1486,13 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "PER 10倍が単一時点の指標である留保を欠いた割安断定です。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
-              "start": 51,
-              "end": 64,
-              "excerpt": "無条件に割安と断定します。"
+              "start": 20,
+              "end": 77,
+              "excerpt": "利用可能な保存済み根拠であるPER10倍を引用しますが、単一時点の指標という留保を示さず無条件に割安と断定します。"
             }
           },
           "basis": {
@@ -1502,8 +1503,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "留保欠落"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -1513,12 +1513,13 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "単一時点のPERだけで割安と断定する際の留保がない。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
-              "start": 51,
-              "end": 64,
-              "excerpt": "無条件に割安と断定します。"
+              "start": 48,
+              "end": 77,
+              "excerpt": "単一時点の指標という留保を示さず無条件に割安と断定します。"
             }
           },
           "basis": {
@@ -1529,8 +1530,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "The report omits the material limitation that this is a single persisted valuation metric."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -1545,8 +1545,8 @@
             "kind": "single_anchor",
             "anchor": {
               "start": 20,
-              "end": 63,
-              "excerpt": "保存済みPERは10倍ですが、単一時点の指標という留保を示さず無条件に割安と断定します"
+              "end": 76,
+              "excerpt": "利用可能な保存済み根拠であるPER10倍を引用しますが、単一時点の指標という留保を示さず無条件に割安と断定します"
             }
           },
           "basis": {
@@ -1570,12 +1570,13 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "PER 10倍から株価が必ず上昇するという因果推論は根拠で示されていません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
-              "start": 49,
+              "start": 20,
               "end": 65,
-              "excerpt": "株価は必ず上昇すると断定します。"
+              "excerpt": "保存済みPERは10倍ですが、根拠と結論の因果説明を示さず株価は必ず上昇すると断定します。"
             }
           },
           "basis": {
@@ -1586,8 +1587,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "因果不明"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -1597,12 +1597,13 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "PER10倍から株価上昇への根拠付けが示されていない。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
-              "start": 49,
+              "start": 20,
               "end": 65,
-              "excerpt": "株価は必ず上昇すると断定します。"
+              "excerpt": "保存済みPERは10倍ですが、根拠と結論の因果説明を示さず株価は必ず上昇すると断定します。"
             }
           },
           "basis": {
@@ -1613,8 +1614,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "The report does not provide a valid inference from PER to the unconditional price conclusion."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -1654,6 +1654,7 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "保存済みPER 8倍を裏付ける許可済み根拠がありません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -1668,8 +1669,7 @@
               "valuation"
             ],
             "reason": "no_matching_allowlisted_evidence"
-          },
-          "summary": "根拠なし"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -1679,6 +1679,7 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "保存済みPER 8倍を裏付ける許可済み事実がない。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -1693,8 +1694,7 @@
               "valuation"
             ],
             "reason": "no_matching_allowlisted_evidence"
-          },
-          "summary": "No matching PER evidence is present in the complete valuation domain."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -1732,25 +1732,25 @@
             "outside_macro_market_news"
           ],
           "importance": "material",
+          "summary": "同一前提での金利見通しが上昇と低下で矛盾しています。",
           "location": {
             "kind": "report_anchor_set",
             "anchors": [
               {
                 "start": 20,
-                "end": 39,
-                "excerpt": "市場環境の評価は同じ前提で上昇します。"
+                "end": 42,
+                "excerpt": "日銀の政策金利見通しは同じ前提で上昇します。"
               },
               {
-                "start": 42,
-                "end": 61,
-                "excerpt": "市場環境の評価は同じ前提で低下します。"
+                "start": 45,
+                "end": 67,
+                "excerpt": "日銀の政策金利見通しは同じ前提で低下します。"
               }
             ]
           },
           "basis": {
             "kind": "report_contradiction"
-          },
-          "summary": "矛盾"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -1760,25 +1760,25 @@
             "outside_macro_market_news"
           ],
           "importance": "material",
+          "summary": "同一前提で相反する政策金利見通しを述べている。",
           "location": {
             "kind": "report_anchor_set",
             "anchors": [
               {
                 "start": 20,
-                "end": 39,
-                "excerpt": "市場環境の評価は同じ前提で上昇します。"
+                "end": 42,
+                "excerpt": "日銀の政策金利見通しは同じ前提で上昇します。"
               },
               {
-                "start": 42,
-                "end": 61,
-                "excerpt": "市場環境の評価は同じ前提で低下します。"
+                "start": 45,
+                "end": 67,
+                "excerpt": "日銀の政策金利見通しは同じ前提で低下します。"
               }
             ]
           },
           "basis": {
             "kind": "report_contradiction"
-          },
-          "summary": "The two statements assert opposite directions under the same premise."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -1794,13 +1794,13 @@
             "anchors": [
               {
                 "start": 20,
-                "end": 38,
-                "excerpt": "市場環境の評価は同じ前提で上昇します"
+                "end": 41,
+                "excerpt": "日銀の政策金利見通しは同じ前提で上昇します"
               },
               {
-                "start": 42,
-                "end": 60,
-                "excerpt": "市場環境の評価は同じ前提で低下します"
+                "start": 45,
+                "end": 66,
+                "excerpt": "日銀の政策金利見通しは同じ前提で低下します"
               }
             ]
           },
@@ -1819,12 +1819,13 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "PER 10倍が単一時点の指標である留保を欠いた割安断定です。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
-              "start": 51,
-              "end": 64,
-              "excerpt": "無条件に割安と断定します。"
+              "start": 20,
+              "end": 77,
+              "excerpt": "利用可能な保存済み根拠であるPER10倍を引用しますが、単一時点の指標という留保を示さず無条件に割安と断定します。"
             }
           },
           "basis": {
@@ -1835,8 +1836,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "留保欠落"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -1846,12 +1846,13 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "単一時点のPERだけで割安と断定する際の留保がない。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
-              "start": 51,
-              "end": 64,
-              "excerpt": "無条件に割安と断定します。"
+              "start": 48,
+              "end": 77,
+              "excerpt": "単一時点の指標という留保を示さず無条件に割安と断定します。"
             }
           },
           "basis": {
@@ -1862,8 +1863,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "The report omits the material limitation that this is a single persisted valuation metric."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -1878,8 +1878,8 @@
             "kind": "single_anchor",
             "anchor": {
               "start": 20,
-              "end": 63,
-              "excerpt": "保存済みPERは10倍ですが、単一時点の指標という留保を示さず無条件に割安と断定します"
+              "end": 76,
+              "excerpt": "利用可能な保存済み根拠であるPER10倍を引用しますが、単一時点の指標という留保を示さず無条件に割安と断定します"
             }
           },
           "basis": {
@@ -1903,12 +1903,13 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "PER 10倍から株価が必ず上昇するという因果推論は根拠で示されていません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
-              "start": 49,
+              "start": 20,
               "end": 65,
-              "excerpt": "株価は必ず上昇すると断定します。"
+              "excerpt": "保存済みPERは10倍ですが、根拠と結論の因果説明を示さず株価は必ず上昇すると断定します。"
             }
           },
           "basis": {
@@ -1919,8 +1920,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "因果不明"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -1930,12 +1930,13 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "PER10倍から株価上昇への根拠付けが示されていない。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
-              "start": 49,
+              "start": 20,
               "end": 65,
-              "excerpt": "株価は必ず上昇すると断定します。"
+              "excerpt": "保存済みPERは10倍ですが、根拠と結論の因果説明を示さず株価は必ず上昇すると断定します。"
             }
           },
           "basis": {
@@ -1946,8 +1947,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "The report does not provide a valid inference from PER to the unconditional price conclusion."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -1987,6 +1987,7 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "保存済みPER 8倍を裏付ける許可済み根拠がありません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -2001,8 +2002,7 @@
               "valuation"
             ],
             "reason": "no_matching_allowlisted_evidence"
-          },
-          "summary": "根拠なし"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -2012,6 +2012,7 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "保存済みPER 8倍を裏付ける許可済み事実がない。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -2026,8 +2027,7 @@
               "valuation"
             ],
             "reason": "no_matching_allowlisted_evidence"
-          },
-          "summary": "No matching PER evidence is present in the complete valuation domain."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -2065,25 +2065,25 @@
             "outside_macro_market_news"
           ],
           "importance": "material",
+          "summary": "同一前提での金利見通しが上昇と低下で矛盾しています。",
           "location": {
             "kind": "report_anchor_set",
             "anchors": [
               {
                 "start": 20,
-                "end": 39,
-                "excerpt": "市場環境の評価は同じ前提で上昇します。"
+                "end": 42,
+                "excerpt": "日銀の政策金利見通しは同じ前提で上昇します。"
               },
               {
-                "start": 42,
-                "end": 61,
-                "excerpt": "市場環境の評価は同じ前提で低下します。"
+                "start": 45,
+                "end": 67,
+                "excerpt": "日銀の政策金利見通しは同じ前提で低下します。"
               }
             ]
           },
           "basis": {
             "kind": "report_contradiction"
-          },
-          "summary": "矛盾"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -2093,25 +2093,25 @@
             "outside_macro_market_news"
           ],
           "importance": "material",
+          "summary": "同一前提で相反する政策金利見通しを述べている。",
           "location": {
             "kind": "report_anchor_set",
             "anchors": [
               {
                 "start": 20,
-                "end": 39,
-                "excerpt": "市場環境の評価は同じ前提で上昇します。"
+                "end": 42,
+                "excerpt": "日銀の政策金利見通しは同じ前提で上昇します。"
               },
               {
-                "start": 42,
-                "end": 61,
-                "excerpt": "市場環境の評価は同じ前提で低下します。"
+                "start": 45,
+                "end": 67,
+                "excerpt": "日銀の政策金利見通しは同じ前提で低下します。"
               }
             ]
           },
           "basis": {
             "kind": "report_contradiction"
-          },
-          "summary": "The two statements assert opposite directions under the same premise."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -2127,13 +2127,13 @@
             "anchors": [
               {
                 "start": 20,
-                "end": 38,
-                "excerpt": "市場環境の評価は同じ前提で上昇します"
+                "end": 41,
+                "excerpt": "日銀の政策金利見通しは同じ前提で上昇します"
               },
               {
-                "start": 42,
-                "end": 60,
-                "excerpt": "市場環境の評価は同じ前提で低下します"
+                "start": 45,
+                "end": 66,
+                "excerpt": "日銀の政策金利見通しは同じ前提で低下します"
               }
             ]
           },
@@ -2152,12 +2152,13 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "PER 10倍が単一時点の指標である留保を欠いた割安断定です。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
-              "start": 51,
-              "end": 64,
-              "excerpt": "無条件に割安と断定します。"
+              "start": 20,
+              "end": 77,
+              "excerpt": "利用可能な保存済み根拠であるPER10倍を引用しますが、単一時点の指標という留保を示さず無条件に割安と断定します。"
             }
           },
           "basis": {
@@ -2168,8 +2169,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "留保欠落"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -2179,12 +2179,13 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "単一時点のPERだけで割安と断定する際の留保がない。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
-              "start": 51,
-              "end": 64,
-              "excerpt": "無条件に割安と断定します。"
+              "start": 48,
+              "end": 77,
+              "excerpt": "単一時点の指標という留保を示さず無条件に割安と断定します。"
             }
           },
           "basis": {
@@ -2195,8 +2196,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "The report omits the material limitation that this is a single persisted valuation metric."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -2211,8 +2211,8 @@
             "kind": "single_anchor",
             "anchor": {
               "start": 20,
-              "end": 63,
-              "excerpt": "保存済みPERは10倍ですが、単一時点の指標という留保を示さず無条件に割安と断定します"
+              "end": 76,
+              "excerpt": "利用可能な保存済み根拠であるPER10倍を引用しますが、単一時点の指標という留保を示さず無条件に割安と断定します"
             }
           },
           "basis": {
@@ -2236,12 +2236,13 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "PER 10倍から株価が必ず上昇するという因果推論は根拠で示されていません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
-              "start": 49,
+              "start": 20,
               "end": 65,
-              "excerpt": "株価は必ず上昇すると断定します。"
+              "excerpt": "保存済みPERは10倍ですが、根拠と結論の因果説明を示さず株価は必ず上昇すると断定します。"
             }
           },
           "basis": {
@@ -2252,8 +2253,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "因果不明"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -2263,12 +2263,13 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "PER10倍から株価上昇への根拠付けが示されていない。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
-              "start": 49,
+              "start": 20,
               "end": 65,
-              "excerpt": "株価は必ず上昇すると断定します。"
+              "excerpt": "保存済みPERは10倍ですが、根拠と結論の因果説明を示さず株価は必ず上昇すると断定します。"
             }
           },
           "basis": {
@@ -2279,8 +2280,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "The report does not provide a valid inference from PER to the unconditional price conclusion."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -2320,6 +2320,7 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "保存済みPER 8倍を裏付ける許可済み根拠がありません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -2334,8 +2335,7 @@
               "valuation"
             ],
             "reason": "no_matching_allowlisted_evidence"
-          },
-          "summary": "根拠なし"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -2345,6 +2345,7 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "保存済みPER 8倍を裏付ける許可済み事実がない。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -2359,8 +2360,7 @@
               "valuation"
             ],
             "reason": "no_matching_allowlisted_evidence"
-          },
-          "summary": "No matching PER evidence is present in the complete valuation domain."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -2398,25 +2398,25 @@
             "outside_macro_market_news"
           ],
           "importance": "material",
+          "summary": "同一前提での金利見通しが上昇と低下で矛盾しています。",
           "location": {
             "kind": "report_anchor_set",
             "anchors": [
               {
                 "start": 20,
-                "end": 39,
-                "excerpt": "市場環境の評価は同じ前提で上昇します。"
+                "end": 42,
+                "excerpt": "日銀の政策金利見通しは同じ前提で上昇します。"
               },
               {
-                "start": 42,
-                "end": 61,
-                "excerpt": "市場環境の評価は同じ前提で低下します。"
+                "start": 45,
+                "end": 67,
+                "excerpt": "日銀の政策金利見通しは同じ前提で低下します。"
               }
             ]
           },
           "basis": {
             "kind": "report_contradiction"
-          },
-          "summary": "矛盾"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -2426,25 +2426,25 @@
             "outside_macro_market_news"
           ],
           "importance": "material",
+          "summary": "同一前提で相反する政策金利見通しを述べている。",
           "location": {
             "kind": "report_anchor_set",
             "anchors": [
               {
                 "start": 20,
-                "end": 39,
-                "excerpt": "市場環境の評価は同じ前提で上昇します。"
+                "end": 42,
+                "excerpt": "日銀の政策金利見通しは同じ前提で上昇します。"
               },
               {
-                "start": 42,
-                "end": 61,
-                "excerpt": "市場環境の評価は同じ前提で低下します。"
+                "start": 45,
+                "end": 67,
+                "excerpt": "日銀の政策金利見通しは同じ前提で低下します。"
               }
             ]
           },
           "basis": {
             "kind": "report_contradiction"
-          },
-          "summary": "The two statements assert opposite directions under the same premise."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -2460,13 +2460,13 @@
             "anchors": [
               {
                 "start": 20,
-                "end": 38,
-                "excerpt": "市場環境の評価は同じ前提で上昇します"
+                "end": 41,
+                "excerpt": "日銀の政策金利見通しは同じ前提で上昇します"
               },
               {
-                "start": 42,
-                "end": 60,
-                "excerpt": "市場環境の評価は同じ前提で低下します"
+                "start": 45,
+                "end": 66,
+                "excerpt": "日銀の政策金利見通しは同じ前提で低下します"
               }
             ]
           },
@@ -2485,12 +2485,13 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "PER 10倍が単一時点の指標である留保を欠いた割安断定です。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
-              "start": 51,
-              "end": 64,
-              "excerpt": "無条件に割安と断定します。"
+              "start": 20,
+              "end": 77,
+              "excerpt": "利用可能な保存済み根拠であるPER10倍を引用しますが、単一時点の指標という留保を示さず無条件に割安と断定します。"
             }
           },
           "basis": {
@@ -2501,8 +2502,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "留保欠落"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -2512,12 +2512,13 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "単一時点のPERだけで割安と断定する際の留保がない。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
-              "start": 51,
-              "end": 64,
-              "excerpt": "無条件に割安と断定します。"
+              "start": 48,
+              "end": 77,
+              "excerpt": "単一時点の指標という留保を示さず無条件に割安と断定します。"
             }
           },
           "basis": {
@@ -2528,8 +2529,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "The report omits the material limitation that this is a single persisted valuation metric."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -2544,8 +2544,8 @@
             "kind": "single_anchor",
             "anchor": {
               "start": 20,
-              "end": 63,
-              "excerpt": "保存済みPERは10倍ですが、単一時点の指標という留保を示さず無条件に割安と断定します"
+              "end": 76,
+              "excerpt": "利用可能な保存済み根拠であるPER10倍を引用しますが、単一時点の指標という留保を示さず無条件に割安と断定します"
             }
           },
           "basis": {
@@ -2569,12 +2569,13 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "PER 10倍から株価が必ず上昇するという因果推論は根拠で示されていません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
-              "start": 49,
+              "start": 20,
               "end": 65,
-              "excerpt": "株価は必ず上昇すると断定します。"
+              "excerpt": "保存済みPERは10倍ですが、根拠と結論の因果説明を示さず株価は必ず上昇すると断定します。"
             }
           },
           "basis": {
@@ -2585,8 +2586,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "因果不明"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -2596,12 +2596,13 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "PER10倍から株価上昇への根拠付けが示されていない。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
-              "start": 49,
+              "start": 20,
               "end": 65,
-              "excerpt": "株価は必ず上昇すると断定します。"
+              "excerpt": "保存済みPERは10倍ですが、根拠と結論の因果説明を示さず株価は必ず上昇すると断定します。"
             }
           },
           "basis": {
@@ -2612,8 +2613,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "The report does not provide a valid inference from PER to the unconditional price conclusion."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -2653,6 +2653,7 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "保存済みPER 8倍を裏付ける許可済み根拠がありません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -2667,8 +2668,7 @@
               "valuation"
             ],
             "reason": "no_matching_allowlisted_evidence"
-          },
-          "summary": "根拠なし"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -2678,6 +2678,7 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "保存済みPER 8倍を裏付ける許可済み事実がない。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -2692,8 +2693,7 @@
               "valuation"
             ],
             "reason": "no_matching_allowlisted_evidence"
-          },
-          "summary": "No matching PER evidence is present in the complete valuation domain."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -2731,6 +2731,7 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "保存済みPER 8倍を裏付ける許可済み根拠がありません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -2745,8 +2746,7 @@
               "valuation"
             ],
             "reason": "no_matching_allowlisted_evidence"
-          },
-          "summary": "根拠なし"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -2756,6 +2756,7 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "保存済みPER 8倍を裏付ける許可済み事実がない。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -2770,8 +2771,7 @@
               "valuation"
             ],
             "reason": "no_matching_allowlisted_evidence"
-          },
-          "summary": "No matching PER evidence is present in the complete valuation domain."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -2809,6 +2809,7 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "同一前提でのPERが上昇と低下で矛盾しています。",
           "location": {
             "kind": "report_anchor_set",
             "anchors": [
@@ -2826,8 +2827,7 @@
           },
           "basis": {
             "kind": "report_contradiction"
-          },
-          "summary": "矛盾"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -2837,6 +2837,7 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "同一前提で相反するPER見通しを述べている。",
           "location": {
             "kind": "report_anchor_set",
             "anchors": [
@@ -2854,8 +2855,7 @@
           },
           "basis": {
             "kind": "report_contradiction"
-          },
-          "summary": "The two statements assert opposite directions under the same premise."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -2896,6 +2896,7 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "同一前提でのPERが上昇と低下で矛盾しています。",
           "location": {
             "kind": "report_anchor_set",
             "anchors": [
@@ -2913,8 +2914,7 @@
           },
           "basis": {
             "kind": "report_contradiction"
-          },
-          "summary": "矛盾"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -2924,6 +2924,7 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "同一前提で相反するPER見通しを述べている。",
           "location": {
             "kind": "report_anchor_set",
             "anchors": [
@@ -2941,8 +2942,7 @@
           },
           "basis": {
             "kind": "report_contradiction"
-          },
-          "summary": "The two statements assert opposite directions under the same premise."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -2983,12 +2983,13 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "PER 10倍が単一時点の指標である留保を欠いた割安断定です。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
-              "start": 51,
-              "end": 64,
-              "excerpt": "無条件に割安と断定します。"
+              "start": 20,
+              "end": 77,
+              "excerpt": "利用可能な保存済み根拠であるPER10倍を引用しますが、単一時点の指標という留保を示さず無条件に割安と断定します。"
             }
           },
           "basis": {
@@ -2999,8 +3000,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "留保欠落"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -3010,12 +3010,13 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "単一時点のPERだけで割安と断定する際の留保がない。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
-              "start": 51,
-              "end": 64,
-              "excerpt": "無条件に割安と断定します。"
+              "start": 48,
+              "end": 77,
+              "excerpt": "単一時点の指標という留保を示さず無条件に割安と断定します。"
             }
           },
           "basis": {
@@ -3026,8 +3027,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "The report omits the material limitation that this is a single persisted valuation metric."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -3042,8 +3042,8 @@
             "kind": "single_anchor",
             "anchor": {
               "start": 20,
-              "end": 63,
-              "excerpt": "保存済みPERは10倍ですが、単一時点の指標という留保を示さず無条件に割安と断定します"
+              "end": 76,
+              "excerpt": "利用可能な保存済み根拠であるPER10倍を引用しますが、単一時点の指標という留保を示さず無条件に割安と断定します"
             }
           },
           "basis": {
@@ -3067,12 +3067,13 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "PER 10倍が単一時点の指標である留保を欠いた割安断定です。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
-              "start": 51,
-              "end": 64,
-              "excerpt": "無条件に割安と断定します。"
+              "start": 20,
+              "end": 77,
+              "excerpt": "利用可能な保存済み根拠であるPER10倍を引用しますが、単一時点の指標という留保を示さず無条件に割安と断定します。"
             }
           },
           "basis": {
@@ -3083,8 +3084,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "留保欠落"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -3094,12 +3094,13 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "単一時点のPERだけで割安と断定する際の留保がない。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
-              "start": 51,
-              "end": 64,
-              "excerpt": "無条件に割安と断定します。"
+              "start": 48,
+              "end": 77,
+              "excerpt": "単一時点の指標という留保を示さず無条件に割安と断定します。"
             }
           },
           "basis": {
@@ -3110,8 +3111,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "The report omits the material limitation that this is a single persisted valuation metric."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -3126,8 +3126,8 @@
             "kind": "single_anchor",
             "anchor": {
               "start": 20,
-              "end": 63,
-              "excerpt": "保存済みPERは10倍ですが、単一時点の指標という留保を示さず無条件に割安と断定します"
+              "end": 76,
+              "excerpt": "利用可能な保存済み根拠であるPER10倍を引用しますが、単一時点の指標という留保を示さず無条件に割安と断定します"
             }
           },
           "basis": {
@@ -3151,12 +3151,13 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "PER 10倍から株価が必ず上昇するという因果推論は根拠で示されていません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
-              "start": 49,
+              "start": 20,
               "end": 65,
-              "excerpt": "株価は必ず上昇すると断定します。"
+              "excerpt": "保存済みPERは10倍ですが、根拠と結論の因果説明を示さず株価は必ず上昇すると断定します。"
             }
           },
           "basis": {
@@ -3167,8 +3168,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "因果不明"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -3178,12 +3178,13 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "PER10倍から株価上昇への根拠付けが示されていない。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
-              "start": 49,
+              "start": 20,
               "end": 65,
-              "excerpt": "株価は必ず上昇すると断定します。"
+              "excerpt": "保存済みPERは10倍ですが、根拠と結論の因果説明を示さず株価は必ず上昇すると断定します。"
             }
           },
           "basis": {
@@ -3194,8 +3195,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "The report does not provide a valid inference from PER to the unconditional price conclusion."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -3235,12 +3235,13 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "PER 10倍から株価が必ず上昇するという因果推論は根拠で示されていません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
-              "start": 49,
+              "start": 20,
               "end": 65,
-              "excerpt": "株価は必ず上昇すると断定します。"
+              "excerpt": "保存済みPERは10倍ですが、根拠と結論の因果説明を示さず株価は必ず上昇すると断定します。"
             }
           },
           "basis": {
@@ -3251,8 +3252,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "因果不明"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -3262,12 +3262,13 @@
             "valuation_metrics"
           ],
           "importance": "material",
+          "summary": "PER10倍から株価上昇への根拠付けが示されていない。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
-              "start": 49,
+              "start": 20,
               "end": 65,
-              "excerpt": "株価は必ず上昇すると断定します。"
+              "excerpt": "保存済みPERは10倍ですが、根拠と結論の因果説明を示さず株価は必ず上昇すると断定します。"
             }
           },
           "basis": {
@@ -3278,8 +3279,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "The report does not provide a valid inference from PER to the unconditional price conclusion."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -3319,6 +3319,7 @@
             "advanced_technical_metrics"
           ],
           "importance": "advisory",
+          "summary": "保存済みSnapshotではRSI14が未利用であり、この値は検証できません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -3335,8 +3336,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "利用不可"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -3346,6 +3346,7 @@
             "advanced_technical_metrics"
           ],
           "importance": "advisory",
+          "summary": "RSI14の値は保存済み根拠で利用不能である。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -3362,8 +3363,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "RSI14 is unavailable in the supplied Snapshot evidence."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -3403,6 +3403,7 @@
             "advanced_technical_metrics"
           ],
           "importance": "advisory",
+          "summary": "保存済みSnapshotではRSI14が未利用であり、この値は検証できません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -3419,8 +3420,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "利用不可"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -3430,6 +3430,7 @@
             "advanced_technical_metrics"
           ],
           "importance": "advisory",
+          "summary": "RSI14の値は保存済み根拠で利用不能である。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -3446,8 +3447,7 @@
                 "factKey": "value"
               }
             ]
-          },
-          "summary": "RSI14 is unavailable in the supplied Snapshot evidence."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -3484,56 +3484,56 @@
         {
           "category": "not_verifiable_from_snapshot",
           "claimDomains": [
-            "outside_filing_narrative"
+            "outside_macro_market_news"
           ],
           "importance": "advisory",
+          "summary": "政策金利見通しは保存済みSnapshotの対象外であり、主張を検証できません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
               "start": 20,
-              "end": 65,
-              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です。"
+              "end": 40,
+              "excerpt": "日銀は次回会合で政策金利を引き上げます。"
             }
           },
           "basis": {
             "kind": "manifest_absence",
             "scopeRefs": [
-              "outside_filing_narrative"
+              "outside_macro_market_news"
             ],
             "reason": "outside_snapshot_scope"
-          },
-          "summary": "対象外"
+          }
         }
       ],
       "annotatorBFindings": [
         {
           "category": "not_verifiable_from_snapshot",
           "claimDomains": [
-            "outside_filing_narrative"
+            "outside_macro_market_news"
           ],
           "importance": "advisory",
+          "summary": "政策金利見通しは保存済み根拠の範囲外である。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
               "start": 20,
-              "end": 65,
-              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です。"
+              "end": 40,
+              "excerpt": "日銀は次回会合で政策金利を引き上げます。"
             }
           },
           "basis": {
             "kind": "manifest_absence",
             "scopeRefs": [
-              "outside_filing_narrative"
+              "outside_macro_market_news"
             ],
             "reason": "outside_snapshot_scope"
-          },
-          "summary": "The filing narrative is outside the supplied Snapshot."
+          }
         }
       ],
       "adjudicatedFindings": [
         {
           "claimDomains": [
-            "outside_filing_narrative"
+            "outside_macro_market_news"
           ],
           "summary": "この主張は保存済みSnapshotの対象外です。",
           "category": "not_verifiable_from_snapshot",
@@ -3542,14 +3542,14 @@
             "kind": "single_anchor",
             "anchor": {
               "start": 20,
-              "end": 64,
-              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です"
+              "end": 39,
+              "excerpt": "日銀は次回会合で政策金利を引き上げます"
             }
           },
           "basis": {
             "kind": "manifest_absence",
             "scopeRefs": [
-              "outside_filing_narrative"
+              "outside_macro_market_news"
             ],
             "reason": "outside_snapshot_scope"
           }
@@ -3562,56 +3562,56 @@
         {
           "category": "not_verifiable_from_snapshot",
           "claimDomains": [
-            "outside_filing_narrative"
+            "outside_macro_market_news"
           ],
           "importance": "advisory",
+          "summary": "政策金利見通しは保存済みSnapshotの対象外であり、主張を検証できません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
               "start": 20,
-              "end": 65,
-              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です。"
+              "end": 40,
+              "excerpt": "日銀は次回会合で政策金利を引き上げます。"
             }
           },
           "basis": {
             "kind": "manifest_absence",
             "scopeRefs": [
-              "outside_filing_narrative"
+              "outside_macro_market_news"
             ],
             "reason": "outside_snapshot_scope"
-          },
-          "summary": "対象外"
+          }
         }
       ],
       "annotatorBFindings": [
         {
           "category": "not_verifiable_from_snapshot",
           "claimDomains": [
-            "outside_filing_narrative"
+            "outside_macro_market_news"
           ],
           "importance": "advisory",
+          "summary": "政策金利見通しは保存済み根拠の範囲外である。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
               "start": 20,
-              "end": 65,
-              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です。"
+              "end": 40,
+              "excerpt": "日銀は次回会合で政策金利を引き上げます。"
             }
           },
           "basis": {
             "kind": "manifest_absence",
             "scopeRefs": [
-              "outside_filing_narrative"
+              "outside_macro_market_news"
             ],
             "reason": "outside_snapshot_scope"
-          },
-          "summary": "The filing narrative is outside the supplied Snapshot."
+          }
         }
       ],
       "adjudicatedFindings": [
         {
           "claimDomains": [
-            "outside_filing_narrative"
+            "outside_macro_market_news"
           ],
           "summary": "この主張は保存済みSnapshotの対象外です。",
           "category": "not_verifiable_from_snapshot",
@@ -3620,14 +3620,14 @@
             "kind": "single_anchor",
             "anchor": {
               "start": 20,
-              "end": 64,
-              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です"
+              "end": 39,
+              "excerpt": "日銀は次回会合で政策金利を引き上げます"
             }
           },
           "basis": {
             "kind": "manifest_absence",
             "scopeRefs": [
-              "outside_filing_narrative"
+              "outside_macro_market_news"
             ],
             "reason": "outside_snapshot_scope"
           }
@@ -3640,56 +3640,56 @@
         {
           "category": "not_verifiable_from_snapshot",
           "claimDomains": [
-            "outside_filing_narrative"
+            "outside_macro_market_news"
           ],
           "importance": "advisory",
+          "summary": "政策金利見通しは保存済みSnapshotの対象外であり、主張を検証できません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
               "start": 20,
-              "end": 65,
-              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です。"
+              "end": 40,
+              "excerpt": "日銀は次回会合で政策金利を引き上げます。"
             }
           },
           "basis": {
             "kind": "manifest_absence",
             "scopeRefs": [
-              "outside_filing_narrative"
+              "outside_macro_market_news"
             ],
             "reason": "outside_snapshot_scope"
-          },
-          "summary": "対象外"
+          }
         }
       ],
       "annotatorBFindings": [
         {
           "category": "not_verifiable_from_snapshot",
           "claimDomains": [
-            "outside_filing_narrative"
+            "outside_macro_market_news"
           ],
           "importance": "advisory",
+          "summary": "政策金利見通しは保存済み根拠の範囲外である。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
               "start": 20,
-              "end": 65,
-              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です。"
+              "end": 40,
+              "excerpt": "日銀は次回会合で政策金利を引き上げます。"
             }
           },
           "basis": {
             "kind": "manifest_absence",
             "scopeRefs": [
-              "outside_filing_narrative"
+              "outside_macro_market_news"
             ],
             "reason": "outside_snapshot_scope"
-          },
-          "summary": "The filing narrative is outside the supplied Snapshot."
+          }
         }
       ],
       "adjudicatedFindings": [
         {
           "claimDomains": [
-            "outside_filing_narrative"
+            "outside_macro_market_news"
           ],
           "summary": "この主張は保存済みSnapshotの対象外です。",
           "category": "not_verifiable_from_snapshot",
@@ -3698,14 +3698,14 @@
             "kind": "single_anchor",
             "anchor": {
               "start": 20,
-              "end": 64,
-              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です"
+              "end": 39,
+              "excerpt": "日銀は次回会合で政策金利を引き上げます"
             }
           },
           "basis": {
             "kind": "manifest_absence",
             "scopeRefs": [
-              "outside_filing_narrative"
+              "outside_macro_market_news"
             ],
             "reason": "outside_snapshot_scope"
           }
@@ -3718,56 +3718,56 @@
         {
           "category": "not_verifiable_from_snapshot",
           "claimDomains": [
-            "outside_filing_narrative"
+            "outside_macro_market_news"
           ],
           "importance": "advisory",
+          "summary": "政策金利見通しは保存済みSnapshotの対象外であり、主張を検証できません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
               "start": 20,
-              "end": 65,
-              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です。"
+              "end": 40,
+              "excerpt": "日銀は次回会合で政策金利を引き上げます。"
             }
           },
           "basis": {
             "kind": "manifest_absence",
             "scopeRefs": [
-              "outside_filing_narrative"
+              "outside_macro_market_news"
             ],
             "reason": "outside_snapshot_scope"
-          },
-          "summary": "対象外"
+          }
         }
       ],
       "annotatorBFindings": [
         {
           "category": "not_verifiable_from_snapshot",
           "claimDomains": [
-            "outside_filing_narrative"
+            "outside_macro_market_news"
           ],
           "importance": "advisory",
+          "summary": "政策金利見通しは保存済み根拠の範囲外である。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
               "start": 20,
-              "end": 65,
-              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です。"
+              "end": 40,
+              "excerpt": "日銀は次回会合で政策金利を引き上げます。"
             }
           },
           "basis": {
             "kind": "manifest_absence",
             "scopeRefs": [
-              "outside_filing_narrative"
+              "outside_macro_market_news"
             ],
             "reason": "outside_snapshot_scope"
-          },
-          "summary": "The filing narrative is outside the supplied Snapshot."
+          }
         }
       ],
       "adjudicatedFindings": [
         {
           "claimDomains": [
-            "outside_filing_narrative"
+            "outside_macro_market_news"
           ],
           "summary": "この主張は保存済みSnapshotの対象外です。",
           "category": "not_verifiable_from_snapshot",
@@ -3776,14 +3776,14 @@
             "kind": "single_anchor",
             "anchor": {
               "start": 20,
-              "end": 64,
-              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です"
+              "end": 39,
+              "excerpt": "日銀は次回会合で政策金利を引き上げます"
             }
           },
           "basis": {
             "kind": "manifest_absence",
             "scopeRefs": [
-              "outside_filing_narrative"
+              "outside_macro_market_news"
             ],
             "reason": "outside_snapshot_scope"
           }
@@ -3799,6 +3799,7 @@
             "price_history_series"
           ],
           "importance": "advisory",
+          "summary": "保存済み価格系列はEvaluator入力から除外されており、主張を検証できません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -3813,8 +3814,7 @@
               "price_history_series"
             ],
             "reason": "persisted_evidence_not_sent"
-          },
-          "summary": "除外済み"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -3824,6 +3824,7 @@
             "price_history_series"
           ],
           "importance": "advisory",
+          "summary": "終値系列は保存されているが評価入力から除外されている。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -3838,8 +3839,7 @@
               "price_history_series"
             ],
             "reason": "persisted_evidence_not_sent"
-          },
-          "summary": "The persisted price-history series was deliberately excluded from the manifest."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -3877,6 +3877,7 @@
             "price_history_series"
           ],
           "importance": "advisory",
+          "summary": "保存済み価格系列はEvaluator入力から除外されており、主張を検証できません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -3891,8 +3892,7 @@
               "price_history_series"
             ],
             "reason": "persisted_evidence_not_sent"
-          },
-          "summary": "除外済み"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -3902,6 +3902,7 @@
             "price_history_series"
           ],
           "importance": "advisory",
+          "summary": "終値系列は保存されているが評価入力から除外されている。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -3916,8 +3917,7 @@
               "price_history_series"
             ],
             "reason": "persisted_evidence_not_sent"
-          },
-          "summary": "The persisted price-history series was deliberately excluded from the manifest."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -3955,6 +3955,7 @@
             "price_history_series"
           ],
           "importance": "advisory",
+          "summary": "保存済み価格系列はEvaluator入力から除外されており、主張を検証できません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -3969,8 +3970,7 @@
               "price_history_series"
             ],
             "reason": "persisted_evidence_not_sent"
-          },
-          "summary": "除外済み"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -3980,6 +3980,7 @@
             "price_history_series"
           ],
           "importance": "advisory",
+          "summary": "終値系列は保存されているが評価入力から除外されている。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -3994,8 +3995,7 @@
               "price_history_series"
             ],
             "reason": "persisted_evidence_not_sent"
-          },
-          "summary": "The persisted price-history series was deliberately excluded from the manifest."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -4033,6 +4033,7 @@
             "price_history_series"
           ],
           "importance": "advisory",
+          "summary": "保存済み価格系列はEvaluator入力から除外されており、主張を検証できません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -4047,8 +4048,7 @@
               "price_history_series"
             ],
             "reason": "persisted_evidence_not_sent"
-          },
-          "summary": "除外済み"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -4058,6 +4058,7 @@
             "price_history_series"
           ],
           "importance": "advisory",
+          "summary": "終値系列は保存されているが評価入力から除外されている。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -4072,8 +4073,7 @@
               "price_history_series"
             ],
             "reason": "persisted_evidence_not_sent"
-          },
-          "summary": "The persisted price-history series was deliberately excluded from the manifest."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -4111,6 +4111,7 @@
             "price_history_series"
           ],
           "importance": "advisory",
+          "summary": "保存済み価格系列はEvaluator入力から除外されており、主張を検証できません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -4125,8 +4126,7 @@
               "price_history_series"
             ],
             "reason": "persisted_evidence_not_sent"
-          },
-          "summary": "除外済み"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -4136,6 +4136,7 @@
             "price_history_series"
           ],
           "importance": "advisory",
+          "summary": "終値系列は保存されているが評価入力から除外されている。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -4150,8 +4151,7 @@
               "price_history_series"
             ],
             "reason": "persisted_evidence_not_sent"
-          },
-          "summary": "The persisted price-history series was deliberately excluded from the manifest."
+          }
         }
       ],
       "adjudicatedFindings": [
@@ -4189,6 +4189,7 @@
             "price_history_series"
           ],
           "importance": "advisory",
+          "summary": "保存済み価格系列はEvaluator入力から除外されており、主張を検証できません。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -4203,8 +4204,7 @@
               "price_history_series"
             ],
             "reason": "persisted_evidence_not_sent"
-          },
-          "summary": "除外済み"
+          }
         }
       ],
       "annotatorBFindings": [
@@ -4214,6 +4214,7 @@
             "price_history_series"
           ],
           "importance": "advisory",
+          "summary": "終値系列は保存されているが評価入力から除外されている。",
           "location": {
             "kind": "single_anchor",
             "anchor": {
@@ -4228,8 +4229,7 @@
               "price_history_series"
             ],
             "reason": "persisted_evidence_not_sent"
-          },
-          "summary": "The persisted price-history series was deliberately excluded from the manifest."
+          }
         }
       ],
       "adjudicatedFindings": [

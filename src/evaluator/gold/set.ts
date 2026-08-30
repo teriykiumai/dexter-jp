@@ -209,7 +209,7 @@ function manifestForCategory(
   ordinal: number,
 ): EvidenceManifestV1 {
   const selected = category === 'not_verifiable_from_snapshot'
-    ? { scopeId: 'outside_filing_narrative' as const, state: 'outside' as const }
+    ? { scopeId: 'outside_macro_market_news' as const, state: 'outside' as const }
     : category === 'not_verifiable_by_evaluator'
       ? { scopeId: 'price_history_series' as const, state: 'excluded' as const }
       : { scopeId: 'valuation' as const, state: 'complete' as const };
@@ -289,13 +289,13 @@ function findingForCategory(
       }
       return {
         category,
-        claimDomains: ['outside_filing_narrative'],
+        claimDomains: ['outside_macro_market_news'],
         summary: 'この主張は保存済みSnapshotの対象外です。',
         importance: 'advisory',
         location,
         basis: {
           kind: 'manifest_absence',
-          scopeRefs: ['outside_filing_narrative'],
+          scopeRefs: ['outside_macro_market_news'],
           reason: 'outside_snapshot_scope',
         },
       };
@@ -377,21 +377,21 @@ function reportFor(
     : category === 'not_verifiable_from_snapshot'
       ? options.nonAvailableFact
         ? '保存済みSnapshotのRSI14は70です'
-        : '保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です'
+        : '日銀は次回会合で政策金利を引き上げます'
       : category === 'not_verifiable_by_evaluator'
         ? '保存済みの過去60営業日終値は一貫して上昇しています'
         : category === 'unclear_reasoning'
           ? '保存済みPERは10倍ですが、根拠と結論の因果説明を示さず株価は必ず上昇すると断定します'
           : category === 'missing_caveat'
-            ? '保存済みPERは10倍ですが、単一時点の指標という留保を示さず無条件に割安と断定します'
+            ? '利用可能な保存済み根拠であるPER10倍を引用しますが、単一時点の指標という留保を示さず無条件に割安と断定します'
             : options.outsideInternal
-              ? '市場環境の評価は同じ前提で上昇します'
+              ? '日銀の政策金利見通しは同じ前提で上昇します'
               : 'PERは同じ前提で上昇します';
   const contradictionExcerpts: readonly [string, string] | null = category === 'internal_inconsistency'
     ? [
         primaryExcerpt,
         options.outsideInternal
-          ? '市場環境の評価は同じ前提で低下します'
+          ? '日銀の政策金利見通しは同じ前提で低下します'
           : 'PERは同じ前提で低下します',
       ]
     : null;
@@ -536,7 +536,7 @@ export const GOLD_SET_CANDIDATE_V1_DIGEST = sha256CanonicalJsonV1({
 } as CanonicalJsonValue);
 
 export const REVIEWED_GOLD_SET_CANDIDATE_V1_DIGEST =
-  'sha256:ab1977b75aeed4c6cb1748b70bffc44e241711c231241413389731393bb0c8cf' as const;
+  'sha256:181f2934340c861e1a5ca6129310977a38a7e9f78d2392c371d686d27352a5d6' as const;
 
 if (GOLD_SET_CANDIDATE_V1_DIGEST !== REVIEWED_GOLD_SET_CANDIDATE_V1_DIGEST) {
   throw new Error('Gold-set candidate changed without updating its reviewed digest.');

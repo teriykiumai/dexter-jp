@@ -3,6 +3,7 @@ import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { comparisonSnapshot } from '../analysis/comparison/test-fixtures.js';
+import { buildEvidenceManifestV1 } from '../analysis/evaluation/manifest.js';
 import { EvaluationRepository } from '../analysis/evaluation/repository.js';
 import { AnalysisSnapshotRepository } from '../analysis/snapshot/repository.js';
 import {
@@ -124,6 +125,47 @@ describe('Evaluator runtime controller', () => {
       state.saved.snapshotId,
       result.evaluationId,
     )).toEqual(result.sidecar);
+  });
+
+  test('resolves a unique exact provider excerpt before strict anchor validation', async () => {
+    const state = await repositories();
+    const manifest = buildEvidenceManifestV1(state.snapshot);
+    const item = manifest.items.find(value => value.definitionKey === 'valuation.currentPrice');
+    if (item === undefined) throw new Error('expected current-price evidence');
+    const excerpt = state.snapshot.finalReportMarkdown.slice(0, 20);
+    expect(state.snapshot.finalReportMarkdown.indexOf(excerpt, 1)).toBe(-1);
+    const times = [Date.parse('2026-08-30T01:00:00.000Z'), Date.parse('2026-08-30T01:00:01.000Z')];
+    const result = await evaluatePersistedSnapshotV1({
+      ticker: state.saved.canonicalTicker,
+      snapshotId: state.saved.snapshotId,
+      selectedModel: 'gpt-5.6-terra',
+    }, {
+      ...runtimeDependencies(),
+      snapshotRepository: state.snapshotRepository,
+      evaluationRepository: state.evaluationRepository,
+      invokeProvider: async () => ({
+        findings: [{
+          category: 'unclear_reasoning',
+          claimDomains: ['valuation_metrics'],
+          summary: '利用可能な根拠から結論への説明が不足しています。',
+          importance: 'material',
+          location: { kind: 'single_anchor', anchor: { start: 1, end: 2, excerpt } },
+          basis: {
+            kind: 'available_fact_refs',
+            refs: [{ itemId: item.itemId, factKey: 'value' }],
+          },
+        }],
+        tokenUsage: { inputTokens: 100, outputTokens: 20, totalTokens: 120 },
+        attemptCount: 1,
+      }),
+      now: () => times.shift()!,
+    });
+    expect(result.sidecar.result).toMatchObject({
+      state: 'available',
+      findings: [{
+        location: { kind: 'single_anchor', anchor: { start: 0, end: excerpt.length, excerpt } },
+      }],
+    });
   });
 
   test('default-No confirmation creates no sidecar and makes no provider call', async () => {
