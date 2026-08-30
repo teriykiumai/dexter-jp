@@ -1,0 +1,4334 @@
+{
+  "version": 1,
+  "candidateDigest": "sha256:ab1977b75aeed4c6cb1748b70bffc44e241711c231241413389731393bb0c8cf",
+  "annotationMethod": "two_independent_then_adjudicated",
+  "annotatorAId": "annotator-g",
+  "annotatorBId": "annotator-h",
+  "adjudicatorId": "codex-gpt-5.6-sol",
+  "completedAt": "2026-08-30T09:13:48.948Z",
+  "cases": [
+    {
+      "caseId": "gold_v1_dev_01",
+      "annotatorAFindings": [
+        {
+          "category": "unsupported_claim",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 16,
+              "end": 29,
+              "excerpt": "保存済みPERは8倍です。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "valuation"
+            ],
+            "reason": "no_matching_allowlisted_evidence"
+          },
+          "summary": "根拠なし"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "unsupported_claim",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 16,
+              "end": 29,
+              "excerpt": "保存済みPERは8倍です。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "valuation"
+            ],
+            "reason": "no_matching_allowlisted_evidence"
+          },
+          "summary": "No matching PER evidence is present in the complete valuation domain."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "summary": "保存済み根拠に対応しない評価指標の主張です。",
+          "category": "unsupported_claim",
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 16,
+              "end": 28,
+              "excerpt": "保存済みPERは8倍です"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "valuation"
+            ],
+            "reason": "no_matching_allowlisted_evidence"
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_dev_02",
+      "annotatorAFindings": [
+        {
+          "category": "not_verifiable_from_snapshot",
+          "claimDomains": [
+            "advanced_technical_metrics"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 16,
+              "end": 40,
+              "excerpt": "保存済みSnapshotのRSI14は70です。"
+            }
+          },
+          "basis": {
+            "kind": "non_available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_959afa06443f820ac94653e4",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "利用不可"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "not_verifiable_from_snapshot",
+          "claimDomains": [
+            "advanced_technical_metrics"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 16,
+              "end": 40,
+              "excerpt": "保存済みSnapshotのRSI14は70です。"
+            }
+          },
+          "basis": {
+            "kind": "non_available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_959afa06443f820ac94653e4",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "RSI14 is unavailable in the supplied Snapshot evidence."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "advanced_technical_metrics"
+          ],
+          "summary": "保存済みSnapshotの利用不能な観測に依存する主張です。",
+          "category": "not_verifiable_from_snapshot",
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 16,
+              "end": 39,
+              "excerpt": "保存済みSnapshotのRSI14は70です"
+            }
+          },
+          "basis": {
+            "kind": "non_available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_959afa06443f820ac94653e4",
+                "factKey": "value"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_dev_03",
+      "annotatorAFindings": [
+        {
+          "category": "not_verifiable_by_evaluator",
+          "claimDomains": [
+            "price_history_series"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 16,
+              "end": 43,
+              "excerpt": "保存済みの過去60営業日終値は一貫して上昇しています。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "price_history_series"
+            ],
+            "reason": "persisted_evidence_not_sent"
+          },
+          "summary": "除外済み"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "not_verifiable_by_evaluator",
+          "claimDomains": [
+            "price_history_series"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 16,
+              "end": 43,
+              "excerpt": "保存済みの過去60営業日終値は一貫して上昇しています。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "price_history_series"
+            ],
+            "reason": "persisted_evidence_not_sent"
+          },
+          "summary": "The persisted price-history series was deliberately excluded from the manifest."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "price_history_series"
+          ],
+          "summary": "保存済みですがEvaluatorへ送られない系列に依存します。",
+          "category": "not_verifiable_by_evaluator",
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 16,
+              "end": 42,
+              "excerpt": "保存済みの過去60営業日終値は一貫して上昇しています"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "price_history_series"
+            ],
+            "reason": "persisted_evidence_not_sent"
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_dev_04",
+      "annotatorAFindings": [
+        {
+          "category": "internal_inconsistency",
+          "claimDomains": [
+            "outside_macro_market_news"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "report_anchor_set",
+            "anchors": [
+              {
+                "start": 16,
+                "end": 35,
+                "excerpt": "市場環境の評価は同じ前提で上昇します。"
+              },
+              {
+                "start": 38,
+                "end": 57,
+                "excerpt": "市場環境の評価は同じ前提で低下します。"
+              }
+            ]
+          },
+          "basis": {
+            "kind": "report_contradiction"
+          },
+          "summary": "矛盾"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "internal_inconsistency",
+          "claimDomains": [
+            "outside_macro_market_news"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "report_anchor_set",
+            "anchors": [
+              {
+                "start": 16,
+                "end": 35,
+                "excerpt": "市場環境の評価は同じ前提で上昇します。"
+              },
+              {
+                "start": 38,
+                "end": 57,
+                "excerpt": "市場環境の評価は同じ前提で低下します。"
+              }
+            ]
+          },
+          "basis": {
+            "kind": "report_contradiction"
+          },
+          "summary": "The two statements assert opposite directions under the same premise."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "outside_macro_market_news"
+          ],
+          "summary": "同じ論点について相反する説明があります。",
+          "category": "internal_inconsistency",
+          "importance": "material",
+          "location": {
+            "kind": "report_anchor_set",
+            "anchors": [
+              {
+                "start": 16,
+                "end": 34,
+                "excerpt": "市場環境の評価は同じ前提で上昇します"
+              },
+              {
+                "start": 38,
+                "end": 56,
+                "excerpt": "市場環境の評価は同じ前提で低下します"
+              }
+            ]
+          },
+          "basis": {
+            "kind": "report_contradiction"
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_dev_05",
+      "annotatorAFindings": [
+        {
+          "category": "unclear_reasoning",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 45,
+              "end": 61,
+              "excerpt": "株価は必ず上昇すると断定します。"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "因果不明"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "unclear_reasoning",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 45,
+              "end": 61,
+              "excerpt": "株価は必ず上昇すると断定します。"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "The report does not provide a valid inference from PER to the unconditional price conclusion."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "summary": "保存済みPERから結論へ至る推論が明示されていません。",
+          "category": "unclear_reasoning",
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 16,
+              "end": 60,
+              "excerpt": "保存済みPERは10倍ですが、根拠と結論の因果説明を示さず株価は必ず上昇すると断定します"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_dev_06",
+      "annotatorAFindings": [
+        {
+          "category": "missing_caveat",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 47,
+              "end": 60,
+              "excerpt": "無条件に割安と断定します。"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "留保欠落"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "missing_caveat",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 47,
+              "end": 60,
+              "excerpt": "無条件に割安と断定します。"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "The report omits the material limitation that this is a single persisted valuation metric."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "summary": "単一時点のPERであるという留保がありません。",
+          "category": "missing_caveat",
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 16,
+              "end": 59,
+              "excerpt": "保存済みPERは10倍ですが、単一時点の指標という留保を示さず無条件に割安と断定します"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_dev_07",
+      "annotatorAFindings": [
+        {
+          "category": "unsupported_claim",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 16,
+              "end": 29,
+              "excerpt": "保存済みPERは8倍です。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "valuation"
+            ],
+            "reason": "no_matching_allowlisted_evidence"
+          },
+          "summary": "根拠なし"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "unsupported_claim",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 16,
+              "end": 29,
+              "excerpt": "保存済みPERは8倍です。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "valuation"
+            ],
+            "reason": "no_matching_allowlisted_evidence"
+          },
+          "summary": "No matching PER evidence is present in the complete valuation domain."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "summary": "保存済み根拠に対応しない評価指標の主張です。",
+          "category": "unsupported_claim",
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 16,
+              "end": 28,
+              "excerpt": "保存済みPERは8倍です"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "valuation"
+            ],
+            "reason": "no_matching_allowlisted_evidence"
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_dev_08",
+      "annotatorAFindings": [
+        {
+          "category": "not_verifiable_from_snapshot",
+          "claimDomains": [
+            "outside_filing_narrative"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 16,
+              "end": 61,
+              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "outside_filing_narrative"
+            ],
+            "reason": "outside_snapshot_scope"
+          },
+          "summary": "対象外"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "not_verifiable_from_snapshot",
+          "claimDomains": [
+            "outside_filing_narrative"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 16,
+              "end": 61,
+              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "outside_filing_narrative"
+            ],
+            "reason": "outside_snapshot_scope"
+          },
+          "summary": "The filing narrative is outside the supplied Snapshot."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "outside_filing_narrative"
+          ],
+          "summary": "この主張は保存済みSnapshotの対象外です。",
+          "category": "not_verifiable_from_snapshot",
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 16,
+              "end": 60,
+              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "outside_filing_narrative"
+            ],
+            "reason": "outside_snapshot_scope"
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_dev_09",
+      "annotatorAFindings": [
+        {
+          "category": "not_verifiable_by_evaluator",
+          "claimDomains": [
+            "price_history_series"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 16,
+              "end": 43,
+              "excerpt": "保存済みの過去60営業日終値は一貫して上昇しています。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "price_history_series"
+            ],
+            "reason": "persisted_evidence_not_sent"
+          },
+          "summary": "除外済み"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "not_verifiable_by_evaluator",
+          "claimDomains": [
+            "price_history_series"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 16,
+              "end": 43,
+              "excerpt": "保存済みの過去60営業日終値は一貫して上昇しています。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "price_history_series"
+            ],
+            "reason": "persisted_evidence_not_sent"
+          },
+          "summary": "The persisted price-history series was deliberately excluded from the manifest."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "price_history_series"
+          ],
+          "summary": "保存済みですがEvaluatorへ送られない系列に依存します。",
+          "category": "not_verifiable_by_evaluator",
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 16,
+              "end": 42,
+              "excerpt": "保存済みの過去60営業日終値は一貫して上昇しています"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "price_history_series"
+            ],
+            "reason": "persisted_evidence_not_sent"
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_dev_10",
+      "annotatorAFindings": [
+        {
+          "category": "internal_inconsistency",
+          "claimDomains": [
+            "outside_macro_market_news"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "report_anchor_set",
+            "anchors": [
+              {
+                "start": 16,
+                "end": 35,
+                "excerpt": "市場環境の評価は同じ前提で上昇します。"
+              },
+              {
+                "start": 38,
+                "end": 57,
+                "excerpt": "市場環境の評価は同じ前提で低下します。"
+              }
+            ]
+          },
+          "basis": {
+            "kind": "report_contradiction"
+          },
+          "summary": "矛盾"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "internal_inconsistency",
+          "claimDomains": [
+            "outside_macro_market_news"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "report_anchor_set",
+            "anchors": [
+              {
+                "start": 16,
+                "end": 35,
+                "excerpt": "市場環境の評価は同じ前提で上昇します。"
+              },
+              {
+                "start": 38,
+                "end": 57,
+                "excerpt": "市場環境の評価は同じ前提で低下します。"
+              }
+            ]
+          },
+          "basis": {
+            "kind": "report_contradiction"
+          },
+          "summary": "The two statements assert opposite directions under the same premise."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "outside_macro_market_news"
+          ],
+          "summary": "同じ論点について相反する説明があります。",
+          "category": "internal_inconsistency",
+          "importance": "material",
+          "location": {
+            "kind": "report_anchor_set",
+            "anchors": [
+              {
+                "start": 16,
+                "end": 34,
+                "excerpt": "市場環境の評価は同じ前提で上昇します"
+              },
+              {
+                "start": 38,
+                "end": 56,
+                "excerpt": "市場環境の評価は同じ前提で低下します"
+              }
+            ]
+          },
+          "basis": {
+            "kind": "report_contradiction"
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_dev_11",
+      "annotatorAFindings": [
+        {
+          "category": "unclear_reasoning",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 45,
+              "end": 61,
+              "excerpt": "株価は必ず上昇すると断定します。"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "因果不明"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "unclear_reasoning",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 45,
+              "end": 61,
+              "excerpt": "株価は必ず上昇すると断定します。"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "The report does not provide a valid inference from PER to the unconditional price conclusion."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "summary": "保存済みPERから結論へ至る推論が明示されていません。",
+          "category": "unclear_reasoning",
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 16,
+              "end": 60,
+              "excerpt": "保存済みPERは10倍ですが、根拠と結論の因果説明を示さず株価は必ず上昇すると断定します"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_dev_12",
+      "annotatorAFindings": [
+        {
+          "category": "missing_caveat",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 47,
+              "end": 60,
+              "excerpt": "無条件に割安と断定します。"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "留保欠落"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "missing_caveat",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 47,
+              "end": 60,
+              "excerpt": "無条件に割安と断定します。"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "The report omits the material limitation that this is a single persisted valuation metric."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "summary": "単一時点のPERであるという留保がありません。",
+          "category": "missing_caveat",
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 16,
+              "end": 59,
+              "excerpt": "保存済みPERは10倍ですが、単一時点の指標という留保を示さず無条件に割安と断定します"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_dev_13",
+      "annotatorAFindings": [
+        {
+          "category": "unsupported_claim",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 16,
+              "end": 29,
+              "excerpt": "保存済みPERは8倍です。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "valuation"
+            ],
+            "reason": "no_matching_allowlisted_evidence"
+          },
+          "summary": "根拠なし"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "unsupported_claim",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 16,
+              "end": 29,
+              "excerpt": "保存済みPERは8倍です。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "valuation"
+            ],
+            "reason": "no_matching_allowlisted_evidence"
+          },
+          "summary": "No matching PER evidence is present in the complete valuation domain."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "summary": "保存済み根拠に対応しない評価指標の主張です。",
+          "category": "unsupported_claim",
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 16,
+              "end": 28,
+              "excerpt": "保存済みPERは8倍です"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "valuation"
+            ],
+            "reason": "no_matching_allowlisted_evidence"
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_dev_14",
+      "annotatorAFindings": [
+        {
+          "category": "not_verifiable_from_snapshot",
+          "claimDomains": [
+            "outside_filing_narrative"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 16,
+              "end": 61,
+              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "outside_filing_narrative"
+            ],
+            "reason": "outside_snapshot_scope"
+          },
+          "summary": "対象外"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "not_verifiable_from_snapshot",
+          "claimDomains": [
+            "outside_filing_narrative"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 16,
+              "end": 61,
+              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "outside_filing_narrative"
+            ],
+            "reason": "outside_snapshot_scope"
+          },
+          "summary": "The filing narrative is outside the supplied Snapshot."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "outside_filing_narrative"
+          ],
+          "summary": "この主張は保存済みSnapshotの対象外です。",
+          "category": "not_verifiable_from_snapshot",
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 16,
+              "end": 60,
+              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "outside_filing_narrative"
+            ],
+            "reason": "outside_snapshot_scope"
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_dev_15",
+      "annotatorAFindings": [
+        {
+          "category": "not_verifiable_by_evaluator",
+          "claimDomains": [
+            "price_history_series"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 16,
+              "end": 43,
+              "excerpt": "保存済みの過去60営業日終値は一貫して上昇しています。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "price_history_series"
+            ],
+            "reason": "persisted_evidence_not_sent"
+          },
+          "summary": "除外済み"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "not_verifiable_by_evaluator",
+          "claimDomains": [
+            "price_history_series"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 16,
+              "end": 43,
+              "excerpt": "保存済みの過去60営業日終値は一貫して上昇しています。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "price_history_series"
+            ],
+            "reason": "persisted_evidence_not_sent"
+          },
+          "summary": "The persisted price-history series was deliberately excluded from the manifest."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "price_history_series"
+          ],
+          "summary": "保存済みですがEvaluatorへ送られない系列に依存します。",
+          "category": "not_verifiable_by_evaluator",
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 16,
+              "end": 42,
+              "excerpt": "保存済みの過去60営業日終値は一貫して上昇しています"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "price_history_series"
+            ],
+            "reason": "persisted_evidence_not_sent"
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_dev_16",
+      "annotatorAFindings": [
+        {
+          "category": "internal_inconsistency",
+          "claimDomains": [
+            "outside_macro_market_news"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "report_anchor_set",
+            "anchors": [
+              {
+                "start": 16,
+                "end": 35,
+                "excerpt": "市場環境の評価は同じ前提で上昇します。"
+              },
+              {
+                "start": 38,
+                "end": 57,
+                "excerpt": "市場環境の評価は同じ前提で低下します。"
+              }
+            ]
+          },
+          "basis": {
+            "kind": "report_contradiction"
+          },
+          "summary": "矛盾"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "internal_inconsistency",
+          "claimDomains": [
+            "outside_macro_market_news"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "report_anchor_set",
+            "anchors": [
+              {
+                "start": 16,
+                "end": 35,
+                "excerpt": "市場環境の評価は同じ前提で上昇します。"
+              },
+              {
+                "start": 38,
+                "end": 57,
+                "excerpt": "市場環境の評価は同じ前提で低下します。"
+              }
+            ]
+          },
+          "basis": {
+            "kind": "report_contradiction"
+          },
+          "summary": "The two statements assert opposite directions under the same premise."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "outside_macro_market_news"
+          ],
+          "summary": "同じ論点について相反する説明があります。",
+          "category": "internal_inconsistency",
+          "importance": "material",
+          "location": {
+            "kind": "report_anchor_set",
+            "anchors": [
+              {
+                "start": 16,
+                "end": 34,
+                "excerpt": "市場環境の評価は同じ前提で上昇します"
+              },
+              {
+                "start": 38,
+                "end": 56,
+                "excerpt": "市場環境の評価は同じ前提で低下します"
+              }
+            ]
+          },
+          "basis": {
+            "kind": "report_contradiction"
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_01",
+      "annotatorAFindings": [
+        {
+          "category": "unsupported_claim",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 33,
+              "excerpt": "保存済みPERは8倍です。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "valuation"
+            ],
+            "reason": "no_matching_allowlisted_evidence"
+          },
+          "summary": "根拠なし"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "unsupported_claim",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 33,
+              "excerpt": "保存済みPERは8倍です。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "valuation"
+            ],
+            "reason": "no_matching_allowlisted_evidence"
+          },
+          "summary": "No matching PER evidence is present in the complete valuation domain."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "summary": "保存済み根拠に対応しない評価指標の主張です。",
+          "category": "unsupported_claim",
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 32,
+              "excerpt": "保存済みPERは8倍です"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "valuation"
+            ],
+            "reason": "no_matching_allowlisted_evidence"
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_02",
+      "annotatorAFindings": [
+        {
+          "category": "internal_inconsistency",
+          "claimDomains": [
+            "outside_macro_market_news"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "report_anchor_set",
+            "anchors": [
+              {
+                "start": 20,
+                "end": 39,
+                "excerpt": "市場環境の評価は同じ前提で上昇します。"
+              },
+              {
+                "start": 42,
+                "end": 61,
+                "excerpt": "市場環境の評価は同じ前提で低下します。"
+              }
+            ]
+          },
+          "basis": {
+            "kind": "report_contradiction"
+          },
+          "summary": "矛盾"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "internal_inconsistency",
+          "claimDomains": [
+            "outside_macro_market_news"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "report_anchor_set",
+            "anchors": [
+              {
+                "start": 20,
+                "end": 39,
+                "excerpt": "市場環境の評価は同じ前提で上昇します。"
+              },
+              {
+                "start": 42,
+                "end": 61,
+                "excerpt": "市場環境の評価は同じ前提で低下します。"
+              }
+            ]
+          },
+          "basis": {
+            "kind": "report_contradiction"
+          },
+          "summary": "The two statements assert opposite directions under the same premise."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "outside_macro_market_news"
+          ],
+          "summary": "同じ論点について相反する説明があります。",
+          "category": "internal_inconsistency",
+          "importance": "material",
+          "location": {
+            "kind": "report_anchor_set",
+            "anchors": [
+              {
+                "start": 20,
+                "end": 38,
+                "excerpt": "市場環境の評価は同じ前提で上昇します"
+              },
+              {
+                "start": 42,
+                "end": 60,
+                "excerpt": "市場環境の評価は同じ前提で低下します"
+              }
+            ]
+          },
+          "basis": {
+            "kind": "report_contradiction"
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_03",
+      "annotatorAFindings": [
+        {
+          "category": "missing_caveat",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 51,
+              "end": 64,
+              "excerpt": "無条件に割安と断定します。"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "留保欠落"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "missing_caveat",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 51,
+              "end": 64,
+              "excerpt": "無条件に割安と断定します。"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "The report omits the material limitation that this is a single persisted valuation metric."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "summary": "単一時点のPERであるという留保がありません。",
+          "category": "missing_caveat",
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 63,
+              "excerpt": "保存済みPERは10倍ですが、単一時点の指標という留保を示さず無条件に割安と断定します"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_04",
+      "annotatorAFindings": [
+        {
+          "category": "unclear_reasoning",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 49,
+              "end": 65,
+              "excerpt": "株価は必ず上昇すると断定します。"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "因果不明"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "unclear_reasoning",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 49,
+              "end": 65,
+              "excerpt": "株価は必ず上昇すると断定します。"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "The report does not provide a valid inference from PER to the unconditional price conclusion."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "summary": "保存済みPERから結論へ至る推論が明示されていません。",
+          "category": "unclear_reasoning",
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 64,
+              "excerpt": "保存済みPERは10倍ですが、根拠と結論の因果説明を示さず株価は必ず上昇すると断定します"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_05",
+      "annotatorAFindings": [
+        {
+          "category": "unsupported_claim",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 33,
+              "excerpt": "保存済みPERは8倍です。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "valuation"
+            ],
+            "reason": "no_matching_allowlisted_evidence"
+          },
+          "summary": "根拠なし"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "unsupported_claim",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 33,
+              "excerpt": "保存済みPERは8倍です。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "valuation"
+            ],
+            "reason": "no_matching_allowlisted_evidence"
+          },
+          "summary": "No matching PER evidence is present in the complete valuation domain."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "summary": "保存済み根拠に対応しない評価指標の主張です。",
+          "category": "unsupported_claim",
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 32,
+              "excerpt": "保存済みPERは8倍です"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "valuation"
+            ],
+            "reason": "no_matching_allowlisted_evidence"
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_06",
+      "annotatorAFindings": [
+        {
+          "category": "internal_inconsistency",
+          "claimDomains": [
+            "outside_macro_market_news"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "report_anchor_set",
+            "anchors": [
+              {
+                "start": 20,
+                "end": 39,
+                "excerpt": "市場環境の評価は同じ前提で上昇します。"
+              },
+              {
+                "start": 42,
+                "end": 61,
+                "excerpt": "市場環境の評価は同じ前提で低下します。"
+              }
+            ]
+          },
+          "basis": {
+            "kind": "report_contradiction"
+          },
+          "summary": "矛盾"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "internal_inconsistency",
+          "claimDomains": [
+            "outside_macro_market_news"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "report_anchor_set",
+            "anchors": [
+              {
+                "start": 20,
+                "end": 39,
+                "excerpt": "市場環境の評価は同じ前提で上昇します。"
+              },
+              {
+                "start": 42,
+                "end": 61,
+                "excerpt": "市場環境の評価は同じ前提で低下します。"
+              }
+            ]
+          },
+          "basis": {
+            "kind": "report_contradiction"
+          },
+          "summary": "The two statements assert opposite directions under the same premise."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "outside_macro_market_news"
+          ],
+          "summary": "同じ論点について相反する説明があります。",
+          "category": "internal_inconsistency",
+          "importance": "material",
+          "location": {
+            "kind": "report_anchor_set",
+            "anchors": [
+              {
+                "start": 20,
+                "end": 38,
+                "excerpt": "市場環境の評価は同じ前提で上昇します"
+              },
+              {
+                "start": 42,
+                "end": 60,
+                "excerpt": "市場環境の評価は同じ前提で低下します"
+              }
+            ]
+          },
+          "basis": {
+            "kind": "report_contradiction"
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_07",
+      "annotatorAFindings": [
+        {
+          "category": "missing_caveat",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 51,
+              "end": 64,
+              "excerpt": "無条件に割安と断定します。"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "留保欠落"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "missing_caveat",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 51,
+              "end": 64,
+              "excerpt": "無条件に割安と断定します。"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "The report omits the material limitation that this is a single persisted valuation metric."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "summary": "単一時点のPERであるという留保がありません。",
+          "category": "missing_caveat",
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 63,
+              "excerpt": "保存済みPERは10倍ですが、単一時点の指標という留保を示さず無条件に割安と断定します"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_08",
+      "annotatorAFindings": [
+        {
+          "category": "unclear_reasoning",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 49,
+              "end": 65,
+              "excerpt": "株価は必ず上昇すると断定します。"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "因果不明"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "unclear_reasoning",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 49,
+              "end": 65,
+              "excerpt": "株価は必ず上昇すると断定します。"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "The report does not provide a valid inference from PER to the unconditional price conclusion."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "summary": "保存済みPERから結論へ至る推論が明示されていません。",
+          "category": "unclear_reasoning",
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 64,
+              "excerpt": "保存済みPERは10倍ですが、根拠と結論の因果説明を示さず株価は必ず上昇すると断定します"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_09",
+      "annotatorAFindings": [
+        {
+          "category": "unsupported_claim",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 33,
+              "excerpt": "保存済みPERは8倍です。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "valuation"
+            ],
+            "reason": "no_matching_allowlisted_evidence"
+          },
+          "summary": "根拠なし"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "unsupported_claim",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 33,
+              "excerpt": "保存済みPERは8倍です。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "valuation"
+            ],
+            "reason": "no_matching_allowlisted_evidence"
+          },
+          "summary": "No matching PER evidence is present in the complete valuation domain."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "summary": "保存済み根拠に対応しない評価指標の主張です。",
+          "category": "unsupported_claim",
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 32,
+              "excerpt": "保存済みPERは8倍です"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "valuation"
+            ],
+            "reason": "no_matching_allowlisted_evidence"
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_10",
+      "annotatorAFindings": [
+        {
+          "category": "internal_inconsistency",
+          "claimDomains": [
+            "outside_macro_market_news"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "report_anchor_set",
+            "anchors": [
+              {
+                "start": 20,
+                "end": 39,
+                "excerpt": "市場環境の評価は同じ前提で上昇します。"
+              },
+              {
+                "start": 42,
+                "end": 61,
+                "excerpt": "市場環境の評価は同じ前提で低下します。"
+              }
+            ]
+          },
+          "basis": {
+            "kind": "report_contradiction"
+          },
+          "summary": "矛盾"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "internal_inconsistency",
+          "claimDomains": [
+            "outside_macro_market_news"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "report_anchor_set",
+            "anchors": [
+              {
+                "start": 20,
+                "end": 39,
+                "excerpt": "市場環境の評価は同じ前提で上昇します。"
+              },
+              {
+                "start": 42,
+                "end": 61,
+                "excerpt": "市場環境の評価は同じ前提で低下します。"
+              }
+            ]
+          },
+          "basis": {
+            "kind": "report_contradiction"
+          },
+          "summary": "The two statements assert opposite directions under the same premise."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "outside_macro_market_news"
+          ],
+          "summary": "同じ論点について相反する説明があります。",
+          "category": "internal_inconsistency",
+          "importance": "material",
+          "location": {
+            "kind": "report_anchor_set",
+            "anchors": [
+              {
+                "start": 20,
+                "end": 38,
+                "excerpt": "市場環境の評価は同じ前提で上昇します"
+              },
+              {
+                "start": 42,
+                "end": 60,
+                "excerpt": "市場環境の評価は同じ前提で低下します"
+              }
+            ]
+          },
+          "basis": {
+            "kind": "report_contradiction"
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_11",
+      "annotatorAFindings": [
+        {
+          "category": "missing_caveat",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 51,
+              "end": 64,
+              "excerpt": "無条件に割安と断定します。"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "留保欠落"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "missing_caveat",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 51,
+              "end": 64,
+              "excerpt": "無条件に割安と断定します。"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "The report omits the material limitation that this is a single persisted valuation metric."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "summary": "単一時点のPERであるという留保がありません。",
+          "category": "missing_caveat",
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 63,
+              "excerpt": "保存済みPERは10倍ですが、単一時点の指標という留保を示さず無条件に割安と断定します"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_12",
+      "annotatorAFindings": [
+        {
+          "category": "unclear_reasoning",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 49,
+              "end": 65,
+              "excerpt": "株価は必ず上昇すると断定します。"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "因果不明"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "unclear_reasoning",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 49,
+              "end": 65,
+              "excerpt": "株価は必ず上昇すると断定します。"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "The report does not provide a valid inference from PER to the unconditional price conclusion."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "summary": "保存済みPERから結論へ至る推論が明示されていません。",
+          "category": "unclear_reasoning",
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 64,
+              "excerpt": "保存済みPERは10倍ですが、根拠と結論の因果説明を示さず株価は必ず上昇すると断定します"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_13",
+      "annotatorAFindings": [
+        {
+          "category": "unsupported_claim",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 33,
+              "excerpt": "保存済みPERは8倍です。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "valuation"
+            ],
+            "reason": "no_matching_allowlisted_evidence"
+          },
+          "summary": "根拠なし"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "unsupported_claim",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 33,
+              "excerpt": "保存済みPERは8倍です。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "valuation"
+            ],
+            "reason": "no_matching_allowlisted_evidence"
+          },
+          "summary": "No matching PER evidence is present in the complete valuation domain."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "summary": "保存済み根拠に対応しない評価指標の主張です。",
+          "category": "unsupported_claim",
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 32,
+              "excerpt": "保存済みPERは8倍です"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "valuation"
+            ],
+            "reason": "no_matching_allowlisted_evidence"
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_14",
+      "annotatorAFindings": [
+        {
+          "category": "internal_inconsistency",
+          "claimDomains": [
+            "outside_macro_market_news"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "report_anchor_set",
+            "anchors": [
+              {
+                "start": 20,
+                "end": 39,
+                "excerpt": "市場環境の評価は同じ前提で上昇します。"
+              },
+              {
+                "start": 42,
+                "end": 61,
+                "excerpt": "市場環境の評価は同じ前提で低下します。"
+              }
+            ]
+          },
+          "basis": {
+            "kind": "report_contradiction"
+          },
+          "summary": "矛盾"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "internal_inconsistency",
+          "claimDomains": [
+            "outside_macro_market_news"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "report_anchor_set",
+            "anchors": [
+              {
+                "start": 20,
+                "end": 39,
+                "excerpt": "市場環境の評価は同じ前提で上昇します。"
+              },
+              {
+                "start": 42,
+                "end": 61,
+                "excerpt": "市場環境の評価は同じ前提で低下します。"
+              }
+            ]
+          },
+          "basis": {
+            "kind": "report_contradiction"
+          },
+          "summary": "The two statements assert opposite directions under the same premise."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "outside_macro_market_news"
+          ],
+          "summary": "同じ論点について相反する説明があります。",
+          "category": "internal_inconsistency",
+          "importance": "material",
+          "location": {
+            "kind": "report_anchor_set",
+            "anchors": [
+              {
+                "start": 20,
+                "end": 38,
+                "excerpt": "市場環境の評価は同じ前提で上昇します"
+              },
+              {
+                "start": 42,
+                "end": 60,
+                "excerpt": "市場環境の評価は同じ前提で低下します"
+              }
+            ]
+          },
+          "basis": {
+            "kind": "report_contradiction"
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_15",
+      "annotatorAFindings": [
+        {
+          "category": "missing_caveat",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 51,
+              "end": 64,
+              "excerpt": "無条件に割安と断定します。"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "留保欠落"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "missing_caveat",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 51,
+              "end": 64,
+              "excerpt": "無条件に割安と断定します。"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "The report omits the material limitation that this is a single persisted valuation metric."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "summary": "単一時点のPERであるという留保がありません。",
+          "category": "missing_caveat",
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 63,
+              "excerpt": "保存済みPERは10倍ですが、単一時点の指標という留保を示さず無条件に割安と断定します"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_16",
+      "annotatorAFindings": [
+        {
+          "category": "unclear_reasoning",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 49,
+              "end": 65,
+              "excerpt": "株価は必ず上昇すると断定します。"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "因果不明"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "unclear_reasoning",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 49,
+              "end": 65,
+              "excerpt": "株価は必ず上昇すると断定します。"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "The report does not provide a valid inference from PER to the unconditional price conclusion."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "summary": "保存済みPERから結論へ至る推論が明示されていません。",
+          "category": "unclear_reasoning",
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 64,
+              "excerpt": "保存済みPERは10倍ですが、根拠と結論の因果説明を示さず株価は必ず上昇すると断定します"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_17",
+      "annotatorAFindings": [
+        {
+          "category": "unsupported_claim",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 33,
+              "excerpt": "保存済みPERは8倍です。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "valuation"
+            ],
+            "reason": "no_matching_allowlisted_evidence"
+          },
+          "summary": "根拠なし"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "unsupported_claim",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 33,
+              "excerpt": "保存済みPERは8倍です。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "valuation"
+            ],
+            "reason": "no_matching_allowlisted_evidence"
+          },
+          "summary": "No matching PER evidence is present in the complete valuation domain."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "summary": "保存済み根拠に対応しない評価指標の主張です。",
+          "category": "unsupported_claim",
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 32,
+              "excerpt": "保存済みPERは8倍です"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "valuation"
+            ],
+            "reason": "no_matching_allowlisted_evidence"
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_18",
+      "annotatorAFindings": [
+        {
+          "category": "unsupported_claim",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 33,
+              "excerpt": "保存済みPERは8倍です。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "valuation"
+            ],
+            "reason": "no_matching_allowlisted_evidence"
+          },
+          "summary": "根拠なし"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "unsupported_claim",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 33,
+              "excerpt": "保存済みPERは8倍です。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "valuation"
+            ],
+            "reason": "no_matching_allowlisted_evidence"
+          },
+          "summary": "No matching PER evidence is present in the complete valuation domain."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "summary": "保存済み根拠に対応しない評価指標の主張です。",
+          "category": "unsupported_claim",
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 32,
+              "excerpt": "保存済みPERは8倍です"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "valuation"
+            ],
+            "reason": "no_matching_allowlisted_evidence"
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_19",
+      "annotatorAFindings": [
+        {
+          "category": "internal_inconsistency",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "report_anchor_set",
+            "anchors": [
+              {
+                "start": 20,
+                "end": 35,
+                "excerpt": "PERは同じ前提で上昇します。"
+              },
+              {
+                "start": 38,
+                "end": 53,
+                "excerpt": "PERは同じ前提で低下します。"
+              }
+            ]
+          },
+          "basis": {
+            "kind": "report_contradiction"
+          },
+          "summary": "矛盾"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "internal_inconsistency",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "report_anchor_set",
+            "anchors": [
+              {
+                "start": 20,
+                "end": 35,
+                "excerpt": "PERは同じ前提で上昇します。"
+              },
+              {
+                "start": 38,
+                "end": 53,
+                "excerpt": "PERは同じ前提で低下します。"
+              }
+            ]
+          },
+          "basis": {
+            "kind": "report_contradiction"
+          },
+          "summary": "The two statements assert opposite directions under the same premise."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "summary": "同じ論点について相反する説明があります。",
+          "category": "internal_inconsistency",
+          "importance": "material",
+          "location": {
+            "kind": "report_anchor_set",
+            "anchors": [
+              {
+                "start": 20,
+                "end": 34,
+                "excerpt": "PERは同じ前提で上昇します"
+              },
+              {
+                "start": 38,
+                "end": 52,
+                "excerpt": "PERは同じ前提で低下します"
+              }
+            ]
+          },
+          "basis": {
+            "kind": "report_contradiction"
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_20",
+      "annotatorAFindings": [
+        {
+          "category": "internal_inconsistency",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "report_anchor_set",
+            "anchors": [
+              {
+                "start": 20,
+                "end": 35,
+                "excerpt": "PERは同じ前提で上昇します。"
+              },
+              {
+                "start": 38,
+                "end": 53,
+                "excerpt": "PERは同じ前提で低下します。"
+              }
+            ]
+          },
+          "basis": {
+            "kind": "report_contradiction"
+          },
+          "summary": "矛盾"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "internal_inconsistency",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "report_anchor_set",
+            "anchors": [
+              {
+                "start": 20,
+                "end": 35,
+                "excerpt": "PERは同じ前提で上昇します。"
+              },
+              {
+                "start": 38,
+                "end": 53,
+                "excerpt": "PERは同じ前提で低下します。"
+              }
+            ]
+          },
+          "basis": {
+            "kind": "report_contradiction"
+          },
+          "summary": "The two statements assert opposite directions under the same premise."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "summary": "同じ論点について相反する説明があります。",
+          "category": "internal_inconsistency",
+          "importance": "material",
+          "location": {
+            "kind": "report_anchor_set",
+            "anchors": [
+              {
+                "start": 20,
+                "end": 34,
+                "excerpt": "PERは同じ前提で上昇します"
+              },
+              {
+                "start": 38,
+                "end": 52,
+                "excerpt": "PERは同じ前提で低下します"
+              }
+            ]
+          },
+          "basis": {
+            "kind": "report_contradiction"
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_21",
+      "annotatorAFindings": [
+        {
+          "category": "missing_caveat",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 51,
+              "end": 64,
+              "excerpt": "無条件に割安と断定します。"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "留保欠落"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "missing_caveat",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 51,
+              "end": 64,
+              "excerpt": "無条件に割安と断定します。"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "The report omits the material limitation that this is a single persisted valuation metric."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "summary": "単一時点のPERであるという留保がありません。",
+          "category": "missing_caveat",
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 63,
+              "excerpt": "保存済みPERは10倍ですが、単一時点の指標という留保を示さず無条件に割安と断定します"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_22",
+      "annotatorAFindings": [
+        {
+          "category": "missing_caveat",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 51,
+              "end": 64,
+              "excerpt": "無条件に割安と断定します。"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "留保欠落"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "missing_caveat",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 51,
+              "end": 64,
+              "excerpt": "無条件に割安と断定します。"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "The report omits the material limitation that this is a single persisted valuation metric."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "summary": "単一時点のPERであるという留保がありません。",
+          "category": "missing_caveat",
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 63,
+              "excerpt": "保存済みPERは10倍ですが、単一時点の指標という留保を示さず無条件に割安と断定します"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_23",
+      "annotatorAFindings": [
+        {
+          "category": "unclear_reasoning",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 49,
+              "end": 65,
+              "excerpt": "株価は必ず上昇すると断定します。"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "因果不明"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "unclear_reasoning",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 49,
+              "end": 65,
+              "excerpt": "株価は必ず上昇すると断定します。"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "The report does not provide a valid inference from PER to the unconditional price conclusion."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "summary": "保存済みPERから結論へ至る推論が明示されていません。",
+          "category": "unclear_reasoning",
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 64,
+              "excerpt": "保存済みPERは10倍ですが、根拠と結論の因果説明を示さず株価は必ず上昇すると断定します"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_24",
+      "annotatorAFindings": [
+        {
+          "category": "unclear_reasoning",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 49,
+              "end": 65,
+              "excerpt": "株価は必ず上昇すると断定します。"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "因果不明"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "unclear_reasoning",
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 49,
+              "end": 65,
+              "excerpt": "株価は必ず上昇すると断定します。"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "The report does not provide a valid inference from PER to the unconditional price conclusion."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "valuation_metrics"
+          ],
+          "summary": "保存済みPERから結論へ至る推論が明示されていません。",
+          "category": "unclear_reasoning",
+          "importance": "material",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 64,
+              "excerpt": "保存済みPERは10倍ですが、根拠と結論の因果説明を示さず株価は必ず上昇すると断定します"
+            }
+          },
+          "basis": {
+            "kind": "available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_48e68fae2566c29d485baa9b",
+                "factKey": "value"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_25",
+      "annotatorAFindings": [
+        {
+          "category": "not_verifiable_from_snapshot",
+          "claimDomains": [
+            "advanced_technical_metrics"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 44,
+              "excerpt": "保存済みSnapshotのRSI14は70です。"
+            }
+          },
+          "basis": {
+            "kind": "non_available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_959afa06443f820ac94653e4",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "利用不可"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "not_verifiable_from_snapshot",
+          "claimDomains": [
+            "advanced_technical_metrics"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 44,
+              "excerpt": "保存済みSnapshotのRSI14は70です。"
+            }
+          },
+          "basis": {
+            "kind": "non_available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_959afa06443f820ac94653e4",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "RSI14 is unavailable in the supplied Snapshot evidence."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "advanced_technical_metrics"
+          ],
+          "summary": "保存済みSnapshotの利用不能な観測に依存する主張です。",
+          "category": "not_verifiable_from_snapshot",
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 43,
+              "excerpt": "保存済みSnapshotのRSI14は70です"
+            }
+          },
+          "basis": {
+            "kind": "non_available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_959afa06443f820ac94653e4",
+                "factKey": "value"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_26",
+      "annotatorAFindings": [
+        {
+          "category": "not_verifiable_from_snapshot",
+          "claimDomains": [
+            "advanced_technical_metrics"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 44,
+              "excerpt": "保存済みSnapshotのRSI14は70です。"
+            }
+          },
+          "basis": {
+            "kind": "non_available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_959afa06443f820ac94653e4",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "利用不可"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "not_verifiable_from_snapshot",
+          "claimDomains": [
+            "advanced_technical_metrics"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 44,
+              "excerpt": "保存済みSnapshotのRSI14は70です。"
+            }
+          },
+          "basis": {
+            "kind": "non_available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_959afa06443f820ac94653e4",
+                "factKey": "value"
+              }
+            ]
+          },
+          "summary": "RSI14 is unavailable in the supplied Snapshot evidence."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "advanced_technical_metrics"
+          ],
+          "summary": "保存済みSnapshotの利用不能な観測に依存する主張です。",
+          "category": "not_verifiable_from_snapshot",
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 43,
+              "excerpt": "保存済みSnapshotのRSI14は70です"
+            }
+          },
+          "basis": {
+            "kind": "non_available_fact_refs",
+            "refs": [
+              {
+                "itemId": "e_959afa06443f820ac94653e4",
+                "factKey": "value"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_27",
+      "annotatorAFindings": [
+        {
+          "category": "not_verifiable_from_snapshot",
+          "claimDomains": [
+            "outside_filing_narrative"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 65,
+              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "outside_filing_narrative"
+            ],
+            "reason": "outside_snapshot_scope"
+          },
+          "summary": "対象外"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "not_verifiable_from_snapshot",
+          "claimDomains": [
+            "outside_filing_narrative"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 65,
+              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "outside_filing_narrative"
+            ],
+            "reason": "outside_snapshot_scope"
+          },
+          "summary": "The filing narrative is outside the supplied Snapshot."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "outside_filing_narrative"
+          ],
+          "summary": "この主張は保存済みSnapshotの対象外です。",
+          "category": "not_verifiable_from_snapshot",
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 64,
+              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "outside_filing_narrative"
+            ],
+            "reason": "outside_snapshot_scope"
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_28",
+      "annotatorAFindings": [
+        {
+          "category": "not_verifiable_from_snapshot",
+          "claimDomains": [
+            "outside_filing_narrative"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 65,
+              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "outside_filing_narrative"
+            ],
+            "reason": "outside_snapshot_scope"
+          },
+          "summary": "対象外"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "not_verifiable_from_snapshot",
+          "claimDomains": [
+            "outside_filing_narrative"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 65,
+              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "outside_filing_narrative"
+            ],
+            "reason": "outside_snapshot_scope"
+          },
+          "summary": "The filing narrative is outside the supplied Snapshot."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "outside_filing_narrative"
+          ],
+          "summary": "この主張は保存済みSnapshotの対象外です。",
+          "category": "not_verifiable_from_snapshot",
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 64,
+              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "outside_filing_narrative"
+            ],
+            "reason": "outside_snapshot_scope"
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_29",
+      "annotatorAFindings": [
+        {
+          "category": "not_verifiable_from_snapshot",
+          "claimDomains": [
+            "outside_filing_narrative"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 65,
+              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "outside_filing_narrative"
+            ],
+            "reason": "outside_snapshot_scope"
+          },
+          "summary": "対象外"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "not_verifiable_from_snapshot",
+          "claimDomains": [
+            "outside_filing_narrative"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 65,
+              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "outside_filing_narrative"
+            ],
+            "reason": "outside_snapshot_scope"
+          },
+          "summary": "The filing narrative is outside the supplied Snapshot."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "outside_filing_narrative"
+          ],
+          "summary": "この主張は保存済みSnapshotの対象外です。",
+          "category": "not_verifiable_from_snapshot",
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 64,
+              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "outside_filing_narrative"
+            ],
+            "reason": "outside_snapshot_scope"
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_30",
+      "annotatorAFindings": [
+        {
+          "category": "not_verifiable_from_snapshot",
+          "claimDomains": [
+            "outside_filing_narrative"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 65,
+              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "outside_filing_narrative"
+            ],
+            "reason": "outside_snapshot_scope"
+          },
+          "summary": "対象外"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "not_verifiable_from_snapshot",
+          "claimDomains": [
+            "outside_filing_narrative"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 65,
+              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "outside_filing_narrative"
+            ],
+            "reason": "outside_snapshot_scope"
+          },
+          "summary": "The filing narrative is outside the supplied Snapshot."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "outside_filing_narrative"
+          ],
+          "summary": "この主張は保存済みSnapshotの対象外です。",
+          "category": "not_verifiable_from_snapshot",
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 64,
+              "excerpt": "保存済みSnapshot外の有価証券報告書本文によれば海外売上高は前年同期比20%増です"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "outside_filing_narrative"
+            ],
+            "reason": "outside_snapshot_scope"
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_31",
+      "annotatorAFindings": [
+        {
+          "category": "not_verifiable_by_evaluator",
+          "claimDomains": [
+            "price_history_series"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 47,
+              "excerpt": "保存済みの過去60営業日終値は一貫して上昇しています。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "price_history_series"
+            ],
+            "reason": "persisted_evidence_not_sent"
+          },
+          "summary": "除外済み"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "not_verifiable_by_evaluator",
+          "claimDomains": [
+            "price_history_series"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 47,
+              "excerpt": "保存済みの過去60営業日終値は一貫して上昇しています。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "price_history_series"
+            ],
+            "reason": "persisted_evidence_not_sent"
+          },
+          "summary": "The persisted price-history series was deliberately excluded from the manifest."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "price_history_series"
+          ],
+          "summary": "保存済みですがEvaluatorへ送られない系列に依存します。",
+          "category": "not_verifiable_by_evaluator",
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 46,
+              "excerpt": "保存済みの過去60営業日終値は一貫して上昇しています"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "price_history_series"
+            ],
+            "reason": "persisted_evidence_not_sent"
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_32",
+      "annotatorAFindings": [
+        {
+          "category": "not_verifiable_by_evaluator",
+          "claimDomains": [
+            "price_history_series"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 47,
+              "excerpt": "保存済みの過去60営業日終値は一貫して上昇しています。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "price_history_series"
+            ],
+            "reason": "persisted_evidence_not_sent"
+          },
+          "summary": "除外済み"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "not_verifiable_by_evaluator",
+          "claimDomains": [
+            "price_history_series"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 47,
+              "excerpt": "保存済みの過去60営業日終値は一貫して上昇しています。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "price_history_series"
+            ],
+            "reason": "persisted_evidence_not_sent"
+          },
+          "summary": "The persisted price-history series was deliberately excluded from the manifest."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "price_history_series"
+          ],
+          "summary": "保存済みですがEvaluatorへ送られない系列に依存します。",
+          "category": "not_verifiable_by_evaluator",
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 46,
+              "excerpt": "保存済みの過去60営業日終値は一貫して上昇しています"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "price_history_series"
+            ],
+            "reason": "persisted_evidence_not_sent"
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_33",
+      "annotatorAFindings": [
+        {
+          "category": "not_verifiable_by_evaluator",
+          "claimDomains": [
+            "price_history_series"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 47,
+              "excerpt": "保存済みの過去60営業日終値は一貫して上昇しています。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "price_history_series"
+            ],
+            "reason": "persisted_evidence_not_sent"
+          },
+          "summary": "除外済み"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "not_verifiable_by_evaluator",
+          "claimDomains": [
+            "price_history_series"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 47,
+              "excerpt": "保存済みの過去60営業日終値は一貫して上昇しています。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "price_history_series"
+            ],
+            "reason": "persisted_evidence_not_sent"
+          },
+          "summary": "The persisted price-history series was deliberately excluded from the manifest."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "price_history_series"
+          ],
+          "summary": "保存済みですがEvaluatorへ送られない系列に依存します。",
+          "category": "not_verifiable_by_evaluator",
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 46,
+              "excerpt": "保存済みの過去60営業日終値は一貫して上昇しています"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "price_history_series"
+            ],
+            "reason": "persisted_evidence_not_sent"
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_34",
+      "annotatorAFindings": [
+        {
+          "category": "not_verifiable_by_evaluator",
+          "claimDomains": [
+            "price_history_series"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 47,
+              "excerpt": "保存済みの過去60営業日終値は一貫して上昇しています。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "price_history_series"
+            ],
+            "reason": "persisted_evidence_not_sent"
+          },
+          "summary": "除外済み"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "not_verifiable_by_evaluator",
+          "claimDomains": [
+            "price_history_series"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 47,
+              "excerpt": "保存済みの過去60営業日終値は一貫して上昇しています。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "price_history_series"
+            ],
+            "reason": "persisted_evidence_not_sent"
+          },
+          "summary": "The persisted price-history series was deliberately excluded from the manifest."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "price_history_series"
+          ],
+          "summary": "保存済みですがEvaluatorへ送られない系列に依存します。",
+          "category": "not_verifiable_by_evaluator",
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 46,
+              "excerpt": "保存済みの過去60営業日終値は一貫して上昇しています"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "price_history_series"
+            ],
+            "reason": "persisted_evidence_not_sent"
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_35",
+      "annotatorAFindings": [
+        {
+          "category": "not_verifiable_by_evaluator",
+          "claimDomains": [
+            "price_history_series"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 47,
+              "excerpt": "保存済みの過去60営業日終値は一貫して上昇しています。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "price_history_series"
+            ],
+            "reason": "persisted_evidence_not_sent"
+          },
+          "summary": "除外済み"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "not_verifiable_by_evaluator",
+          "claimDomains": [
+            "price_history_series"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 47,
+              "excerpt": "保存済みの過去60営業日終値は一貫して上昇しています。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "price_history_series"
+            ],
+            "reason": "persisted_evidence_not_sent"
+          },
+          "summary": "The persisted price-history series was deliberately excluded from the manifest."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "price_history_series"
+          ],
+          "summary": "保存済みですがEvaluatorへ送られない系列に依存します。",
+          "category": "not_verifiable_by_evaluator",
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 46,
+              "excerpt": "保存済みの過去60営業日終値は一貫して上昇しています"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "price_history_series"
+            ],
+            "reason": "persisted_evidence_not_sent"
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_36",
+      "annotatorAFindings": [
+        {
+          "category": "not_verifiable_by_evaluator",
+          "claimDomains": [
+            "price_history_series"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 47,
+              "excerpt": "保存済みの過去60営業日終値は一貫して上昇しています。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "price_history_series"
+            ],
+            "reason": "persisted_evidence_not_sent"
+          },
+          "summary": "除外済み"
+        }
+      ],
+      "annotatorBFindings": [
+        {
+          "category": "not_verifiable_by_evaluator",
+          "claimDomains": [
+            "price_history_series"
+          ],
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 47,
+              "excerpt": "保存済みの過去60営業日終値は一貫して上昇しています。"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "price_history_series"
+            ],
+            "reason": "persisted_evidence_not_sent"
+          },
+          "summary": "The persisted price-history series was deliberately excluded from the manifest."
+        }
+      ],
+      "adjudicatedFindings": [
+        {
+          "claimDomains": [
+            "price_history_series"
+          ],
+          "summary": "保存済みですがEvaluatorへ送られない系列に依存します。",
+          "category": "not_verifiable_by_evaluator",
+          "importance": "advisory",
+          "location": {
+            "kind": "single_anchor",
+            "anchor": {
+              "start": 20,
+              "end": 46,
+              "excerpt": "保存済みの過去60営業日終値は一貫して上昇しています"
+            }
+          },
+          "basis": {
+            "kind": "manifest_absence",
+            "scopeRefs": [
+              "price_history_series"
+            ],
+            "reason": "persisted_evidence_not_sent"
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "gold_v1_holdout_37",
+      "annotatorAFindings": [],
+      "annotatorBFindings": [],
+      "adjudicatedFindings": []
+    },
+    {
+      "caseId": "gold_v1_holdout_38",
+      "annotatorAFindings": [],
+      "annotatorBFindings": [],
+      "adjudicatedFindings": []
+    },
+    {
+      "caseId": "gold_v1_holdout_39",
+      "annotatorAFindings": [],
+      "annotatorBFindings": [],
+      "adjudicatedFindings": []
+    },
+    {
+      "caseId": "gold_v1_holdout_40",
+      "annotatorAFindings": [],
+      "annotatorBFindings": [],
+      "adjudicatedFindings": []
+    },
+    {
+      "caseId": "gold_v1_holdout_41",
+      "annotatorAFindings": [],
+      "annotatorBFindings": [],
+      "adjudicatedFindings": []
+    },
+    {
+      "caseId": "gold_v1_holdout_42",
+      "annotatorAFindings": [],
+      "annotatorBFindings": [],
+      "adjudicatedFindings": []
+    },
+    {
+      "caseId": "gold_v1_holdout_43",
+      "annotatorAFindings": [],
+      "annotatorBFindings": [],
+      "adjudicatedFindings": []
+    },
+    {
+      "caseId": "gold_v1_holdout_44",
+      "annotatorAFindings": [],
+      "annotatorBFindings": [],
+      "adjudicatedFindings": []
+    },
+    {
+      "caseId": "gold_v1_holdout_45",
+      "annotatorAFindings": [],
+      "annotatorBFindings": [],
+      "adjudicatedFindings": []
+    },
+    {
+      "caseId": "gold_v1_holdout_46",
+      "annotatorAFindings": [],
+      "annotatorBFindings": [],
+      "adjudicatedFindings": []
+    },
+    {
+      "caseId": "gold_v1_holdout_47",
+      "annotatorAFindings": [],
+      "annotatorBFindings": [],
+      "adjudicatedFindings": []
+    },
+    {
+      "caseId": "gold_v1_holdout_48",
+      "annotatorAFindings": [],
+      "annotatorBFindings": [],
+      "adjudicatedFindings": []
+    }
+  ]
+}

@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { readFile } from 'node:fs/promises';
 import { validateEvaluationFindingsWireV1 } from '../../analysis/evaluation/findings.js';
+import { validateGoldAdjudicationV1 } from './adjudication.js';
 import {
   GOLD_FINDING_CATEGORIES_V1,
   GOLD_SET_CANDIDATE_V1,
@@ -78,7 +80,62 @@ describe('Evaluator Japanese gold-set candidate V1', () => {
     }
   });
 
+  test('uses category-specific claims that an independent annotator can classify', () => {
+    const nonClean = GOLD_SET_CANDIDATE_V1.cases.filter(value => !value.clean);
+    const reportsFor = (category: (typeof GOLD_FINDING_CATEGORIES_V1)[number]) => nonClean
+      .filter(value => value.annotation.proposedFindings[0]?.category === category)
+      .map(value => value.report);
+
+    expect(reportsFor('unsupported_claim').every(report => report.includes('保存済みPERは8倍'))).toBe(true);
+    expect(reportsFor('not_verifiable_from_snapshot').every(report => (
+      report.includes('保存済みSnapshot外の有価証券報告書本文')
+      || report.includes('保存済みSnapshotのRSI14')
+    ))).toBe(true);
+    expect(reportsFor('not_verifiable_by_evaluator').every(report => (
+      report.includes('過去60営業日終値')
+    ))).toBe(true);
+    expect(reportsFor('internal_inconsistency').every(report => (
+      report.includes('上昇します') && report.includes('低下します')
+    ))).toBe(true);
+    expect(reportsFor('unclear_reasoning').every(report => report.includes('因果説明を示さず'))).toBe(true);
+    expect(reportsFor('missing_caveat').every(report => report.includes('留保を示さず'))).toBe(true);
+    const caveatCases = nonClean.filter(value => (
+      value.annotation.proposedFindings[0]?.category === 'missing_caveat'
+    ));
+    expect(caveatCases.every(value => (
+      (value.evidenceManifest.items[0]?.facts[0]?.dataDates.length ?? 0) > 0
+    ))).toBe(true);
+    expect(nonClean.some(value => value.report.includes('検証対象の主張'))).toBe(false);
+  });
+
   test('remains pending until two independent annotations and adjudication are supplied', () => {
     expect(GOLD_SET_CANDIDATE_V1.annotationState).toBe('pending_independent_review');
+  });
+
+  test('loads the tracked two-annotator adjudication with matching critical labels', async () => {
+    const raw = JSON.parse(await readFile(
+      new URL('./adjudicated-v1.json', import.meta.url),
+      'utf8',
+    )) as {
+      annotatorAId: string;
+      annotatorBId: string;
+      cases: Array<{
+        annotatorAFindings: Array<{ summary: string; [key: string]: unknown }>;
+        annotatorBFindings: Array<{ summary: string; [key: string]: unknown }>;
+        adjudicatedFindings: unknown[];
+      }>;
+    };
+    const validated = validateGoldAdjudicationV1(raw);
+    expect(raw.annotatorAId).not.toBe(raw.annotatorBId);
+    expect(validated.cases).toHaveLength(64);
+    expect(validated.cases.reduce((count, value) => count + value.expectedFindings.length, 0)).toBe(52);
+
+    const withoutSummary = ({ summary: _summary, ...finding }: { summary: string; [key: string]: unknown }) => finding;
+    for (const [index, annotation] of raw.cases.entries()) {
+      expect(annotation.annotatorAFindings.map(withoutSummary))
+        .toEqual(annotation.annotatorBFindings.map(withoutSummary));
+      expect(annotation.adjudicatedFindings)
+        .toEqual(GOLD_SET_CANDIDATE_V1.cases[index]!.annotation.proposedFindings);
+    }
   });
 });
