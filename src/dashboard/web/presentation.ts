@@ -535,6 +535,13 @@ function formatRatioDeltaAsPoints(value: number | null): DisplayValue {
   return { text: `${formatted} pt`, available: true };
 }
 
+function formatStoredPeerPercentile(value: number | null): DisplayValue {
+  if (value === null || !Number.isFinite(value)) {
+    return { text: UNAVAILABLE_TEXT, available: false };
+  }
+  return { text: `${String(value)} / ${String(value * 100)}%`, available: true };
+}
+
 export function displayText(value: string | null | undefined): DisplayValue {
   return value
     ? { text: value, available: true }
@@ -826,7 +833,7 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
 
   const peer = snapshot.peerComparison;
   const peerView = peer ? (() => {
-    const radar = buildPeerRadarModel(snapshot.canonicalTicker, peer);
+    const radar = buildPeerRadarModel(snapshot.canonicalTicker, peer, snapshot.unavailable);
     return {
       rows: radar.axes.map(axis => {
         return {
@@ -835,7 +842,7 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
           target: formatMetric(axis.targetValue, peerUnits[axis.metric]),
           median: formatMetric(axis.median, peerUnits[axis.metric]),
           rank: rankValue(axis.rank, axis.cohortSize),
-          percentile: formatMetric(axis.percentile, 'ratio', { ratioAsPercent: true }),
+          percentile: formatStoredPeerPercentile(axis.percentile),
           direction: axis.direction,
           sampleSize: {
             text: `${axis.peerSampleSize} / 選定 ${radar.selectedPeerCount} 社`,

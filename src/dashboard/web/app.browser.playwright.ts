@@ -666,9 +666,9 @@ function peerRadarSnapshot(
     dividendYield: 0.025,
   };
   const radarMetrics = Object.keys(metrics) as RadarMetric[];
-  const percentiles = [0, 1, 0.5, 0.25, 0.75, 0.4, 0.6] as const;
+  const percentiles = [0, 1, 1 / 3, 0.25, 0.75, 0.4, 0.6] as const;
   const positions = Object.fromEntries(radarMetrics.map((metric, index) => {
-    const peerSampleSize = metric === 'per' ? 1 : metric === 'pbr' ? 4 : 5;
+    const peerSampleSize = metric === 'per' ? 1 : metric === 'pbr' ? 4 : metric === 'roe' ? 3 : 5;
     return [metric, {
       metric,
       direction: metric === 'per' || metric === 'pbr'
@@ -710,6 +710,13 @@ function peerRadarSnapshot(
   return AnalysisSnapshotSchema.parse({
     ...snapshot,
     dataDates: { ...snapshot.dataDates, peerComparison: '2026-08-21' },
+    unavailable: issue === 'zero_sample'
+      ? [...snapshot.unavailable, {
+          section: 'peerComparison',
+          metric: 'roe',
+          reason: 'insufficient_peer_data',
+        }]
+      : snapshot.unavailable,
     peerComparison: {
       result: {
         target: {
@@ -1542,6 +1549,7 @@ test.describe('Peer Radar browser presentation', () => {
       await expect(exactTable.locator('tbody tr')).toHaveCount(7);
       await expect(exactTable).toContainText('1 / 選定 5 社');
       await expect(exactTable).toContainText('4 / 選定 5 社');
+      await expect(exactTable).toContainText(`${String(1 / 3)} / ${String((1 / 3) * 100)}%`);
       await expect(exactTable).toContainText('lower_is_better');
       await expect(exactTable).toContainText('2026-08-21');
       await expect(exactTable).toContainText('利用可能');

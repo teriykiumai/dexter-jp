@@ -1831,10 +1831,64 @@ describe('snapshot presentation mapping', () => {
 
     expect(view.peer?.polygonPercentiles).toBeNull();
     expect(roe).toMatchObject({
-      percentile: { text: '120%', available: true },
+      percentile: { text: '1.2 / 120%', available: true },
       state: 'invalid',
       stateText: '保存値不整合 (position_structure_mismatch)',
     });
+  });
+
+  test('fails closed on a builder-reachable top-level Peer unavailable conflict', () => {
+    const input = snapshotInput();
+    input.peerComparison = peerComparison(true)!.result;
+    input.peerCandidateMarketCapsComplete = true;
+    input.additionalUnavailable = [{
+      section: 'peerComparison',
+      metric: 'roe',
+      reason: 'additional_validation_failure',
+    }];
+    const snapshot = buildAnalysisSnapshot(input);
+
+    expect(snapshot.unavailable).toContainEqual({
+      section: 'peerComparison',
+      metric: 'roe',
+      reason: 'additional_validation_failure',
+    });
+    const view = mapSnapshotToDashboard(snapshot);
+    expect(view.peer?.polygonPercentiles).toBeNull();
+    expect(view.peer?.rows.find(row => row.metric === 'roe')).toMatchObject({
+      state: 'invalid',
+      stateText: '保存値不整合 (snapshot_unavailable_conflict)',
+    });
+  });
+
+  test('preserves a repeating stored Peer percentile losslessly in the exact table', () => {
+    const peer = peerComparison(true)!;
+    peer.result.selection.peers.push({
+      ...structuredClone(peer.result.selection.peers[0]!),
+      id: '7299',
+      name: '比較企業6',
+    });
+    peer.result.selection.sameSectorCandidateCount = 6;
+    peer.result.selection.marketCapPrioritizedPeerCount = 6;
+    const storedPercentile = 5 / 6;
+    Object.assign(peer.result.positions.roe, {
+      percentile: storedPercentile,
+      peerSampleSize: 6,
+      cohortSize: 7,
+    });
+    const snapshot: AnalysisSnapshot = {
+      ...baseSnapshot(),
+      peerComparison: peer,
+    };
+
+    const percentile = mapSnapshotToDashboard(snapshot).peer?.rows
+      .find(row => row.metric === 'roe')?.percentile;
+
+    expect(percentile).toEqual({
+      text: `${String(storedPercentile)} / ${String(storedPercentile * 100)}%`,
+      available: true,
+    });
+    expect(Number(percentile?.text.split(' / ')[0])).toBe(storedPercentile);
   });
 
   test('passes through only complete adjusted OHLC bars and precomputed latest levels', () => {

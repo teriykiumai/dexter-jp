@@ -45,6 +45,12 @@ export interface PeerRadarModel {
   marketCapPriorityUnavailableReason: SnapshotPeerComparison['marketCapPriorityUnavailableReason'];
 }
 
+interface PeerRadarSnapshotUnavailable {
+  section: string;
+  metric?: string;
+  reason: string;
+}
+
 function isFiniteNumber(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
@@ -105,17 +111,38 @@ function unavailableAxisState(
     : { state: 'invalid', reason: 'unavailable_position_mismatch' };
 }
 
-function axisModel(metric: PeerMetric, label: string, peer: SnapshotPeerComparison): PeerRadarAxisModel {
+function axisModel(
+  metric: PeerMetric,
+  label: string,
+  peer: SnapshotPeerComparison,
+  snapshotUnavailable: readonly PeerRadarSnapshotUnavailable[],
+): PeerRadarAxisModel {
   const position = peer.result.positions[metric];
   const expectedDirection = PEER_METRIC_DIRECTIONS[metric];
   const selectedPeerCount = peer.result.selection.peers.length;
   const unavailable = peer.result.unavailable.filter(item => item.metric === metric);
+  const topLevelUnavailable = snapshotUnavailable.filter(item => (
+    item.section === 'peerComparison' && item.metric === metric
+  ));
 
   let state: PeerRadarAxisState = 'available';
   let stateReason: string | null = null;
-  if (unavailable.length > 1) {
+  if (topLevelUnavailable.length > 1) {
+    state = 'invalid';
+    stateReason = 'duplicate_snapshot_unavailable_metric';
+  } else if (unavailable.length > 1) {
     state = 'invalid';
     stateReason = 'duplicate_unavailable_metric';
+  } else if (topLevelUnavailable[0] && !unavailable[0]) {
+    state = 'invalid';
+    stateReason = 'snapshot_unavailable_conflict';
+  } else if (
+    topLevelUnavailable[0]
+    && unavailable[0]
+    && topLevelUnavailable[0].reason !== unavailable[0].reason
+  ) {
+    state = 'invalid';
+    stateReason = 'unavailable_reason_mismatch';
   } else if (unavailable[0]) {
     const unavailableState = unavailableAxisState(metric, peer, unavailable[0].reason);
     state = unavailableState.state;
@@ -160,9 +187,12 @@ function axisModel(metric: PeerMetric, label: string, peer: SnapshotPeerComparis
 export function buildPeerRadarModel(
   canonicalTicker: string,
   peer: SnapshotPeerComparison,
+  snapshotUnavailable: readonly PeerRadarSnapshotUnavailable[],
 ): PeerRadarModel {
   const selection = validateSelection(canonicalTicker, peer);
-  const axes = PEER_RADAR_AXES.map(axis => axisModel(axis.metric, axis.label, peer));
+  const axes = PEER_RADAR_AXES.map(axis => (
+    axisModel(axis.metric, axis.label, peer, snapshotUnavailable)
+  ));
   const polygonPercentiles = selection.state === 'available'
     && axes.every(axis => axis.state === 'available' && axis.percentile !== null)
     ? axes.map(axis => axis.percentile as number)

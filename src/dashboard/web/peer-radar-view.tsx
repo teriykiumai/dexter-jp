@@ -119,7 +119,7 @@ export function PeerRadarPresentation({ peer }: { peer: PeerRadarView }) {
               <th>対象企業</th>
               <th>同業中央値</th>
               <th>順位</th>
-              <th>パーセンタイル</th>
+              <th>パーセンタイル (保存値 / %)</th>
               <th>有効Peer数</th>
               <th>方向</th>
               <th>データ基準日</th>

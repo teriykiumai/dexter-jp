@@ -74,7 +74,7 @@ function peerFixture(): SnapshotPeerComparison {
 
 describe('Peer Radar stored-position validation', () => {
   test('accepts boundary percentiles, fractional ranks, and sparse stored samples', () => {
-    const model = buildPeerRadarModel('7203', peerFixture());
+    const model = buildPeerRadarModel('7203', peerFixture(), []);
 
     expect(model.selectionState).toBe('available');
     expect(model.polygonPercentiles).toHaveLength(7);
@@ -115,7 +115,7 @@ describe('Peer Radar stored-position validation', () => {
     for (const item of cases) {
       const peer = peerFixture();
       item.mutate(peer);
-      const model = buildPeerRadarModel('7203', peer);
+      const model = buildPeerRadarModel('7203', peer, []);
       expect(model.polygonPercentiles, item.name).toBeNull();
       expect(model.axes.find(axis => axis.metric === 'roe')?.state, item.name).toBe('invalid');
     }
@@ -160,7 +160,7 @@ describe('Peer Radar stored-position validation', () => {
     for (const item of invalidSelections) {
       const peer = peerFixture();
       item.mutate(peer);
-      const model = buildPeerRadarModel(item.ticker ?? '7203', peer);
+      const model = buildPeerRadarModel(item.ticker ?? '7203', peer, []);
       expect(model.selectionState, item.name).toBe('invalid');
       expect(model.polygonPercentiles, item.name).toBeNull();
     }
@@ -173,7 +173,7 @@ describe('Peer Radar stored-position validation', () => {
       position.peerSampleSize = Math.min(position.peerSampleSize, 4);
       position.cohortSize = position.peerSampleSize + 1;
     }
-    const sparseModel = buildPeerRadarModel('7203', sparseSelection);
+    const sparseModel = buildPeerRadarModel('7203', sparseSelection, []);
     expect(sparseModel.selectionState).toBe('unavailable');
     expect(sparseModel.axes.every(axis => axis.state === 'available')).toBeTrue();
     expect(sparseModel.polygonPercentiles).toBeNull();
@@ -190,7 +190,11 @@ describe('Peer Radar stored-position validation', () => {
       peerSampleSize: 4,
       cohortSize: 0,
     });
-    expect(buildPeerRadarModel('7203', missingTarget).axes.find(axis => axis.metric === 'roe')).toMatchObject({
+    expect(buildPeerRadarModel('7203', missingTarget, [{
+      section: 'peerComparison',
+      metric: 'roe',
+      reason: 'missing_target_metric',
+    }]).axes.find(axis => axis.metric === 'roe')).toMatchObject({
       state: 'unavailable',
       stateReason: 'missing_target_metric',
     });
@@ -204,7 +208,12 @@ describe('Peer Radar stored-position validation', () => {
       peerSampleSize: 0,
       cohortSize: 1,
     });
-    const zeroModel = buildPeerRadarModel('7203', zeroSample);
+    const zeroUnavailable = [{
+      section: 'peerComparison',
+      metric: 'roe',
+      reason: 'insufficient_peer_data',
+    }] as const;
+    const zeroModel = buildPeerRadarModel('7203', zeroSample, zeroUnavailable);
     expect(zeroModel.polygonPercentiles).toBeNull();
     expect(zeroModel.axes.find(axis => axis.metric === 'roe')).toMatchObject({
       peerSampleSize: 0,
@@ -213,8 +222,24 @@ describe('Peer Radar stored-position validation', () => {
     });
 
     zeroSample.result.positions.roe.peerSampleSize = 1;
-    expect(buildPeerRadarModel('7203', zeroSample).axes.find(axis => axis.metric === 'roe')?.state)
+    expect(buildPeerRadarModel('7203', zeroSample, zeroUnavailable)
+      .axes.find(axis => axis.metric === 'roe')?.state)
       .toBe('invalid');
+  });
+
+  test('fails closed on top-level Snapshot unavailable conflicts', () => {
+    const peer = peerFixture();
+    const model = buildPeerRadarModel('7203', peer, [{
+      section: 'peerComparison',
+      metric: 'roe',
+      reason: 'additional_validation_failure',
+    }]);
+
+    expect(model.polygonPercentiles).toBeNull();
+    expect(model.axes.find(axis => axis.metric === 'roe')).toMatchObject({
+      state: 'invalid',
+      stateReason: 'snapshot_unavailable_conflict',
+    });
   });
 
   test('does not replay selected-peer metric eligibility', () => {
@@ -223,7 +248,8 @@ describe('Peer Radar stored-position validation', () => {
     for (const peer of first.result.selection.peers) peer.metrics = { per: -10, roe: null };
     for (const peer of second.result.selection.peers) peer.metrics = { per: 100, roe: 100 };
 
-    expect(buildPeerRadarModel('7203', first)).toEqual(buildPeerRadarModel('7203', second));
+    expect(buildPeerRadarModel('7203', first, []))
+      .toEqual(buildPeerRadarModel('7203', second, []));
   });
 
   test('keeps the same sparse Radar model in every V1-V9 envelope', () => {
@@ -232,11 +258,15 @@ describe('Peer Radar stored-position validation', () => {
     v9.dataDates.peerComparison = '2026-08-21';
     v9.unavailable = v9.unavailable.filter(item => item.section !== 'peerComparison');
     const parsed = AnalysisSnapshotSchema.parse(v9) as AnalysisSnapshotV9;
-    const expected = buildPeerRadarModel('7203', parsed.peerComparison!);
+    const expected = buildPeerRadarModel('7203', parsed.peerComparison!, parsed.unavailable);
 
     for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9] as const) {
       const snapshot = snapshotAtVersion(parsed, version);
-      expect(buildPeerRadarModel(snapshot.canonicalTicker, snapshot.peerComparison!)).toEqual(expected);
+      expect(buildPeerRadarModel(
+        snapshot.canonicalTicker,
+        snapshot.peerComparison!,
+        snapshot.unavailable,
+      )).toEqual(expected);
     }
   });
 
