@@ -4,6 +4,11 @@ import type {
   SnapshotUnavailable,
 } from '../../analysis/snapshot/schema.js';
 import type { AnalysisSnapshotLatestItem } from '../../analysis/snapshot/repository.js';
+import {
+  buildPeerRadarModel,
+  type PeerRadarAxisState,
+  type PeerRadarSelectionState,
+} from './peer-radar.js';
 
 export const UNAVAILABLE_TEXT = '利用不可' as const;
 
@@ -173,11 +178,17 @@ export interface ChartPriceLine {
 }
 
 export interface PeerMetricRow {
+  metric: string;
   label: string;
   target: DisplayValue;
   median: DisplayValue;
   rank: DisplayValue;
   percentile: DisplayValue;
+  direction: string;
+  sampleSize: DisplayValue;
+  dataDate: DisplayValue;
+  state: PeerRadarAxisState;
+  stateText: string;
 }
 
 export interface CorrelationWindowView {
@@ -403,6 +414,11 @@ export interface DashboardViewModel {
   };
   peer: {
     rows: PeerMetricRow[];
+    polygonPercentiles: readonly number[] | null;
+    selectedPeerCount: number;
+    tooFewPeers: boolean;
+    selectionState: PeerRadarSelectionState;
+    selectionStateText: string;
     marketCapPriority: DisplayValue;
     marketCapPriorityReason: string | null;
   } | null;
@@ -543,16 +559,6 @@ function rankValue(rank: number | null, cohortSize: number): DisplayValue {
   };
 }
 
-const peerLabels = {
-  per: 'PER',
-  pbr: 'PBR',
-  roe: 'ROE',
-  roic: 'ROIC',
-  operatingMargin: '営業利益率',
-  revenueGrowth: '売上成長率',
-  dividendYield: '配当利回り',
-} as const;
-
 const dataDateLabels = {
   identity: '企業情報',
   fundamental: '財務情報',
@@ -575,6 +581,18 @@ const dataDateLabels = {
 
 function reasonText(reason: string): string {
   return reason.replaceAll('_', ' ');
+}
+
+function peerRadarAxisStateText(state: PeerRadarAxisState, reason: string | null): string {
+  if (state === 'available') return '利用可能';
+  const label = state === 'unavailable' ? '利用不可' : '保存値不整合';
+  return reason ? `${label} (${reason})` : label;
+}
+
+function peerRadarSelectionStateText(state: PeerRadarSelectionState, reason: string | null): string {
+  if (state === 'available') return '有効';
+  const label = state === 'unavailable' ? '選定不足' : '保存値不整合';
+  return reason ? `${label} (${reason})` : label;
 }
 
 function investorTypeCategoryView(
@@ -807,24 +825,43 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
   }
 
   const peer = snapshot.peerComparison;
-  const peerView = peer ? {
-    rows: Object.entries(peer.result.positions).map(([key, position]) => {
-      const metric = key as keyof typeof peerLabels;
-      return {
-        label: peerLabels[metric],
-        target: formatMetric(position.targetValue, peerUnits[metric]),
-        median: formatMetric(position.median, peerUnits[metric]),
-        rank: rankValue(position.rank, position.cohortSize),
-        percentile: formatMetric(position.percentile, 'ratio', { ratioAsPercent: true }),
-      };
-    }),
-    marketCapPriority: peer.marketCapPriorityApplied
-      ? { text: '適用済み', available: true }
-      : { text: '未適用', available: false },
-    marketCapPriorityReason: peer.marketCapPriorityUnavailableReason
-      ? reasonText(peer.marketCapPriorityUnavailableReason)
-      : null,
-  } : null;
+  const peerView = peer ? (() => {
+    const radar = buildPeerRadarModel(snapshot.canonicalTicker, peer);
+    return {
+      rows: radar.axes.map(axis => {
+        return {
+          metric: axis.metric,
+          label: axis.label,
+          target: formatMetric(axis.targetValue, peerUnits[axis.metric]),
+          median: formatMetric(axis.median, peerUnits[axis.metric]),
+          rank: rankValue(axis.rank, axis.cohortSize),
+          percentile: formatMetric(axis.percentile, 'ratio', { ratioAsPercent: true }),
+          direction: axis.direction,
+          sampleSize: {
+            text: `${axis.peerSampleSize} / 選定 ${radar.selectedPeerCount} 社`,
+            available: true,
+          },
+          dataDate: displayText(snapshot.dataDates.peerComparison),
+          state: axis.state,
+          stateText: peerRadarAxisStateText(axis.state, axis.stateReason),
+        };
+      }),
+      polygonPercentiles: radar.polygonPercentiles,
+      selectedPeerCount: radar.selectedPeerCount,
+      tooFewPeers: radar.tooFewPeers,
+      selectionState: radar.selectionState,
+      selectionStateText: peerRadarSelectionStateText(
+        radar.selectionState,
+        radar.selectionStateReason,
+      ),
+      marketCapPriority: peer.marketCapPriorityApplied
+        ? { text: '適用済み', available: true }
+        : { text: '未適用', available: false },
+      marketCapPriorityReason: peer.marketCapPriorityUnavailableReason
+        ? reasonText(peer.marketCapPriorityUnavailableReason)
+        : null,
+    };
+  })() : null;
 
   const supply = snapshot.supplyDemand;
   const supplyDemand = supply ? [

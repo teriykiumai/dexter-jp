@@ -313,19 +313,27 @@ function peerComparison(marketCapPriorityApplied: boolean): AnalysisSnapshot['pe
         sector: '輸送用機器',
         marketCap: 50_000,
         dataDate: '2026-08-21',
-        metrics: { per: 12 },
+        metrics: {
+          per: 12,
+          pbr: 12,
+          roe: 12,
+          roic: 12,
+          operatingMargin: 12,
+          revenueGrowth: 12,
+          dividendYield: 12,
+        },
       },
       selection: {
-        peers: [{
-          id: '7267',
-          name: '本田技研工業株式会社',
+        peers: Array.from({ length: 5 }, (_, index) => ({
+          id: `72${index + 10}`,
+          name: `比較企業${index + 1}`,
           sector: '輸送用機器',
-          marketCap: 20_000,
+          marketCap: 20_000 - index * 1_000,
           dataDate: '2026-08-21',
-          metrics: { per: 10 },
-        }],
+          metrics: { per: 10 + index },
+        })),
         sameSectorCandidateCount: 5,
-        marketCapPrioritizedPeerCount: 1,
+        marketCapPrioritizedPeerCount: 5,
         sectorLeaderId: '7203',
         sectorLeaderIncluded: true,
         tooFewPeers: false,
@@ -1786,8 +1794,10 @@ describe('snapshot presentation mapping', () => {
   });
 
   test('shows market-cap priority as unavailable when the snapshot says it was not applied', () => {
+    const base = baseSnapshot();
     const snapshot: AnalysisSnapshot = {
-      ...baseSnapshot(),
+      ...base,
+      dataDates: { ...base.dataDates, peerComparison: '2026-08-21' },
       peerComparison: peerComparison(false),
     };
 
@@ -1795,7 +1805,36 @@ describe('snapshot presentation mapping', () => {
 
     expect(view.peer?.marketCapPriority).toEqual({ text: '未適用', available: false });
     expect(view.peer?.marketCapPriorityReason).toBe('incomplete peer market cap');
+    expect(view.peer?.selectionState).toBe('available');
+    expect(view.peer?.selectedPeerCount).toBe(5);
+    expect(view.peer?.polygonPercentiles).toEqual(Array.from({ length: 7 }, () => 0.75));
     expect(view.peer?.rows[0].rank.text).toBe('2.5 / 5');
+    expect(view.peer?.rows[0]).toMatchObject({
+      direction: 'lower_is_better',
+      sampleSize: { text: '4 / 選定 5 社', available: true },
+      dataDate: { text: '2026-08-21', available: true },
+      state: 'available',
+      stateText: '利用可能',
+    });
+  });
+
+  test('preserves invalid Peer values in the exact table while suppressing the polygon', () => {
+    const peer = peerComparison(true)!;
+    peer.result.positions.roe.percentile = 1.2;
+    const snapshot: AnalysisSnapshot = {
+      ...baseSnapshot(),
+      peerComparison: peer,
+    };
+
+    const view = mapSnapshotToDashboard(snapshot);
+    const roe = view.peer?.rows.find(row => row.metric === 'roe');
+
+    expect(view.peer?.polygonPercentiles).toBeNull();
+    expect(roe).toMatchObject({
+      percentile: { text: '120%', available: true },
+      state: 'invalid',
+      stateText: '保存値不整合 (position_structure_mismatch)',
+    });
   });
 
   test('passes through only complete adjusted OHLC bars and precomputed latest levels', () => {
