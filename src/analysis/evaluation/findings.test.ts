@@ -63,6 +63,115 @@ describe('Evaluation finding V1 validation', () => {
     expect(unavailable.basis.kind).toBe('non_available_fact_refs');
   });
 
+  test('canonicalizes duplicate and reversed provider refs before hashing', () => {
+    const manifest = buildEvidenceManifestV1(comparisonSnapshot());
+    const valuationRefs = manifest.items
+      .filter(item => ['valuation.currentPrice', 'valuation.per'].includes(item.definitionKey))
+      .map(item => ({ itemId: item.itemId, factKey: 'value' }));
+    if (valuationRefs.length !== 2) throw new Error('expected valuation evidence');
+    const finding = {
+      category: 'internal_inconsistency' as const,
+      claimDomains: ['valuation_metrics'] as const,
+      importance: 'material' as const,
+      summary: '保存値と矛盾します。',
+      location: { kind: 'single_anchor' as const, anchor: { start: 0, end: 2, excerpt: '株価' } },
+      basis: {
+        kind: 'available_fact_refs' as const,
+        refs: [valuationRefs[1], valuationRefs[0], valuationRefs[1]],
+      },
+    };
+    const normalized = validateEvaluationFindingWireV1(finding, '株価', manifest);
+    const canonical = validateEvaluationFindingWireV1({
+      ...finding,
+      basis: { ...finding.basis, refs: valuationRefs },
+    }, '株価', manifest);
+    expect(normalized.basis).toEqual({ kind: 'available_fact_refs', refs: valuationRefs });
+    expect(normalized.findingId).toBe(canonical.findingId);
+
+    const absence = {
+      category: 'unsupported_claim' as const,
+      claimDomains: ['valuation_metrics', 'technical_metrics'] as const,
+      importance: 'material' as const,
+      summary: '根拠がありません。',
+      location: { kind: 'single_anchor' as const, anchor: { start: 0, end: 2, excerpt: '根拠' } },
+      basis: {
+        kind: 'manifest_absence' as const,
+        scopeRefs: ['technical', 'valuation', 'technical'] as const,
+        reason: 'no_matching_allowlisted_evidence' as const,
+      },
+    };
+    const normalizedAbsence = validateEvaluationFindingWireV1(absence, '根拠', manifest);
+    const canonicalAbsence = validateEvaluationFindingWireV1({
+      ...absence,
+      basis: { ...absence.basis, scopeRefs: ['valuation', 'technical'] },
+    }, '根拠', manifest);
+    expect(normalizedAbsence.basis).toEqual({
+      kind: 'manifest_absence', scopeRefs: ['valuation', 'technical'],
+      reason: 'no_matching_allowlisted_evidence',
+    });
+    expect(normalizedAbsence.findingId).toBe(canonicalAbsence.findingId);
+  });
+
+  test('requires manifest absence when an entire scope is unavailable', () => {
+    const manifest = buildEvidenceManifestV1(comparisonSnapshot());
+    const peer = manifest.items.find(item => item.definitionKey === 'peerComparison.position');
+    if (peer === undefined) throw new Error('expected peer placeholder evidence');
+    expect(peer.facts[0].state).not.toBe('available');
+    const finding = {
+      category: 'not_verifiable_from_snapshot' as const,
+      claimDomains: ['peer_positions'] as const,
+      importance: 'advisory' as const,
+      summary: 'Peer比較全体を確認できません。',
+      location: { kind: 'single_anchor' as const, anchor: { start: 0, end: 6, excerpt: 'Peer比較' } },
+    };
+    expect(() => validateEvaluationFindingWireV1({
+      ...finding,
+      basis: {
+        kind: 'non_available_fact_refs',
+        refs: [{ itemId: peer.itemId, factKey: peer.facts[0].factKey }],
+      },
+    }, 'Peer比較', manifest)).toThrow(EvaluationFindingValidationError);
+
+    const accepted = validateEvaluationFindingWireV1({
+      ...finding,
+      basis: {
+        kind: 'manifest_absence', scopeRefs: ['peer_comparison'],
+        reason: 'relevant_evidence_unavailable',
+      },
+    }, 'Peer比較', manifest);
+    expect(accepted.basis).toEqual({
+      kind: 'manifest_absence', scopeRefs: ['peer_comparison'],
+      reason: 'relevant_evidence_unavailable',
+    });
+
+    const oldManifest = buildEvidenceManifestV1(snapshotAtVersion(comparisonSnapshot(), 1));
+    const sector = oldManifest.items.find(item => item.definitionKey === 'sectorBenchmark.identity');
+    if (sector === undefined) throw new Error('expected sector placeholder evidence');
+    expect(() => validateEvaluationFindingWireV1({
+      category: 'not_verifiable_from_snapshot',
+      claimDomains: ['sector_benchmark_persisted_windows'],
+      importance: 'advisory',
+      summary: '旧schemaではセクター比較を確認できません。',
+      location: { kind: 'single_anchor', anchor: { start: 0, end: 6, excerpt: 'セクター比較' } },
+      basis: {
+        kind: 'non_available_fact_refs',
+        refs: [{ itemId: sector.itemId, factKey: sector.facts[0].factKey }],
+      },
+    }, 'セクター比較', oldManifest)).toThrow(EvaluationFindingValidationError);
+    const oldAccepted = validateEvaluationFindingWireV1({
+      category: 'not_verifiable_from_snapshot',
+      claimDomains: ['sector_benchmark_persisted_windows'],
+      importance: 'advisory',
+      summary: '旧schemaではセクター比較を確認できません。',
+      location: { kind: 'single_anchor', anchor: { start: 0, end: 6, excerpt: 'セクター比較' } },
+      basis: {
+        kind: 'manifest_absence', scopeRefs: ['sector_benchmark'],
+        reason: 'relevant_evidence_unavailable',
+      },
+    }, 'セクター比較', oldManifest);
+    expect(oldAccepted.basis.kind).toBe('manifest_absence');
+  });
+
   test('distinguishes outside scope and intentionally excluded persisted evidence', () => {
     const manifest = buildEvidenceManifestV1(comparisonSnapshot());
     const outside = validateEvaluationFindingWireV1({

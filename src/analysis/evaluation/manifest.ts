@@ -272,10 +272,20 @@ const SYNTHETIC_REASON = {
 
 function reasons(
   values: readonly Readonly<{ reason: string; detail?: string | null }>[] | undefined,
-  fallback: readonly EvidenceFactUnavailableReasonV1[] = SYNTHETIC_REASON.missing,
+  fallback: readonly EvidenceFactUnavailableReasonV1[] = [],
 ): readonly EvidenceFactUnavailableReasonV1[] {
   if (values === undefined || values.length === 0) return fallback;
   return values.map(value => ({ reason: value.reason, detail: null }));
+}
+
+function storedMetricReasons(
+  snapshot: AnalysisSnapshot,
+  section: string,
+  metric: string,
+): readonly EvidenceFactUnavailableReasonV1[] {
+  return reasons(snapshot.unavailable.filter(item => (
+    item.section === section && item.metric === metric
+  )));
 }
 
 function availableFact(
@@ -336,8 +346,20 @@ function scalarFact(
   dataDates: readonly NamedDataDateV1[] = [],
   unavailableReasons?: readonly EvidenceFactUnavailableReasonV1[],
 ): EvidenceFactV1 {
+  const exactReasons = unavailableReasons ?? [];
+  if (value !== null && value !== undefined && exactReasons.length > 0) {
+    throw new EvidenceManifestError('definition_contract_invalid', {
+      factKey,
+      unavailableReasons: exactReasons,
+    });
+  }
   return value === null || value === undefined
-    ? unavailableFact(factKey, unit, dataDates, unavailableReasons)
+    ? unavailableFact(
+        factKey,
+        unit,
+        dataDates,
+        exactReasons.length > 0 ? exactReasons : SYNTHETIC_REASON.missing,
+      )
     : availableFact(factKey, value, unit, dataDates);
 }
 
@@ -367,7 +389,8 @@ const ALLOWED_PROVENANCE_ROLES = new Set([
 ]);
 const ALLOWED_FACT_REASONS = new Set([
   'missing_metric_value', 'snapshot_section_unavailable', 'schema_predates_scope',
-  'schema_predates_instance', 'stored_not_collected', 'missing_or_invalid_price',
+  'schema_predates_instance', 'stored_not_collected', 'fundamental_source_missing',
+  'missing_or_invalid_price',
   'insufficient_financial_history', 'missing_or_invalid_eps', 'non_positive_eps',
   'missing_or_invalid_bps', 'non_positive_bps', 'missing_or_invalid_dividend',
   'missing_or_invalid_revenue', 'non_positive_revenue', 'invalid_fiscal_year_range',
@@ -726,7 +749,7 @@ function fundamentalItems(
     throw new EvidenceManifestError('collection_limit_exceeded', 'fundamental.periods');
   }
   const provenance = sectionProvenance(snapshot, 'fundamental');
-  return section.periods.map(period => {
+  return section.periods.map((period, periodIndex) => {
     const dataDates = [date('submit', period.submitDate)];
     const identity: ComparisonInstanceIdentityV1 = [{ name: 'fiscalYear', value: period.fiscalYear }];
     return buildItem(
@@ -738,6 +761,9 @@ function fundamentalItems(
         period[factKey],
         unit(snapshot, 'fundamental', factKey),
         dataDates,
+        periodIndex === section.periods.length - 1
+          ? storedMetricReasons(snapshot, 'fundamental', factKey)
+          : [],
       )),
       provenance,
     );
@@ -798,7 +824,10 @@ function peerItems(snapshot: AnalysisSnapshot, scope: EvidenceScopeV1): readonly
     const metricUnit = unit(snapshot, 'peerComparison', metric);
     const facts: readonly EvidenceFactV1[] = [
       availableFact('direction', position.direction, null, dataDates),
-      scalarFact('targetValue', position.targetValue, metricUnit, dataDates, reasons(metricReasons)),
+      scalarFact(
+        'targetValue', position.targetValue, metricUnit, dataDates,
+        reasons(metricReasons.filter(value => value.reason === 'missing_target_metric')),
+      ),
       scalarFact('median', position.median, metricUnit, dataDates, reasons(metricReasons)),
       scalarFact('rank', position.rank, unit(snapshot, 'peerComparison', 'rank'), dataDates, reasons(metricReasons)),
       scalarFact('percentile', position.percentile, unit(snapshot, 'peerComparison', 'percentile'), dataDates, reasons(metricReasons)),
@@ -948,7 +977,7 @@ function investorItems(snapshot: AnalysisSnapshot, scope: EvidenceScopeV1): read
   const provenance = sectionProvenance(snapshot, 'investorTypeFlows');
   const sectionDates = [date('section', section.dataDate)];
   if (section.period === null) {
-    const periodReasons = reasons(section.unavailable);
+    const periodReasons = reasons(section.unavailable, SYNTHETIC_REASON.missing);
     return [buildItem(
       'investor_type_flows', 'investorTypeFlows.period', [],
       [
@@ -1026,6 +1055,11 @@ function sectorBenchmarkItems(
   }
   const section = snapshot.sectorBenchmark;
   const unavailableReasons = reasons(section.unavailable);
+  const benchmarkReasons = reasons(section.unavailable.filter(value => (
+    value.reason === 'sector_classification_unavailable'
+    || value.reason === 'unsupported_sector'
+    || (value.reason === 'invalid_data' && section.benchmark === null)
+  )));
   const dates = [date('analysis_as_of', section.analysisAsOfDate), date('section', section.dataDate)];
   const provenance = directProvenance([
     { source: section.provenance.classification.source, role: 'sector_classification_data', asOfDate: section.benchmark?.classificationDate ?? null, endpoint: section.provenance.classification.endpoint },
@@ -1035,11 +1069,11 @@ function sectorBenchmarkItems(
   const benchmark = section.benchmark;
   const identityFacts: readonly EvidenceFactV1[] = [
     availableFact('analysisAsOfDate', section.analysisAsOfDate, null, dates),
-    scalarFact('benchmark.type', benchmark?.type, null, dates, unavailableReasons),
-    scalarFact('benchmark.sectorCode', benchmark?.sectorCode, null, dates, unavailableReasons),
-    scalarFact('benchmark.sectorName', benchmark?.sectorName, null, dates, unavailableReasons),
-    scalarFact('benchmark.indexCode', benchmark?.indexCode, null, dates, unavailableReasons),
-    scalarFact('benchmark.classificationDate', benchmark?.classificationDate, null, dates, unavailableReasons),
+    scalarFact('benchmark.type', benchmark?.type, null, dates, benchmarkReasons),
+    scalarFact('benchmark.sectorCode', benchmark?.sectorCode, null, dates, benchmarkReasons),
+    scalarFact('benchmark.sectorName', benchmark?.sectorName, null, dates, benchmarkReasons),
+    scalarFact('benchmark.indexCode', benchmark?.indexCode, null, dates, benchmarkReasons),
+    scalarFact('benchmark.classificationDate', benchmark?.classificationDate, null, dates, benchmarkReasons),
     scalarFact('dataDate', section.dataDate, null, dates, unavailableReasons),
     availableFact('alignedPriceCount', section.alignedPriceCount, 'count', dates),
   ];
@@ -1058,7 +1092,10 @@ function sectorBenchmarkItems(
     ];
     const facts = matches.length === 0
       ? CORRELATION_FACT_KEYS.map(key => unavailableFact(
-        key, section.units[key as keyof typeof section.units] ?? null, dates, unavailableReasons,
+        key,
+        section.units[key as keyof typeof section.units] ?? null,
+        dates,
+        unavailableReasons.length > 0 ? unavailableReasons : SYNTHETIC_REASON.missing,
       ))
       : correlationFacts(matches[0], section.units);
     items.push(buildItem(
@@ -1088,6 +1125,11 @@ function sectorShortItems(
     throw new EvidenceManifestError('collection_limit_exceeded', 'sectorShortRatio.observations');
   }
   const sectionReasons = reasons(section.unavailable);
+  const classificationReasons = reasons(section.unavailable.filter(value => (
+    value.reason === 'sector_classification_unavailable'
+    || value.reason === 'unsupported_sector'
+    || (value.reason === 'invalid_data' && section.sector === null)
+  )));
   const sectionDates = [date('analysis_as_of', section.analysisAsOfDate), date('section', section.dataDate)];
   const provenance = directProvenance([
     ...(section.provenance.classification === null ? [] : [{
@@ -1107,9 +1149,9 @@ function sectorShortItems(
   const identityFacts: readonly EvidenceFactV1[] = [
     availableFact('analysisAsOfDate', section.analysisAsOfDate, null, sectionDates),
     availableFact('issuerCode', section.issuerCode, null, sectionDates),
-    scalarFact('sector.classificationDate', section.sector?.classificationDate, null, sectionDates, sectionReasons),
-    scalarFact('sector.sectorCode', section.sector?.sectorCode, null, sectionDates, sectionReasons),
-    scalarFact('sector.sectorName', section.sector?.sectorName, null, sectionDates, sectionReasons),
+    scalarFact('sector.classificationDate', section.sector?.classificationDate, null, sectionDates, classificationReasons),
+    scalarFact('sector.sectorCode', section.sector?.sectorCode, null, sectionDates, classificationReasons),
+    scalarFact('sector.sectorName', section.sector?.sectorName, null, sectionDates, classificationReasons),
     scalarFact('dataDate', section.dataDate, null, sectionDates, sectionReasons),
     availableFact('observationCount', section.observations.length, 'count', sectionDates),
   ];
@@ -1118,14 +1160,18 @@ function sectorShortItems(
     'sector_short_ratio_engine', 'Persisted observations only; no source-totality claim.',
   )];
   for (const observation of section.observations) {
-    const observationReasons = reasons(observation.unavailable);
     const dates = [date('section', observation.date)];
     const facts = SECTOR_SHORT_OBSERVATION_FACT_KEYS.map(factKey => scalarFact(
       factKey,
       observation[factKey],
       section.units[factKey],
       dates,
-      observationReasons,
+      reasons(observation.unavailable.filter(value => (
+        value.reason === 'zero_total_selling_value'
+          ? factKey === 'shortSellingRatio'
+          : ['shortSellingValue', 'totalSellingValue', 'shortSellingRatio'].includes(factKey)
+            || observation[factKey] === null
+      ))),
     ));
     items.push(buildItem(
       'sector_short_ratio', 'sectorShortRatio.observation', [{ name: 'date', value: observation.date }],
@@ -1166,6 +1212,9 @@ function advancedDividendItems(
   ]);
   const dates = [date('analysis_as_of', section.analysisAsOfDate), date('section', section.dataDate)];
   const eventReasons = reasons(section.unavailable.filter(value => value.scope === 'event'));
+  if (section.events !== null && eventReasons.length > 0) {
+    throw new EvidenceManifestError('definition_contract_invalid', 'advancedDividend.events');
+  }
   const identityFacts: readonly EvidenceFactV1[] = [
     availableFact('analysisAsOfDate', section.analysisAsOfDate, null, dates),
     availableFact('collectedAt', section.collectedAt, null, dates),
@@ -1173,10 +1222,16 @@ function advancedDividendItems(
     scalarFact('dataDate', section.dataDate, null, dates),
     availableFact('fiscalObservationCount', section.observations.length, 'count', dates),
     section.events === null
-      ? unavailableFact('eventCollectionAvailable', null, dates, eventReasons)
+      ? unavailableFact(
+          'eventCollectionAvailable', null, dates,
+          eventReasons.length > 0 ? eventReasons : SYNTHETIC_REASON.missing,
+        )
       : availableFact('eventCollectionAvailable', true, null, dates),
     section.events === null
-      ? unavailableFact('eventCount', 'count', dates, eventReasons)
+      ? unavailableFact(
+          'eventCount', 'count', dates,
+          eventReasons.length > 0 ? eventReasons : SYNTHETIC_REASON.missing,
+        )
       : availableFact('eventCount', section.events.length, 'count', dates),
   ];
   const items: EvidenceItemV1[] = [buildItem(
@@ -1253,6 +1308,16 @@ function volumeProfileItems(
   }
   const section = snapshot.volumeProfile;
   const unavailableReasons = reasons(section.unavailable);
+  const basisReasons = reasons(section.unavailable.filter(value => (
+    value.reason === 'corporate_action_basis_unavailable'
+  )));
+  const unavailableProfileFactKeys = new Set<string>([
+    'binningMethod.minPrice', 'binningMethod.maxPrice',
+    'poc.binIndex', 'poc.price', 'poc.allocatedVolume', 'poc.volumeShare',
+    'valueArea.targetVolumeShare', 'valueArea.achievedVolumeShare',
+    'valueArea.val', 'valueArea.vah', 'valueArea.firstBinIndex',
+    'valueArea.lastBinIndex',
+  ]);
   const dates = [
     date('analysis_as_of', section.analysisAsOfDate), date('section', section.dataDate),
     date('window_start', section.windowStartDate), date('window_end', section.windowEndDate),
@@ -1298,9 +1363,16 @@ function volumeProfileItems(
     'methodology.approximation': { value: section.methodology.approximation, unit: null },
     'methodology.actualHolderCostBasis': { value: section.methodology.actualHolderCostBasis, unit: null },
   };
-  const facts = VOLUME_PROFILE_FACT_KEYS.map(factKey => scalarFact(
-    factKey, values[factKey].value, values[factKey].unit, dates, unavailableReasons,
-  ));
+  const facts = VOLUME_PROFILE_FACT_KEYS.map(factKey => {
+    const factReasons = unavailableProfileFactKeys.has(factKey)
+      ? unavailableReasons
+      : factKey === 'priceBasis' || factKey === 'volumeBasis'
+        ? basisReasons
+        : [];
+    return scalarFact(
+      factKey, values[factKey].value, values[factKey].unit, dates, factReasons,
+    );
+  });
   return [buildItem(
     'volume_profile_summary', 'volumeProfile.summary', [], facts, provenance,
     section.methodology.id, 'Summary only; bins are intentionally excluded.',
@@ -1380,6 +1452,7 @@ function allowedReasonsForDefinition(definitionKey: string): ReadonlySet<string>
     'non_positive_bps', 'missing_or_invalid_dividend', 'missing_or_invalid_revenue',
     'non_positive_revenue', 'invalid_fiscal_year_range',
   );
+  else if (definitionKey === 'fundamental.period') add('fundamental_source_missing');
   else if (definitionKey === 'snapshot.identity') add('schema_predates_instance');
   else if (definitionKey.startsWith('technical.')) add('engine_reported_unavailable');
   else if (definitionKey.startsWith('advancedTechnical.')) add(

@@ -132,6 +132,7 @@ function sameDomains(
 type ResolvedFactRef = Readonly<{
   ref: EvidenceFactRefV1;
   item: EvidenceItemV1;
+  itemIndex: number;
   factIndex: number;
   state: 'available' | 'unavailable' | 'not_collected';
 }>;
@@ -143,8 +144,6 @@ function resolveFactRefs(
   const itemById = new Map(manifest.items.map(item => [item.itemId, item]));
   const refs: ResolvedFactRef[] = [];
   const seen = new Set<string>();
-  let previousItem = -1;
-  let previousFact = -1;
   for (const ref of basis.refs) {
     const item = itemById.get(ref.itemId);
     if (item === undefined) {
@@ -153,14 +152,10 @@ function resolveFactRefs(
     const itemIndex = manifest.items.indexOf(item);
     const factIndex = item.facts.findIndex(fact => fact.factKey === ref.factKey);
     const key = `${ref.itemId}\u0000${ref.factKey}`;
-    if (
-      factIndex < 0
-      || seen.has(key)
-      || itemIndex < previousItem
-      || (itemIndex === previousItem && factIndex <= previousFact)
-    ) {
+    if (factIndex < 0) {
       throw new EvaluationFindingValidationError('evidence_reference_invalid', ref);
     }
+    if (seen.has(key)) continue;
     const fact = item.facts[factIndex];
     if (
       (basis.kind === 'available_fact_refs' && fact.state !== 'available')
@@ -168,12 +163,12 @@ function resolveFactRefs(
     ) {
       throw new EvaluationFindingValidationError('evidence_reference_invalid', ref);
     }
-    refs.push({ ref, item, factIndex, state: fact.state });
+    refs.push({ ref, item, itemIndex, factIndex, state: fact.state });
     seen.add(key);
-    previousItem = itemIndex;
-    previousFact = factIndex;
   }
-  return refs;
+  return refs.sort((left, right) => (
+    left.itemIndex - right.itemIndex || left.factIndex - right.factIndex
+  ));
 }
 
 function validateFactBasis(
@@ -182,10 +177,40 @@ function validateFactBasis(
   manifest: EvidenceManifestV1,
 ): void {
   const refs = resolveFactRefs(basis, manifest);
+  const scopeById = new Map(manifest.scopes.map(scope => [scope.scopeId, scope]));
+  if (basis.kind === 'non_available_fact_refs' && refs.some(value => {
+    const scope = scopeById.get(value.item.scopeId);
+    return scope === undefined
+      || scope.state !== 'available'
+      || scope.coverage !== 'complete_for_domain';
+  })) {
+    throw new EvaluationFindingValidationError('evidence_reference_invalid', basis);
+  }
   const reached = new Set(refs.map(value => EVIDENCE_SCOPE_DOMAIN_V1[value.item.scopeId]));
   if (!sameDomains(reached, finding.claimDomains)) {
     throw new EvaluationFindingValidationError('evidence_reference_invalid', basis);
   }
+}
+
+function canonicalizeEvidenceBasis(
+  finding: EvaluationFindingWireV1,
+  manifest: EvidenceManifestV1,
+): EvaluationFindingWireV1 {
+  const basis = finding.basis;
+  if (basis.kind === 'available_fact_refs' || basis.kind === 'non_available_fact_refs') {
+    const refs = resolveFactRefs(basis, manifest).map(value => value.ref);
+    return { ...finding, basis: { kind: basis.kind, refs } } as EvaluationFindingWireV1;
+  }
+  if (basis.kind === 'manifest_absence') {
+    const scopeRefs = [...new Set(basis.scopeRefs)].sort((left, right) => (
+      EVIDENCE_SCOPE_IDS.indexOf(left) - EVIDENCE_SCOPE_IDS.indexOf(right)
+    ));
+    return {
+      ...finding,
+      basis: { kind: basis.kind, scopeRefs, reason: basis.reason },
+    } as EvaluationFindingWireV1;
+  }
+  return finding;
 }
 
 function validateAbsenceBasis(
@@ -319,17 +344,18 @@ export function validateEvaluationFindingWireV1(
   if (!parsed.success) {
     throw new EvaluationFindingValidationError('output_schema_invalid', parsed.error);
   }
-  const finding = parsed.data;
-  if (finding.summary.trim() !== finding.summary) {
+  const parsedFinding = parsed.data;
+  if (parsedFinding.summary.trim() !== parsedFinding.summary) {
     throw new EvaluationFindingValidationError('output_schema_invalid', 'summary whitespace');
   }
   assertRegistryOrder(
-    finding.claimDomains,
+    parsedFinding.claimDomains,
     EVIDENCE_CLAIM_DOMAINS,
     'evidence_reference_invalid',
   );
-  validateLocation(finding.location, report);
+  validateLocation(parsedFinding.location, report);
   const manifest = validateEvidenceManifestV1(rawManifest);
+  const finding = canonicalizeEvidenceBasis(parsedFinding, manifest);
   validateCategoryBasis(finding, manifest);
   const withId = { ...finding, findingId: createFindingId(finding) };
   const complete = EvaluationFindingV1Schema.safeParse(withId);

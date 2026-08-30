@@ -1,9 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  comparisonInput,
   comparisonSnapshot,
   snapshotAtVersion,
 } from '../comparison/test-fixtures.js';
+import { buildAnalysisSnapshot } from '../snapshot/builder.js';
 import type { AnalysisSnapshotV9 } from '../snapshot/schema.js';
+import { analyzePeerComparison } from '../../tools/finance/peer-comparison-engine.js';
 import {
   buildEvidenceManifestV1,
   createEvidenceItemIdV1,
@@ -189,6 +192,138 @@ describe('Evidence Manifest V1', () => {
       unavailableReasons: [{ reason: 'missing_or_invalid_eps', detail: null }],
     });
     expect(JSON.stringify(manifest)).not.toContain('private');
+  });
+
+  test('preserves exact custom reasons and rejects available facts paired with them', () => {
+    const fundamentalInput = comparisonInput();
+    if (fundamentalInput.fundamental === null) throw new Error('expected fundamental fixture');
+    fundamentalInput.fundamental.periods[0].revenue = null;
+    fundamentalInput.fundamental.periods[0].roe = 0;
+    fundamentalInput.additionalUnavailable.push({
+      section: 'fundamental', metric: 'revenue', reason: 'fundamental_source_missing',
+    });
+    const fundamentalManifest = buildEvidenceManifestV1(buildAnalysisSnapshot(fundamentalInput));
+    const fundamental = fundamentalManifest.items.find(item => (
+      item.definitionKey === 'fundamental.period'
+    ));
+    expect(fundamental?.facts.find(fact => fact.factKey === 'revenue')).toMatchObject({
+      state: 'unavailable', value: null,
+      unavailableReasons: [{ reason: 'fundamental_source_missing', detail: null }],
+    });
+    expect(fundamental?.facts.find(fact => fact.factKey === 'roe')).toMatchObject({
+      state: 'available', value: 0, unavailableReasons: [],
+    });
+
+    const fundamentalContradiction = comparisonInput();
+    fundamentalContradiction.additionalUnavailable.push({
+      section: 'fundamental', metric: 'revenue', reason: 'fundamental_source_missing',
+    });
+    expect(() => buildEvidenceManifestV1(buildAnalysisSnapshot(fundamentalContradiction)))
+      .toThrow(EvidenceManifestError);
+
+    const strategyInput = comparisonInput();
+    if (strategyInput.strategy === null) throw new Error('expected strategy fixture');
+    strategyInput.strategy.entry = null;
+    strategyInput.strategy.candidates = [];
+    strategyInput.strategy.unavailable.push({
+      candidate: 'entry', reason: 'missing_entry',
+    });
+    const strategyManifest = buildEvidenceManifestV1(buildAnalysisSnapshot(strategyInput));
+    const strategy = strategyManifest.items.find(item => item.definitionKey === 'strategy.entry');
+    expect(strategy?.facts.find(fact => fact.factKey === 'entry.price')).toMatchObject({
+      state: 'unavailable', value: null,
+      unavailableReasons: [{ reason: 'missing_entry', detail: null }],
+    });
+
+    const strategyContradiction = comparisonInput();
+    if (strategyContradiction.strategy === null) throw new Error('expected strategy fixture');
+    strategyContradiction.strategy.unavailable.push({
+      candidate: 'entry', reason: 'missing_entry',
+    });
+    expect(() => buildEvidenceManifestV1(buildAnalysisSnapshot(strategyContradiction)))
+      .toThrow(EvidenceManifestError);
+  });
+
+  test('keeps grouped sibling facts available when exact reasons apply only to nullable facts', () => {
+    const peerInput = comparisonInput();
+    peerInput.peerComparison = analyzePeerComparison({
+      id: '7203', name: 'トヨタ自動車株式会社', sector: '輸送用機器', marketCap: 1_000,
+      dataDate: '2026-08-21',
+      metrics: {
+        per: 15, pbr: 1.2, roe: 12, roic: 10, operatingMargin: 8,
+        revenueGrowth: 5, dividendYield: 2.5,
+      },
+    }, []);
+    peerInput.peerCandidateMarketCapsComplete = true;
+    const peerManifest = buildEvidenceManifestV1(buildAnalysisSnapshot(peerInput));
+    const per = peerManifest.items.find(item => (
+      item.definitionKey === 'peerComparison.position'
+      && item.instanceIdentity.some(value => value.name === 'metric' && value.value === 'per')
+    ));
+    expect(per?.facts.find(fact => fact.factKey === 'targetValue')).toMatchObject({
+      state: 'available', value: 15,
+    });
+    expect(per?.facts.find(fact => fact.factKey === 'median')).toMatchObject({
+      state: 'unavailable',
+      unavailableReasons: [{ reason: 'insufficient_peer_data', detail: null }],
+    });
+
+    const sectorInput = comparisonInput();
+    if (sectorInput.sectorBenchmark === null) throw new Error('expected sector fixture');
+    sectorInput.sectorBenchmark.dataDate = null;
+    sectorInput.sectorBenchmark.alignedPriceCount = 0;
+    sectorInput.sectorBenchmark.windows = [];
+    sectorInput.sectorBenchmark.unavailable = [{ reason: 'no_sector_index_data' }];
+    const sectorManifest = buildEvidenceManifestV1(buildAnalysisSnapshot(sectorInput));
+    const sector = sectorManifest.items.find(item => item.definitionKey === 'sectorBenchmark.identity');
+    expect(sector?.facts.find(fact => fact.factKey === 'benchmark.sectorCode')).toMatchObject({
+      state: 'available', value: '3700',
+    });
+    expect(sector?.facts.find(fact => fact.factKey === 'dataDate')).toMatchObject({
+      state: 'unavailable',
+      unavailableReasons: [{ reason: 'no_sector_index_data', detail: null }],
+    });
+
+    const dividendInput = comparisonInput();
+    if (dividendInput.advancedDividend === null || dividendInput.advancedDividend.events === null) {
+      throw new Error('expected dividend fixture');
+    }
+    for (const event of dividendInput.advancedDividend.events) {
+      event.ordinaryDividendPerShare = null;
+      event.commemorativeDividendPerShare = null;
+      event.specialDividendPerShare = null;
+    }
+    dividendInput.advancedDividend.unavailable.push({
+      scope: 'component', reason: 'component_breakdown_unavailable',
+    });
+    const dividendManifest = buildEvidenceManifestV1(buildAnalysisSnapshot(dividendInput));
+    const dividend = dividendManifest.items.find(item => item.definitionKey === 'advancedDividend.event');
+    expect(dividend?.facts.find(fact => fact.factKey === 'dividendPerShare')).toMatchObject({
+      state: 'available', value: 50,
+    });
+    expect(dividend?.facts.find(fact => fact.factKey === 'ordinaryDividendPerShare')).toMatchObject({
+      state: 'unavailable',
+      unavailableReasons: [{ reason: 'component_breakdown_unavailable', detail: null }],
+    });
+
+    const volumeInput = comparisonInput();
+    if (volumeInput.volumeProfile === null) throw new Error('expected volume fixture');
+    volumeInput.volumeProfile.bins = null;
+    volumeInput.volumeProfile.poc = null;
+    volumeInput.volumeProfile.valueArea = null;
+    volumeInput.volumeProfile.binningMethod.effectiveBinCount = 0;
+    volumeInput.volumeProfile.binningMethod.minPrice = null;
+    volumeInput.volumeProfile.binningMethod.maxPrice = null;
+    volumeInput.volumeProfile.unavailable = [{ scope: 'profile', reason: 'zero_total_volume' }];
+    const volumeManifest = buildEvidenceManifestV1(buildAnalysisSnapshot(volumeInput));
+    const volume = volumeManifest.items.find(item => item.definitionKey === 'volumeProfile.summary');
+    expect(volume?.facts.find(fact => fact.factKey === 'dataDate')).toMatchObject({
+      state: 'available', value: '2026-08-21',
+    });
+    expect(volume?.facts.find(fact => fact.factKey === 'poc.price')).toMatchObject({
+      state: 'unavailable',
+      unavailableReasons: [{ reason: 'zero_total_volume', detail: null }],
+    });
   });
 
   test('groups every maximum collection into exactly 343 items without source URLs', () => {
