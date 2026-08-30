@@ -301,9 +301,10 @@ sector, stratified, and rolling reassignment are prohibited.
 
 Before locked labels are read, freeze and digest the source manifest, observation
 universe, feature mapping, candidate version, target version, split assignment,
-evaluation code commit, deterministic seed, and complete development report. Locked
-labels remain in a separately identified local artifact and normal CI never reads
-them.
+evaluation code commit, `sha256_moving_block_months_v1` algorithm identity,
+`bootstrapSeedV1`, and complete development report. Section 7.3 defines the exact
+seed derivation; an independently chosen random seed is prohibited. Locked labels
+remain in a separately identified local artifact and normal CI never reads them.
 
 The locked split may be unsealed once for this candidate version. A crash before any
 locked label is read may be retried from the same immutable inputs. Any partial or
@@ -345,16 +346,123 @@ These are ranking diagnostics, not an investable portfolio or a trading instruct
 No issuer is shorted, bought, or assigned an action by the product.
 
 Across months, report the arithmetic mean, median, standard deviation, positive-month
-fraction, and a two-sided 95% moving-block-bootstrap confidence interval. Resample
-whole months in consecutive blocks of four and use 10,000 replicates. For every
-replicate and required block, derive the block-start index from the first unsigned
-64-bit big-endian word of
-`SHA-256(campaignId + ":" + statisticId + ":" + replicateIndex + ":" + blockIndex)`,
-modulo the number of valid starts. Concatenate blocks and truncate to the original
-month count. Use the sorted replicate values at zero-based indices 249 and 9749 as
-the percentile interval endpoints. The four-month block covers overlap in the
-60-session target. The same resampled month indices and `statisticId` are used for
-paired candidate-minus-baseline statistics.
+fraction, and a two-sided 95% moving-block-bootstrap confidence interval under
+section 7.3. The confidence interval is for the arithmetic mean; the other summaries
+are point estimates. The four-month block covers overlap in the 60-session target.
+
+### 7.3 Bootstrap identity and reproducibility
+
+The exact algorithm identity is `sha256_moving_block_months_v1`. `campaignId` is a
+lowercase, hyphenated UUIDv4 string. Derive and persist the only permitted seed as:
+
+```text
+bootstrapSeedV1 = "sha256:" + lowercaseHex(
+  SHA-256(UTF-8(
+    "dexter-jp-score-evaluation-bootstrap-v1\n" + campaignId
+  ))
+)
+```
+
+There is no trailing newline in the seed input. A verifier must recompute the seed
+from `campaignId` and reject a manifest whose persisted value differs. Do not add a
+random seed, use `campaignId` directly as a seed, or use a runtime PRNG.
+
+Every bootstrapped statistic has this exact ASCII identifier grammar:
+
+```text
+score_eval_v1/<series>/<target>/<population>/<label>/<peer>/<measure>
+```
+
+The closed component registry is:
+
+| Component | Exact values |
+| --- | --- |
+| `series` | `candidate`, `single_per`, `single_pbr`, `single_roe`, `single_roic`, `single_operating_margin`, `single_revenue_growth`, `single_dividend_yield`, `best_single`, `candidate_minus_best_single` |
+| `target` | `t20`, `t60`, `t120` |
+| `population` | `all`, `liquidity_above_bottom_quintile` |
+| `label` | `raw`, `winsorized_01_99` |
+| `peer` | `peer_min_5`, `peer_min_8` |
+| `measure` | `mean_monthly_spearman`, `mean_top_minus_bottom` |
+
+Primary candidate and single-metric baseline reports use
+`t60/all/raw/peer_min_5`. The section 8.2 candidate report uses the full Cartesian
+product of the registered target, population, label, and peer values. The one paired
+primary statistic uses exactly:
+
+```text
+score_eval_v1/candidate_minus_best_single/t60/all/raw/peer_min_5/mean_monthly_spearman
+```
+
+The Gate 3 confidence intervals map to exact IDs as follows:
+
+| Gate 3 measure | Exact `statisticId` |
+| --- | --- |
+| mean monthly primary-target candidate Spearman | `score_eval_v1/candidate/t60/all/raw/peer_min_5/mean_monthly_spearman` |
+| mean primary 60-session candidate top-minus-bottom, including the no-score comparison | `score_eval_v1/candidate/t60/all/raw/peer_min_5/mean_top_minus_bottom` |
+| mean paired candidate-minus-best-single Spearman | `score_eval_v1/candidate_minus_best_single/t60/all/raw/peer_min_5/mean_monthly_spearman` |
+
+For the Gate 3 no-score spread, the no-score monthly spread is exactly zero, so the
+gate reuses the candidate's exact primary statistic and confidence interval:
+
+```text
+score_eval_v1/candidate/t60/all/raw/peer_min_5/mean_top_minus_bottom
+```
+
+Do not create a second alias or bootstrap sample for the mathematically identical
+difference. A paired candidate-minus-best-single series subtracts the two monthly
+values first, using the exact same aligned months, and then bootstraps that difference
+vector under its paired statistic ID.
+
+For one `statisticId`, order its finite monthly values by ascending anchor date and
+let `monthCount` be that vector length. Use:
+
+```text
+blockLength = 4
+replicateCount = 10000
+requiredBlockCount = ceil(monthCount / blockLength)
+validStartCount = monthCount - blockLength + 1
+```
+
+`monthCount < 4` is a protocol failure. `replicateIndex` is zero-based from `0`
+through `9999`; `blockIndex` is zero-based from `0` through
+`requiredBlockCount - 1`. Encode each index as unsigned base-10 ASCII without a sign,
+leading zero, or surrounding whitespace. For every replicate and block, form the
+exact UTF-8 byte sequence, with ASCII LF separators and no trailing LF:
+
+```text
+bootstrapSeedV1 + "\n"
+  + statisticId + "\n"
+  + decimal(replicateIndex) + "\n"
+  + decimal(blockIndex)
+```
+
+Take the first eight SHA-256 digest bytes as one unsigned 64-bit big-endian integer.
+The start index is that integer modulo `validStartCount`, in the inclusive range
+`0..monthCount - 4`. Append the four consecutive monthly positions beginning there.
+After all required blocks are appended, truncate the resample to `monthCount`.
+
+Calculate the requested mean for every resample. Sort the 10,000 finite replicate
+means in ascending numeric order and use zero-based positions 249 and 9749 as the
+95% percentile interval. Non-finite input or output is a protocol failure.
+
+The normative golden vector is:
+
+```text
+campaignId:
+  00000000-0000-4000-8000-000000000001
+bootstrapSeedV1:
+  sha256:42e269a96e93a67f7f2cbda86d96f26442ce597962f3be7050838f97b441f67b
+statisticId:
+  score_eval_v1/candidate/t60/all/raw/peer_min_5/mean_monthly_spearman
+monthCount: 24
+replicate 0 block starts: [12, 7, 1, 7, 7, 9]
+replicate 1 block starts: [14, 10, 12, 14, 11, 4]
+monthly test vector: [1, 2, ..., 24]
+95% interval for the resampled mean: [184 / 24, 416 / 24]
+```
+
+Future Phase 4 tests must reproduce the seed, both block-start vectors, and both
+exact rational interval numerators before any development or locked report is valid.
 
 ## 8. Calibration and sensitivity
 
@@ -515,7 +623,8 @@ At minimum, the immutable campaign manifest records:
 - eligible issue-type allowlist and issuer-identity mapping version;
 - peer Engine source commit and all calculation-version identities;
 - observation, feature, label, exclusion-ledger, and code-commit digests;
-- deterministic bootstrap seed;
+- `sha256_moving_block_months_v1`, recomputed `bootstrapSeedV1`, the exact statistic
+  IDs executed, and the selected `best_single_metric_v1` metric identity;
 - development report digest and locked-unseal state; and
 - cost/request cap and actual source request count/cost.
 
@@ -566,8 +675,10 @@ Each implementation PR must run `bun test`, `bun run typecheck`, and
 missing, invalid, zero, duplicate, chronology, future-injection, split-boundary,
 corporate-action, identity-transition, and delisting cases. S2/S4 statistical tests
 must verify hand-calculable ranks, ties, groups, bootstrap determinism, paired
-statistics, coverage, and every gate boundary. Normal CI never accesses locked data
-or external APIs.
+statistics, coverage, and every gate boundary. The bootstrap suite must reproduce the
+section 7.3 golden seed, block starts, and exact CI numerators, and must reject an
+altered seed, statistic ID, encoding, index base, or block count. Normal CI never
+accesses locked data or external APIs.
 
 ## 13. P3-C0 acceptance and deferred scope
 
