@@ -8,6 +8,9 @@ history
 
 **Baseline identity:** PR #73 merge; Dashboard UX closeout complete
 
+**Merged implementation baseline before P3-X:**
+`656781ae197a4480f90e9be964cebeb37e8449d0` (PR #82 merge; P3-C0 complete)
+
 **Date:** 2026-08-30
 
 ## 1. Purpose and authority
@@ -2474,14 +2477,42 @@ Self-review verifies:
 - reviewable step boundaries; and
 - Handoff remains non-normative and does not claim approval.
 
-## 14. Next task after merge
+## 14. P3-X final closeout contract
 
-After the exact P3-EF head passes independent review and is merged:
+P3-C0 is merged at the implementation baseline recorded above. P3-X is a docs-only
+closeout and changes only:
 
-```text
-P3-C0 — Create docs/PHASE3_SCORE_EVALUATION_PLAN.md only
-```
+- `Usage.md` to document the implemented immutable-history, Comparison, Radar, URL,
+  and read-only API behavior plus the deferred boundaries;
+- this plan to replace the stale next-step instruction with the closeout contract;
+  and
+- `docs/PHASE3_HANDOFF.md` to record the merged Phase 3 baseline through P3-C0 and
+  the Phase 4 boundary.
 
-Implement only the composite-score evaluation design. Do not add a runtime score,
-weight, Snapshot field, Dashboard score, Evaluator runtime/API/UI, PDF, Snapshot V10,
-or source fetch in P3-C0.
+`docs/USER_SETUP.md` is inspected but does not change because Phase 3 introduced no
+new required runtime, dependency, credential, environment variable, font, or browser
+installation. P3-X changes no code, dependency, Snapshot/API/UI contract, or
+historical predecessor plan.
+
+P3-X must:
+
+1. verify `Usage.md` against the merged repository and tests rather than the design
+   candidate;
+2. record the immutable merged PR/commit history through P3-C0 while keeping the
+   current P3-X approval, CI, and merge state dependent on GitHub and
+   `docs/REVIEW_POLICY.md`;
+3. run the full regression, type-check, diff check, and Dashboard Playwright suite;
+4. confirm V9 writer/V1–V9 readability, five tabs, GET-only Dashboard, and valid
+   zero/unavailable/not-collected behavior remain unchanged;
+5. confirm no Evaluator runtime/CLI/API/UI/provider dispatch, runtime score,
+   PDF/export surface, Snapshot V10, new signal, credential, or `.dexter` artifact is
+   introduced; and
+6. publish one independently reviewable Draft PR from fast-forwarded `main`.
+
+The P3-X candidate must not describe itself as merged or declare Phase 3 complete.
+After that exact head passes independent review, is merged, and local `main` is
+fast-forwarded to `origin/main`, the Section 12 Done conditions are satisfied and no
+further Phase 3 feature step remains. Any score experiment or product adoption is
+Phase 4 work under `docs/PHASE3_SCORE_EVALUATION_PLAN.md` plus a separate reviewed
+implementation plan; deferred Evaluator or PDF work requires its own independent
+plan rather than reopening Phase 3.

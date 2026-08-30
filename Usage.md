@@ -17,11 +17,18 @@ Local Dashboard起動
 Analysis Watchlist
         ↓
 Single Stock Dashboard
+        ├─ 保存済み分析の比較
+        └─ 保存済みPeer percentileのRadar
 ```
 
 Phase 1.5ではSnapshot、JSON persistence、Read-only API、Single Stock Dashboard、
 Analysis Watchlistを順に追加しました。これは実装stepの呼称であり、現在の
 `schemaVersion`とは別です。
+
+Phase 3では、同一銘柄のimmutableな保存済みSnapshot 2件を比較する機能と、既存の
+7つのPeer percentileを表示するRadarを追加しました。どちらも保存済み値を読む
+Dashboard機能であり、外部sourceの再取得、再分析、Snapshot変更、売買判断は行いません。
+総合スコアは評価計画だけを定義し、runtime scoreは実装していません。
 
 現在のSnapshot compatibilityは以下です。
 
@@ -250,8 +257,8 @@ Standard Agentによるcomprehensive analysisが正常終了すると、分析�
 .dexter/
 └─ analysis/
    └─ <ticker>/
-      ├─ latest.json
-      └─ <snapshotId>.json
+      ├─ <snapshotId>.json
+      └─ ...
 ```
 
 7203の場合:
@@ -260,8 +267,8 @@ Standard Agentによるcomprehensive analysisが正常終了すると、分析�
 .dexter/
 └─ analysis/
    └─ 7203/
-      ├─ latest.json
       ├─ 2026-08-23T01-02-03-000Z.json
+      ├─ 2026-08-30T01-02-03-000Z.json
       └─ ...
 ```
 
@@ -281,19 +288,20 @@ Standard Agentによるcomprehensive analysisが正常終了すると、分析�
 
 ---
 
-# 7. latest.json と history
+# 7. authoritative latest と immutable history
 
-## latest.json
+## Authoritative latest
 
-そのtickerについて最後に正常保存されたSnapshotです。
+そのtickerの最新Snapshotは、validなhistory全件から`generatedAtEpochMs`が最大の
+ものを選んで解決します。filename文字列やdirectory列挙順では決めません。
 
-```text
-.dexter/analysis/7203/latest.json
-```
+新しいV9 saveはhistory fileだけをcreate-onlyで公開し、`latest.json`を書きません。
+既存環境にlegacy `latest.json`があっても、historyが1件以上あるtickerではlatest
+選択に使用しません。historyが0件のlegacy tickerに限りread fallbackとして使います。
 
-Dashboardのdetail画面は基本的にこのSnapshotを表示します。
+Dashboard detail、Watchlist、latest GETは同じauthoritative resolutionを使用します。
 
-## History
+## Immutable history
 
 分析を実行するたびにWindows-safeなtimestamp名で履歴が残ります。
 
@@ -303,7 +311,9 @@ Dashboardのdetail画面は基本的にこのSnapshotを表示します。
 2026-08-23T01-02-03-000Z.json
 ```
 
-history保存後に`latest.json`が更新されます。
+historyはcreate-onlyです。同一Snapshot ID・同一canonical payloadの再saveだけは
+idempotentですが、同一IDに異なるpayloadを保存しようとするとcollisionとして拒否
+され、既存fileは上書きされません。古いV1〜V8 historyもrewrite/backfillしません。
 
 ---
 
@@ -439,7 +449,9 @@ V5ではroot画面がAnalysis Watchlistになっています。
 http://127.0.0.1:3000/
 ```
 
-`.dexter/analysis/`に保存されている各tickerの`latest.json`が一覧表示されます。
+`.dexter/analysis/`に保存されている各tickerについて、immutable historyから解決した
+authoritative latestが一覧表示されます。historyがないlegacy tickerだけは
+`latest.json` fallbackを使用します。
 
 表示項目:
 
@@ -584,9 +596,9 @@ Browserのback / forward操作にも対応しています。
 
 ## 保存済みSnapshotを再読み込みする
 
-detail画面の`保存済みSnapshotを再読み込み`は、ローカルに保存済みのlatest Snapshotを
-GET APIから読み直すだけです。外部ソースからの最新データ取得、Agent／LLMの実行、
-再分析、Snapshot保存は行いません。
+detail画面の`保存済みSnapshotを再読み込み`は、ローカルのimmutable historyから
+authoritative latest Snapshotを解決してGET APIから読み直すだけです。外部ソースからの
+最新データ取得、Agent／LLMの実行、再分析、Snapshot保存は行いません。
 
 CLIで同じ銘柄を再分析して新しいSnapshotを保存した後、その保存結果を現在のタブへ
 反映したい場合に使用します。再読み込みに失敗した場合も、現在表示中のSnapshotは維持
@@ -616,6 +628,28 @@ PBR
 ROE
 Trend
 ```
+
+## 5つのタブとURL state
+
+detail画面は次の5タブで構成されます。
+
+| tab ID | 表示label | 主な内容 |
+| --- | --- | --- |
+| `report` | 概要・レポート | 保存済み分析の比較、Final Report |
+| `technical` | 株価・テクニカル | 価格、テクニカル、Strategy |
+| `fundamentals` | 比較・配当 | Peer Comparison / Radar、Advanced Dividend |
+| `supply-demand` | 需給・空売り | 信用需給、公開空売り残高報告 |
+| `market` | 市場・セクター | 投資部門別、市場相関、sector分析 |
+
+選択中のtickerとtabはURLへ保存されます。
+
+```text
+http://127.0.0.1:3000/?ticker=7203&tab=fundamentals
+```
+
+BrowserのBack / Forwardとreloadでも同じ画面を復元します。`tab`がない、または未知の
+値の場合は`report`へ戻ります。V1〜V9のどのSnapshotでも5タブは維持され、古いschemaに
+存在しないsectionをvalid zeroとして扱いません。
 
 ## Price Structure
 
@@ -676,9 +710,31 @@ POC / VAH / VALはdescriptive outputであり、自動的なsupport/resistance�
 ではありません。計算・availability・corporate-action契約の詳細は
 `docs/PHASE2_PLAN.md`を参照してください。
 
+## 保存済み分析の比較
+
+`report / 概要・レポート`の先頭に`保存済み分析の比較`があります。同一tickerに
+保存済みhistoryが2件以上ある場合、`比較を開始`を選ぶと表示中のSnapshotを対象、
+その直前に保存されたSnapshotを基準として比較します。開始後は基準・対象のselectorで
+別の組み合わせを選べますが、基準は必ず対象より古いSnapshotでなければなりません。
+
+比較中の組み合わせはURLに保存されます。
+
+```text
+http://127.0.0.1:3000/?ticker=7203&tab=report&base=<snapshotId>&target=<snapshotId>
+```
+
+結果表は`指標 / 基準値 / 対象値 / 差分 / 状態`を表示します。差分は`対象値 − 基準値`
+であり、相対変化や良否を判定しません。表示は`変化・要確認 / すべて / 値の変化 /
+要確認`とsectionで絞り込めます。単位、期間、method、benchmark、identity、data dateが
+比較できない行は無理に差分を作らず、行ごとの状態と`日付・比較条件`を表示します。
+
+この機能は明示registryで定義した保存済みscalar/categoryと同一性を定義できる観測だけを
+比較します。JSON全体の再帰diff、collection-level record diff、外部source取得、再分析、
+Snapshot変更は行いません。
+
 ---
 
-# 16. Peer Comparison
+# 16. Peer Comparison / Peer Radar
 
 以下を表示します。
 
@@ -714,6 +770,17 @@ Market Cap Priorityも表示します。
 ```
 
 候補企業のmarket capが不足している場合などは、無理に適用済みと表示しません。
+
+## Peer Radar
+
+`fundamentals / 比較・配当`では、同じ7指標についてSnapshotに保存済みの
+direction-normalized percentileをRadarと正確な表で表示します。表には対象企業、
+同業中央値、順位、percentile、有効Peer数、方向、data date、状態を表示します。
+
+Radarは表示専用です。Browserでpercentileを再計算したり、値を0〜1へclampしたり、
+Peer eligibilityを再判定したりしません。1軸でも欠損、範囲外、direction mismatch、
+sample/cohort/rank不整合がある場合はpolygon全体を表示せず、partial polygonも作りません。
+SVGの色は良否を示さず、正確な値と利用状態は常設の表をauthorityとして確認します。
 
 ---
 
@@ -987,6 +1054,24 @@ curl http://127.0.0.1:3000/api/analyses/7203/history/2026-08-23T01-02-03-000Z
 
 ---
 
+## 保存済みSnapshotの比較
+
+```http
+GET /api/analyses/:ticker/comparison?baseSnapshotId=<id>&targetSnapshotId=<id>
+```
+
+例:
+
+```bash
+curl "http://127.0.0.1:3000/api/analyses/7203/comparison?baseSnapshotId=<old-id>&targetSnapshotId=<new-id>"
+```
+
+同一tickerのhistoryを、古い基準から新しい対象の順で明示的に指定します。自動swap、
+latest代替、外部source fetchは行いません。成功は200、malformed・同一ID・逆順・ticker
+mismatchは400、Snapshot missingは404、corrupt/schema/filesystem failureは500です。
+
+---
+
 # 25. APIはRead-only
 
 以下は存在しません。
@@ -1082,15 +1167,10 @@ generatedAt
 
 のidentity整合性を検証します。
 
-例えば:
-
-```text
-.dexter/analysis/7203/latest.json
-```
-
-の中身を6758のSnapshotへ手動で置き換えた場合、読み込みは拒否されます。
-
-History filenameと`generatedAt`が一致しない場合も拒否されます。
+例えば`.dexter/analysis/7203/<snapshotId>.json`の中身を6758のSnapshotへ手動で
+置き換えた場合、読み込みは拒否されます。History filenameと`generatedAt`が一致しない
+場合も拒否されます。1件でもhistoryがあるtickerではlegacy `latest.json`へ変更しても
+authoritative latestにはなりません。
 
 ---
 
@@ -1113,10 +1193,10 @@ CLI:
 正常終了後:
 
 ```text
-.dexter/analysis/7203/latest.json
+.dexter/analysis/7203/<snapshotId>.json
 ```
 
-が生成されます。
+がcreate-onlyで生成されます。
 
 ## Terminal 2
 
@@ -1175,11 +1255,11 @@ Watchlistへの専用「追加」操作はありません。
 ```text
 .dexter/analysis/
 ├─ 6758/
-│  └─ latest.json
+│  └─ <snapshotId>.json
 ├─ 7203/
-│  └─ latest.json
+│  └─ <snapshotId>.json
 └─ 7974/
-   └─ latest.json
+   └─ <snapshotId>.json
 ```
 
 Dashboardを開くと3銘柄がWatchlistに表示されます。
@@ -1194,15 +1274,9 @@ Dashboardを開くと3銘柄がWatchlistに表示されます。
 7203を分析して
 ```
 
-すると新しいhistoryが追加され、
-
-```text
-latest.json
-```
-
-が新しいSnapshotへ更新されます。
-
-古いhistoryは残ります。
+すると新しいhistoryがcreate-onlyで追加されます。古いhistoryは残り、validなhistory
+全件から`generatedAtEpochMs`が最大のSnapshotがauthoritative latestとして自動的に
+解決されます。`latest.json`は更新されません。
 
 ---
 
@@ -1280,13 +1354,8 @@ JQUANTS_API_KEY
 /?ticker=7203
 ```
 
-を開いている場合:
-
-```text
-.dexter/analysis/7203/latest.json
-```
-
-が存在するか確認します。
+を開いている場合、`.dexter/analysis/7203/`にvalidなhistory JSONが1件以上あるか確認
+します。historyが0件のlegacy tickerだけは`latest.json`がread fallbackになります。
 
 ---
 
@@ -1346,9 +1415,9 @@ schemaVersion
 
 があります。
 
-現在のwriterは`schemaVersion = 9`です。RepositoryはvalidなV1〜V9 historyと
-`latest.json`を読み取れます。V1〜V8ファイルを自動的に書き換えず、新規saveだけを
-V9として保存します。
+現在のwriterは`schemaVersion = 9`です。RepositoryはvalidなV1〜V9 historyを読み取り、
+historyが0件のlegacy tickerに限り`latest.json`も読み取れます。V1〜V8ファイルを
+自動的に書き換えず、新規saveだけをV9として保存します。
 
 古いSnapshotに後続sectionが存在しない場合、Dashboardはそれを`0`ではなく
 `not_collected`として扱います。未知のschemaVersionはunsupportedとして拒否し、
@@ -1366,7 +1435,14 @@ bun run typecheck
 git diff --check
 ```
 
-すべて成功することを確認してからPRを作成します。
+Dashboardのinteraction、History API、focus、responsive表示を変更した場合は、さらに:
+
+```bash
+bun run test:dashboard-browser
+```
+
+を実行します。すべて成功することを確認してからPRを作成します。通常CIは外部AI
+providerへ接続しません。
 
 ---
 
@@ -1401,10 +1477,18 @@ Historical indicator series
 Full SMA series
 Dated Swing markers
 Backtest
+PDF / print view / export storage / download API
+Evaluator runtime / CLI / API / Dashboard tab
+Runtime composite score / score field / Dashboard score
+Collection-level record diff / cross-ticker comparison
 ```
 
 Phase 2のformula、source availability、no-look-ahead、Snapshot evolution、deferred/
 rejected scopeの詳細は`docs/PHASE2_PLAN.md`を参照してください。
+Phase 3のComparison、Radar、Evaluator freeze、score evaluation boundaryは
+`docs/PHASE3_PLAN.md`、scoreの検証設計は`docs/PHASE3_SCORE_EVALUATION_PLAN.md`を参照して
+ください。EvaluatorのP3-E1 foundationは内部に保持されていますが、runtime producerや
+Dashboard consumerはありません。Score採用はPhase 4の検証後に別途判断します。
 
 ---
 
@@ -1432,6 +1516,8 @@ Read-only Local API
 React Dashboard
         ├─ Analysis Watchlist
         └─ Single Stock Dashboard
+             ├─ 2 Snapshots → deterministic Comparison → report tab
+             └─ stored Peer percentiles → Radar / exact table → fundamentals tab
 ```
 
 重要なのは依存方向です。
@@ -1502,4 +1588,5 @@ Analysis
 → Single Stock Dashboard
 ```
 
-まで確認できます。
+まで確認できます。同じtickerを2回以上分析してhistoryを保存すると、`report`タブで
+保存済み分析の比較も確認できます。
