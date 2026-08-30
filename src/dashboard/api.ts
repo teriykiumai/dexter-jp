@@ -1,8 +1,18 @@
 import {
   AnalysisSnapshotPersistenceError,
   AnalysisSnapshotSchema,
+  CanonicalTickerSchema,
+  SnapshotIdSchema,
   type AnalysisSnapshotRepository,
 } from '../analysis/snapshot/index.js';
+import { digestValidatedAnalysisSnapshot } from '../analysis/snapshot/canonical-json.js';
+import {
+  compareAnalysisSnapshotsV1,
+  comparisonFailureV1,
+  type AnalysisSnapshotComparisonResponseV1,
+  type ComparisonFailureCodeV1,
+  type ComparisonRequestSelectorsV1,
+} from '../analysis/comparison/index.js';
 import { loadDashboardAsset } from './assets.js';
 
 export type AnalysisSnapshotReader = Pick<
@@ -87,6 +97,104 @@ function persistenceErrorResponse(error: AnalysisSnapshotPersistenceError): Resp
   }
 }
 
+const COMPARISON_BAD_REQUEST_CODES = new Set<ComparisonFailureCodeV1>([
+  'invalid_ticker',
+  'invalid_base_snapshot_id',
+  'invalid_target_snapshot_id',
+  'same_snapshot_id',
+  'base_ticker_mismatch',
+  'target_ticker_mismatch',
+  'invalid_order',
+]);
+
+function comparisonResponse(value: AnalysisSnapshotComparisonResponseV1): Response {
+  if (value.outcome === 'success') return jsonResponse(value);
+  if (COMPARISON_BAD_REQUEST_CODES.has(value.error.code)) return jsonResponse(value, 400);
+  if (value.error.code === 'base_snapshot_not_found' || value.error.code === 'target_snapshot_not_found') {
+    return jsonResponse(value, 404);
+  }
+  return jsonResponse(value, 500);
+}
+
+function comparisonPersistenceFailure(
+  request: ComparisonRequestSelectorsV1,
+  side: 'base' | 'target',
+  error: AnalysisSnapshotPersistenceError,
+): AnalysisSnapshotComparisonResponseV1 {
+  if (error.kind === 'missing_snapshot') {
+    return comparisonFailureV1(request, `${side}_snapshot_not_found`);
+  }
+  if (error.kind === 'unsupported_schema_version') {
+    return comparisonFailureV1(request, 'unsupported_snapshot_version');
+  }
+  if (
+    error.kind === 'malformed_json'
+    || error.kind === 'schema_validation_failed'
+    || error.kind === 'snapshot_identity_mismatch'
+    || error.kind === 'snapshot_history_corrupt'
+  ) {
+    return comparisonFailureV1(request, 'corrupt_snapshot');
+  }
+  return comparisonFailureV1(request, 'snapshot_filesystem_failure');
+}
+
+async function loadComparisonInput(
+  repository: AnalysisSnapshotReader,
+  request: ComparisonRequestSelectorsV1,
+  side: 'base' | 'target',
+) {
+  const snapshotId = side === 'base' ? request.baseSnapshotId : request.targetSnapshotId;
+  try {
+    const rawSnapshot = await repository.loadHistory(request.ticker, snapshotId);
+    const parsed = AnalysisSnapshotSchema.safeParse(rawSnapshot);
+    if (!parsed.success) return comparisonFailureV1(request, 'corrupt_snapshot');
+    const snapshot = parsed.data;
+    return {
+      snapshotId,
+      snapshot,
+      snapshotDigest: digestValidatedAnalysisSnapshot(snapshot),
+    } as const;
+  } catch (error) {
+    if (error instanceof AnalysisSnapshotPersistenceError) {
+      return comparisonPersistenceFailure(request, side, error);
+    }
+    return comparisonFailureV1(request, 'snapshot_filesystem_failure');
+  }
+}
+
+async function handleComparisonRequest(
+  url: URL,
+  ticker: string,
+  repository: AnalysisSnapshotReader,
+): Promise<Response> {
+  const baseSnapshotIds = url.searchParams.getAll('baseSnapshotId');
+  const targetSnapshotIds = url.searchParams.getAll('targetSnapshotId');
+  const request = {
+    ticker,
+    baseSnapshotId: baseSnapshotIds.length === 1 ? baseSnapshotIds[0]! : '',
+    targetSnapshotId: targetSnapshotIds.length === 1 ? targetSnapshotIds[0]! : '',
+  } satisfies ComparisonRequestSelectorsV1;
+
+  if (!CanonicalTickerSchema.safeParse(request.ticker).success) {
+    return comparisonResponse(comparisonFailureV1(request, 'invalid_ticker'));
+  }
+  if (!SnapshotIdSchema.safeParse(request.baseSnapshotId).success) {
+    return comparisonResponse(comparisonFailureV1(request, 'invalid_base_snapshot_id'));
+  }
+  if (!SnapshotIdSchema.safeParse(request.targetSnapshotId).success) {
+    return comparisonResponse(comparisonFailureV1(request, 'invalid_target_snapshot_id'));
+  }
+  if (request.baseSnapshotId === request.targetSnapshotId) {
+    return comparisonResponse(comparisonFailureV1(request, 'same_snapshot_id'));
+  }
+
+  const base = await loadComparisonInput(repository, request, 'base');
+  if ('outcome' in base) return comparisonResponse(base);
+  const target = await loadComparisonInput(repository, request, 'target');
+  if ('outcome' in target) return comparisonResponse(target);
+  return comparisonResponse(compareAnalysisSnapshotsV1({ ticker, base, target }));
+}
+
 export function isAllowedDashboardHost(host: string | null): boolean {
   if (host === null) return false;
   const match = /^(?:127\.0\.0\.1|localhost)(?::([1-9]\d{0,4}))?$/.exec(
@@ -132,6 +240,15 @@ export async function handleDashboardRequest(
     if (segments.length === 3 && segments[0] === 'api' && segments[1] === 'analyses') {
       const snapshot = await repository.loadLatest(segments[2]);
       return jsonResponse(AnalysisSnapshotSchema.parse(snapshot));
+    }
+
+    if (
+      segments.length === 4
+      && segments[0] === 'api'
+      && segments[1] === 'analyses'
+      && segments[3] === 'comparison'
+    ) {
+      return await handleComparisonRequest(url, segments[2], repository);
     }
 
     if (

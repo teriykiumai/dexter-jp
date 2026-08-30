@@ -4,7 +4,7 @@ import {
   type SnapshotDigest,
 } from '../snapshot/canonical-json.js';
 import { generatedAtEpochMs } from '../snapshot/latest-order.js';
-import { createSnapshotId, SnapshotIdSchema } from '../snapshot/repository.js';
+import { createSnapshotId, SnapshotIdSchema } from '../snapshot/id.js';
 import {
   AnalysisSnapshotSchema,
   CanonicalTickerSchema,

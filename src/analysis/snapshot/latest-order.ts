@@ -4,7 +4,7 @@ export interface LatestSnapshotOrderItemV1 {
   readonly snapshot: AnalysisSnapshot;
 }
 
-export function generatedAtEpochMs(snapshot: AnalysisSnapshot): number {
+export function generatedAtEpochMs(snapshot: Pick<AnalysisSnapshot, 'generatedAt'>): number {
   return Date.parse(snapshot.generatedAt);
 }
 

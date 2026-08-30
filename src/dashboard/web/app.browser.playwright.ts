@@ -13,15 +13,22 @@ import {
   AnalysisSnapshotV8Schema,
   AnalysisSnapshotV9Schema,
   buildAnalysisSnapshot,
+  createSnapshotId,
   type AnalysisSnapshot,
   type AnalysisSnapshotInput,
   type AnalysisSnapshotV9,
 } from '../../analysis/snapshot/index.js';
+import { digestValidatedAnalysisSnapshot } from '../../analysis/snapshot/canonical-json.js';
+import {
+  compareAnalysisSnapshotsV1,
+  comparisonFailureV1,
+} from '../../analysis/comparison/index.js';
 import {
   DASHBOARD_TABS,
   buildDashboardAvailabilityNavigation,
   type DashboardTabId,
 } from './presentation.js';
+import { COMPARISON_PAIR_REQUIREMENT } from './comparison.js';
 
 function snapshotInput(ticker: string): AnalysisSnapshotInput {
   return {
@@ -640,6 +647,17 @@ function snapshotWithIdentity(
   });
 }
 
+function historyItemFor(snapshot: AnalysisSnapshot) {
+  return {
+    snapshotId: new Date(snapshot.generatedAt).toISOString().replace(/[:.]/g, '-'),
+    canonicalTicker: snapshot.canonicalTicker,
+    companyName: snapshot.companyName,
+    generatedAt: snapshot.generatedAt,
+    status: snapshot.status,
+    dataDates: snapshot.dataDates,
+  };
+}
+
 let dashboardProcess: ChildProcessWithoutNullStreams;
 let baseUrl: string;
 
@@ -681,12 +699,92 @@ async function mockSnapshotApi(
   page: Page,
   responseDelayMs: Readonly<Record<string, number>> = {},
 ): Promise<void> {
-  await page.route('**/api/analyses/*', async route => {
-    const ticker = new URL(route.request().url()).pathname.split('/').at(-1) ?? '';
+  await page.route('**/api/analyses/**', async route => {
+    const segments = new URL(route.request().url()).pathname.split('/').filter(Boolean);
+    const ticker = segments[2] ?? '';
     const delay = responseDelayMs[ticker] ?? 0;
     if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay));
+    const snapshot = snapshotFor(ticker);
+    const body = segments[3] === 'history' && segments.length === 4
+      ? [historyItemFor(snapshot)]
+      : snapshot;
     await route.fulfill({
-      body: JSON.stringify(snapshotFor(ticker)),
+      body: JSON.stringify(body),
+      contentType: 'application/json; charset=utf-8',
+      status: 200,
+    });
+  });
+}
+
+async function mockComparisonApi(
+  page: Page,
+  fixtureSnapshots: readonly AnalysisSnapshot[],
+  requestLog: string[] = [],
+): Promise<void> {
+  const ordered = [...fixtureSnapshots].sort((left, right) => (
+    Date.parse(left.generatedAt) - Date.parse(right.generatedAt)
+  ));
+  const ticker = ordered[0]?.canonicalTicker;
+  if (!ticker || ordered.some(snapshot => snapshot.canonicalTicker !== ticker)) {
+    throw new Error('Comparison browser fixtures must have one canonical ticker.');
+  }
+  const byId = new Map(ordered.map(snapshot => [createSnapshotId(snapshot.generatedAt), snapshot]));
+  await page.route('**/api/analyses/**', async route => {
+    const url = new URL(route.request().url());
+    const segments = url.pathname.split('/').filter(Boolean);
+    requestLog.push(`${url.pathname}${url.search}`);
+    if (segments[2] !== ticker) {
+      await route.fulfill({ body: '{}', contentType: 'application/json', status: 404 });
+      return;
+    }
+    if (segments[3] === 'history' && segments.length === 4) {
+      await route.fulfill({
+        body: JSON.stringify([...ordered].reverse().map(historyItemFor)),
+        contentType: 'application/json; charset=utf-8',
+        status: 200,
+      });
+      return;
+    }
+    if (segments[3] === 'history' && segments.length === 5) {
+      const snapshot = byId.get(segments[4] ?? '');
+      await route.fulfill({
+        body: JSON.stringify(snapshot ?? {}),
+        contentType: 'application/json; charset=utf-8',
+        status: snapshot ? 200 : 404,
+      });
+      return;
+    }
+    if (segments[3] === 'comparison') {
+      const baseSnapshotId = url.searchParams.get('baseSnapshotId') ?? '';
+      const targetSnapshotId = url.searchParams.get('targetSnapshotId') ?? '';
+      const base = byId.get(baseSnapshotId);
+      const target = byId.get(targetSnapshotId);
+      if (!base || !target) {
+        await route.fulfill({ body: '{}', contentType: 'application/json', status: 404 });
+        return;
+      }
+      const response = compareAnalysisSnapshotsV1({
+        ticker,
+        base: {
+          snapshotId: baseSnapshotId,
+          snapshot: base,
+          snapshotDigest: digestValidatedAnalysisSnapshot(base),
+        },
+        target: {
+          snapshotId: targetSnapshotId,
+          snapshot: target,
+          snapshotDigest: digestValidatedAnalysisSnapshot(target),
+        },
+      });
+      await route.fulfill({
+        body: JSON.stringify(response),
+        contentType: 'application/json; charset=utf-8',
+        status: response.outcome === 'success' ? 200 : 400,
+      });
+      return;
+    }
+    await route.fulfill({
+      body: JSON.stringify(ordered.at(-1)),
       contentType: 'application/json; charset=utf-8',
       status: 200,
     });
@@ -704,8 +802,17 @@ async function mockReloadResponses(
   responses: readonly MockReloadResponse[],
 ): Promise<void> {
   let responseIndex = 0;
-  await page.unroute('**/api/analyses/*');
-  await page.route('**/api/analyses/*', async route => {
+  await page.unroute('**/api/analyses/**');
+  await page.route('**/api/analyses/**', async route => {
+    const segments = new URL(route.request().url()).pathname.split('/').filter(Boolean);
+    if (segments[3] === 'history' && segments.length === 4) {
+      await route.fulfill({
+        body: JSON.stringify([historyItemFor(snapshotFor(segments[2] ?? ''))]),
+        contentType: 'application/json; charset=utf-8',
+        status: 200,
+      });
+      return;
+    }
     const response = responses[Math.min(responseIndex, responses.length - 1)];
     responseIndex += 1;
     if (!response) throw new Error('No reload fixture response was configured.');
@@ -815,6 +922,262 @@ async function expectSelectedTab(page: Page, tab: DashboardTabId): Promise<void>
   expect(state.visiblePanel).toBe(`dashboard-panel-${tab}`);
   expect(new URL(page.url()).searchParams.get('tab')).toBe(tab);
 }
+
+test.describe('saved-analysis Comparison browser interaction', () => {
+  test('starts one atomic pair, renders the semantic table, and restores pair-scoped UI state', async ({ browser }) => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    const target = snapshotFor('1010');
+    const base = snapshotWithIdentity('1010', '2026-08-22T01:02:03.000Z');
+    try {
+      await mockComparisonApi(page, [base, target]);
+      await openDetail(page, '1010');
+      await page.evaluate(() => {
+        const original = window.history.pushState.bind(window.history);
+        (window as unknown as { comparisonPushes: string[] }).comparisonPushes = [];
+        window.history.pushState = ((state: unknown, unused: string, url?: string | URL | null) => {
+          (window as unknown as { comparisonPushes: string[] }).comparisonPushes.push(String(url));
+          original(state, unused, url);
+        }) as History['pushState'];
+      });
+
+      await page.getByRole('button', { name: '比較を開始' }).click();
+      await expect(page.getByRole('heading', { name: '保存済み分析の比較' })).toBeVisible();
+      await expect(page.locator('.comparison-table').first()).toBeVisible();
+      expect(await page.locator('.comparison-table').first().locator('thead th').allTextContents())
+        .toEqual(['指標', '基準値', '対象値', '差分', '状態']);
+      const url = new URL(page.url());
+      expect(url.searchParams.get('base')).toBe(createSnapshotId(base.generatedAt));
+      expect(url.searchParams.get('target')).toBe(createSnapshotId(target.generatedAt));
+      const pushes = await page.evaluate(() => (
+        (window as unknown as { comparisonPushes: string[] }).comparisonPushes
+      ));
+      expect(pushes).toHaveLength(1);
+      expect(new URL(pushes[0]!, baseUrl).searchParams.has('base')).toBe(true);
+      expect(new URL(pushes[0]!, baseUrl).searchParams.has('target')).toBe(true);
+
+      await page.locator('.comparison-filters select').first().selectOption('all');
+      const disclosure = page.locator('.comparison-row-conditions').first();
+      await disclosure.locator('summary').click();
+      await expect(disclosure).toHaveAttribute('open', '');
+      await page.locator('#dashboard-tab-technical').click();
+      await page.locator('#dashboard-tab-report').click();
+      await expect(page.locator('.comparison-filters select').first()).toHaveValue('all');
+      await expect(page.locator('.comparison-row-conditions').first()).toHaveAttribute('open', '');
+
+      for (const width of [320, 768, 1280]) {
+        await page.setViewportSize({ width, height: 900 });
+        const overflow = await page.evaluate(() => {
+          const region = document.querySelector<HTMLElement>('.comparison-table-scroll');
+          return {
+            documentOverflow: document.documentElement.scrollWidth > window.innerWidth,
+            regionOverflow: region ? region.scrollWidth > region.clientWidth : false,
+          };
+        });
+        expect(overflow.documentOverflow).toBe(false);
+        expect(overflow.regionOverflow).toBe(width < 1280);
+      }
+      await page.locator('.comparison-table-scroll').first().focus();
+      await expect(page.locator('.comparison-table-scroll').first()).toBeFocused();
+
+      await page.getByRole('button', { name: '比較を解除' }).first().click();
+      expect(new URL(page.url()).searchParams.has('base')).toBe(false);
+      await page.goBack();
+      await expect(page.locator('.comparison-table').first()).toBeVisible();
+      await expect(page.locator('.comparison-filters select').first()).toHaveValue('all');
+      await expect(page.locator('.comparison-row-conditions').first()).toHaveAttribute('open', '');
+    } finally {
+      await page.close();
+    }
+  });
+
+  test('keeps zero/one history disabled and rejects a one-sided deep link without a comparison request', async ({ browser }) => {
+    const page = await browser.newPage();
+    const requestLog: string[] = [];
+    const target = snapshotFor('1010');
+    const targetId = createSnapshotId(target.generatedAt);
+    try {
+      await mockComparisonApi(page, [target], requestLog);
+      await openDetail(page, '1010');
+      await expect(page.getByRole('button', { name: '比較を開始' })).toBeDisabled();
+      await expect(page.getByText(COMPARISON_PAIR_REQUIREMENT)).toBeVisible();
+
+      await page.goto(`${baseUrl}/?ticker=1010&tab=report&base=${targetId}`);
+      await waitForSelectedTab(page, 'report');
+      await expect(page.getByText('比較URLには有効な基準Snapshotと対象Snapshotの両方が必要です。')).toBeVisible();
+      await expect(page.getByRole('button', { name: '比較を再試行' })).toHaveCount(0);
+      expect(requestLog.filter(value => value.includes('/comparison?'))).toHaveLength(0);
+      await page.getByRole('button', { name: '比較を解除' }).first().click();
+      const url = new URL(page.url());
+      expect(url.searchParams.has('base')).toBe(false);
+      expect(url.searchParams.has('target')).toBe(false);
+      expect(url.searchParams.get('ticker')).toBe('1010');
+      expect(url.searchParams.get('tab')).toBe('report');
+    } finally {
+      await page.close();
+    }
+  });
+
+  test('resolves a changed target to its numeric immediate predecessor without a transient URL', async ({ browser }) => {
+    const page = await browser.newPage();
+    const oldest = snapshotWithIdentity('1010', '2026-08-23T01:02:03Z');
+    const middle = snapshotWithIdentity('1010', '2026-08-23T01:02:03.500Z');
+    const newest = snapshotWithIdentity('1010', '2026-08-24T01:02:03.000Z');
+    try {
+      await mockComparisonApi(page, [newest, oldest, middle]);
+      await openDetail(page, '1010');
+      await page.getByRole('button', { name: '比較を開始' }).click();
+      await expect(page.locator('.comparison-table').first()).toBeVisible();
+      expect(new URL(page.url()).searchParams.get('base')).toBe(createSnapshotId(middle.generatedAt));
+
+      await page.locator('.comparison-selectors label').filter({ hasText: '対象Snapshot' })
+        .locator('select').selectOption(createSnapshotId(middle.generatedAt));
+      await expect(page.locator('.comparison-table').first()).toBeVisible();
+      const url = new URL(page.url());
+      expect(url.searchParams.get('target')).toBe(createSnapshotId(middle.generatedAt));
+      expect(url.searchParams.get('base')).toBe(createSnapshotId(oldest.generatedAt));
+    } finally {
+      await page.close();
+    }
+  });
+
+  test('keeps a pinned pair on reload and adopts a newer target only after explicit action', async ({ browser }) => {
+    const page = await browser.newPage();
+    const oldest = snapshotWithIdentity('1010', '2026-08-21T01:02:03.000Z');
+    const current = snapshotWithIdentity('1010', '2026-08-22T01:02:03.000Z');
+    const newer = snapshotWithIdentity('1010', '2026-08-23T01:02:03.000Z');
+    try {
+      await mockComparisonApi(page, [oldest, current]);
+      await openDetail(page, '1010');
+      await page.getByRole('button', { name: '比較を開始' }).click();
+      await expect(page.locator('.comparison-table').first()).toBeVisible();
+      const pinnedUrl = page.url();
+
+      await page.getByRole('button', { name: '保存済みSnapshotを再読み込み' }).click();
+      await expect(page.locator('.snapshot-reload-feedback')).toContainText('新しい保存済み分析はありません');
+      expect(page.url()).toBe(pinnedUrl);
+      await expect(page.locator('.comparison-table').first()).toBeVisible();
+
+      await page.unroute('**/api/analyses/**');
+      await mockComparisonApi(page, [oldest, current, newer]);
+      await page.getByRole('button', { name: '保存済みSnapshotを再読み込み' }).click();
+      await expect(page.getByRole('button', { name: '新しい保存済み分析を対象にする' })).toBeVisible();
+      expect(page.url()).toBe(pinnedUrl);
+      await expect(page.locator('.comparison-table').first()).toBeVisible();
+
+      await page.getByRole('button', { name: '新しい保存済み分析を対象にする' }).click();
+      await expect(page.locator('.comparison-table').first()).toBeVisible();
+      const adoptedUrl = new URL(page.url());
+      expect(adoptedUrl.searchParams.get('base')).toBe(createSnapshotId(current.generatedAt));
+      expect(adoptedUrl.searchParams.get('target')).toBe(createSnapshotId(newer.generatedAt));
+    } finally {
+      await page.close();
+    }
+  });
+
+  test('preserves matching future Evaluation selectors and clears them only when target changes', async ({ browser }) => {
+    const page = await browser.newPage();
+    const oldest = snapshotWithIdentity('1010', '2026-08-21T01:02:03.000Z');
+    const pinned = snapshotWithIdentity('1010', '2026-08-22T01:02:03.000Z');
+    const newest = snapshotWithIdentity('1010', '2026-08-23T01:02:03.000Z');
+    const pinnedId = createSnapshotId(pinned.generatedAt);
+    const evaluationId = '123e4567-e89b-42d3-a456-426614174000';
+    try {
+      await mockComparisonApi(page, [oldest, pinned, newest]);
+      await openDetail(
+        page,
+        '1010',
+        'report',
+        `&evaluationSnapshot=${pinnedId}&evaluation=${evaluationId}`,
+      );
+      await expect(page.locator('.generated-at')).toContainText('2026');
+      await page.getByRole('button', { name: '比較を開始' }).click();
+      await expect(page.locator('.comparison-table').first()).toBeVisible();
+      let url = new URL(page.url());
+      expect(url.searchParams.get('target')).toBe(pinnedId);
+      expect(url.searchParams.get('evaluationSnapshot')).toBe(pinnedId);
+      expect(url.searchParams.get('evaluation')).toBe(evaluationId);
+
+      await page.getByRole('button', { name: '比較を解除' }).first().click();
+      await expect(page.getByRole('button', { name: '比較を開始' })).toBeEnabled();
+      url = new URL(page.url());
+      expect(url.searchParams.has('base')).toBe(false);
+      expect(url.searchParams.get('evaluationSnapshot')).toBe(pinnedId);
+      expect(url.searchParams.get('evaluation')).toBe(evaluationId);
+
+      await page.getByRole('button', { name: '比較を開始' }).click();
+      await expect(page.locator('.comparison-table').first()).toBeVisible();
+      await page.locator('.comparison-selectors label').filter({ hasText: '対象Snapshot' })
+        .locator('select').selectOption(createSnapshotId(newest.generatedAt));
+      await expect(page.locator('.comparison-table').first()).toBeVisible();
+      url = new URL(page.url());
+      expect(url.searchParams.has('evaluationSnapshot')).toBe(false);
+      expect(url.searchParams.has('evaluation')).toBe(false);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test('ignores an abort-insensitive pinned reload after the comparison target changes', async ({ browser }) => {
+    const page = await browser.newPage();
+    const oldest = snapshotWithIdentity('1010', '2026-08-21T01:02:03.000Z');
+    const middle = snapshotWithIdentity('1010', '2026-08-22T01:02:03.000Z');
+    const newest = snapshotWithIdentity('1010', '2026-08-23T01:02:03.000Z');
+    try {
+      await mockComparisonApi(page, [oldest, middle, newest]);
+      await openDetail(page, '1010');
+      await page.getByRole('button', { name: '比較を開始' }).click();
+      await expect(page.locator('.comparison-table').first()).toBeVisible();
+      await installAbortIgnoringReloadFetch(page, '1010', [{ body: newest, delayMs: 450 }]);
+
+      await page.getByRole('button', { name: '保存済みSnapshotを再読み込み' }).click();
+      await page.locator('.comparison-selectors label').filter({ hasText: '対象Snapshot' })
+        .locator('select').selectOption(createSnapshotId(middle.generatedAt));
+      await expect(page.locator('.comparison-table').first()).toBeVisible();
+      await page.waitForTimeout(550);
+
+      const url = new URL(page.url());
+      expect(url.searchParams.get('target')).toBe(createSnapshotId(middle.generatedAt));
+      expect(url.searchParams.get('base')).toBe(createSnapshotId(oldest.generatedAt));
+      await expect(page.locator('.snapshot-reload-feedback')).toHaveText('');
+    } finally {
+      await page.close();
+    }
+  });
+
+  test('offers a pair-bound retry only for an exact 500 comparison failure', async ({ browser }) => {
+    const page = await browser.newPage();
+    const base = snapshotWithIdentity('1010', '2026-08-22T01:02:03.000Z');
+    const target = snapshotWithIdentity('1010', '2026-08-23T01:02:03.000Z');
+    const pair = {
+      baseSnapshotId: createSnapshotId(base.generatedAt),
+      targetSnapshotId: createSnapshotId(target.generatedAt),
+    };
+    let attempts = 0;
+    try {
+      await mockComparisonApi(page, [base, target]);
+      await page.route('**/api/analyses/1010/comparison?*', async route => {
+        attempts += 1;
+        await route.fulfill({
+          body: JSON.stringify(comparisonFailureV1({ ticker: '1010', ...pair }, 'snapshot_filesystem_failure')),
+          contentType: 'application/json; charset=utf-8',
+          status: 500,
+        });
+      });
+      await openDetail(
+        page,
+        '1010',
+        'report',
+        `&base=${pair.baseSnapshotId}&target=${pair.targetSnapshotId}`,
+      );
+      await expect(page.getByText('保存済みSnapshotを読み込めないため比較できません。')).toBeVisible();
+      await page.getByRole('button', { name: '比較を再試行' }).click();
+      await expect.poll(() => attempts).toBe(2);
+      expect(new URL(page.url()).searchParams.get('target')).toBe(pair.targetSnapshotId);
+    } finally {
+      await page.close();
+    }
+  });
+});
 
 test.describe('Dashboard detail tab browser interaction', () => {
   test('canonicalizes tab URLs and preserves non-tab query parameters', async ({ browser }) => {
@@ -1134,7 +1497,10 @@ test.describe('Dashboard detail tab browser interaction', () => {
       await expect(bins).toHaveAttribute('open', '');
       await expect(smaToggle).toHaveAttribute('aria-pressed', 'false');
       await expect(page.getByRole('dialog', { name: '用語集', exact: true })).toBeVisible();
-      expect(requests).toEqual([{ method: 'GET', pathname: '/api/analyses/1010' }]);
+      expect(requests).toEqual([
+        { method: 'GET', pathname: '/api/analyses/1010' },
+        { method: 'GET', pathname: '/api/analyses/1010/history' },
+      ]);
     } finally {
       await page.close();
     }

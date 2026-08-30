@@ -3,12 +3,17 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  AnalysisSnapshotPersistenceError,
   AnalysisSnapshotRepository,
   buildAnalysisSnapshot,
   type AnalysisSnapshot,
   type AnalysisSnapshotInput,
 } from '../analysis/snapshot/index.js';
-import { handleDashboardRequest, isAllowedDashboardHost } from './api.js';
+import {
+  handleDashboardRequest,
+  isAllowedDashboardHost,
+  type AnalysisSnapshotReader,
+} from './api.js';
 
 const temporaryDirectories: string[] = [];
 
@@ -75,6 +80,11 @@ function request(path: string, method = 'GET', host = '127.0.0.1'): Request {
     method,
     headers: { Host: host },
   });
+}
+
+function comparisonPath(baseSnapshotId: string, targetSnapshotId: string): string {
+  const query = new URLSearchParams({ baseSnapshotId, targetSnapshotId });
+  return `/api/analyses/7203/comparison?${query.toString()}`;
 }
 
 async function responseJson(response: Response): Promise<Record<string, unknown> | unknown[]> {
@@ -167,6 +177,134 @@ describe('dashboard request handler', () => {
       repository,
     )) as Array<Record<string, unknown>>;
     expect(history.map(item => item.generatedAt)).toEqual([newer.generatedAt, older.generatedAt]);
+  });
+
+  test('serves the exact versioned comparison union with safe response headers', async () => {
+    const { repository } = await createRepository();
+    const base = await repository.save(partialSnapshot('2026-08-22T01:02:03.000Z'));
+    const target = await repository.save(partialSnapshot('2026-08-23T01:02:03.000Z'));
+
+    const response = await handleDashboardRequest(
+      request(comparisonPath(base.snapshotId, target.snapshotId)),
+      repository,
+    );
+    const body = await responseJson(response) as Record<string, unknown>;
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(response.headers.has('access-control-allow-origin')).toBeFalse();
+    expect(body).toMatchObject({
+      resultVersion: 1,
+      registryVersion: 1,
+      outcome: 'success',
+      ticker: '7203',
+      base: { snapshotId: base.snapshotId },
+      target: { snapshotId: target.snapshotId },
+      comparisonAsOf: '2026-08-23T01:02:03.000Z',
+    });
+    expect((body.base as Record<string, unknown>).snapshotDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect((body.target as Record<string, unknown>).snapshotDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(body).not.toHaveProperty('finalReportMarkdown');
+  });
+
+  test('maps invalid comparison selectors and order to exact 400 failures before reads', async () => {
+    const { repository } = await createRepository();
+    const base = await repository.save(partialSnapshot('2026-08-22T01:02:03.000Z'));
+    const target = await repository.save(partialSnapshot('2026-08-23T01:02:03.000Z'));
+    const cases = [
+      ['/api/analyses/7203/comparison', 'invalid_base_snapshot_id'],
+      [`/api/analyses/7203/comparison?baseSnapshotId=${base.snapshotId}`, 'invalid_target_snapshot_id'],
+      [comparisonPath('latest', target.snapshotId), 'invalid_base_snapshot_id'],
+      [`${comparisonPath(base.snapshotId, target.snapshotId)}&baseSnapshotId=${base.snapshotId}`, 'invalid_base_snapshot_id'],
+      [comparisonPath(base.snapshotId, base.snapshotId), 'same_snapshot_id'],
+      [comparisonPath(target.snapshotId, base.snapshotId), 'invalid_order'],
+    ] as const;
+
+    for (const [path, code] of cases) {
+      const response = await handleDashboardRequest(request(path), repository);
+      expect(response.status).toBe(400);
+      expect(await responseJson(response)).toMatchObject({
+        resultVersion: 1,
+        registryVersion: 1,
+        outcome: 'failure',
+        error: { code },
+      });
+    }
+  });
+
+  test('uses side-specific 404 comparison failures', async () => {
+    const { repository } = await createRepository();
+    const base = await repository.save(partialSnapshot('2026-08-22T01:02:03.000Z'));
+    const target = await repository.save(partialSnapshot('2026-08-23T01:02:03.000Z'));
+    const missingBase = '2026-08-21T01-02-03-000Z';
+    const missingTarget = '2026-08-24T01-02-03-000Z';
+
+    for (const [path, code] of [
+      [comparisonPath(missingBase, target.snapshotId), 'base_snapshot_not_found'],
+      [comparisonPath(base.snapshotId, missingTarget), 'target_snapshot_not_found'],
+    ] as const) {
+      const response = await handleDashboardRequest(request(path), repository);
+      expect(response.status).toBe(404);
+      expect(await responseJson(response)).toMatchObject({ outcome: 'failure', error: { code } });
+    }
+  });
+
+  test('maps corrupt, unsupported, and filesystem comparison failures to exact safe 500 unions', async () => {
+    const base = partialSnapshot('2026-08-22T01:02:03.000Z');
+    const target = partialSnapshot('2026-08-23T01:02:03.000Z');
+    const baseId = '2026-08-22T01-02-03-000Z';
+    const targetId = '2026-08-23T01-02-03-000Z';
+
+    for (const [kind, code] of [
+      ['schema_validation_failed', 'corrupt_snapshot'],
+      ['unsupported_schema_version', 'unsupported_snapshot_version'],
+      ['filesystem_error', 'snapshot_filesystem_failure'],
+    ] as const) {
+      const repository: AnalysisSnapshotReader = {
+        listLatest: async () => [],
+        loadLatest: async () => target,
+        listHistory: async () => [],
+        loadHistory: async (_ticker, snapshotId) => {
+          if (snapshotId === baseId) return base;
+          throw new AnalysisSnapshotPersistenceError(kind, 'private path and parser details');
+        },
+      };
+      const response = await handleDashboardRequest(
+        request(comparisonPath(baseId, targetId)),
+        repository,
+      );
+      const body = await response.text();
+
+      expect(response.status).toBe(500);
+      expect(body).toContain(`\"code\":\"${code}\"`);
+      expect(body).not.toContain('private path');
+      expect(body).not.toContain('parser details');
+    }
+  });
+
+  test('maps a returned Snapshot ticker mismatch to an exact 400 comparison failure', async () => {
+    const baseId = '2026-08-22T01-02-03-000Z';
+    const targetId = '2026-08-23T01-02-03-000Z';
+    const repository: AnalysisSnapshotReader = {
+      listLatest: async () => [],
+      loadLatest: async () => partialSnapshot(),
+      listHistory: async () => [],
+      loadHistory: async (_ticker, snapshotId) => snapshotId === baseId
+        ? partialSnapshot('2026-08-22T01:02:03.000Z', '6758')
+        : partialSnapshot('2026-08-23T01:02:03.000Z'),
+    };
+
+    const response = await handleDashboardRequest(
+      request(comparisonPath(baseId, targetId)),
+      repository,
+    );
+
+    expect(response.status).toBe(400);
+    expect(await responseJson(response)).toMatchObject({
+      outcome: 'failure',
+      error: { code: 'base_ticker_mismatch' },
+    });
   });
 
   test('returns safe errors for unknown ticker and history snapshots', async () => {
