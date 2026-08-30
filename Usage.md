@@ -600,9 +600,15 @@ detail画面の`保存済みSnapshotを再読み込み`は、ローカルのimmu
 authoritative latest Snapshotを解決してGET APIから読み直すだけです。外部ソースからの
 最新データ取得、Agent／LLMの実行、再分析、Snapshot保存は行いません。
 
-CLIで同じ銘柄を再分析して新しいSnapshotを保存した後、その保存結果を現在のタブへ
-反映したい場合に使用します。再読み込みに失敗した場合も、現在表示中のSnapshotは維持
-されます。
+Comparisonを使用していない場合は、CLIで同じ銘柄を再分析して新しいSnapshotを保存した
+後、そのauthoritative latestを現在のタブへ反映するために使用できます。再読み込みに
+失敗した場合も、現在表示中のSnapshotは維持されます。
+
+Comparison中は、URLで選択した基準・対象Snapshotを固定したまま再読み込みします。
+より新しいauthoritative latestが見つかっても自動では切り替えず、
+`新しい保存済み分析があります`と表示します。`新しい保存済み分析を対象にする`を明示的に
+選んだときだけ、そのSnapshotを新しい対象とし、validatedな`generatedAtEpochMs`順で
+直前にあるSnapshotを基準としてpair全体を切り替えます。
 
 ---
 
@@ -714,8 +720,10 @@ POC / VAH / VALはdescriptive outputであり、自動的なsupport/resistance�
 
 `report / 概要・レポート`の先頭に`保存済み分析の比較`があります。同一tickerに
 保存済みhistoryが2件以上ある場合、`比較を開始`を選ぶと表示中のSnapshotを対象、
-その直前に保存されたSnapshotを基準として比較します。開始後は基準・対象のselectorで
-別の組み合わせを選べますが、基準は必ず対象より古いSnapshotでなければなりません。
+validatedな`generatedAtEpochMs`順で対象の直前にあるSnapshotを基準として比較します。
+fileの保存・書き込み完了順やdirectory列挙順は使用しません。開始後は基準・対象の
+selectorで別の組み合わせを選べますが、基準は必ず対象より古いSnapshotでなければ
+なりません。
 
 比較中の組み合わせはURLに保存されます。
 
