@@ -180,6 +180,9 @@ describe('Comparison registry V1', () => {
     );
     expect(result.metricRows).toHaveLength(103);
     expect(new Set(result.metricRows.map(item => item.metricKey))).toEqual(new Set(COMPARISON_METRIC_KEYS));
+    expect(result.metricRows.every(item => (
+      item.instanceIntroducedInSnapshotVersion >= item.definitionIntroducedInSnapshotVersion
+    ))).toBeTrue();
     expect(result.metricRows
       .filter(item => item.metricKey === 'marketCorrelation.window.beta')
       .map(item => item.instanceIdentity.find(identity => identity.name === 'period')?.value))
@@ -429,6 +432,13 @@ describe('Comparison observations and dispositions', () => {
     expect(day20.target.state).toBe('available');
     expect(day60.instanceIntroducedInSnapshotVersion).toBe(1);
     expect(day60.base.state).toBe('available');
+    for (const period of [20, 60, 250] as const) {
+      expect(row(
+        result,
+        'sectorBenchmark.window.beta',
+        ['period', period],
+      ).instanceIntroducedInSnapshotVersion).toBe(6);
+    }
     expect(row(result, 'supplyDemand.mean4w').base).toMatchObject({
       state: 'not_collected',
       unavailableReasons: [{ reason: 'schema_predates_instance', detail: null }],
@@ -546,6 +556,105 @@ describe('Comparison observations and dispositions', () => {
       state: 'unavailable',
       unavailableReasons: [{ reason: 'event_source_plan_unavailable', detail: null }],
     });
+    expect(row(
+      success(base, eventUnavailable),
+      'advancedDividend.event.ordinaryDividendPerShare',
+      ['recordDateYearMonth', '2027-03'],
+    ).target).toMatchObject({
+      state: 'unavailable',
+      unavailableReasons: [{ reason: 'event_source_plan_unavailable', detail: null }],
+    });
+  });
+
+  test('keeps complete dividend siblings available under collection-wide scope reasons', () => {
+    const base = comparisonSnapshot('2026-08-22T01:00:00.000Z');
+    const target = mutateV9(comparisonSnapshot('2026-08-22T02:00:00.000Z'), value => {
+      if (value.advancedDividend === null || value.advancedDividend.events === null) {
+        throw new Error('fixture');
+      }
+      const incompleteFiscal = value.advancedDividend.observations.find(
+        observation => observation.kind === 'company_forecast',
+      );
+      const incompleteEvent = value.advancedDividend.events.find(
+        event => event.corporateActionReferenceNumber === 'action-2',
+      );
+      if (incompleteFiscal === undefined || incompleteEvent === undefined) throw new Error('fixture');
+      incompleteFiscal.annualDividendPerShare = null;
+      incompleteFiscal.payoutRatio = null;
+      incompleteEvent.ordinaryDividendPerShare = null;
+      value.advancedDividend.unavailable.push(
+        { scope: 'core', reason: 'missing_data' },
+        { scope: 'component', reason: 'component_breakdown_unavailable' },
+      );
+      value.unavailable.push(
+        { section: 'advancedDividend', metric: 'core', reason: 'missing_data' },
+        { section: 'advancedDividend', metric: 'component', reason: 'component_breakdown_unavailable' },
+      );
+    });
+    const result = success(base, target);
+
+    expect(row(
+      result,
+      'advancedDividend.fiscal.annualDividendPerShare',
+      ['fiscalYearEndDate', '2026-03-31'],
+    ).target).toMatchObject({ state: 'available', value: 90 });
+    expect(row(
+      result,
+      'advancedDividend.fiscal.annualDividendPerShare',
+      ['fiscalYearEndDate', '2027-03-31'],
+    ).target).toMatchObject({
+      state: 'unavailable',
+      unavailableReasons: [{ reason: 'missing_data', detail: null }],
+    });
+    expect(row(
+      result,
+      'advancedDividend.event.ordinaryDividendPerShare',
+      ['recordDateYearMonth', '2026-09'],
+    ).target).toMatchObject({ state: 'available', value: 45 });
+    expect(row(
+      result,
+      'advancedDividend.event.ordinaryDividendPerShare',
+      ['recordDateYearMonth', '2027-03'],
+    ).target).toMatchObject({
+      state: 'unavailable',
+      unavailableReasons: [{ reason: 'component_breakdown_unavailable', detail: null }],
+    });
+  });
+
+  test('does not let an unrelated dividend scope reason hide an exact removed identity', () => {
+    const base = comparisonSnapshot('2026-08-22T01:00:00.000Z');
+    const target = mutateV9(comparisonSnapshot('2026-08-22T02:00:00.000Z'), value => {
+      if (value.advancedDividend === null || value.advancedDividend.events === null) {
+        throw new Error('fixture');
+      }
+      value.advancedDividend.observations = value.advancedDividend.observations
+        .filter(observation => observation.kind === 'actual');
+      value.advancedDividend.observations[0].annualDividendPerShare = null;
+      value.advancedDividend.observations[0].payoutRatio = null;
+      value.advancedDividend.events = value.advancedDividend.events
+        .filter(event => event.corporateActionReferenceNumber === 'action-1');
+      value.advancedDividend.events[0].ordinaryDividendPerShare = null;
+      value.advancedDividend.unavailable.push(
+        { scope: 'core', reason: 'missing_data' },
+        { scope: 'component', reason: 'component_breakdown_unavailable' },
+      );
+      value.unavailable.push(
+        { section: 'advancedDividend', metric: 'core', reason: 'missing_data' },
+        { section: 'advancedDividend', metric: 'component', reason: 'component_breakdown_unavailable' },
+      );
+    });
+    const result = success(base, target);
+
+    expect(row(
+      result,
+      'advancedDividend.fiscal.annualDividendPerShare',
+      ['fiscalYearEndDate', '2027-03-31'],
+    ).comparison).toMatchObject({ reason: 'record_removed', presentSide: 'base' });
+    expect(row(
+      result,
+      'advancedDividend.event.ordinaryDividendPerShare',
+      ['recordDateYearMonth', '2027-03'],
+    ).comparison).toMatchObject({ reason: 'record_removed', presentSide: 'base' });
   });
 
   test('classifies section absence and rejects an existing section marked not_collected', () => {

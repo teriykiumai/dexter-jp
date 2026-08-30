@@ -935,11 +935,21 @@ type WindowMetric =
   | 'benchmarkVolatilityAnnualized'
   | 'excessReturn';
 
-function windowInstances(): readonly ComparisonInstanceDefinitionV1[] {
+function windowInstances(
+  introducedInSnapshotVersion: (period: WindowPeriod) => ComparisonIntroductionVersionV1,
+): readonly ComparisonInstanceDefinitionV1[] {
   return WINDOW_PERIODS.map(period => ({
     identity: identity(['period', period]),
-    introducedInSnapshotVersion: period === 20 ? 3 : 1,
+    introducedInSnapshotVersion: introducedInSnapshotVersion(period),
   }));
+}
+
+function marketCorrelationWindowInstances(): readonly ComparisonInstanceDefinitionV1[] {
+  return windowInstances(period => period === 20 ? 3 : 1);
+}
+
+function sectorBenchmarkWindowInstances(): readonly ComparisonInstanceDefinitionV1[] {
+  return windowInstances(() => 6);
 }
 
 function instancePeriod(instance: ComparisonInstanceDefinitionV1): WindowPeriod {
@@ -973,7 +983,7 @@ function marketCorrelationDefinition(metric: Exclude<WindowMetric,
     allowedUnavailableReasons: [
       'insufficient_history', 'zero_stock_variance', 'zero_benchmark_variance',
     ],
-    resolveInstances: windowInstances,
+    resolveInstances: marketCorrelationWindowInstances,
     compareInstances: windowInstanceCompare,
     resolveValue: (snapshot, instance) => {
       const result = snapshot.marketCorrelation;
@@ -1049,7 +1059,7 @@ function sectorBenchmarkDefinition(metric: WindowMetric): InternalDefinitionV1 {
     allowedUnavailableReasons: [
       'insufficient_history', 'zero_stock_variance', 'zero_benchmark_variance',
     ],
-    resolveInstances: windowInstances,
+    resolveInstances: sectorBenchmarkWindowInstances,
     compareInstances: windowInstanceCompare,
     resolveValue: (snapshot, instance) => {
       if (!('sectorBenchmark' in snapshot) || snapshot.sectorBenchmark === null) {
@@ -1354,7 +1364,7 @@ function dividendFiscalDefinition(
       }
       if (matches.length === 0) {
         const hasCoreReason = result.unavailable.some(item => item.scope === 'core');
-        return hasCoreReason
+        return result.observations.length === 0 && hasCoreReason
           ? {
               kind: 'absent', identity: instance.identity, missingAsUnavailable: true,
               actualUnit: snapshot.units.advancedDividend[isPayout ? 'payoutRatio' : 'dividendPerShare'] ?? null,
@@ -1381,7 +1391,7 @@ function dividendFiscalDefinition(
           ...instance.identity.map(item => [item.name, item.value] as [string, typeof item.value]),
           [sourceFieldName, observation[sourceFieldName]],
         ),
-        ['core'],
+        observation[field] === null ? ['core'] : [],
       );
     },
   });
@@ -1437,12 +1447,13 @@ type DividendEventField =
 
 function dividendEventDefinition(field: DividendEventField): InternalDefinitionV1 {
   const scope = field === 'dividendPerShare' ? 'event' : 'component';
+  const eventCollectionReasons = [
+    'no_eligible_dividend_event_data', 'event_source_plan_unavailable',
+    'availability_calendar_unavailable', 'missing_data', 'invalid_data',
+  ];
   const allowedReasons = scope === 'event'
-    ? [
-        'no_eligible_dividend_event_data', 'event_source_plan_unavailable',
-        'availability_calendar_unavailable', 'missing_data', 'invalid_data',
-      ]
-    : ['component_breakdown_unavailable'];
+    ? eventCollectionReasons
+    : [...eventCollectionReasons, 'component_breakdown_unavailable'];
   return createDefinition({
     key: `advancedDividend.event.${field}` as ComparisonMetricKeyV1,
     section: 'advancedDividend',
@@ -1475,8 +1486,7 @@ function dividendEventDefinition(field: DividendEventField): InternalDefinitionV
         return { kind: 'ambiguous', identity: instance.identity, candidateCount: matches.length };
       }
       if (matches.length === 0) {
-        const hasScopeReason = result.unavailable.some(item => item.scope === scope);
-        return events === null || hasScopeReason
+        return events === null
           ? {
               kind: 'absent', identity: instance.identity, missingAsUnavailable: true,
               actualUnit: snapshot.units.advancedDividend.dividendPerShare ?? null,
@@ -1485,7 +1495,7 @@ function dividendEventDefinition(field: DividendEventField): InternalDefinitionV
                 { role: 'notified', value: null },
               ],
               provenance: sectionProvenance(snapshot, 'advancedDividend'),
-              reasonMetrics: [scope],
+              reasonMetrics: ['event'],
             }
           : { kind: 'absent', identity: instance.identity };
       }
@@ -1507,7 +1517,7 @@ function dividendEventDefinition(field: DividendEventField): InternalDefinitionV
           ...instance.identity.map(item => [item.name, item.value] as [string, typeof item.value]),
           ['decision', event.decision],
         ),
-        [scope],
+        event[field] === null ? [scope] : [],
       );
     },
   });
