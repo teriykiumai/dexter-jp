@@ -13,78 +13,29 @@ import { DEFAULT_SYSTEM_PROMPT } from '@/agent/prompts';
 import type { TokenUsage } from '@/agent/types';
 import { logger } from '@/utils';
 import { classifyError, isNonRetryableError } from '@/utils/errors';
-import { resolveProvider, getProviderById, type ProviderDef } from '@/providers';
+import type { ProviderDef } from '@/providers';
+import {
+  DEFAULT_MODEL,
+  getResolvedProvider,
+  resolveLlmRuntime,
+  type LlmTaskProfile,
+  type ResolvedLlmRuntime,
+} from './runtime.js';
 
-export const DEFAULT_PROVIDER = 'openai';
-export const DEFAULT_MODEL = 'gpt-5.6-terra';
-
-export type LlmTaskProfile = 'deep_analysis' | 'balanced' | 'fast_structured';
-export type LlmReasoningEffort = 'low' | 'medium' | 'high';
-
-export type ResolvedLlmRuntime = Readonly<{
-  model: string;
-  providerId: string;
-  reasoningEffort?: LlmReasoningEffort;
-}>;
-
-const OPENAI_GPT_5_6_REASONING_MODELS = new Set([
-  'gpt-5.6',
-  'gpt-5.6-sol',
-  'gpt-5.6-terra',
-  'gpt-5.6-luna',
-]);
+export {
+  DEFAULT_MODEL,
+  DEFAULT_PROVIDER,
+  resolveLlmRuntime,
+  resolveReasoningEffort,
+  type LlmReasoningEffort,
+  type LlmTaskProfile,
+  type ResolvedLlmRuntime,
+} from './runtime.js';
 
 function usesOpenAiResponsesApi(model: string): boolean {
   return model.startsWith('gpt-5.6');
 }
 
-const OPENAI_REASONING_EFFORT_BY_PROFILE: Record<LlmTaskProfile, LlmReasoningEffort> = {
-  deep_analysis: 'high',
-  balanced: 'medium',
-  fast_structured: 'low',
-};
-
-/** Resolve provider-neutral task intent into one immutable LLM runtime. */
-export function resolveLlmRuntime(
-  selectedModel: string = DEFAULT_MODEL,
-  taskProfile?: LlmTaskProfile,
-): ResolvedLlmRuntime {
-  const selectedProvider = resolveProvider(selectedModel);
-  const model = taskProfile === 'fast_structured'
-    ? selectedProvider.fastModel ?? selectedModel
-    : selectedModel;
-  const provider = resolveProvider(model);
-  const reasoningEffort = resolveReasoningEffort(model, provider.id, taskProfile);
-
-  return Object.freeze({
-    model,
-    providerId: provider.id,
-    ...(reasoningEffort ? { reasoningEffort } : {}),
-  });
-}
-
-export function resolveReasoningEffort(
-  effectiveModel: string,
-  effectiveProviderId: string,
-  taskProfile?: LlmTaskProfile,
-): LlmReasoningEffort | undefined {
-  if (
-    taskProfile === undefined
-    || effectiveProviderId !== 'openai'
-    || !OPENAI_GPT_5_6_REASONING_MODELS.has(effectiveModel)
-  ) {
-    return undefined;
-  }
-  return OPENAI_REASONING_EFFORT_BY_PROFILE[taskProfile];
-}
-
-function getResolvedProvider(runtime: ResolvedLlmRuntime): ProviderDef {
-  const provider = getProviderById(runtime.providerId);
-  if (!provider) {
-    throw new Error(`[LLM] Unknown provider: ${runtime.providerId}`);
-  }
-  return provider;
-}
 
 // Generic retry helper with exponential backoff
 async function withRetry<T>(fn: () => Promise<T>, provider: string, maxAttempts = 3): Promise<T> {
