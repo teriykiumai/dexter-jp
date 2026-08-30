@@ -5,7 +5,9 @@ import {
   buildComparisonPath,
   buildComparisonResetPath,
   comparisonIdentityKey,
+  comparisonMetricLabel,
   comparisonRowMatchesFilter,
+  formatComparisonIdentity,
   isValidComparisonPair,
   parseComparisonPageSelection,
   restoreComparisonHistoryState,
@@ -104,6 +106,29 @@ describe('comparison Dashboard controller helpers', () => {
     expect(comparisonRowMatchesFilter(unchanged as never, 'attention', 'all')).toBeFalse();
     expect(comparisonRowMatchesFilter(issue as never, 'changed', 'all')).toBeFalse();
     expect(comparisonRowMatchesFilter(changed as never, 'issues', 'all')).toBeFalse();
+  });
+
+  test('binds long-balance statistics to their stable Supply/Demand keys', () => {
+    const expectedLabels = {
+      'supplyDemand.mean4w': '信用買残4週平均',
+      'supplyDemand.mean13w': '信用買残13週平均',
+      'supplyDemand.mean52w': '信用買残52週平均',
+      'supplyDemand.deviation52w': '信用買残52週平均乖離率',
+      'supplyDemand.percentile52w': '信用買残52週パーセンタイル',
+    } as const;
+
+    for (const [metricKey, label] of Object.entries(expectedLabels)) {
+      expect(comparisonMetricLabel({ metricKey, instanceIdentity: [] } as never)).toBe(label);
+    }
+  });
+
+  test('formats exact instance and Observation identity members without dropping nulls', () => {
+    expect(formatComparisonIdentity([])).toBe('固定条件なし');
+    expect(formatComparisonIdentity([
+      { name: 'latestFiscalYear', value: 2026 },
+      { name: 'indexCode', value: '0040' },
+      { name: 'benchmark', value: null },
+    ])).toBe('latestFiscalYear=2026 / indexCode=0040 / benchmark=null');
   });
 
   test('restores transient UI state only for the exact pair and result versions', () => {

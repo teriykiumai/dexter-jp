@@ -564,6 +564,7 @@ function DashboardTabPanel({
 function Dashboard({
   comparison,
   comparisonIssue,
+  comparisonLoading,
   comparisonNotice,
   comparisonPair,
   comparisonSelectionPresent,
@@ -586,6 +587,7 @@ function Dashboard({
 }: {
   comparison: Extract<AnalysisSnapshotComparisonResponseV1, { outcome: 'success' }> | null;
   comparisonIssue: ComparisonPanelIssue | null;
+  comparisonLoading: boolean;
   comparisonNotice: string | null;
   comparisonPair: ComparisonPair | null;
   comparisonSelectionPresent: boolean;
@@ -617,6 +619,7 @@ function Dashboard({
   const selectedTabRef = useRef(selectedTab);
   const previousSelectedTabRef = useRef(selectedTab);
   const previousNavigationRevisionRef = useRef(navigationRevision);
+  const previousSnapshotIdentityRef = useRef(`${snapshot.canonicalTicker}:${snapshot.generatedAt}`);
   const visiblePriceLines = useMemo(() => view.chart.priceLines.filter(
     line => !hiddenPriceLineLabels.includes(line.label),
   ), [hiddenPriceLineLabels, view.chart.priceLines]);
@@ -656,6 +659,16 @@ function Dashboard({
       focusGlossaryDestination();
     });
   }, []);
+
+  useEffect(() => {
+    const snapshotIdentity = `${snapshot.canonicalTicker}:${snapshot.generatedAt}`;
+    if (previousSnapshotIdentityRef.current === snapshotIdentity) return;
+    previousSnapshotIdentityRef.current = snapshotIdentity;
+    glossaryInvokerRef.current = null;
+    setGlossarySelection(null);
+    setDisclosures({ ...DEFAULT_DISCLOSURE_STATE });
+    setHiddenPriceLineLabels([]);
+  }, [snapshot.canonicalTicker, snapshot.generatedAt]);
 
   useEffect(() => {
     if (
@@ -1449,6 +1462,7 @@ function Dashboard({
         displayedSnapshotId={displayedSnapshotId}
         history={history}
         issue={comparisonIssue}
+        loading={comparisonLoading}
         notice={comparisonNotice}
         pair={comparisonPair}
         selectionPresent={comparisonSelectionPresent}
@@ -1865,6 +1879,7 @@ function App() {
   >(null);
   const [comparisonPair, setComparisonPair] = useState<ComparisonPair | null>(null);
   const [comparisonIssue, setComparisonIssue] = useState<ComparisonPanelIssue | null>(null);
+  const [comparisonLoading, setComparisonLoading] = useState(false);
   const [comparisonNotice, setComparisonNotice] = useState<string | null>(null);
   const [watchlistItems, setWatchlistItems] = useState<WatchlistItemView[]>([]);
   const [sortKey, setSortKey] = useState<WatchlistSortKey>('latestDataDate');
@@ -1874,6 +1889,7 @@ function App() {
   const selectedTickerRef = useRef(selectedTicker);
   const comparisonSelectionRef = useRef(comparisonSelection);
   const evaluationSnapshotIdRef = useRef(evaluationSnapshotId);
+  const snapshotRef = useRef(snapshot);
   const mainRequestTokenRef = useRef(0);
   const reloadAbortControllerRef = useRef<AbortController | null>(null);
   const reloadRequestTokenRef = useRef(0);
@@ -1881,6 +1897,7 @@ function App() {
   selectedTickerRef.current = selectedTicker;
   comparisonSelectionRef.current = comparisonSelection;
   evaluationSnapshotIdRef.current = evaluationSnapshotId;
+  snapshotRef.current = snapshot;
   const selectionKey = comparisonSelectionKey(comparisonSelection);
 
   const cancelSnapshotReload = useCallback(() => {
@@ -1923,7 +1940,16 @@ function App() {
         || nextEvaluationSnapshotId !== evaluationSnapshotIdRef.current;
       if (loadIdentityChanged) {
         cancelSnapshotReload();
-        setLoading(true);
+        setComparison(null);
+        setComparisonPair(nextComparison.kind === 'valid' ? nextComparison.pair : null);
+        setComparisonIssue(null);
+        setComparisonNotice(null);
+        if (nextTicker && snapshotRef.current?.canonicalTicker === nextTicker) {
+          setComparisonLoading(true);
+        } else {
+          setComparisonLoading(false);
+          setLoading(true);
+        }
       }
       setSelectedTicker(nextTicker);
       setSelectedTab(nextTab);
@@ -1964,16 +1990,28 @@ function App() {
     mainRequestTokenRef.current = requestToken;
     const isCurrent = () => !abortController.signal.aborted
       && mainRequestTokenRef.current === requestToken;
-    setLoading(true);
+    const scopedDetailLoad = selectedTicker !== null
+      && snapshot !== null
+      && snapshot.canonicalTicker === selectedTicker;
+    if (scopedDetailLoad) {
+      setComparisonLoading(true);
+    } else {
+      setComparisonLoading(false);
+      setLoading(true);
+    }
     setError(null);
     setComparison(null);
-    setComparisonPair(null);
+    setComparisonPair(scopedDetailLoad && comparisonSelection.kind === 'valid'
+      ? comparisonSelection.pair
+      : null);
     setComparisonIssue(null);
     setComparisonNotice(null);
 
     if (selectedTicker) {
-      setSnapshot(null);
-      setDisplayedSnapshotId(null);
+      if (!scopedDetailLoad) {
+        setSnapshot(null);
+        setDisplayedSnapshotId(null);
+      }
       void (async () => {
         const history = await fetchSnapshotHistory(selectedTicker, abortController.signal);
         if (comparisonSelection.kind === 'valid' && isValidComparisonPair(history, comparisonSelection.pair)) {
@@ -2013,6 +2051,7 @@ function App() {
           return;
         }
 
+        setComparisonPair(null);
         const pinnedSnapshotId = comparisonSelection.kind === 'none'
           ? evaluationSnapshotId
           : null;
@@ -2033,10 +2072,18 @@ function App() {
         }
       })().catch((cause: unknown) => {
         if (isCurrent()) {
-          setError(cause instanceof Error ? cause.message : 'Snapshotを読み込めませんでした。');
+          const message = cause instanceof Error ? cause.message : 'Snapshotを読み込めませんでした。';
+          if (scopedDetailLoad) {
+            setComparisonIssue({ message, retryable: false });
+          } else {
+            setError(message);
+          }
         }
       }).finally(() => {
-        if (isCurrent()) setLoading(false);
+        if (isCurrent()) {
+          setComparisonLoading(false);
+          setLoading(false);
+        }
       });
     } else {
       setSnapshot(null);
@@ -2057,7 +2104,10 @@ function App() {
           setError(cause instanceof Error ? cause.message : 'Analysis一覧を読み込めませんでした。');
         }
       }).finally(() => {
-        if (isCurrent()) setLoading(false);
+        if (isCurrent()) {
+          setComparisonLoading(false);
+          setLoading(false);
+        }
       });
     }
     return () => abortController.abort();
@@ -2074,11 +2124,14 @@ function App() {
       preserveEvaluationForTarget,
     );
     window.history.pushState({}, '', path);
+    setComparison(null);
+    setComparisonPair(pair);
+    setComparisonIssue(null);
     setComparisonSelection({ kind: 'valid', pair });
     setEvaluationSnapshotId(parseEvaluationSnapshotId(new URL(path, window.location.origin).search));
     setSelectedTab(DEFAULT_DASHBOARD_TAB);
     setComparisonNotice(null);
-    setLoading(true);
+    setComparisonLoading(true);
     setNavigationRevision(current => current + 1);
   };
 
@@ -2091,6 +2144,7 @@ function App() {
       buildDetailPath(ticker, DEFAULT_DASHBOARD_TAB, window.location.search),
     );
     setLoading(true);
+    setComparisonLoading(false);
     setSelectedTicker(ticker);
     setSelectedTab(DEFAULT_DASHBOARD_TAB);
     setComparisonSelection({ kind: 'none' });
@@ -2101,6 +2155,7 @@ function App() {
     cancelSnapshotReload();
     window.history.pushState({}, '', buildWatchlistPath(window.location.search));
     setLoading(true);
+    setComparisonLoading(false);
     setSelectedTicker(null);
     setSelectedTab(DEFAULT_DASHBOARD_TAB);
     setComparisonSelection({ kind: 'none' });
@@ -2139,10 +2194,13 @@ function App() {
       targetSnapshotId,
     );
     window.history.pushState({}, '', path);
+    setComparison(null);
+    setComparisonPair(null);
+    setComparisonIssue(null);
     setComparisonSelection({ kind: 'none' });
     setEvaluationSnapshotId(parseEvaluationSnapshotId(new URL(path, window.location.origin).search));
     setSelectedTab(DEFAULT_DASHBOARD_TAB);
-    setLoading(true);
+    setComparisonLoading(true);
     setNavigationRevision(current => current + 1);
   };
   const changeComparisonBase = (baseSnapshotId: string) => {
@@ -2167,7 +2225,7 @@ function App() {
     cancelSnapshotReload();
     setComparison(null);
     setComparisonIssue(null);
-    setLoading(true);
+    setComparisonLoading(true);
     setLoadRevision(current => current + 1);
   };
 
@@ -2285,9 +2343,10 @@ function App() {
   if (selectedTicker && snapshot) {
     return (
       <Dashboard
-        key={`${snapshot.canonicalTicker}:${snapshot.generatedAt}`}
+        key={snapshot.canonicalTicker}
         comparison={comparison}
         comparisonIssue={comparisonIssue}
+        comparisonLoading={comparisonLoading}
         comparisonNotice={comparisonNotice}
         comparisonPair={comparisonPair}
         comparisonSelectionPresent={comparisonSelection.kind !== 'none'}

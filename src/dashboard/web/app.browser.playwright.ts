@@ -19,6 +19,7 @@ import {
   type AnalysisSnapshotV9,
 } from '../../analysis/snapshot/index.js';
 import { digestValidatedAnalysisSnapshot } from '../../analysis/snapshot/canonical-json.js';
+import { comparisonSnapshot } from '../../analysis/comparison/test-fixtures.js';
 import {
   compareAnalysisSnapshotsV1,
   comparisonFailureV1,
@@ -924,6 +925,48 @@ async function expectSelectedTab(page: Page, tab: DashboardTabId): Promise<void>
 }
 
 test.describe('saved-analysis Comparison browser interaction', () => {
+  test('shows both Observation identities for period and benchmark mismatches', async ({ browser }) => {
+    const page = await browser.newPage();
+    const base = comparisonSnapshot('2026-08-22T01:02:03.000Z');
+    const targetSnapshot = comparisonSnapshot('2026-08-23T01:02:03.000Z');
+    const target = AnalysisSnapshotV9Schema.parse({
+      ...targetSnapshot,
+      valuation: targetSnapshot.valuation && {
+        ...targetSnapshot.valuation,
+        latestFiscalYear: 2027,
+      },
+      sectorBenchmark: targetSnapshot.sectorBenchmark && {
+        ...targetSnapshot.sectorBenchmark,
+        benchmark: targetSnapshot.sectorBenchmark.benchmark && {
+          ...targetSnapshot.sectorBenchmark.benchmark,
+          indexCode: '0051',
+        },
+      },
+    });
+    try {
+      await mockComparisonApi(page, [base, target]);
+      await openDetail(page, '7203');
+      await page.getByRole('button', { name: '比較を開始' }).click();
+
+      const periodRow = page.locator('tr[data-comparison-row="valuation.per"]');
+      await periodRow.locator('summary').click();
+      await expect(periodRow.locator('dl > div').filter({ hasText: '基準の同一性' }))
+        .toContainText('latestFiscalYear=2026');
+      await expect(periodRow.locator('dl > div').filter({ hasText: '対象の同一性' }))
+        .toContainText('latestFiscalYear=2027');
+
+      const benchmarkRow = page.locator('tr[data-comparison-row="sectorBenchmark.window.correlation"]').first();
+      await benchmarkRow.locator('summary').click();
+      await expect(benchmarkRow.locator('dl > div').filter({ hasText: '基準の同一性' }))
+        .toContainText('indexCode=0050');
+      await expect(benchmarkRow.locator('dl > div').filter({ hasText: '対象の同一性' }))
+        .toContainText('indexCode=0051');
+      await expect(benchmarkRow).toContainText('比較不可: ベンチマーク不一致');
+    } finally {
+      await page.close();
+    }
+  });
+
   test('starts one atomic pair, renders the semantic table, and restores pair-scoped UI state', async ({ browser }) => {
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     const target = snapshotFor('1010');
@@ -1035,6 +1078,48 @@ test.describe('saved-analysis Comparison browser interaction', () => {
       const url = new URL(page.url());
       expect(url.searchParams.get('target')).toBe(createSnapshotId(middle.generatedAt));
       expect(url.searchParams.get('base')).toBe(createSnapshotId(oldest.generatedAt));
+    } finally {
+      await page.close();
+    }
+  });
+
+  test('keeps selector focus and scroll while pair changes and Back/Forward load in place', async ({ browser }) => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 500 } });
+    const oldest = snapshotWithIdentity('1010', '2026-08-21T01:02:03.000Z');
+    const middle = snapshotWithIdentity('1010', '2026-08-22T01:02:03.000Z');
+    const newest = snapshotWithIdentity('1010', '2026-08-23T01:02:03.000Z');
+    try {
+      await mockComparisonApi(page, [oldest, middle, newest]);
+      await openDetail(page, '1010');
+      await page.getByRole('button', { name: '比較を開始' }).click();
+      await expect(page.locator('.comparison-table').first()).toBeVisible();
+      await page.route('**/api/analyses/1010/comparison?*', async route => {
+        await new Promise(resolve => setTimeout(resolve, 250));
+        await route.fallback();
+      });
+
+      const targetSelect = page.locator('.comparison-selectors label').filter({ hasText: '対象Snapshot' })
+        .locator('select');
+      await targetSelect.scrollIntoViewIfNeeded();
+      await targetSelect.focus();
+      const initialScroll = await page.evaluate(() => window.scrollY);
+      await targetSelect.selectOption(createSnapshotId(middle.generatedAt));
+      await expect(page.getByRole('heading', { name: '保存済み分析の比較' })).toBeVisible();
+      await expect(page.locator('.comparison-table')).toHaveCount(0);
+      await expect(targetSelect).toBeFocused();
+      await expect(page.locator('.comparison-table').first()).toBeVisible();
+      await expect(targetSelect).toBeFocused();
+      expect(Math.abs(await page.evaluate(() => window.scrollY) - initialScroll)).toBeLessThanOrEqual(2);
+
+      await page.goBack();
+      await expect(page.locator('.comparison-table').first()).toBeVisible();
+      await expect(targetSelect).toBeFocused();
+      expect(Math.abs(await page.evaluate(() => window.scrollY) - initialScroll)).toBeLessThanOrEqual(2);
+
+      await page.goForward();
+      await expect(page.locator('.comparison-table').first()).toBeVisible();
+      await expect(targetSelect).toBeFocused();
+      expect(Math.abs(await page.evaluate(() => window.scrollY) - initialScroll)).toBeLessThanOrEqual(2);
     } finally {
       await page.close();
     }

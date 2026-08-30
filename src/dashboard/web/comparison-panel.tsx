@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type {
   AnalysisSnapshotComparisonResponseV1,
   ComparisonObservationV1,
@@ -14,6 +14,7 @@ import {
   comparisonRowId,
   comparisonRowMatchesFilter,
   comparisonStatusLabel,
+  formatComparisonIdentity,
   formatComparisonDelta,
   formatComparisonObservation,
   orderedHistory,
@@ -31,6 +32,7 @@ export type ComparisonPanelIssue = Readonly<{
 
 interface ComparisonPanelProps {
   comparison: Extract<AnalysisSnapshotComparisonResponseV1, { outcome: 'success' }> | null;
+  loading: boolean;
   displayedSnapshotId: string | null;
   history: readonly AnalysisSnapshotHistoryItem[];
   issue: ComparisonPanelIssue | null;
@@ -97,9 +99,6 @@ function RowConditions({
   row: SnapshotComparisonMetricRowV1;
   onOpenChange: (open: boolean) => void;
 }) {
-  const identity = row.instanceIdentity.length > 0
-    ? row.instanceIdentity.map(item => `${item.name}=${item.value ?? 'null'}`).join(' / ')
-    : '固定指標';
   return (
     <details
       className="comparison-row-conditions"
@@ -108,9 +107,11 @@ function RowConditions({
     >
       <summary>日付・比較条件</summary>
       <dl>
-        <div><dt>同一性</dt><dd>{identity}</dd></div>
-        <div><dt>基準</dt><dd>{observationContext(row.base).join('。')}</dd></div>
-        <div><dt>対象</dt><dd>{observationContext(row.target).join('。')}</dd></div>
+        <div><dt>比較行の同一性</dt><dd>{formatComparisonIdentity(row.instanceIdentity)}</dd></div>
+        <div><dt>基準の同一性</dt><dd>{formatComparisonIdentity(row.base.identity)}</dd></div>
+        <div><dt>基準の状態・日付</dt><dd>{observationContext(row.base).join('。')}</dd></div>
+        <div><dt>対象の同一性</dt><dd>{formatComparisonIdentity(row.target.identity)}</dd></div>
+        <div><dt>対象の状態・日付</dt><dd>{observationContext(row.target).join('。')}</dd></div>
       </dl>
     </details>
   );
@@ -233,6 +234,7 @@ export function ComparisonPanel({
   displayedSnapshotId,
   history,
   issue,
+  loading,
   notice,
   pair,
   selectionPresent,
@@ -244,6 +246,8 @@ export function ComparisonPanel({
   onStart,
   onTargetRejected,
 }: ComparisonPanelProps) {
+  const comparisonResultsRef = useRef<HTMLDivElement | null>(null);
+  const previousResultsHeightRef = useRef(0);
   const ascendingHistory = useMemo(() => orderedHistory(history), [history]);
   const targetIndex = pair
     ? ascendingHistory.findIndex(item => item.snapshotId === pair.targetSnapshotId)
@@ -252,8 +256,18 @@ export function ComparisonPanel({
     ? resolveComparisonPair(history, displayedSnapshotId)
     : null;
 
+  useLayoutEffect(() => {
+    if (comparison && comparisonResultsRef.current) {
+      previousResultsHeightRef.current = comparisonResultsRef.current.getBoundingClientRect().height;
+    }
+  }, [comparison]);
+
   return (
-    <section className="panel comparison-panel" aria-labelledby="comparison-title">
+    <section
+      aria-busy={loading}
+      className="panel comparison-panel"
+      aria-labelledby="comparison-title"
+    >
       <header className="panel-header comparison-panel-header">
         <div>
           <span className="eyebrow">IMMUTABLE SNAPSHOTS</span>
@@ -309,7 +323,7 @@ export function ComparisonPanel({
       ) : null}
 
       <p aria-atomic="true" aria-live="polite" className="comparison-announcement" role="status">
-        {notice ?? ''}
+        {loading ? '比較結果を読み込み中…' : notice ?? ''}
       </p>
       {issue ? (
         <div className="comparison-error" role="alert">
@@ -318,10 +332,18 @@ export function ComparisonPanel({
         </div>
       ) : null}
       {comparison ? (
-        <ComparisonResults
-          key={comparisonIdentityKey(ticker, comparison)}
-          comparison={comparison}
-          ticker={ticker}
+        <div ref={comparisonResultsRef}>
+          <ComparisonResults
+            key={comparisonIdentityKey(ticker, comparison)}
+            comparison={comparison}
+            ticker={ticker}
+          />
+        </div>
+      ) : loading && previousResultsHeightRef.current > 0 ? (
+        <div
+          aria-hidden="true"
+          className="comparison-loading-space"
+          style={{ minHeight: previousResultsHeightRef.current }}
         />
       ) : null}
     </section>

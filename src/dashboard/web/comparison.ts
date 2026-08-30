@@ -1,6 +1,7 @@
 import {
   COMPARISON_SECTIONS,
   type AnalysisSnapshotComparisonResponseV1,
+  type ComparisonInstanceIdentityV1,
   type ComparisonMetricKeyV1,
   type ComparisonObservationV1,
   type ComparisonSectionV1,
@@ -252,11 +253,11 @@ export const COMPARISON_METRIC_LABELS = {
   'supplyDemand.marginRatio': '信用倍率',
   'supplyDemand.buyingBalanceWeeklyChange': '信用買残の週次変化',
   'supplyDemand.sellingBalanceWeeklyChange': '信用売残の週次変化',
-  'supplyDemand.mean4w': '信用倍率4週平均',
-  'supplyDemand.mean13w': '信用倍率13週平均',
-  'supplyDemand.mean52w': '信用倍率52週平均',
-  'supplyDemand.deviation52w': '信用倍率52週偏差',
-  'supplyDemand.percentile52w': '信用倍率52週パーセンタイル',
+  'supplyDemand.mean4w': '信用買残4週平均',
+  'supplyDemand.mean13w': '信用買残13週平均',
+  'supplyDemand.mean52w': '信用買残52週平均',
+  'supplyDemand.deviation52w': '信用買残52週平均乖離率',
+  'supplyDemand.percentile52w': '信用買残52週パーセンタイル',
   'supplyDemand.averageDailyVolume20': '20日平均出来高',
   'supplyDemand.digestionDays': '買残消化日数',
   'marketCorrelation.window.observations': '観測数',
@@ -384,4 +385,11 @@ export function comparisonMetricLabel(row: SnapshotComparisonMetricRowV1): strin
     .map(item => `${item.name}=${item.value === null ? 'null' : String(item.value)}`)
     .join(' / ');
   return identity ? `${COMPARISON_METRIC_LABELS[row.metricKey]}（${identity}）` : COMPARISON_METRIC_LABELS[row.metricKey];
+}
+
+export function formatComparisonIdentity(identity: ComparisonInstanceIdentityV1): string {
+  if (identity.length === 0) return '固定条件なし';
+  return identity
+    .map(item => `${item.name}=${item.value === null ? 'null' : String(item.value)}`)
+    .join(' / ');
 }
