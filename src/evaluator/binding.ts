@@ -29,6 +29,30 @@ function sha256Bytes(bytes: Uint8Array): `sha256:${string}` {
   return `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
 }
 
+function isEvaluatorTextSource(path: string): boolean {
+  return path === 'bun.lock'
+    || /\.(?:[cm]?[jt]sx?|json|toml|md)$/.test(path);
+}
+
+export function digestEvaluatorSourceFileV1(
+  path: string,
+  bytes: Uint8Array,
+): `sha256:${string}` {
+  if (!isEvaluatorTextSource(path)) {
+    throw new Error('Evaluator source binding encountered an unsupported binary path.');
+  }
+  const normalized: number[] = [];
+  for (let index = 0; index < bytes.length; index += 1) {
+    if (bytes[index] === 13 && bytes[index + 1] === 10) {
+      normalized.push(10);
+      index += 1;
+    } else {
+      normalized.push(bytes[index]!);
+    }
+  }
+  return sha256Bytes(Uint8Array.from(normalized));
+}
+
 function posixPath(value: string): string {
   return value.replaceAll('\\', '/').replace(/^\.\//, '');
 }
@@ -172,7 +196,7 @@ export async function buildEvaluatorSourceManifestFromGitV1(
   const files = paths.map(path => {
     const blob = runGit(rootDirectory, ['show', `${commitSha}:${path}`]);
     if (blob.exitCode !== 0) throw new Error('Evaluator source Git blob could not be read.');
-    return { path, blobDigest: sha256Bytes(blob.stdout) };
+    return { path, blobDigest: digestEvaluatorSourceFileV1(path, blob.stdout) };
   });
   return EvaluatorSourceManifestV1Schema.parse({
     kind: 'dexter_evaluator_source',
@@ -197,7 +221,10 @@ export async function buildEvaluatorSourceManifestFromFilesystemV1(
   const paths = expectedPaths === undefined ? discovered : [...expectedPaths];
   const files = await Promise.all(paths.map(async path => ({
     path,
-    blobDigest: sha256Bytes(await readFile(await assertRegularContainedFile(rootDirectory, path))),
+    blobDigest: digestEvaluatorSourceFileV1(
+      path,
+      await readFile(await assertRegularContainedFile(rootDirectory, path)),
+    ),
   })));
   return EvaluatorSourceManifestV1Schema.parse({
     kind: 'dexter_evaluator_source', version: 1, files,

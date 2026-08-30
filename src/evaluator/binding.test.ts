@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   buildEvaluatorDependencyManifestV1,
   buildEvaluatorSourceManifestFromFilesystemV1,
+  digestEvaluatorSourceFileV1,
   digestEvaluatorBindingV1,
 } from './binding.js';
 
@@ -41,5 +42,17 @@ describe('Evaluator source and dependency binding', () => {
       process.cwd(),
       manifest.files.slice(1).map(value => value.path),
     )).rejects.toThrow('source closure changed');
+  });
+
+  test('binds Git text identically across LF and Windows CRLF checkouts', () => {
+    const lf = new TextEncoder().encode('first\nsecond\n');
+    const crlf = new TextEncoder().encode('first\r\nsecond\r\n');
+    const loneCr = new TextEncoder().encode('first\rsecond\n');
+    expect(digestEvaluatorSourceFileV1('src/evaluator/example.ts', crlf))
+      .toBe(digestEvaluatorSourceFileV1('src/evaluator/example.ts', lf));
+    expect(digestEvaluatorSourceFileV1('src/evaluator/example.ts', loneCr))
+      .not.toBe(digestEvaluatorSourceFileV1('src/evaluator/example.ts', lf));
+    expect(() => digestEvaluatorSourceFileV1('src/evaluator/example.wasm', lf))
+      .toThrow('unsupported binary path');
   });
 });
