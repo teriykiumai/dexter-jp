@@ -102,7 +102,10 @@ cannot add a bar to an already confirmed run.
 
 Campaign resistance accepts only persisted `resistance_level` target prices from a
 digest-valid Snapshot whose Strategy date is not later than that Snapshot's own
-Tokyo generation date and exactly matches the anchor.
+Tokyo generation date and exactly matches the anchor. Each exact price retains its
+sorted source-Snapshot digests. Provenance then follows the unchanged Engine's exact
+resistance-to-entry-tick normalization, so a generated candidate records only the
+union of evidence that actually maps to its output target.
 
 ### 4.3 Existing Engine boundary
 
@@ -166,6 +169,20 @@ and all `anchor_unavailable` cases. Target/stop/resistance strata contain only
 candidate cases and use separately named candidate-bearing denominators; unavailable
 anchors are never omitted, replicated, or placed in a null candidate stratum.
 
+Candidate IDs use separate `snapshot_candidate_identity_v1` and
+`campaign_candidate_identity_v1` canonical envelopes. Campaign identity includes
+ticker, anchor, the 251-session policy, exact Entry/Stop/Target tuple,
+candidate-specific resistance evidence, and a zero-based deterministic duplicate
+ordinal. It excludes run/case UUIDs, manifest identity, timestamps, and outcomes, so
+equal reruns preserve candidate IDs/order while cross-anchor, cross-ticker, and true
+duplicate candidates remain distinct.
+
+Campaign aggregates are deliberately `campaign_global` across every ticker and
+anchor in the run. Version 1 persists no per-ticker aggregates and the Browser never
+derives them from cases. The current ticker limits the run picker by membership and,
+within a selected run, filters only the case list/detail; it does not change run
+metadata or aggregate metrics.
+
 CLI external fetches and Dashboard jobs require explicit default-No confirmation.
 Normal CI never calls J-Quants. Before confirmation, preflight applies the runtime's
 same `rolling_attempt_log_v1` formula and rejects a minimum schedule that cannot
@@ -184,6 +201,12 @@ Run and case selection is explicit in the URL; there is no automatic latest run 
 auto-open on completion. The local mutation API uses exact same-origin validation
 and a process-local CSRF token. The Browser never receives the J-Quants credential
 or a local filesystem path.
+
+A campaign aggregate is headed
+`キャンペーン全体（{tickerCount}銘柄・{requestedAnchorCount}基準日）` and warns
+that only the case list is filtered to the displayed ticker. It is never labeled as
+that ticker's performance. A cross-ticker case deep link is rejected as a scoped
+selection error.
 
 ## 5. Implementation order
 
@@ -250,6 +273,11 @@ For P4-I0 after that gate:
 - Broad campaign limits, sparse unavailable data, and multiple candidates per anchor
   make naive win-rate interpretation misleading; mandatory strata and denominators
   must remain intact.
+- Multi-ticker campaign metrics are global by contract; a single-stock page must not
+  imply that filtered cases make those aggregates ticker-specific.
+- Candidate identity stability depends on the exact versioned envelope and
+  candidate-specific resistance mapping; publication UUIDs and Engine order must not
+  leak into it.
 - A crash after run promotion must reconcile the reserved run rather than create an
   orphan or erase a suspect artifact.
 - Low configured request rates can make a selector impossible within 90 minutes;

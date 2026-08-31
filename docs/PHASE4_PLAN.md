@@ -411,17 +411,11 @@ candidates use `precommitted_source_unknown`: persistence proves the level was f
 before evaluation, but V1-V9 does not preserve a source identity that Phase 4 can
 upgrade to source-verified evidence.
 
-Candidate identity is the canonical digest of:
-
-```text
-snapshotDigest + strategy.dataDate + entry.reason + entry.price +
-stop.reason + stop.price + target.reason + target.price + stable duplicate ordinal
-```
-
-The duplicate ordinal is assigned only after stable sorting by the complete tuple;
-identical duplicates remain separate cases and are explicitly marked. A Snapshot
-with `strategy === null`, no candidates, malformed chronology, or a future Strategy
-date produces an unavailable case/run record rather than a fabricated candidate.
+Saved candidates use the versioned `snapshot_candidate_identity_v1` envelope in
+Section 5.4. Identical duplicates remain separate cases and are explicitly marked.
+A Snapshot with `strategy === null`, no candidates, malformed chronology, or a future
+Strategy date produces an unavailable case/run record rather than a fabricated
+candidate.
 
 Let `generatedTokyoDate` be the Tokyo calendar date containing the exact
 `generatedAt` instant. If `strategy.dataDate > generatedTokyoDate`, reason is
@@ -476,9 +470,18 @@ is applied before extracting any price. Extraction reads only persisted
 `strategy.candidates[].target.price` values whose `target.reason` is exactly
 `resistance_level`; report text, entry/stop levels, 2R targets, and other fields are
 never resistance evidence. At most 16 unique finite positive extracted prices
-survive exact deduplication across accepted evidence. Invalid temporal evidence,
-identity, schema/digest, or extracted value makes that anchor unavailable with
-`resistance_evidence_invalid`; it is never silently ignored.
+survive exact deduplication across accepted evidence. For every surviving price, the
+extractor retains the sorted unique Snapshot digests that supplied that exact price.
+After the entry tick is resolved, provenance association reuses the unchanged
+Engine's exact `tickAtOrBelow(rawResistance, entryTick)` transformation and groups
+the source digests by that normalized target. Raw levels that the Engine rejects at
+or below entry produce no mapping; multiple raw levels collapsing to one normalized
+target contribute the sorted union of their digests. A generated
+`resistance_level` candidate receives only the digests in the group for its exact
+Engine output target; a `risk_reward_2R` candidate receives none. This association
+does not create, round, or repair a candidate outside the Engine. Invalid temporal
+evidence, identity, schema/digest, or extracted value makes that anchor unavailable
+with `resistance_evidence_invalid`; it is never silently ignored.
 
 Campaign candidate generation is the distinct, versioned policy
 `technical_251_strategy_v1`. Its technical window is exactly t0 plus the preceding
@@ -515,6 +518,65 @@ resistance value, but current V1-V9 data does not prove the original resistance
 producer identity, so it is labeled `precommitted_source_unknown` and aggregated
 separately. Phase 4 never invents a resistance level or describes this tier as
 source-verified.
+
+### 5.4 Canonical candidate identity
+
+Every candidate case persists `candidateId` as `sha256:<64 lowercase hex>`. It is
+SHA-256 over one complete, strict typed envelope serialized with `CanonicalJsonV1`.
+Snapshot and campaign modes use different identity versions:
+
+```ts
+type SnapshotCandidateIdentityEnvelopeV1 = Readonly<{
+  candidateIdentityVersion: 'snapshot_candidate_identity_v1';
+  snapshotDigest: SnapshotDigest;
+  strategyDataDate: TseSessionDate;
+  entry: Readonly<{ reason: EntryReason; price: number }>;
+  stop: Readonly<{ reason: StopReason; price: number }>;
+  target: Readonly<{ reason: TargetReason; price: number }>;
+  duplicateOrdinal: number;
+}>;
+
+type CampaignCandidateIdentityEnvelopeV1 = Readonly<{
+  candidateIdentityVersion: 'campaign_candidate_identity_v1';
+  ticker: CanonicalTicker;
+  anchorDate: TseSessionDate;
+  candidateGenerationPolicy: 'technical_251_strategy_v1';
+  resistanceEvidenceTier: 'none' | 'precommitted_source_unknown';
+  resistanceEvidenceSnapshotDigests: readonly SnapshotDigest[];
+  entry: Readonly<{ reason: EntryReason; price: number }>;
+  stop: Readonly<{ reason: StopReason; price: number }>;
+  target: Readonly<{ reason: TargetReason; price: number }>;
+  duplicateOrdinal: number;
+}>;
+```
+
+The evidence-digest array is the candidate-specific array from Section 5.3, sorted
+lexicographically and deduplicated before hashing. Every field is required. Prices
+must already be validated finite canonical numbers; `CanonicalJsonV1` normalizes
+negative zero to zero. No run ID, case ID, job/preflight ID, manifest name/digest,
+timestamp, outcome, fill, or unused resistance reference enters candidate identity.
+Thus campaign composition and random publication identities cannot change an equal
+candidate's ID, while ticker, anchor, policy, price/reason tuple, or evidence identity
+changes do.
+
+The normalized campaign-anchor identity is exactly `(ticker, anchorDate)` because
+the manifest rejects duplicate pairs; no manifest-wide identity is needed to
+disambiguate anchors. Every envelope field is also persisted in the candidate case,
+and loaders reconstruct and rehash the envelope before accepting `candidateId`.
+`duplicateOrdinal` is a nonnegative safe integer. Snapshot audit persists an empty
+`resistanceEvidenceSnapshotDigests` array because V1-V9 has no source identity;
+campaign 2R also persists an empty array, while campaign resistance persists the
+candidate-specific array above.
+
+For each mode, first form the complete identity base tuple above without
+`duplicateOrdinal` and sort candidates by the `CanonicalJsonV1` bytes of that base
+tuple in ascending unsigned UTF-8 byte order. Within each exactly equal base tuple,
+assign zero-based ordinals `0..n-1`; Engine/source order is ignored. Hash the complete
+envelope including that ordinal. This makes the candidate-ID multiset and its
+candidate-ID sort order identical across equal reruns even though `runId` and
+`caseId` are new UUIDv4 values. Different tickers or anchor dates cannot collide, and
+true duplicates within one anchor remain distinct. An `anchor_unavailable` case has
+no `candidateId`, candidate envelope, or duplicate ordinal.
 
 ## 6. Outcome validator
 
@@ -728,15 +790,19 @@ digests, and versions, but no invented candidate, price, fill, or R field.
 `candidate` is then discriminated by the Section 6 result union. It contains:
 
 - `schemaVersion: "strategy_validation_case_v1"`;
-- case/run identity, mode, confidence, ticker, and anchor/decision dates;
+- case/run identity, mode, confidence, ticker, anchor/decision dates, and the exact
+  Snapshot `strategyDataDate` when applicable;
 - Snapshot ID/schema/digest or campaign manifest digest, as applicable;
 - technical/Strategy/tick/source-contract, candidate-generation, daily-fill, and
   limit-queue version literals; `candidateGenerationPolicy` is `null` for Snapshot
   audit and exactly `technical_251_strategy_v1` for campaign mode;
-- canonical candidate identity and duplicate ordinal;
+- exact `candidateIdentityVersion`, canonical `candidateId`, and zero-based duplicate
+  ordinal from Section 5.4;
 - exact entry, stop, and target values and reason literals;
 - tick category/effective date, per-level tick, and executability state;
-- resistance evidence tier and only the accepted evidence Snapshot digests;
+- resistance evidence tier and `resistanceEvidenceSnapshotDigests`: empty for
+  Snapshot audit and campaign 2R, otherwise only the campaign evidence digests mapped
+  to that exact resistance target price;
 - frozen `startedAt`, `outcomeAsOfSession`, entry-wait and holding-window boundaries;
 - independent `entryProven` plus exact entry fill identity when true;
 - result union, exact fill/mark dates and prices, planned/actual risk, R values,
@@ -764,6 +830,7 @@ candidate cases.
 - exact input selector and canonical Snapshot or manifest digest;
 - source/technical/Strategy/outcome/tick/aggregation version literals and the same
   mode-constrained `candidateGenerationPolicy` value as every referenced case;
+- the exact `aggregationScope` from Section 8.1;
 - ordered case IDs and case digests;
 - aggregate strata and metrics from Section 8;
 - counted request attempts, cache hits, duration, frozen execution controls including
@@ -876,6 +943,33 @@ code/message, counts, and timestamps.
 
 ### 8.1 Mandatory strata
 
+Every run persists this aggregation scope:
+
+```ts
+type StrategyValidationAggregationScopeV1 =
+  | Readonly<{
+      scopeVersion: 'strategy_validation_aggregation_scope_v1';
+      kind: 'snapshot_ticker';
+      tickers: readonly [CanonicalTicker];
+      tickerCount: 1;
+      requestedAnchorCount: 1;
+    }>
+  | Readonly<{
+      scopeVersion: 'strategy_validation_aggregation_scope_v1';
+      kind: 'campaign_global';
+      tickers: readonly CanonicalTicker[];
+      tickerCount: number;
+      requestedAnchorCount: number;
+    }>;
+```
+
+`tickers` is the nonempty, sorted unique canonical ticker set; `tickerCount` must
+equal its length. Snapshot mode always uses `snapshot_ticker`. Campaign mode always
+uses `campaign_global`, including a one-ticker campaign, and
+`requestedAnchorCount` equals the manifest's accepted anchor count. The run's ticker
+scope is exactly `aggregationScope.tickers`. Scope `requestedAnchorCount` must equal
+the Section 8.2 track-level value; any mismatch makes the run corrupt.
+
 Aggregation has two levels. Track-level anchor coverage is calculated once for the
 run's mode/confidence and includes every requested anchor, including
 `anchor_unavailable`. It is never partitioned by candidate-only dimensions.
@@ -892,6 +986,14 @@ cases are never combined. Duplicate candidates remain counted and their duplicat
 count is visible. An `anchor_unavailable` case is represented only at track level;
 it is neither omitted, replicated into candidate strata, nor assigned null
 target/stop/resistance dimensions.
+
+All campaign track metrics and candidate strata are calculated once across every
+ticker and anchor in the run: they are campaign-global, not statistics for the
+Dashboard's current ticker. Ticker is deliberately not an aggregation stratum in
+version 1. No persisted per-ticker aggregate, ticker-aggregate API, or Browser-side
+derivation from cases exists. Within a selected run, the case-list ticker filter
+changes only which case items are returned; it never changes `aggregationScope` or
+any persisted aggregate.
 
 ### 8.2 Metrics
 
@@ -945,8 +1047,9 @@ Rates always name their denominator. Unavailable and ambiguous rows never enter 
 exact realized-R denominator. Valid zero and negative R remain values. Empty metric
 sets are an explicit unavailable state, not zero. Median uses the deterministic
 midpoint of the two central values for an even count. All calculations use finite
-numbers, candidate-ID order for summation, and a versioned stable sort; negative zero
-is serialized as zero and non-finite aggregate output fails validation.
+numbers, ascending Section 5.4 `candidateId` order for summation, and a versioned
+stable sort; negative zero is serialized as zero and non-finite aggregate output
+fails validation.
 
 These descriptive metrics have no significance test, confidence claim, PASS/FAIL,
 P&L, cost-adjusted result, or recommendation. The UI must put coverage and unavailable
@@ -1077,7 +1180,8 @@ error and are not repaired. There is no automatic run selection, `latest` fallba
 or auto-open after a job completes. Explicit user selection uses History API state;
 Back/Forward and reload restore the exact valid selection. Ticker/list navigation
 removes run/case state. A run whose ticker scope excludes the current ticker is not
-adopted.
+adopted. A deep-linked case whose persisted ticker differs from the current ticker
+shows a scoped selection error and is not rendered under that stock page.
 
 Latest-request-wins guards all list, run, case, job, and Snapshot transitions.
 Stale responses and abort errors cannot overwrite newer content or move focus.
@@ -1101,14 +1205,23 @@ literal, route kind, normalized filter digest, and the last complete sort tuple.
 are at most 1,024 ASCII bytes. Decode/schema/canonical-reencode mismatch, malformed,
 duplicate, or cross-query cursors are 400. Runs sort by `completedAt desc, runId asc`.
 Cases sort by `ticker asc, anchor/decisionDate asc, caseKind asc` with
-`anchor_unavailable` before `candidate`, then nullable candidate ID ascending.
-Pagination has no duplicate or omission at equal sort keys.
+`anchor_unavailable` before `candidate`, then the nullable Section 5.4 `candidateId`
+ascending. The null sentinel applies only to `anchor_unavailable` and sorts before
+all candidate IDs. Pagination has no duplicate or omission at equal sort keys.
 
 The run and case lists each accept zero or one canonical `ticker`; the case filter
 must also belong to the selected run's ticker scope. Unknown query parameters or
 duplicate singleton parameters are 400. Loaders revalidate all referenced artifacts;
 corruption is 500 and is never silently skipped. A run/case identity mismatch is 500,
 not 404.
+
+The run-list ticker filter includes a run exactly when
+`aggregationScope.tickers` contains that ticker. The case-list ticker filter returns
+only cases whose persisted ticker equals it. Run summaries include the validated
+`aggregationScope`; `GET /runs/:runId` always returns the persisted run and its
+campaign-global aggregates unchanged. Neither read route calculates a per-ticker
+rate from cases. Case detail is an exact artifact read and the Dashboard separately
+enforces the current-ticker selection rule above.
 
 List successes are exactly:
 
@@ -1262,6 +1375,17 @@ tick validity, exact/unavailable/ambiguous state, and named denominators. Ambigu
 bounds are visually and semantically distinct from exact R. No PASS badge, score,
 ranking, color-only direction, or Buy/Sell wording is allowed.
 
+For `campaign_global`, every aggregate table/chart is headed exactly
+`キャンペーン全体（{tickerCount}銘柄・{requestedAnchorCount}基準日）` and displays
+this adjacent warning with the canonical current ticker substituted:
+`集計値はキャンペーン全体です。表示中の銘柄は{ticker}ですが、ケース一覧だけがこの銘柄に絞り込まれています。`
+The Dashboard always requests the case list with its current ticker and permits only
+matching case detail. Run metadata and persisted aggregates remain campaign-global;
+changing the case filter cannot change them. No aggregate label may name the current
+ticker as its population, and React must not derive a ticker-specific count, rate,
+mean, median, or bound from the filtered cases. A one-ticker campaign keeps the same
+campaign-global label and rule.
+
 Tables remain usable with keyboard and screen reader, status changes use an
 appropriate live region, focus moves only after explicit navigation or a scoped
 validation error, and charts (if any) are supplemental to exact accessible tables.
@@ -1323,11 +1447,11 @@ reviewed plan and user decision.
 | P4-I0 | strict dates/time zones; future-row isolation; official-session arithmetic; `outcomeAsOfSession` strictly before started Tokyo date; null/no-row distinction; cumulative factor boundaries and rounding golden vectors; corporate-action flags; all tick bands/dates/categories; decimal executability; canonical source digest; input immutability |
 | P4-I1 | exact endpoint/query/field schemas; `ProdCat`; master/date identity; pagination duplicate/repeat; same startedAt before/after same-day publication yields identical accepted outcome rows; `rolling_attempt_log_v1` monotonic scheduling; `minimumDispatchDurationMs` at 1/min, 2/min, default 5/min, exactly feasible, and one-attempt-over boundaries; preflight/runtime frozen-control parity; 4xx/429/5xx/network retry matrix; `Retry-After`; rate and 250-attempt accounting; required `acceptedAt`; 30s/90m deadline; abort priority; no secret/body logging; stub CI; manual <=10-attempt matured-anchor smoke |
 | P4-V1 | t1/t20/t60/t79 boundaries; no-trade sessions; every entry/open/threshold gap branch; entry-bar stop-only with `C <= stop`, `stop < C < target`, target-only, and dual-touch vectors; `UL=1/LL=0` with deterministic lower stop; `LL=1/UL=0` with deterministic upper-side fill; buy-entry exactly at flagged `H`; sell-stop exactly at flagged `L`; same flags with fill strictly inside the boundary; gap/open and entry-bar limit-bound variants; precedence over intraday bounds; all corporate-action boundaries; invalid ticks/candidates; immature outcomes; actual-risk zero; exact/mark/ambiguous R; no input mutation |
-| P4-R1 | 1 MiB/UTF-8/duplicate keys/strict fields; required/absent/mismatched `limitQueueEvidence`; 1/500 anchors; duplicate anchor; 0/8 refs; 16 resistance dedup; UUID/path containment; canonical manifest/case/run/source digests; atomic no-replace and temp cleanup; rerun new ID; corruption never skipped; track-level all-anchor coverage and candidate-stratum denominators with mostly-unavailable/multi-stratum fixtures |
-| P4-S1 | V1-V9 exact history load; ticker/ID/digest; no latest fallback; generatedAt Tokyo date; future strategy date; all stored 2R/resistance and duplicates; default-No/noninteractive confirmation; error/cancel no run |
-| P4-C1 | exact `technical_251_strategy_v1` t0-bounded sessions; adding older rows outside the final 251 leaves reconstruction unchanged; differential >251-bar fixture where full-history production input retains an older latest Swing/candidate but the 251 policy does not; `reconstructed_251_as_of` and non-production warning; no current AdjOHLC/future influence; missing OHLC/no candidate; same Engine code/reasons/defaults with no input-window parity claim; entry-tick injection and per-level validation; resistance Snapshot generatedTokyoDate guard before extraction; only persisted `resistance_level` target prices; ticker/dataDate/digest; resistance tiers; latest t20 entry through holding day60 |
-| P4-J1 | Host/Origin/CSRF; token restart/constant-time check; JSON/media/body limits; frozen preflight startedAt/execution controls; `external_schedule_infeasible` before preflight ID/confirmation; expiry/one-time/digest mismatch; one global job; every lifecycle transition; crash before promotion, after promotion/before completion rewrite, and after completion; reconciliation digest/identity/corruption; cancel during wait/fetch/validate/publish; 200/202/400/403/404/409/413/415/500 and inherited 405; pagination ties; corruption 500; no credential/path response |
-| P4-D1 | six stable tabs/label/order; no auto selection/open; Snapshot picker/file size; minimum attempts/duration/rate/deadline warning before default-No confirmation; `technical_251_strategy_v1` and non-production-parity warning; polling/cancel/recovery; deep link/Back/Forward/reload; invalid/orphan URL; ticker/list transitions; latest-request-wins; focus/live region/keyboard; exact tables and ambiguity; 320/768/1280 px; document overflow; Playwright |
+| P4-R1 | 1 MiB/UTF-8/duplicate keys/strict fields; required/absent/mismatched `limitQueueEvidence`; 1/500 anchors; duplicate anchor; 0/8 refs; 16 resistance dedup; UUID/path containment; canonical manifest/case/run/source digests; both candidate-identity golden envelopes; same tuple across anchors/tickers, true duplicate ordinals, and equal rerun IDs/order despite new run/case UUIDs; atomic no-replace and temp cleanup; rerun new ID; corruption never skipped; track-level all-anchor coverage and candidate-stratum denominators with mostly-unavailable/multi-stratum fixtures; multi-ticker campaign whose global and per-ticker rates differ while only global aggregates persist |
+| P4-S1 | V1-V9 exact history load; ticker/ID/digest; no latest fallback; generatedAt Tokyo date; future strategy date; all stored 2R/resistance and duplicates; `snapshot_candidate_identity_v1` stability; default-No/noninteractive confirmation; error/cancel no run |
+| P4-C1 | exact `technical_251_strategy_v1` t0-bounded sessions; adding older rows outside the final 251 leaves reconstruction unchanged; differential >251-bar fixture where full-history production input retains an older latest Swing/candidate but the 251 policy does not; `reconstructed_251_as_of` and non-production warning; no current AdjOHLC/future influence; missing OHLC/no candidate; same Engine code/reasons/defaults with no input-window parity claim; entry-tick injection and per-level validation; resistance Snapshot generatedTokyoDate guard before extraction; only persisted `resistance_level` target prices; raw-to-Engine-target evidence mapping including normalization collisions and candidate-specific digests; ticker/dataDate/digest; resistance tiers; `campaign_candidate_identity_v1`; latest t20 entry through holding day60 |
+| P4-J1 | Host/Origin/CSRF; token restart/constant-time check; JSON/media/body limits; frozen preflight startedAt/execution controls; `external_schedule_infeasible` before preflight ID/confirmation; expiry/one-time/digest mismatch; one global job; every lifecycle transition; crash before promotion, after promotion/before completion rewrite, and after completion; reconciliation digest/identity/corruption; cancel during wait/fetch/validate/publish; 200/202/400/403/404/409/413/415/500 and inherited 405; canonical candidate-ID pagination ties; run ticker membership and ticker-filtered cases with unchanged campaign-global aggregate; corruption 500; no credential/path response |
+| P4-D1 | six stable tabs/label/order; no auto selection/open; Snapshot picker/file size; minimum attempts/duration/rate/deadline warning before default-No confirmation; `technical_251_strategy_v1` and non-production-parity warning; polling/cancel/recovery; deep link/Back/Forward/reload; invalid/orphan/cross-ticker case URL; ticker/list transitions; latest-request-wins; multi-ticker global-vs-current-ticker fixture with exact campaign-global heading/warning, ticker-filtered cases, and no Browser aggregate derivation or ticker-specific metric label; focus/live region/keyboard; exact tables and ambiguity; 320/768/1280 px; document overflow; Playwright |
 | P4-X | full Bun tests/typecheck/diff check/Playwright; manual smoke evidence; CI/review/merge/main; Usage/setup/handoff; absence of Snapshot V10, runtime score, PASS/FAIL, Buy/Sell, external CI, and partial runs |
 
 Fixtures include valid zero, negative R, equality at every price/tick/date boundary,
@@ -1349,6 +1473,9 @@ Phase 4 is Done only when:
 - Snapshot audit and reconstructed campaign each produce and reload at least one
   matured deterministic fixture/run under their distinct confidence labels, and the
   campaign run is labeled as `technical_251_strategy_v1`, not production replay;
+- equal campaign reruns preserve canonical candidate IDs/order despite new publication
+  UUIDs, and a multi-ticker run is presented only as campaign-global while its case
+  list remains current-ticker scoped;
 - cancellation, crash recovery, corruption, no-look-ahead, action, tick, gap, and
   ambiguity failure paths are proven, including same-day publication crossing and
   post-promotion job reconciliation;
@@ -1370,6 +1497,8 @@ another source or weakening the contract.
 - Strategy V2, per-level re-rounding, or production Strategy-interface changes;
 - canonicalizing or migrating the production comprehensive-analysis Technical input
   window, and any claim of campaign/production candidate parity;
+- per-ticker campaign aggregates, ticker-stratified outcome statistics, and a
+  ticker-aggregate API;
 - the 2027 STR-based tick regime;
 - exact historical source correction-vintage reproduction;
 - composite-score validation execution, runtime score, weights, or adoption;

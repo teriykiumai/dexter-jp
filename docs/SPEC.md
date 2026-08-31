@@ -420,6 +420,12 @@ vintageの完全再現でもない。Phase 4ではportfolio backtest、取引コ
 Strategyの合否、Buy / Sell signal、runtime composite scoreを実装しない。詳細は
 `docs/PHASE4_PLAN.md` を参照する。
 
+複数銘柄を含む再構成campaignの集計はrun全体だけを母集団とし、単一銘柄
+Dashboardで銘柄別成績として表示またはBrowser再計算しない。現在銘柄はrun候補を
+membershipで絞り、選択run内ではcase一覧・詳細だけを絞り込む。candidate identityは
+run/case UUIDや時刻に依存しないversioned canonical digestとし、同一入力の再実行で
+安定させる。
+
 `docs/PHASE3_SCORE_EVALUATION_PLAN.md` のscore検証はPhase 4の自動的な要件では
 なく、runtime採用も許可しない。point-in-time基盤の適用範囲をscoreへ広げる
 場合は、Strategy outcome検証とは別のreviewed planと明示的な採否判断を必要とする。
