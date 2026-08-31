@@ -557,12 +557,33 @@ function markAtHorizon(
     });
 }
 
+function ambiguityBoundR(bound: StrategyAmbiguityBoundV1): number | null {
+  if (bound.kind === 'stop_hit' || bound.kind === 'target_hit') return bound.realizedR;
+  if (bound.kind === 'horizon_expired' && bound.mark.state === 'available') {
+    return bound.mark.markR;
+  }
+  return null;
+}
+
+function orderNumericAmbiguityBounds(
+  first: StrategyAmbiguityBoundV1,
+  second: StrategyAmbiguityBoundV1,
+): readonly [StrategyAmbiguityBoundV1, StrategyAmbiguityBoundV1] {
+  const firstR = ambiguityBoundR(first);
+  const secondR = ambiguityBoundR(second);
+  return firstR !== null && secondR !== null && secondR < firstR
+    ? Object.freeze([second, first])
+    : Object.freeze([first, second]);
+}
+
 function ambiguityResult(
   context: RuntimeContext & { entryFill: StrategyOutcomeFillV1; actualRisk: number },
   ambiguityDate: TseSessionDate,
-  pessimistic: ExactTerminal,
-  optimistic: StrategyAmbiguityBoundV1,
+  initialPessimistic: ExactTerminal,
+  survivingBranch: StrategyAmbiguityBoundV1,
 ): StrategyOutcomeResultV1 {
+  const initialBound = terminalBound(initialPessimistic, context.entryFill, context.actualRisk);
+  const [pessimistic, optimistic] = orderNumericAmbiguityBounds(initialBound, survivingBranch);
   return Object.freeze({
     ...base(context),
     kind: 'ambiguous_intraday',
@@ -570,7 +591,7 @@ function ambiguityResult(
     entryFill: context.entryFill,
     actualRisk: context.actualRisk,
     ambiguityDate,
-    pessimistic: terminalBound(pessimistic, context.entryFill, context.actualRisk),
+    pessimistic,
     optimistic,
   });
 }
@@ -587,6 +608,9 @@ function validateOutcome(input: StrategyOutcomeInputV1, context: RuntimeContext)
     || !input.calendar.hasCalendarDate(initialTickDate)
     || !input.calendar.isSession(outcomeAsOfSession)) {
     return unavailable(context, 'calendar_incomplete');
+  }
+  if (!input.calendar.isSession(initialTickDate) || initialTickDate > decisionDate) {
+    return unavailable(context, 'source_response_invalid');
   }
 
   const tickEvidence = tickEvidenceByDate(input.tickCategoryEvidence);

@@ -258,6 +258,27 @@ describe('daily long entry and exit fills', () => {
       expect(validateLongStrategyOutcomeV1(input([vector.bar]))).toMatchObject(vector.expected);
     }
   });
+
+  test('orders continued ambiguity by numeric R while retaining each fill identity', () => {
+    const result = validateLongStrategyOutcomeV1(input([
+      thresholdEntry(1, { low: 85, close: 100 }),
+      traded(2, { open: 80, high: 85, low: 75, close: 82 }),
+    ]));
+    expect(result).toMatchObject({
+      kind: 'ambiguous_intraday',
+      ambiguityDate: DATES[1],
+      pessimistic: {
+        kind: 'stop_hit',
+        realizedR: -2,
+        exitFill: { date: DATES[2], method: 'open', price: 80 },
+      },
+      optimistic: {
+        kind: 'stop_hit',
+        realizedR: -1,
+        exitFill: { date: DATES[1], method: 'stop_level', price: 90 },
+      },
+    });
+  });
 });
 
 describe('adverse_flagged_boundary_v1', () => {
@@ -422,6 +443,39 @@ describe('fail-closed outcome evidence', () => {
       thresholdEntry(1, { high: 101, close: 100.5 }),
     ], { candidate, evidence }));
     expect(result).toMatchObject({ kind: 'unavailable', reason: 'non_executable_tick' });
+  });
+
+  test('does not let future or non-session Mid400 evidence validate the frozen candidate', () => {
+    const dates = fixtureDates('2023-06-02', 4);
+    const calendar = createTseSessionCalendarV1([
+      { Date: dates[0], HolDiv: '1' },
+      { Date: dates[1], HolDiv: '0' },
+      { Date: dates[2], HolDiv: '0' },
+      { Date: dates[3], HolDiv: '1' },
+    ], dates[0], dates[3]);
+    const candidate = {
+      ...BASE_CANDIDATE,
+      entry: { ...BASE_CANDIDATE.entry, price: 100.5 },
+    } as StrategyOutcomeCandidateV1;
+    const validateAt = (initialTickDate: TseSessionDate) => validateLongStrategyOutcomeV1({
+      candidate,
+      decisionDate: dates[0]!,
+      outcomeAsOfSession: dates[3]! as OutcomeAsOfSession,
+      initialTickDate,
+      tickCategoryEvidence: [{ date: initialTickDate, categories: ['topix_mid400'] }],
+      calendar,
+      bars: [],
+    });
+
+    expect(validateAt(dates[0]!)).toMatchObject({
+      kind: 'unavailable', reason: 'non_executable_tick',
+    });
+    expect(validateAt(dates[1]!)).toMatchObject({
+      kind: 'unavailable', reason: 'source_response_invalid',
+    });
+    expect(validateAt(dates[3]!)).toMatchObject({
+      kind: 'unavailable', reason: 'source_response_invalid',
+    });
   });
 
   test('returns the supported-period failure without reading bars', () => {
