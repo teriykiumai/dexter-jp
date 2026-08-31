@@ -485,16 +485,23 @@ describe('fail-closed outcome evidence', () => {
       dates[0],
       dates[1],
     );
-    const result = validateLongStrategyOutcomeV1({
-      candidate: BASE_CANDIDATE,
-      decisionDate: dates[0]!,
-      outcomeAsOfSession: dates[1]! as OutcomeAsOfSession,
-      initialTickDate: dates[0]!,
-      tickCategoryEvidence: [{ date: dates[0]!, categories: ['topix_core30'] }],
-      calendar,
-      bars: [],
-    });
-    expect(result).toMatchObject({ kind: 'unavailable', reason: 'tick_rule_period_unsupported' });
+    for (const tickCategoryEvidence of [
+      [],
+      [{ date: dates[0]!, categories: ['topix_core30'] as const }],
+    ]) {
+      const result = validateLongStrategyOutcomeV1({
+        candidate: BASE_CANDIDATE,
+        decisionDate: dates[0]!,
+        outcomeAsOfSession: dates[1]! as OutcomeAsOfSession,
+        initialTickDate: dates[0]!,
+        tickCategoryEvidence,
+        calendar,
+        bars: [],
+      });
+      expect(result).toMatchObject({
+        kind: 'unavailable', reason: 'tick_rule_period_unsupported',
+      });
+    }
   });
 
   test('does not mutate candidate, bars, or tick evidence', () => {

@@ -16,6 +16,7 @@ import { createTseSessionCalendarV1 } from './calendar.js';
 import { parseDailyBarV1, type TseDailyBarV1 } from './daily-bar.js';
 import {
   STRATEGY_WORST_CASE_EVALUATION_SESSION_V1,
+  resolveLongStrategyInitialFailureWithoutMasterV1,
   validateLongStrategyOutcomeV1,
   type StrategyOutcomeCandidateV1,
   type StrategyOutcomeResultV1,
@@ -632,12 +633,22 @@ export function validateStrategyValidationSourceCompletenessV1(
     switch (context.unavailableReason) {
       case 'source_plan_unavailable':
       case 'source_history_unavailable':
-      case 'source_response_invalid':
+      case 'source_response_invalid': {
+        if (context.mode === 'snapshot') {
+          const calendar = forRole('candidate_calendar');
+          if (calendar.length !== 1
+            || calendar[0]!.envelope.result.state !== 'unavailable'
+            || calendar[0]!.envelope.result.reason !== context.unavailableReason
+            || forRole('candidate_master').length !== 0
+            || forRole('candidate_daily_bars').length !== 0) failCompleteness();
+          return;
+        }
         requireMatchingUnavailable(
           ['candidate_calendar', 'candidate_master', 'candidate_daily_bars'],
           context.unavailableReason,
         );
         return;
+      }
       case 'calendar_incomplete':
         requireMatchingUnavailable(['candidate_calendar'], 'calendar_incomplete');
         return;
@@ -701,6 +712,11 @@ export function validateStrategyValidationSourceCompletenessV1(
   if (isSourceFailureReasonV1(initialFailure)) {
     const candidateMaster = forRole('candidate_master');
     if (context.mode !== 'snapshot'
+      || context.candidate === null
+      || resolveLongStrategyInitialFailureWithoutMasterV1(
+        context.candidate,
+        parseTseSessionDate(context.initialTickDate),
+      ) !== 'tick_category_unavailable'
       || candidateMaster.length !== 1
       || candidateMaster[0]!.envelope.result.state !== 'unavailable'
       || candidateMaster[0]!.envelope.result.reason !== initialFailure

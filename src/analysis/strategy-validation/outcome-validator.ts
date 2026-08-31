@@ -321,8 +321,7 @@ function levelTickReason(
   price: number,
   evidence: ReadonlyMap<string, readonly TseTickCategoryV1[]>,
 ): 'tick_rule_period_unsupported' | 'tick_category_unavailable' | 'non_executable_tick' | null {
-  const categories = evidence.get(date);
-  if (categories === undefined) return 'tick_category_unavailable';
+  const categories = evidence.get(date) ?? [];
   const executable = isExecutableTsePriceV1(date, categories, price);
   if (executable.state === 'unavailable') return executable.reason;
   return executable.executable ? null : 'non_executable_tick';
@@ -338,6 +337,18 @@ function validateCandidateTicks(
     if (reason !== null) return reason;
   }
   return null;
+}
+
+export function resolveLongStrategyInitialFailureWithoutMasterV1(
+  candidate: StrategyOutcomeCandidateV1,
+  initialTickDate: TseSessionDate,
+): 'invalid_candidate' | 'tick_rule_period_unsupported' | 'tick_category_unavailable' {
+  if (candidatePlannedRisk(candidate) === null) return 'invalid_candidate';
+  const reason = validateCandidateTicks(candidate, initialTickDate, new Map());
+  if (reason === 'non_executable_tick' || reason === null) {
+    throw new TypeError('Missing Master evidence unexpectedly resolved an executable tick.');
+  }
+  return reason;
 }
 
 function fill(

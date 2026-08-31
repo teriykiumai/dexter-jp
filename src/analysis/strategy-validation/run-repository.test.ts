@@ -625,6 +625,63 @@ describe('Strategy-validation immutable run repository V1', () => {
     }
   });
 
+  test('allows only a calendar-stage source failure to erase a Snapshot anchor', async () => {
+    const { temporaryRoot, repository } = await temporaryRepository();
+    try {
+      const anchorCaseFor = (
+        role: 'candidate_calendar' | 'candidate_master',
+        source: ReturnType<typeof roleSource>,
+      ) => {
+        const seed = anchorUnavailableCase(source.digest, {
+          caseId: '77777777-7777-4777-8777-777777777777',
+          ticker: '7203',
+          anchorDate: '2025-01-02',
+          reason: 'source_history_unavailable',
+        });
+        const snapshot = snapshotCandidateCase(source.digest);
+        return StrategyValidationCaseV1Schema.parse({
+          ...seed,
+          mode: 'snapshot',
+          confidence: 'precommitted',
+          strategyDataDate: '2025-01-02',
+          selector: snapshot.selector,
+          candidateGenerationPolicy: null,
+          unavailableReason: 'source_plan_unavailable',
+          sourceManifest: createPointInTimeSourceManifestV1({
+            startedAt: TEST_STARTED_AT,
+            outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+            sources: [{ role, digest: source.digest }],
+          }),
+        });
+      };
+      const failedMaster = roleSource({
+        role: 'candidate_master', mode: 'snapshot', ticker: '7203',
+        anchorDate: '2025-01-02', evaluationDate: '2025-01-03',
+        unavailableReason: 'source_plan_unavailable',
+      });
+      const erasedCandidate = anchorCaseFor('candidate_master', failedMaster);
+      await expectRepositoryKind(repository.publish({
+        run: validationRun([erasedCandidate]),
+        cases: [erasedCandidate],
+        sources: [failedMaster],
+      }), 'artifact_incomplete');
+
+      const failedCalendar = roleSource({
+        role: 'candidate_calendar', mode: 'snapshot', ticker: '7203',
+        anchorDate: '2025-01-02', evaluationDate: '2025-01-03',
+        unavailableReason: 'source_plan_unavailable',
+      });
+      const preCandidateFailure = anchorCaseFor('candidate_calendar', failedCalendar);
+      await expect(repository.publish({
+        run: validationRun([preCandidateFailure]),
+        cases: [preCandidateFailure],
+        sources: [failedCalendar],
+      })).resolves.toMatchObject({ state: 'created' });
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
   test('publishes a frozen relationally-invalid candidate as invalid_candidate', async () => {
     const { temporaryRoot, repository } = await temporaryRepository();
     try {
@@ -1515,6 +1572,87 @@ describe('Strategy-validation immutable run repository V1', () => {
         await expect(repository.publish({
           run: validationRun([candidate]), cases: [candidate], sources: evidence.sources,
         })).resolves.toMatchObject({ state: 'created' });
+      } finally {
+        await rm(temporaryRoot, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('does not let an initial Master failure override deterministic candidate or date failures', async () => {
+    for (const scenario of [
+      { anchorDate: '2025-01-02', relationallyInvalid: true },
+      { anchorDate: '2015-09-23', relationallyInvalid: false },
+    ] as const) {
+      const { temporaryRoot, repository } = await temporaryRepository();
+      try {
+        const candidateCalendar = roleSource({
+          role: 'candidate_calendar', mode: 'snapshot', ticker: '7203',
+          anchorDate: scenario.anchorDate, evaluationDate: shiftDate(scenario.anchorDate, 1),
+        });
+        const candidateMaster = roleSource({
+          role: 'candidate_master', mode: 'snapshot', ticker: '7203',
+          anchorDate: scenario.anchorDate, evaluationDate: shiftDate(scenario.anchorDate, 1),
+          unavailableReason: 'source_plan_unavailable',
+        });
+        const sources = [candidateCalendar, candidateMaster].sort((left, right) => (
+          left.digest < right.digest ? -1 : left.digest > right.digest ? 1 : 0
+        ));
+        const base = snapshotCandidateCase(sources[0]!.digest, {
+          anchorDate: scenario.anchorDate,
+        });
+        if (base.caseKind !== 'candidate' || base.selector.mode !== 'snapshot') {
+          throw new TypeError('Expected Snapshot candidate fixture.');
+        }
+        const candidate = scenario.relationallyInvalid
+          ? {
+            entry: { price: 100, reason: 'breakout_above_swing_high' as const },
+            stop: { price: 110, reason: 'latest_swing_low' as const },
+            target: { price: 120, reason: 'risk_reward_2R' as const },
+          }
+          : base.candidate;
+        const plannedRisk = scenario.relationallyInvalid ? null : 10;
+        const invalid = StrategyValidationCaseV1Schema.parse({
+          ...base,
+          candidate,
+          candidateId: digestSnapshotCandidateIdentityV1({
+            snapshotDigest: base.selector.snapshotDigest as SnapshotDigest,
+            strategyDataDate: parseTseSessionDate(base.strategyDataDate),
+            ...candidate,
+            duplicateOrdinal: 0,
+          }),
+          tickEvidence: {
+            effectiveDate: scenario.anchorDate,
+            category: null,
+            unavailableReason: 'source_plan_unavailable',
+            levels: {
+              entry: { tick: null, executable: null },
+              stop: { tick: null, executable: null },
+              target: { tick: null, executable: null },
+            },
+          },
+          outcome: {
+            algorithmVersion: base.outcome.algorithmVersion,
+            limitQueueVersion: base.outcome.limitQueueVersion,
+            plannedRisk,
+            evaluationEndDate: null,
+            kind: 'unavailable',
+            reason: 'source_plan_unavailable',
+            entryProven: false,
+            entryFill: null,
+            actualRisk: null,
+          },
+          sourceManifest: createPointInTimeSourceManifestV1({
+            startedAt: TEST_STARTED_AT,
+            outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+            sources: [
+              { role: 'candidate_calendar', digest: candidateCalendar.digest },
+              { role: 'candidate_master', digest: candidateMaster.digest },
+            ],
+          }),
+        });
+        await expectRepositoryKind(repository.publish({
+          run: validationRun([invalid]), cases: [invalid], sources,
+        }), 'artifact_incomplete');
       } finally {
         await rm(temporaryRoot, { recursive: true, force: true });
       }
