@@ -1,10 +1,10 @@
 # 日本株AI分析システム 仕様書
 
-**Version:** 0.3
+**Version:** 0.4
 **Status:** Draft  
 **Base Project:** `edinetdb/dexter-jp`  
 **Use:** Personal / Local only  
-**Last Updated:** 2026-08-23
+**Last Updated:** 2026-08-31
 
 ## 1. 目的
 
@@ -406,10 +406,33 @@ Phase 1.5の非目標:
 - 総合スコアの評価計画（runtime scoreは実装しない）
 
 ### Phase 4
-- Backtest
-- Entry / Stop / Target有効性検証
-- Score検証とruntime採否判断
-- Look-ahead検証
+- 保存済みSnapshotに事前記録されたEntry / Stop / Targetのoutcome監査
+- manifestで指定した過去基準日のEntry / Stop / Target再構成・outcome検証
+- official session、source-eligibility、as-of cutoff、corporate-action、tick-sizeを
+  明示するpoint-in-time / no-look-ahead共通基盤
+- 検証runを明示選択して閲覧するlocal Dashboard
+
+Phase 4の結果はresearch-onlyであり、`precommitted`（保存済みSnapshot監査）と
+`reconstructed_251_as_of`（exact 251-sessionのversioned policyによる過去時点
+再構成）を混同または合算しない。後者は、complete retrieved historyを渡す現在の
+production Technical / Strategy経路の再現・検証でも、過去に配信されていた訂正前
+vintageの完全再現でもない。Phase 4ではportfolio backtest、取引コストを含む損益、
+Strategyの合否、Buy / Sell signal、runtime composite scoreを実装しない。詳細は
+`docs/PHASE4_PLAN.md` を参照する。
+
+複数銘柄を含む再構成campaignの集計はrun全体だけを母集団とし、単一銘柄
+Dashboardで銘柄別成績として表示またはBrowser再計算しない。現在銘柄はrun候補を
+membershipで絞り、選択run内ではcase一覧・詳細だけを絞り込む。candidate identityは
+run/case UUIDや時刻に依存しないversioned canonical digestとし、同一入力の再実行で
+安定させる。
+
+Backward-readable Snapshotで候補が存在しても`strategy.dataDate`がstrictな暦日・
+official sessionとして成立しない場合、candidate identityやoutcome取得へ進めず、
+専用のunavailable状態としてfail-closedする。future Strategy dateとは区別する。
+
+`docs/PHASE3_SCORE_EVALUATION_PLAN.md` のscore検証はPhase 4の自動的な要件では
+なく、runtime採用も許可しない。point-in-time基盤の適用範囲をscoreへ広げる
+場合は、Strategy outcome検証とは別のreviewed planと明示的な採否判断を必要とする。
 
 PDF exportはPhase 3の対象としない。Dashboard外共有、immutableな監査提出、
 定常的なoffline保存・印刷、またはPDF固有のaccessibility要件が具体化した
