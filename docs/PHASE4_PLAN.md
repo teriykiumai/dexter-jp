@@ -94,6 +94,7 @@ P4-I0 introduces pure parsers and branded values equivalent to:
 
 ```ts
 type TseSessionDate = string;
+type OutcomeAsOfSession = TseSessionDate;
 type AsOfCutoff = string;
 type SourceDate = string;
 type SourceEffectiveDate = string;
@@ -203,11 +204,31 @@ cannot be read until the candidate is frozen and digested.
 
 Every t0 daily-bar request ends at t0. Outcome bars use a separate request beginning
 at t1; an adapter response spanning both sides is prohibited. Candidate-input
-observations carry the t0 end-of-day cutoff. Outcome observations carry the immutable
-job `startedAt` cutoff and must satisfy both `Date > decisionDate` and
-`Date <= TokyoDate(startedAt)`. The orchestrator persists the candidate digest before
-it passes any outcome row to the pure validator. This data-flow separation is tested,
-not left as a caller convention.
+observations carry the t0 end-of-day cutoff.
+
+At local preflight start, CLI and Dashboard freeze one UTC `startedAt`; a Dashboard
+job accepted from that preflight retains the same value and records its later
+`acceptedAt` separately. After the official calendar is collected, the orchestrator
+derives `outcomeAsOfSession` as the greatest TSE session strictly before
+`TokyoDate(startedAt)`. Outcome observations carry `startedAt` as their immutable
+cutoff and are accepted only when:
+
+```text
+decisionDate < Date <= outcomeAsOfSession
+```
+
+Preflight returns the frozen `startedAt` and the conservative boundary rule, not a
+guessed session. The derived authoritative session is persisted in
+job/run/case/source-manifest metadata before outcome-bar collection. No bar whose
+`Date === TokyoDate(startedAt)` is eligible, even if the fetch finishes after that
+bar is published. A job that crosses a same-day publication boundary therefore has
+the same accepted outcome set it had at start. Missing or incomplete calendar
+coverage for this derivation is `calendar_incomplete`; there is no publication-time,
+weekday, or nearest-session fallback.
+
+The orchestrator persists the candidate digest before it passes any outcome row to
+the pure validator. This request and data-flow separation is tested, not left as a
+caller convention.
 
 ### 4.3 Daily-bar schema
 
@@ -333,8 +354,9 @@ deduplicates by digest. A digest collision or unequal content at an existing dig
 is a typed persistence failure.
 
 `PointInTimeSourceManifestV1` records the ordered unique envelope digests used by a
-case and their calculation role. It never substitutes a digest for schema
-validation: envelopes are revalidated and redigested when loaded.
+case, their calculation role, the frozen `startedAt`, and `outcomeAsOfSession`. It
+never substitutes a digest for schema validation: envelopes are revalidated and
+redigested when loaded.
 
 ## 5. Inputs and candidate creation
 
@@ -422,11 +444,25 @@ schema; anchor dates are strict official TSE sessions. Duplicate `(ticker, ancho
 pairs are rejected. There is no truncation.
 
 Each anchor accepts 0-8 Snapshot references. Each reference must load by exact ID,
-match the ticker, pass schema/digest validation, have `generatedAt` no later than the
-anchor cutoff, and have `strategy.dataDate === anchorDate`. At most 16 unique finite
-positive resistance prices survive exact deduplication across accepted evidence.
-Invalid evidence makes that anchor unavailable with `resistance_evidence_invalid`;
-it is never silently ignored.
+match the ticker, and pass schema/digest validation. Let `generatedTokyoDate` be the
+Tokyo date containing its `generatedAt`. Before reading a candidate, the reference
+must satisfy all of:
+
+```text
+generatedAt <= anchor cutoff
+strategy !== null
+strategy.dataDate === anchorDate
+strategy.dataDate <= generatedTokyoDate
+```
+
+The last guard rejects a prior-day Snapshot that claims anchor-day Strategy data and
+is applied before extracting any price. Extraction reads only persisted
+`strategy.candidates[].target.price` values whose `target.reason` is exactly
+`resistance_level`; report text, entry/stop levels, 2R targets, and other fields are
+never resistance evidence. At most 16 unique finite positive extracted prices
+survive exact deduplication across accepted evidence. Invalid temporal evidence,
+identity, schema/digest, or extracted value makes that anchor unavailable with
+`resistance_evidence_invalid`; it is never silently ignored.
 
 The anchor's technical window is exactly t0 plus the preceding 250 official TSE
 sessions: 251 sessions in ascending order, ending at `anchorDate`. All rows are
@@ -491,13 +527,23 @@ After entry, including the entry bar where sequence is provable:
 4. a target-only touch fills at target; and
 5. touching both levels without intraday sequence is `ambiguous_intraday`.
 
-For an `O < entry` entry bar, a target touch proves the price crossed entry before
-target. A stop touch on the same bar does not prove whether the low occurred before
-or after entry. The validator therefore runs two deterministic branches: pessimistic
-assumes entry then stop; optimistic assumes the low preceded entry and continues
-from the close of that session. If both stop and target are touched, pessimistic is
-stop and optimistic is target. Later dual-touch bars use stop and target as the two
-bounds. Branches use the same later rows and cannot read beyond the common horizon.
+For an `O < entry && H >= entry` entry bar, the feasible branch set uses all OHLC
+constraints. Let `stopTouched = L <= stop` and `targetTouched = H >= target`:
+
+| Entry-bar facts | Deterministic interpretation |
+| --- | --- |
+| `targetTouched && stopTouched` | ambiguous: pessimistic stop, optimistic target |
+| `targetTouched && !stopTouched` | target is provably crossed after entry |
+| `!targetTouched && !stopTouched` | entry remains open at `C` |
+| `!targetTouched && stopTouched && C <= stop` | stop is provably crossed after entry |
+| `!targetTouched && stopTouched && C > stop` | ambiguous: pessimistic stop; optimistic assumes the low preceded entry and remains open at `C` |
+
+The `C <= stop` rule is mandatory: after price reaches entry, finishing at or below
+stop requires a post-entry stop crossing, so an optimistic open branch is impossible.
+When the optimistic branch remains open, it continues through later rows from that
+same holding-day count; it does not reset entry or horizon. Later dual-touch bars use
+stop and target as the two bounds. Branches use the same later rows and cannot read
+beyond the common horizon. Source geometry already guarantees `L <= C <= H`.
 
 If `UL === "1"` or `LL === "1"` on a row whose entry or exit fill would otherwise be
 selected, daily data cannot establish queue execution. The result is unavailable
@@ -604,7 +650,8 @@ digests, and versions, but no invented candidate, price, fill, or R field.
 - exact entry, stop, and target values and reason literals;
 - tick category/effective date, per-level tick, and executability state;
 - resistance evidence tier and only the accepted evidence Snapshot digests;
-- entry-wait and holding-window boundaries;
+- frozen `startedAt`, `outcomeAsOfSession`, entry-wait and holding-window boundaries;
+- independent `entryProven` plus exact entry fill identity when true;
 - result union, exact fill/mark dates and prices, planned/actual risk, R values,
   ambiguity bounds, and unavailable reasons; and
 - ordered unique source-envelope digest references.
@@ -623,7 +670,8 @@ candidate cases.
 
 - `schemaVersion: "strategy_validation_run_v1"`;
 - run ID, mode, confidence, campaign-normalized name or `null` for Snapshot mode,
-  lifecycle timestamps, and producer version;
+  frozen `startedAt`, optional Dashboard `acceptedAt`, completion timestamp, derived
+  `outcomeAsOfSession`, and producer version;
 - exact input selector and canonical Snapshot or manifest digest;
 - source/technical/Strategy/outcome/tick/aggregation version literals;
 - ordered case IDs and case digests;
@@ -632,6 +680,13 @@ candidate cases.
   state; and
 - warnings that describe reconstruction vintage, resistance tier, ambiguity, and
   unavailable coverage without making an investment claim.
+
+`runPayloadDigest` is the `SnapshotDigest` of the complete validated `run.json`
+payload under `CanonicalJsonV1`; it is not embedded in `run.json`, avoiding a
+self-referential digest. The repository recomputes it after rereading the assembled
+payload and stores it as `expectedRunPayloadDigest` in the publishing job record.
+Case and source digests remain independently validated before this run-level digest
+is accepted.
 
 Only a complete run is published. A failed, timed-out, or cancelled execution does
 not publish a partial `run.json` or cases. Diagnostic information belongs in the job
@@ -666,7 +721,12 @@ retains the prefixed digest. Loader recomputation must match both.
 ### 7.6 Job artifact
 
 `StrategyValidationJobV1` is the only mutable Phase 4 artifact. It stores no source
-rows or secrets and is rewritten atomically. Its status is one of:
+rows or secrets and is rewritten atomically. Job creation reserves a UUIDv4
+`runId` before any collection. Every state stores job ID, reserved run ID, exact
+input digest, frozen `startedAt`, optional Dashboard `acceptedAt`, status,
+timestamps, sanitized progress counts, and cancellation state. Once derived, it also
+stores `outcomeAsOfSession`; `publishing` and `completed` additionally store
+`expectedRunPayloadDigest`. Its status is one of:
 
 ```text
 preparing
@@ -683,24 +743,52 @@ interrupted
 Allowed transitions are:
 
 ```text
-preparing -> collecting | cancel_requested | failed
-collecting -> validating | cancel_requested | failed
-validating -> publishing | cancel_requested | failed
-publishing -> completed | failed
-cancel_requested -> cancelled | failed
+preparing -> collecting | cancel_requested | failed | interrupted
+collecting -> validating | cancel_requested | failed | interrupted
+validating -> publishing | cancel_requested | failed | interrupted
+publishing -> completed | failed | interrupted
+cancel_requested -> cancelled | failed | interrupted
 ```
 
-`publishing` is not interruptible once atomic promotion starts. On server startup,
-any persisted nonterminal job becomes `interrupted`; its attributable temp directory
-is cleaned and it is never automatically resumed. Completed jobs reference exactly
-one run ID. Failed/cancelled/interrupted jobs have no published run ID and expose only
-a fixed sanitized code/message, counts, and timestamps.
+Transitions to `interrupted` occur only during startup reconciliation, never during
+a live process.
+
+Before promotion, the job is atomically rewritten as `publishing` with its reserved
+run ID and `expectedRunPayloadDigest`. Only then may the matching temp directory be
+promoted to `runs/<runId>`. `publishing` is not interruptible once promotion starts.
+After promotion the job is atomically rewritten as `completed` without changing
+that digest.
+
+Startup reconciliation is status-specific:
+
+1. `preparing`, `collecting`, `validating`, or `cancel_requested` becomes
+   `interrupted`, and only its attributable temp directory is cleaned. A final run at
+   its reserved ID is an invariant failure and is not deleted.
+2. For `publishing`, load the reserved final path. If it is absent, clean the temp
+   directory and mark `interrupted`. If it exists and its complete schema, internal
+   references, input identity, run ID, and recomputed `runPayloadDigest` all equal
+   the job's expected values, atomically finalize the job as `completed`. If it
+   exists but any
+   validation differs, mark the job `failed` with sanitized `artifact_unavailable`,
+   retain the suspect directory, and surface repository corruption.
+3. `completed`, `failed`, `cancelled`, and `interrupted` are not resumed or rewritten
+   except by normal validated reads.
+
+Thus a crash after promotion but before the completion rewrite recovers the exact
+published run instead of orphaning it. Completed jobs reference exactly one validated
+run ID. Cancelled/interrupted jobs have no final run. Failed jobs may retain only the
+suspect final directory from the corruption branch above and expose a fixed sanitized
+code/message, counts, and timestamps.
 
 ## 8. Aggregation and interpretation
 
 ### 8.1 Mandatory strata
 
-Every aggregate is partitioned by all applicable values of:
+Aggregation has two levels. Track-level anchor coverage is calculated once for the
+run's mode/confidence and includes every requested anchor, including
+`anchor_unavailable`. It is never partitioned by candidate-only dimensions.
+
+Candidate-level outcomes are separately partitioned by all applicable values of:
 
 - confidence (`precommitted` or `reconstructed_as_of`);
 - target reason (`risk_reward_2R` or `resistance_level`);
@@ -709,21 +797,57 @@ Every aggregate is partitioned by all applicable values of:
 
 No single all-candidate win rate or R value is emitted. Snapshot-audit and campaign
 cases are never combined. Duplicate candidates remain counted and their duplicate
-count is visible.
+count is visible. An `anchor_unavailable` case is represented only at track level;
+it is neither omitted, replicated into candidate strata, nor assigned null
+target/stop/resistance dimensions.
 
 ### 8.2 Metrics
 
-For every stratum the run records integer numerators and denominators as well as
-display ratios:
+Track-level metrics are exactly:
 
-- anchor count and anchor coverage;
-- anchors with at least one executable candidate and anchor entry rate;
+```text
+requestedAnchorCount
+anchorUnavailableCount
+candidateBearingAnchorCount
+enteredAnchorCount
+anchorCoverage = candidateBearingAnchorCount / requestedAnchorCount
+eligibleAnchorEntryRate = enteredAnchorCount / candidateBearingAnchorCount
+requestedAnchorEntryRate = enteredAnchorCount / requestedAnchorCount
+```
+
+`candidateBearingAnchorCount` counts unique requested anchors with at least one
+`candidate` case. `anchorUnavailableCount` therefore equals requested minus
+candidate-bearing anchors. `enteredAnchorCount` counts unique candidate-bearing
+anchors for which at least one candidate has `entryProven === true`.
+
+Every candidate case persists `entryProven` independently of later outcome
+availability. It is true only when a valid entry fill and its exact date/price are
+provable before any later failure. A later corporate-action or history failure may
+leave it true; `entry_gap_beyond_target`, an unproven limit-queue fill, invalid
+candidate, and no trigger leave it false. Zero denominators produce an explicit
+unavailable ratio, never zero.
+
+Track level also records `anchorUnavailable` counts/rates by exact reason, using
+`requestedAnchorCount` as denominator. Multiple candidates and multiple strata from
+one anchor never duplicate the track-level anchor counts.
+
+For every candidate stratum the run records integer numerators and denominators for:
+
+- `candidateAnchorCount`: unique candidate-bearing anchors represented in the stratum;
+- `enteredCandidateAnchorCount` and
+  `stratumAnchorEntryRate = enteredCandidateAnchorCount / candidateAnchorCount`;
 - candidate count and entered-candidate count;
 - `not_triggered`, `stop_hit`, `target_hit`, `horizon_expired`,
   `ambiguous_intraday`, and `unavailable` counts/rates;
 - exact realized-R count, arithmetic mean, and median;
 - horizon mark-R count, arithmetic mean, and median; and
 - pessimistic/optimistic ambiguous-bound counts, means, and medians when defined.
+
+`enteredCandidateAnchorCount` counts unique anchors with at least one
+`entryProven === true` candidate in that stratum. Every outcome-state rate uses
+candidate count as its denominator. Candidate strata do not expose a metric named
+`anchorCoverage`; `stratumAnchorEntryRate` describes entry among anchors already
+eligible for that stratum and must not be presented as population coverage.
 
 Rates always name their denominator. Unavailable and ambiguous rows never enter the
 exact realized-R denominator. Valid zero and negative R remain values. Empty metric
@@ -734,7 +858,8 @@ is serialized as zero and non-finite aggregate output fails validation.
 
 These descriptive metrics have no significance test, confidence claim, PASS/FAIL,
 P&L, cost-adjusted result, or recommendation. The UI must put coverage and unavailable
-rates before target/stop rates so selection and data limitations are visible.
+rates from track level before candidate-stratum target/stop rates so selection and
+data limitations are visible.
 
 ## 9. External-fetch execution controls
 
@@ -897,12 +1022,13 @@ The preflight body is exactly one of:
 { "mode": "campaign", "manifest": { "schemaVersion": "strategy_validation_campaign_v1", "name": "...", "anchors": [] } }
 ```
 
-The response includes a UUIDv4 preflight ID, normalized input digest, counts,
-`estimatedMinimumAttempts`, `hardMaximumAttempts`, rate/timeout/cap, warnings, and
-`expiresAt`. It performs local validation only and expires after 10 minutes. It is
-one-time: accepting a job consumes it atomically. Expired, already-used, mismatched,
-or process-restart preflights cannot start a job. Preflights live only in bounded
-process memory and are never written under `.dexter`.
+The response includes a UUIDv4 preflight ID, frozen `startedAt`, the conservative
+outcome-session rule, normalized input digest, counts, `estimatedMinimumAttempts`,
+`hardMaximumAttempts`, rate/timeout/cap, warnings, and `expiresAt`. It performs local
+validation only and expires after 10 minutes. It is one-time: accepting a job
+consumes it atomically. Expired, already-used, mismatched, or process-restart
+preflights cannot start a job. Preflights live only in bounded process memory and are
+never written under `.dexter`.
 
 The job body is exactly:
 
@@ -1042,13 +1168,13 @@ reviewed plan and user decision.
 | Step | Mandatory focused validation |
 | --- | --- |
 | P4-0 | Source of Truth agreement; predecessor docs unchanged; no runtime/dependency/Snapshot/UI diff |
-| P4-I0 | strict dates/time zones; future-row isolation; official-session arithmetic; null/no-row distinction; cumulative factor boundaries and rounding golden vectors; corporate-action flags; all tick bands/dates/categories; decimal executability; canonical source digest; input immutability |
-| P4-I1 | exact endpoint/query/field schemas; `ProdCat`; master/date identity; pagination duplicate/repeat; 4xx/429/5xx/network retry matrix; `Retry-After`; rate and 250-attempt accounting; 30s/90m timeout; abort priority; no secret/body logging; stub CI; manual <=10-attempt matured-anchor smoke |
-| P4-V1 | t1/t20/t60/t79 boundaries; no-trade sessions; every entry/open/threshold gap branch; entry-bar stop-only branching; dual touch; `UL/LL`; all corporate-action boundaries; invalid ticks/candidates; immature outcomes; actual-risk zero; exact/mark/ambiguous R; no input mutation |
-| P4-R1 | 1 MiB/UTF-8/duplicate keys/strict fields; 1/500 anchors; duplicate anchor; 0/8 refs; 16 resistance dedup; UUID/path containment; canonical manifest/case/run/source digests; atomic no-replace and temp cleanup; rerun new ID; corruption never skipped; aggregation denominators/median/strata |
+| P4-I0 | strict dates/time zones; future-row isolation; official-session arithmetic; `outcomeAsOfSession` strictly before started Tokyo date; null/no-row distinction; cumulative factor boundaries and rounding golden vectors; corporate-action flags; all tick bands/dates/categories; decimal executability; canonical source digest; input immutability |
+| P4-I1 | exact endpoint/query/field schemas; `ProdCat`; master/date identity; pagination duplicate/repeat; same startedAt before/after same-day publication yields identical accepted outcome rows; 4xx/429/5xx/network retry matrix; `Retry-After`; rate and 250-attempt accounting; 30s/90m timeout; abort priority; no secret/body logging; stub CI; manual <=10-attempt matured-anchor smoke |
+| P4-V1 | t1/t20/t60/t79 boundaries; no-trade sessions; every entry/open/threshold gap branch; entry-bar stop-only with `C <= stop`, `stop < C < target`, target-only, and dual-touch vectors; `UL/LL`; all corporate-action boundaries; invalid ticks/candidates; immature outcomes; actual-risk zero; exact/mark/ambiguous R; no input mutation |
+| P4-R1 | 1 MiB/UTF-8/duplicate keys/strict fields; 1/500 anchors; duplicate anchor; 0/8 refs; 16 resistance dedup; UUID/path containment; canonical manifest/case/run/source digests; atomic no-replace and temp cleanup; rerun new ID; corruption never skipped; track-level all-anchor coverage and candidate-stratum denominators with mostly-unavailable/multi-stratum fixtures |
 | P4-S1 | V1-V9 exact history load; ticker/ID/digest; no latest fallback; generatedAt Tokyo date; future strategy date; all stored 2R/resistance and duplicates; default-No/noninteractive confirmation; error/cancel no run |
-| P4-C1 | exact 251 t0-bounded sessions; no current AdjOHLC/future influence; missing OHLC/no candidate; unchanged Engine parity; entry-tick injection and per-level validation; Snapshot evidence date/ticker/dataDate/digest; resistance tiers; latest t20 entry through holding day60 |
-| P4-J1 | Host/Origin/CSRF; token restart/constant-time check; JSON/media/body limits; preflight expiry/one-time/digest mismatch; one global job; every lifecycle transition; startup interruption; cancel during wait/fetch/validate/publish; 200/202/400/403/404/409/413/415/500 and inherited 405; pagination ties; corruption 500; no credential/path response |
+| P4-C1 | exact 251 t0-bounded sessions; no current AdjOHLC/future influence; missing OHLC/no candidate; unchanged Engine parity; entry-tick injection and per-level validation; resistance Snapshot generatedTokyoDate guard before extraction; only persisted `resistance_level` target prices; ticker/dataDate/digest; resistance tiers; latest t20 entry through holding day60 |
+| P4-J1 | Host/Origin/CSRF; token restart/constant-time check; JSON/media/body limits; frozen preflight startedAt; expiry/one-time/digest mismatch; one global job; every lifecycle transition; crash before promotion, after promotion/before completion rewrite, and after completion; reconciliation digest/identity/corruption; cancel during wait/fetch/validate/publish; 200/202/400/403/404/409/413/415/500 and inherited 405; pagination ties; corruption 500; no credential/path response |
 | P4-D1 | six stable tabs/label/order; no auto selection/open; Snapshot picker/file size; default-No confirmation; polling/cancel/recovery; deep link/Back/Forward/reload; invalid/orphan URL; ticker/list transitions; latest-request-wins; focus/live region/keyboard; exact tables and ambiguity; 320/768/1280 px; document overflow; Playwright |
 | P4-X | full Bun tests/typecheck/diff check/Playwright; manual smoke evidence; CI/review/merge/main; Usage/setup/handoff; absence of Snapshot V10, runtime score, PASS/FAIL, Buy/Sell, external CI, and partial runs |
 
@@ -1069,7 +1195,8 @@ Phase 4 is Done only when:
 - Snapshot audit and reconstructed campaign each produce and reload at least one
   matured deterministic fixture/run under their distinct confidence labels;
 - cancellation, crash recovery, corruption, no-look-ahead, action, tick, gap, and
-  ambiguity failure paths are proven;
+  ambiguity failure paths are proven, including same-day publication crossing and
+  post-promotion job reconciliation;
 - Usage/setup/handoff match the implemented surface; and
 - no runtime score, Strategy PASS/FAIL, Buy/Sell signal, partial campaign, Snapshot
   migration, or scheduled external job exists.

@@ -92,6 +92,15 @@ Technical input is exactly t0 plus 250 preceding official sessions. Raw historic
 OHLC is adjusted only through t0 using cumulative `AdjFactor`; current API AdjOHLC is
 not reused. Any action after t0 through evaluation end fails the case closed.
 
+Local preflight freezes `startedAt`; outcome uses only rows through the greatest
+official session strictly before its Tokyo date. The derived
+`outcomeAsOfSession` is persisted, so crossing a same-day J-Quants publication time
+cannot add a bar to an already confirmed run.
+
+Campaign resistance accepts only persisted `resistance_level` target prices from a
+digest-valid Snapshot whose Strategy date is not later than that Snapshot's own
+Tokyo generation date and exactly matches the anchor.
+
 ### 4.3 Existing Engine boundary
 
 `analyzeTechnical`, `analyzeStrategy`, Strategy reasons/defaults, and the production
@@ -110,6 +119,11 @@ holding day 60, so a t20 entry can require evaluation session 79. Daily OHLC app
 fixed conservative gap rules. Same-bar sequence that daily data cannot prove is
 bounded as `ambiguous_intraday`; a required fill on a daily price-limit-flag day is
 `limit_queue_ambiguous`. No-trade rows count as sessions but not touches.
+
+For an entry bar with open below entry and a stop touch, close at or below stop makes
+the stop provable after entry; only a close above stop permits the optimistic
+low-before-entry branch to remain open. Target-plus-stop remains bounded between the
+two terminal outcomes.
 
 The result union is:
 
@@ -135,7 +149,16 @@ Completed runs are immutable and self-contained under:
 
 Equal reruns get new UUIDv4 run IDs. Partial runs are never published. Jobs alone are
 mutable, atomic state records; one global job may run, cancellation is bounded, and
-startup converts nonterminal work to `interrupted` without automatic resume.
+each job reserves its run ID before collection. Startup reconciles `publishing`: a
+promoted run whose recomputed canonical payload digest and identities match the
+publishing record completes the job, an absent run becomes interrupted, and a
+mismatched/corrupt run is retained and surfaced as a hard failure. Other nonterminal
+work becomes interrupted without automatic resume.
+
+Aggregation is hierarchical. Track-level coverage includes every requested anchor
+and all `anchor_unavailable` cases. Target/stop/resistance strata contain only
+candidate cases and use separately named candidate-bearing denominators; unavailable
+anchors are never omitted, replicated, or placed in a null candidate stratum.
 
 CLI external fetches and Dashboard jobs require explicit default-No confirmation.
 Normal CI never calls J-Quants. Rate/timeout/retry/attempt limits are fixed in the
@@ -204,6 +227,8 @@ For P4-I0 after that gate:
   and warning are mandatory, not cosmetic.
 - Daily bars cannot establish intraday order or queue priority; ambiguity must remain
   first-class rather than being forced into a win/loss.
+- Same-day outcome bars are excluded even if a job crosses their publication time;
+  otherwise the immutable cutoff would be false.
 - Historical master/tick evidence and plan retention may fail feasibility; this is an
   acceptable stop result.
 - A t20 entry requires data through evaluation session 79, not merely t60 from t0.
@@ -213,6 +238,8 @@ For P4-I0 after that gate:
 - Broad campaign limits, sparse unavailable data, and multiple candidates per anchor
   make naive win-rate interpretation misleading; mandatory strata and denominators
   must remain intact.
+- A crash after run promotion must reconcile the reserved run rather than create an
+  orphan or erase a suspect artifact.
 
 ## 8. Maintenance boundary
 
