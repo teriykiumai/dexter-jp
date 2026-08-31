@@ -21,6 +21,7 @@ import {
   digestStrategyValidationCaseV1,
   strategyValidationOutcomeHorizonDatesV1,
   strategyValidationOutcomeSessionFactsV1,
+  strategyValidationOutcomeTickDatesV1,
   STRATEGY_VALIDATION_CASE_SCHEMA_VERSION,
   StrategyValidationCaseV1Schema,
   STRATEGY_VALIDATION_UUID_V4_PATTERN,
@@ -42,7 +43,6 @@ import {
   validateStrategyValidationSourceBindingV1,
   validateStrategyValidationSourceCompletenessV1,
   type BoundStrategyValidationSourceV1,
-  type StrategyValidationOutcomeTickCheckV1,
 } from './source-manifest.js';
 import { parseStrictJsonBytesV1 } from './strict-json.js';
 
@@ -91,64 +91,6 @@ export type LoadedStrategyValidationRunV1 = StrategyValidationRunPublicationV1 &
 
 export interface StrategyValidationRunRepositoryOptionsV1 {
   readonly promoteDirectory?: PromoteStrategyValidationRunDirectoryV1;
-}
-
-function outcomeTickChecksV1(
-  value: StrategyValidationCandidateCaseV1,
-): readonly StrategyValidationOutcomeTickCheckV1[] {
-  const checks: StrategyValidationOutcomeTickCheckV1[] = [];
-  const executable = (date: string, price: number): void => {
-    checks.push(Object.freeze({ date, prices: Object.freeze([price]), expected: 'executable' }));
-  };
-  const terminal = (bound: Readonly<{
-    kind: 'stop_hit' | 'target_hit';
-    exitFill: Readonly<{ date: string }>;
-  }>): void => executable(
-    bound.exitFill.date,
-    bound.kind === 'stop_hit' ? value.candidate.stop.price : value.candidate.target.price,
-  );
-
-  if (value.outcome.entryFill !== null) {
-    executable(value.outcome.entryFill.date, value.candidate.entry.price);
-  }
-  if (value.outcome.kind === 'stop_hit' || value.outcome.kind === 'target_hit') {
-    terminal(value.outcome);
-  } else if (value.outcome.kind === 'ambiguous_intraday') {
-    for (const bound of [value.outcome.pessimistic, value.outcome.optimistic]) {
-      if (bound.kind === 'stop_hit' || bound.kind === 'target_hit') terminal(bound);
-    }
-  } else if (value.outcome.kind === 'unavailable') {
-    if (value.outcome.reason === 'limit_queue_ambiguous') {
-      executable(
-        value.outcome.limitQueueEvidence.date,
-        value.outcome.limitQueueEvidence.fillKind === 'entry'
-          ? value.candidate.entry.price
-          : value.candidate.stop.price,
-      );
-    } else if (value.outcome.evaluationEndDate !== null
-      && ['tick_rule_period_unsupported', 'tick_category_unavailable', 'non_executable_tick']
-        .includes(value.outcome.reason)) {
-      checks.push(Object.freeze({
-        date: value.outcome.evaluationEndDate,
-        prices: Object.freeze(value.outcome.entryFill === null
-          ? [value.candidate.entry.price]
-          : [value.candidate.stop.price, value.candidate.target.price]),
-        expected: value.outcome.reason as Exclude<
-          StrategyValidationOutcomeTickCheckV1['expected'], 'executable'
-        >,
-      }));
-    }
-  }
-  return Object.freeze(checks);
-}
-
-function hasOutcomeNotMaturedV1(value: StrategyValidationCandidateCaseV1): boolean {
-  return (value.outcome.kind === 'unavailable'
-      && value.outcome.reason === 'outcome_not_matured')
-    || (value.outcome.kind === 'ambiguous_intraday'
-      && [value.outcome.pessimistic, value.outcome.optimistic].some(bound => (
-        bound.kind === 'unavailable' && bound.reason === 'outcome_not_matured'
-      )));
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
@@ -480,6 +422,8 @@ export class StrategyValidationRunRepositoryV1 {
           unavailableReason: value.caseKind === 'anchor_unavailable'
             ? value.unavailableReason
             : null,
+          candidate: value.caseKind === 'candidate' ? value.candidate : null,
+          persistedOutcome: value.caseKind === 'candidate' ? value.outcome : null,
           initialTickEvidence: value.caseKind === 'candidate'
             ? {
               effectiveDate: value.tickEvidence.effectiveDate,
@@ -508,14 +452,13 @@ export class StrategyValidationRunRepositoryV1 {
                 ? value.outcome.reason
                 : null,
               evaluationEndDate: value.outcome.evaluationEndDate,
-              tickChecks: outcomeTickChecksV1(value),
+              tickEvidenceDates: strategyValidationOutcomeTickDatesV1(value.outcome),
               sessionFacts: strategyValidationOutcomeSessionFactsV1(value.outcome),
               horizonDates: strategyValidationOutcomeHorizonDatesV1(value.outcome),
               terminalCompletionDate: value.outcome.kind === 'stop_hit'
                 || value.outcome.kind === 'target_hit'
                 ? value.outcome.exitFill.date
                 : null,
-              hasOutcomeNotMatured: hasOutcomeNotMaturedV1(value),
             }
             : null,
         });

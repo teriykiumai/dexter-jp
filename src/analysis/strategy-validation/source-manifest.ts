@@ -1,13 +1,26 @@
 import { z } from 'zod';
 import { toJQuantsSecuritiesCode } from '../../utils/japanese-securities-code.js';
-import type { SnapshotDigest } from '../snapshot/canonical-json.js';
+import {
+  canonicalJsonV1,
+  type CanonicalJsonValue,
+  type SnapshotDigest,
+} from '../snapshot/canonical-json.js';
 import {
   isStrictGregorianDate,
   parseAsOfCutoff,
+  parseTseSessionDate,
   tokyoEndOfDayV1,
+  type OutcomeAsOfSession,
 } from './date.js';
 import { createTseSessionCalendarV1 } from './calendar.js';
-import { parseDailyBarV1 } from './daily-bar.js';
+import { parseDailyBarV1, type TseDailyBarV1 } from './daily-bar.js';
+import {
+  STRATEGY_WORST_CASE_EVALUATION_SESSION_V1,
+  validateLongStrategyOutcomeV1,
+  type StrategyOutcomeCandidateV1,
+  type StrategyOutcomeResultV1,
+  type StrategyTickCategoryEvidenceV1,
+} from './outcome-validator.js';
 import {
   isExecutableTsePriceV1,
   jQuantsScaleCategoryToTseTickCategoryV1,
@@ -129,16 +142,6 @@ export type StrategyValidationInitialTickEvidenceContextV1 = Readonly<{
   }>;
 }>;
 
-export type StrategyValidationOutcomeTickCheckV1 = Readonly<{
-  date: string;
-  prices: readonly number[];
-  expected:
-    | 'executable'
-    | 'tick_rule_period_unsupported'
-    | 'tick_category_unavailable'
-    | 'non_executable_tick';
-}>;
-
 export type StrategyValidationSourceCompletenessContextV1 = Readonly<{
   mode: 'snapshot' | 'campaign';
   caseKind: 'anchor_unavailable' | 'candidate';
@@ -151,16 +154,17 @@ export type StrategyValidationSourceCompletenessContextV1 = Readonly<{
   entryWaitSessions: number;
   holdingSessions: number;
   unavailableReason: string | null;
+  candidate: StrategyOutcomeCandidateV1 | null;
+  persistedOutcome: StrategyOutcomeResultV1 | null;
   initialTickEvidence: StrategyValidationInitialTickEvidenceContextV1 | null;
   outcome: Readonly<{
     kind: string;
     unavailableReason: string | null;
     evaluationEndDate: string | null;
-    tickChecks: readonly StrategyValidationOutcomeTickCheckV1[];
+    tickEvidenceDates: readonly string[];
     sessionFacts: readonly Readonly<{ date: string; evaluationSession: number }>[];
     horizonDates: readonly string[];
     terminalCompletionDate: string | null;
-    hasOutcomeNotMatured: boolean;
   }> | null;
 }>;
 
@@ -365,24 +369,6 @@ export function validateStrategyValidationSourceCompletenessV1(
         || level.executable !== null) failCompleteness();
     }
   };
-  const verifyOutcomeTickCheck = (check: StrategyValidationOutcomeTickCheckV1): void => {
-    if (check.prices.length === 0) failCompleteness();
-    const category = masterCategoryAt('outcome_master', check.date);
-    const categories = category === null ? [] : [category];
-    const results = check.prices.map(price => (
-      isExecutableTsePriceV1(check.date, categories, price)
-    ));
-    if (check.expected === 'executable') {
-      if (results.some(result => result.state !== 'available' || !result.executable)) {
-        failCompleteness();
-      }
-      return;
-    }
-    const matches = results.some(result => check.expected === 'non_executable_tick'
-      ? result.state === 'available' && !result.executable
-      : result.state === 'unavailable' && result.reason === check.expected);
-    if (!matches) failCompleteness();
-  };
   const requireMatchingUnavailable = (
     roles: readonly StrategyValidationSourceRoleV1[],
     reason: PointInTimeSourceUnavailableReasonV1,
@@ -407,6 +393,114 @@ export function validateStrategyValidationSourceCompletenessV1(
       );
     } catch {
       return failCompleteness();
+    }
+  };
+  const replayCalendar = () => {
+    completeCalendar('candidate_calendar');
+    completeCalendar('outcome_calendar');
+    if (context.initialTickDate === null) return failCompleteness();
+    const requiredFrom = [
+      context.initialTickDate,
+      context.decisionDate,
+      context.outcomeAsOfSession,
+    ].sort()[0]!;
+    const requiredTo = context.decisionDate > context.outcomeAsOfSession
+      ? context.decisionDate
+      : context.outcomeAsOfSession;
+    const rowsByDate = new Map<string, Readonly<{ Date: string; HolDiv: unknown }>>();
+    for (const role of ['candidate_calendar', 'outcome_calendar'] as const) {
+      for (const binding of availableForRole(role)) {
+        if (binding.envelope.result.state !== 'available') failCompleteness();
+        for (const row of binding.envelope.result.rows) {
+          const date = validateAvailableRow(role, binding.envelope, row);
+          if (date < requiredFrom || date > requiredTo) continue;
+          const previous = rowsByDate.get(date);
+          if (previous !== undefined && previous.HolDiv !== row.HolDiv) failCompleteness();
+          rowsByDate.set(date, Object.freeze({ Date: date, HolDiv: row.HolDiv }));
+        }
+      }
+    }
+    try {
+      return createTseSessionCalendarV1(
+        [...rowsByDate.values()].sort((left, right) => left.Date.localeCompare(right.Date)),
+        requiredFrom,
+        requiredTo,
+      );
+    } catch {
+      return failCompleteness();
+    }
+  };
+  const replayBars = (allowedDates: ReadonlySet<string>): readonly TseDailyBarV1[] => {
+    const bars: TseDailyBarV1[] = [];
+    const dates = new Set<string>();
+    for (const binding of availableForRole('outcome_daily_bars')) {
+      if (binding.envelope.result.state !== 'available') failCompleteness();
+      for (const row of binding.envelope.result.rows) {
+        const date = validateAvailableRow('outcome_daily_bars', binding.envelope, row);
+        if (dates.has(date)) failCompleteness();
+        dates.add(date);
+        if (!allowedDates.has(date)) continue;
+        bars.push(parseDailyBarV1({
+          date: row.Date,
+          open: row.O,
+          high: row.H,
+          low: row.L,
+          close: row.C,
+          upperLimitFlag: row.UL,
+          lowerLimitFlag: row.LL,
+          adjustmentFactor: row.AdjFactor,
+          exRightsType: row.ExRT,
+        }));
+      }
+    }
+    return Object.freeze(bars.sort((left, right) => left.date.localeCompare(right.date)));
+  };
+  const replayTickEvidence = (): readonly StrategyTickCategoryEvidenceV1[] => {
+    const evidence = new Map<string, StrategyTickCategoryEvidenceV1>();
+    for (const role of ['candidate_master', 'outcome_master'] as const) {
+      for (const binding of availableForRole(role)) {
+        if (binding.envelope.result.state !== 'available') failCompleteness();
+        for (const row of binding.envelope.result.rows) {
+          const date = validateAvailableRow(role, binding.envelope, row);
+          if (evidence.has(date)) failCompleteness();
+          const category = jQuantsScaleCategoryToTseTickCategoryV1(
+            row.ScaleCat as string | null,
+          );
+          evidence.set(date, Object.freeze({
+            date: parseTseSessionDate(date),
+            categories: Object.freeze(category === null ? [] : [category]),
+          }));
+        }
+      }
+    }
+    return Object.freeze([...evidence.values()].sort((left, right) => (
+      left.date.localeCompare(right.date)
+    )));
+  };
+  const verifyPersistedOutcome = (): void => {
+    if (context.candidate === null
+      || context.persistedOutcome === null
+      || context.initialTickDate === null
+      || context.outcome === null) failCompleteness();
+    requireAvailableDates('outcome_master', context.outcome.tickEvidenceDates);
+    const calendar = replayCalendar();
+    const allowedDates = new Set<string>(calendar.sessions
+      .filter(date => date > context.decisionDate && date <= context.outcomeAsOfSession)
+      .slice(0, STRATEGY_WORST_CASE_EVALUATION_SESSION_V1));
+    const replayed = validateLongStrategyOutcomeV1({
+      candidate: context.candidate,
+      decisionDate: parseTseSessionDate(context.decisionDate),
+      outcomeAsOfSession: parseTseSessionDate(
+        context.outcomeAsOfSession,
+      ) as OutcomeAsOfSession,
+      initialTickDate: parseTseSessionDate(context.initialTickDate),
+      tickCategoryEvidence: replayTickEvidence(),
+      calendar,
+      bars: replayBars(allowedDates),
+    });
+    if (canonicalJsonV1(replayed as unknown as CanonicalJsonValue)
+      !== canonicalJsonV1(context.persistedOutcome as unknown as CanonicalJsonValue)) {
+      failCompleteness();
     }
   };
   const requireExactAvailableDates = (
@@ -560,6 +654,7 @@ export function validateStrategyValidationSourceCompletenessV1(
         const available = availableDates('outcome_daily_bars');
         if (available.has(missingDate)
           || !provesMissingDate('outcome_daily_bars', missingDate)) failCompleteness();
+        verifyPersistedOutcome();
         return;
       }
     }
@@ -569,7 +664,7 @@ export function validateStrategyValidationSourceCompletenessV1(
   if (evaluationEndDate === null) {
     if (context.outcome.kind !== 'unavailable'
       || context.outcome.sessionFacts.length > 0
-      || context.outcome.tickChecks.length > 0
+      || context.outcome.tickEvidenceDates.length > 0
       || context.outcome.horizonDates.length > 0
       || context.outcome.terminalCompletionDate !== null) failCompleteness();
     if (context.outcome.unavailableReason === 'outcome_not_matured') {
@@ -577,14 +672,12 @@ export function validateStrategyValidationSourceCompletenessV1(
       if (calendar.sessions.some(date => (
         date > context.decisionDate && date <= context.outcomeAsOfSession
       ))) failCompleteness();
+      verifyPersistedOutcome();
     }
     return;
   }
   const sessions = outcomeSessionsThrough(evaluationEndDate);
   requireAvailableDates('outcome_daily_bars', sessions);
-  const tickDates = [...new Set(context.outcome.tickChecks.map(check => check.date))];
-  requireAvailableDates('outcome_master', tickDates);
-  for (const check of context.outcome.tickChecks) verifyOutcomeTickCheck(check);
   const sessionNumber = new Map(sessions.map((date, index) => [date, index + 1]));
   if (context.outcome.sessionFacts.some(fact => (
     sessionNumber.get(fact.date) !== fact.evaluationSession
@@ -601,14 +694,7 @@ export function validateStrategyValidationSourceCompletenessV1(
       || sessionNumber.get(date)! - entry.evaluationSession + 1 !== context.holdingSessions
     ))) failCompleteness();
   }
-  if (context.outcome.hasOutcomeNotMatured) {
-    const entry = context.outcome.sessionFacts[0];
-    if ((entry === undefined && sessions.length >= context.entryWaitSessions)
-      || (entry !== undefined
-        && sessions.length - entry.evaluationSession + 1 >= context.holdingSessions)) {
-      failCompleteness();
-    }
-  }
+  verifyPersistedOutcome();
 }
 
 export function sourceManifestDigestsV1(
