@@ -47,15 +47,22 @@ function dateRange(dateFrom: string, dateTo: string): readonly string[] {
   return Object.freeze(dates);
 }
 
-function calendarRows(dateFrom: string, dateTo: string) {
-  return dateRange(dateFrom, dateTo).map(Date => Object.freeze({ Date, HolDiv: '1' }));
+function calendarRows(
+  dateFrom: string,
+  dateTo: string,
+  nonSessionDates: readonly string[] = [],
+) {
+  const nonSessions = new Set(nonSessionDates);
+  return dateRange(dateFrom, dateTo).map(Date => Object.freeze({
+    Date, HolDiv: nonSessions.has(Date) ? '0' : '1',
+  }));
 }
 
-function masterRow(date: string, ticker: string) {
+function masterRow(date: string, ticker: string, scaleCategory: string | null = 'TOPIX Core30') {
   return Object.freeze({
     Date: date,
     Code: `${ticker}0`,
-    ScaleCat: 'TOPIX Core30',
+    ScaleCat: scaleCategory,
     Mkt: '0111',
     ProdCat: '011',
   });
@@ -137,10 +144,14 @@ function roleSource(input: Readonly<{
   mode: 'snapshot' | 'campaign';
   ticker: string;
   anchorDate: string;
+  decisionDate?: string;
+  initialTickDate?: string;
   evaluationDate: string;
   outcomeDailyDateFrom?: string;
   omitDates?: readonly string[];
   candidateDateFrom?: string;
+  nonSessionDates?: readonly string[];
+  scaleCategory?: string | null;
   unavailableReason?:
     | 'source_plan_unavailable'
     | 'source_history_unavailable'
@@ -151,28 +162,42 @@ function roleSource(input: Readonly<{
   const candidateRole = input.role.startsWith('candidate_');
   const calendarRole = input.role.endsWith('_calendar');
   const masterRole = input.role.endsWith('_master');
+  const decisionDate = input.decisionDate ?? input.anchorDate;
+  const initialTickDate = input.initialTickDate ?? input.anchorDate;
   const campaignStart = input.candidateDateFrom ?? shiftDate(input.anchorDate, -250);
   const dateFrom = input.role === 'candidate_calendar' || input.role === 'candidate_daily_bars'
-    ? (input.mode === 'campaign' ? campaignStart : input.anchorDate)
+    ? (input.mode === 'campaign'
+      ? campaignStart
+      : [input.anchorDate, initialTickDate].sort()[0]!)
+    : input.role === 'candidate_master'
+      ? initialTickDate
     : input.role === 'outcome_calendar'
-      ? input.anchorDate
+      ? decisionDate
       : input.role === 'outcome_master'
         ? input.evaluationDate
         : input.role === 'outcome_daily_bars'
-          ? (input.outcomeDailyDateFrom ?? shiftDate(input.anchorDate, 1))
-          : input.anchorDate;
+          ? (input.outcomeDailyDateFrom ?? shiftDate(decisionDate, 1))
+          : initialTickDate;
   const dateTo = input.role === 'outcome_calendar'
     ? TEST_OUTCOME_AS_OF
     : input.role === 'outcome_daily_bars'
       ? (input.outcomeDailyDateFrom === undefined ? input.evaluationDate : TEST_OUTCOME_AS_OF)
       : input.role === 'outcome_master'
         ? input.evaluationDate
-        : input.anchorDate;
+        : input.role === 'candidate_master'
+          ? initialTickDate
+          : input.role === 'candidate_calendar'
+            ? decisionDate
+            : input.anchorDate;
   const omitted = new Set(input.omitDates ?? []);
   const rows = calendarRole
-    ? calendarRows(dateFrom, dateTo)
+    ? calendarRows(dateFrom, dateTo, input.nonSessionDates)
     : masterRole
-      ? [masterRow(dateFrom, input.ticker)]
+      ? [masterRow(
+        dateFrom,
+        input.ticker,
+        input.scaleCategory === undefined ? 'TOPIX Core30' : input.scaleCategory,
+      )]
       : dailyRows(
         dateRange(dateFrom, dateTo).filter(date => !omitted.has(date)),
         input.ticker,
@@ -203,6 +228,13 @@ function completeCandidateSources(
   evaluationDate: string,
   outcomeDailyDateFrom?: string,
   omitOutcomeDailyDates: readonly string[] = [],
+  options: Readonly<{
+    decisionDate?: string;
+    initialTickDate?: string;
+    nonSessionDates?: readonly string[];
+    candidateScaleCategory?: string | null;
+    outcomeScaleCategory?: string | null;
+  }> = {},
 ) {
   const roles: StrategyValidationSourceRoleV1[] = [
     'candidate_calendar',
@@ -216,6 +248,14 @@ function completeCandidateSources(
     role,
     source: roleSource({
       role, mode, ticker, anchorDate, evaluationDate, outcomeDailyDateFrom,
+      decisionDate: options.decisionDate,
+      initialTickDate: options.initialTickDate,
+      nonSessionDates: options.nonSessionDates,
+      scaleCategory: role === 'candidate_master'
+        ? options.candidateScaleCategory
+        : role === 'outcome_master'
+          ? options.outcomeScaleCategory
+          : undefined,
       omitDates: role === 'outcome_daily_bars' ? omitOutcomeDailyDates : [],
     }),
   }));
@@ -348,6 +388,97 @@ describe('Strategy-validation immutable run repository V1', () => {
       expect(await repository.loadCase(value.run.runId, value.cases[0]!.caseId))
         .toEqual(value.cases[0]);
       expect(await repository.list()).toHaveLength(1);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('keeps a Snapshot initial tick session distinct from a later non-session decision date', async () => {
+    const { temporaryRoot, repository } = await temporaryRepository();
+    try {
+      const anchorDate = '2025-01-03';
+      const decisionDate = '2025-01-04';
+      const evaluationDate = '2025-01-05';
+      const evidence = completeCandidateSources(
+        'snapshot',
+        '7203',
+        anchorDate,
+        evaluationDate,
+        undefined,
+        [],
+        { decisionDate, nonSessionDates: [decisionDate] },
+      );
+      const base = snapshotCandidateCase(evidence.sources[0]!.digest, { anchorDate });
+      if (base.caseKind !== 'candidate' || base.outcome.kind !== 'target_hit') {
+        throw new TypeError('Expected terminal Snapshot fixture.');
+      }
+      const candidate = StrategyValidationCaseV1Schema.parse({
+        ...base,
+        decisionDate,
+        outcome: {
+          ...base.outcome,
+          evaluationEndDate: evaluationDate,
+          entryFill: { ...base.outcome.entryFill, date: evaluationDate },
+          exitFill: { ...base.outcome.exitFill, date: evaluationDate },
+        },
+        sourceManifest: createPointInTimeSourceManifestV1({
+          startedAt: TEST_STARTED_AT,
+          outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+          sources: evidence.references,
+        }),
+      });
+      if (candidate.caseKind !== 'candidate') throw new TypeError('Expected candidate case.');
+      expect(candidate.tickEvidence.effectiveDate).toBe(anchorDate);
+      await expect(repository.publish({
+        run: validationRun([candidate]), cases: [candidate], sources: evidence.sources,
+      })).resolves.toMatchObject({ state: 'created' });
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects a Snapshot initial tick date that is not an official session', async () => {
+    const { temporaryRoot, repository } = await temporaryRepository();
+    try {
+      const anchorDate = '2025-01-03';
+      const decisionDate = '2025-01-04';
+      const evaluationDate = '2025-01-05';
+      const evidence = completeCandidateSources(
+        'snapshot',
+        '7203',
+        anchorDate,
+        evaluationDate,
+        undefined,
+        [],
+        {
+          decisionDate,
+          initialTickDate: decisionDate,
+          nonSessionDates: [decisionDate],
+        },
+      );
+      const base = snapshotCandidateCase(evidence.sources[0]!.digest, { anchorDate });
+      if (base.caseKind !== 'candidate' || base.outcome.kind !== 'target_hit') {
+        throw new TypeError('Expected terminal Snapshot fixture.');
+      }
+      const candidate = StrategyValidationCaseV1Schema.parse({
+        ...base,
+        decisionDate,
+        tickEvidence: { ...base.tickEvidence, effectiveDate: decisionDate },
+        outcome: {
+          ...base.outcome,
+          evaluationEndDate: evaluationDate,
+          entryFill: { ...base.outcome.entryFill, date: evaluationDate },
+          exitFill: { ...base.outcome.exitFill, date: evaluationDate },
+        },
+        sourceManifest: createPointInTimeSourceManifestV1({
+          startedAt: TEST_STARTED_AT,
+          outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+          sources: evidence.references,
+        }),
+      });
+      await expectRepositoryKind(repository.publish({
+        run: validationRun([candidate]), cases: [candidate], sources: evidence.sources,
+      }), 'artifact_incomplete');
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
@@ -729,6 +860,147 @@ describe('Strategy-validation immutable run repository V1', () => {
     }
   });
 
+  test('rejects outcome_not_matured once the no-entry or entered branch is mature', async () => {
+    const { temporaryRoot, repository } = await temporaryRepository();
+    try {
+      const noEntry = (evaluationDate: string) => {
+        const evidence = replaceRoleSource(completeCandidateSources(
+          'snapshot', '7203', '2025-01-02', evaluationDate,
+        ), 'outcome_master', null);
+        const base = snapshotCandidateCase(evidence.sources[0]!.digest);
+        if (base.caseKind !== 'candidate') throw new TypeError('Expected candidate fixture.');
+        const candidate = StrategyValidationCaseV1Schema.parse({
+          ...base,
+          outcome: {
+            algorithmVersion: base.outcome.algorithmVersion,
+            limitQueueVersion: base.outcome.limitQueueVersion,
+            plannedRisk: 10,
+            evaluationEndDate: evaluationDate,
+            kind: 'unavailable',
+            reason: 'outcome_not_matured',
+            entryProven: false,
+            entryFill: null,
+            actualRisk: null,
+          },
+          sourceManifest: createPointInTimeSourceManifestV1({
+            startedAt: TEST_STARTED_AT,
+            outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+            sources: evidence.references,
+          }),
+        });
+        return { candidate, evidence };
+      };
+      const t20 = noEntry('2025-01-22');
+      await expectRepositoryKind(repository.publish({
+        run: validationRun([t20.candidate]),
+        cases: [t20.candidate],
+        sources: t20.evidence.sources,
+      }), 'artifact_incomplete');
+
+      if (t20.candidate.caseKind !== 'candidate') throw new TypeError('Expected candidate case.');
+      const nullBoundary = StrategyValidationCaseV1Schema.parse({
+        ...t20.candidate,
+        outcome: { ...t20.candidate.outcome, evaluationEndDate: null },
+      });
+      await expectRepositoryKind(repository.publish({
+        run: validationRun([nullBoundary]),
+        cases: [nullBoundary],
+        sources: t20.evidence.sources,
+      }), 'artifact_incomplete');
+
+      const t19 = noEntry('2025-01-21');
+      await expect(repository.publish({
+        run: validationRun([t19.candidate]),
+        cases: [t19.candidate],
+        sources: t19.evidence.sources,
+      })).resolves.toMatchObject({ state: 'created' });
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+
+    for (const scenario of [
+      { ambiguous: false, evaluationDate: '2025-03-03', accepted: false },
+      { ambiguous: false, evaluationDate: '2025-03-02', accepted: true },
+      { ambiguous: true, evaluationDate: '2025-03-03', accepted: false },
+    ]) {
+      const { temporaryRoot, repository } = await temporaryRepository();
+      try {
+        const { evaluationDate } = scenario;
+        const complete = completeCandidateSources(
+          'snapshot', '7203', '2025-01-02', evaluationDate,
+        );
+        const entryMaster = roleSource({
+          role: 'outcome_master',
+          mode: 'snapshot',
+          ticker: '7203',
+          anchorDate: '2025-01-02',
+          evaluationDate: '2025-01-03',
+        });
+        const evidence = replaceRoleSource(complete, 'outcome_master', entryMaster);
+        const base = snapshotCandidateCase(evidence.sources[0]!.digest);
+        if (base.caseKind !== 'candidate') throw new TypeError('Expected candidate fixture.');
+        const entryFill = {
+          date: '2025-01-03',
+          evaluationSession: 1,
+          holdingDay: 1,
+          order: 'entry' as const,
+          method: 'entry_level' as const,
+          price: 100,
+        };
+        const candidate = StrategyValidationCaseV1Schema.parse({
+          ...base,
+          outcome: scenario.ambiguous
+            ? {
+              algorithmVersion: base.outcome.algorithmVersion,
+              limitQueueVersion: base.outcome.limitQueueVersion,
+              plannedRisk: 10,
+              evaluationEndDate: evaluationDate,
+              kind: 'ambiguous_intraday',
+              entryProven: true,
+              entryFill,
+              actualRisk: 10,
+              ambiguityDate: '2025-01-03',
+              pessimistic: {
+                kind: 'stop_hit',
+                exitFill: {
+                  date: '2025-01-03', evaluationSession: 1, holdingDay: 1,
+                  order: 'stop', method: 'stop_level', price: 90,
+                },
+                realizedR: -1,
+              },
+              optimistic: { kind: 'unavailable', reason: 'outcome_not_matured' },
+            }
+            : {
+              algorithmVersion: base.outcome.algorithmVersion,
+              limitQueueVersion: base.outcome.limitQueueVersion,
+              plannedRisk: 10,
+              evaluationEndDate: evaluationDate,
+              kind: 'unavailable',
+              reason: 'outcome_not_matured',
+              entryProven: true,
+              entryFill,
+              actualRisk: 10,
+            },
+          sourceManifest: createPointInTimeSourceManifestV1({
+            startedAt: TEST_STARTED_AT,
+            outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+            sources: evidence.references,
+          }),
+        });
+        const value = {
+          run: validationRun([candidate]), cases: [candidate], sources: evidence.sources,
+        };
+        if (scenario.accepted) {
+          await expect(repository.publish(value)).resolves.toMatchObject({ state: 'created' });
+        } else {
+          await expectRepositoryKind(repository.publish(value), 'artifact_incomplete');
+        }
+      } finally {
+        await rm(temporaryRoot, { recursive: true, force: true });
+      }
+    }
+  });
+
   test('rejects a terminal fill without dated outcome master evidence', async () => {
     const { temporaryRoot, repository } = await temporaryRepository();
     try {
@@ -746,6 +1018,154 @@ describe('Strategy-validation immutable run repository V1', () => {
       await expectRepositoryKind(repository.publish({
         run: validationRun([candidate]), cases: [candidate], sources: evidence.sources,
       }), 'artifact_incomplete');
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects candidate master evidence that contradicts persisted initial tick evidence', async () => {
+    const { temporaryRoot, repository } = await temporaryRepository();
+    try {
+      const evidence = completeCandidateSources(
+        'snapshot',
+        '7203',
+        '2025-01-02',
+        '2025-01-03',
+        undefined,
+        [],
+        { candidateScaleCategory: 'その他' },
+      );
+      const base = snapshotCandidateCase(evidence.sources[0]!.digest);
+      const candidate = StrategyValidationCaseV1Schema.parse({
+        ...base,
+        sourceManifest: createPointInTimeSourceManifestV1({
+          startedAt: TEST_STARTED_AT,
+          outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+          sources: evidence.references,
+        }),
+      });
+      await expectRepositoryKind(repository.publish({
+        run: validationRun([candidate]), cases: [candidate], sources: evidence.sources,
+      }), 'artifact_incomplete');
+
+      const exactEvidence = completeCandidateSources(
+        'snapshot', '7203', '2025-01-02', '2025-01-03',
+      );
+      const exactBase = snapshotCandidateCase(exactEvidence.sources[0]!.digest);
+      if (exactBase.caseKind !== 'candidate') throw new TypeError('Expected candidate fixture.');
+      const wrongTick = StrategyValidationCaseV1Schema.parse({
+        ...exactBase,
+        tickEvidence: {
+          ...exactBase.tickEvidence,
+          levels: {
+            ...exactBase.tickEvidence.levels,
+            entry: { tick: 1, executable: true },
+          },
+        },
+        sourceManifest: createPointInTimeSourceManifestV1({
+          startedAt: TEST_STARTED_AT,
+          outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+          sources: exactEvidence.references,
+        }),
+      });
+      await expectRepositoryKind(repository.publish({
+        run: validationRun([wrongTick]), cases: [wrongTick], sources: exactEvidence.sources,
+      }), 'artifact_incomplete');
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('binds persisted fills and tick failures to the dated outcome master category', async () => {
+    const { temporaryRoot, repository } = await temporaryRepository();
+    try {
+      const evidence = completeCandidateSources(
+        'snapshot',
+        '7203',
+        '2025-01-02',
+        '2025-01-03',
+        undefined,
+        [],
+        { outcomeScaleCategory: 'その他' },
+      );
+      const base = snapshotCandidateCase(evidence.sources[0]!.digest);
+      if (base.caseKind !== 'candidate' || base.selector.mode !== 'snapshot') {
+        throw new TypeError('Expected Snapshot candidate fixture.');
+      }
+      const candidateLevels = {
+        entry: { price: 100.5, reason: base.candidate.entry.reason },
+        stop: { price: 90.5, reason: base.candidate.stop.reason },
+        target: { price: 120.5, reason: base.candidate.target.reason },
+      };
+      const common = {
+        ...base,
+        candidate: candidateLevels,
+        candidateId: digestSnapshotCandidateIdentityV1({
+          snapshotDigest: base.selector.snapshotDigest as SnapshotDigest,
+          strategyDataDate: parseTseSessionDate(base.strategyDataDate),
+          ...candidateLevels,
+          duplicateOrdinal: base.duplicateOrdinal,
+        }),
+        tickEvidence: {
+          ...base.tickEvidence,
+          levels: {
+            entry: { tick: 0.1, executable: true },
+            stop: { tick: 0.1, executable: true },
+            target: { tick: 0.1, executable: true },
+          },
+        },
+        sourceManifest: createPointInTimeSourceManifestV1({
+          startedAt: TEST_STARTED_AT,
+          outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+          sources: evidence.references,
+        }),
+      };
+      const contradictory = StrategyValidationCaseV1Schema.parse({
+        ...common,
+        outcome: {
+          algorithmVersion: base.outcome.algorithmVersion,
+          limitQueueVersion: base.outcome.limitQueueVersion,
+          plannedRisk: 10,
+          evaluationEndDate: '2025-01-03',
+          kind: 'target_hit',
+          entryProven: true,
+          entryFill: {
+            date: '2025-01-03', evaluationSession: 1, holdingDay: 1,
+            order: 'entry', method: 'entry_level', price: 100.5,
+          },
+          actualRisk: 10,
+          exitFill: {
+            date: '2025-01-03', evaluationSession: 1, holdingDay: 1,
+            order: 'target', method: 'target_level', price: 120.5,
+          },
+          realizedR: 2,
+        },
+      });
+      await expectRepositoryKind(repository.publish({
+        run: validationRun([contradictory]),
+        cases: [contradictory],
+        sources: evidence.sources,
+      }), 'artifact_incomplete');
+
+      const unavailable = StrategyValidationCaseV1Schema.parse({
+        ...common,
+        outcome: {
+          algorithmVersion: base.outcome.algorithmVersion,
+          limitQueueVersion: base.outcome.limitQueueVersion,
+          plannedRisk: 10,
+          evaluationEndDate: '2025-01-03',
+          kind: 'unavailable',
+          reason: 'non_executable_tick',
+          entryProven: false,
+          entryFill: null,
+          actualRisk: null,
+        },
+      });
+      await expect(repository.publish({
+        run: validationRun([unavailable]),
+        cases: [unavailable],
+        sources: evidence.sources,
+      })).resolves.toMatchObject({ state: 'created' });
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }

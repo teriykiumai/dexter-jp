@@ -538,8 +538,9 @@ export const StrategyValidationCaseV1Schema = z.discriminatedUnion('caseKind', [
       || value.resistanceEvidenceSnapshotDigests.length === 0)) {
     context.addIssue({ code: 'custom', message: 'A campaign resistance candidate requires evidence.' });
   }
-  if (value.tickEvidence.effectiveDate !== value.decisionDate) {
-    context.addIssue({ code: 'custom', message: 'Tick evidence date differs from decisionDate.' });
+  if ((!snapshotMode && value.tickEvidence.effectiveDate !== value.anchorDate)
+    || (snapshotMode && value.tickEvidence.effectiveDate > value.decisionDate)) {
+    context.addIssue({ code: 'custom', message: 'Tick evidence date is invalid for its mode.' });
   }
   const outcomeDates = strategyValidationOutcomeEvidenceDatesV1(value.outcome);
   if (outcomeDates.some(date => date <= value.decisionDate || date > value.outcomeAsOfSession)) {

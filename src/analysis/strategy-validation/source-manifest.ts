@@ -8,6 +8,11 @@ import {
 } from './date.js';
 import { createTseSessionCalendarV1 } from './calendar.js';
 import { parseDailyBarV1 } from './daily-bar.js';
+import {
+  isExecutableTsePriceV1,
+  jQuantsScaleCategoryToTseTickCategoryV1,
+  type TseTickCategoryV1,
+} from './tick.js';
 import type {
   PointInTimeSourceEnvelopeV1,
   PointInTimeSourceUnavailableReasonV1,
@@ -104,8 +109,34 @@ export type StrategyValidationSourceBindingContextV1 = Readonly<{
   anchorDate: string;
   decisionDate: string;
   strategyDataDate: string | null;
+  initialTickDate: string | null;
   startedAt: string;
   outcomeAsOfSession: string;
+}>;
+
+export type StrategyValidationInitialTickEvidenceContextV1 = Readonly<{
+  effectiveDate: string;
+  category: TseTickCategoryV1 | null;
+  unavailableReason:
+    | 'tick_rule_period_unsupported'
+    | 'tick_category_unavailable'
+    | 'invalid_candidate'
+    | null;
+  levels: Readonly<{
+    entry: Readonly<{ price: number; tick: number | null; executable: boolean | null }>;
+    stop: Readonly<{ price: number; tick: number | null; executable: boolean | null }>;
+    target: Readonly<{ price: number; tick: number | null; executable: boolean | null }>;
+  }>;
+}>;
+
+export type StrategyValidationOutcomeTickCheckV1 = Readonly<{
+  date: string;
+  prices: readonly number[];
+  expected:
+    | 'executable'
+    | 'tick_rule_period_unsupported'
+    | 'tick_category_unavailable'
+    | 'non_executable_tick';
 }>;
 
 export type StrategyValidationSourceCompletenessContextV1 = Readonly<{
@@ -115,22 +146,21 @@ export type StrategyValidationSourceCompletenessContextV1 = Readonly<{
   anchorDate: string;
   decisionDate: string;
   strategyDataDate: string | null;
+  initialTickDate: string | null;
+  outcomeAsOfSession: string;
   entryWaitSessions: number;
   holdingSessions: number;
   unavailableReason: string | null;
-  tickEvidenceUnavailableReason:
-    | 'tick_rule_period_unsupported'
-    | 'tick_category_unavailable'
-    | 'invalid_candidate'
-    | null;
+  initialTickEvidence: StrategyValidationInitialTickEvidenceContextV1 | null;
   outcome: Readonly<{
     kind: string;
     unavailableReason: string | null;
     evaluationEndDate: string | null;
-    tickValidationDates: readonly string[];
+    tickChecks: readonly StrategyValidationOutcomeTickCheckV1[];
     sessionFacts: readonly Readonly<{ date: string; evaluationSession: number }>[];
     horizonDates: readonly string[];
     terminalCompletionDate: string | null;
+    hasOutcomeNotMatured: boolean;
   }> | null;
 }>;
 
@@ -179,16 +209,21 @@ export function validateStrategyValidationSourceBindingV1(
 
   switch (reference.role) {
     case 'candidate_calendar': {
-      const earliest = context.mode === 'snapshot' && context.strategyDataDate !== null
-        ? context.strategyDataDate
-        : context.anchorDate;
+      const earliest = [
+        context.mode === 'snapshot' && context.strategyDataDate !== null
+          ? context.strategyDataDate
+          : context.anchorDate,
+        context.initialTickDate,
+      ].filter((date): date is string => date !== null).sort()[0]!;
       if (!covers(envelope, earliest) || !covers(envelope, context.decisionDate)) failBinding();
       return;
     }
-    case 'candidate_master':
-      if (envelope.request.dateFrom !== context.decisionDate
-        || envelope.request.dateTo !== context.decisionDate) failBinding();
+    case 'candidate_master': {
+      const expectedDate = context.initialTickDate ?? context.decisionDate;
+      if (envelope.request.dateFrom !== expectedDate
+        || envelope.request.dateTo !== expectedDate) failBinding();
       return;
+    }
     case 'candidate_daily_bars':
       if (context.mode !== 'campaign'
         || envelope.request.dateFrom > context.anchorDate
@@ -291,6 +326,63 @@ export function validateStrategyValidationSourceCompletenessV1(
     const available = availableDates(role);
     if (dates.some(date => !available.has(date))) failCompleteness();
   };
+  const masterCategoryAt = (
+    role: 'candidate_master' | 'outcome_master',
+    date: string,
+  ): TseTickCategoryV1 | null => {
+    let matchingRow: Readonly<Record<string, unknown>> | null = null;
+    for (const binding of availableForRole(role)) {
+      if (binding.envelope.result.state !== 'available') failCompleteness();
+      for (const row of binding.envelope.result.rows) {
+        if (validateAvailableRow(role, binding.envelope, row) !== date) continue;
+        if (matchingRow !== null) failCompleteness();
+        matchingRow = row;
+      }
+    }
+    if (matchingRow === null) return failCompleteness();
+    return jQuantsScaleCategoryToTseTickCategoryV1(
+      matchingRow.ScaleCat as string | null,
+    );
+  };
+  const verifyInitialTickEvidence = (
+    evidence: StrategyValidationInitialTickEvidenceContextV1,
+  ): void => {
+    if (evidence.effectiveDate !== context.initialTickDate) failCompleteness();
+    if (evidence.unavailableReason === 'invalid_candidate') return;
+    requireAvailableDates('candidate_master', [evidence.effectiveDate]);
+    const category = masterCategoryAt('candidate_master', evidence.effectiveDate);
+    if (category !== evidence.category) failCompleteness();
+    const categories = category === null ? [] : [category];
+    for (const level of Object.values(evidence.levels)) {
+      const result = isExecutableTsePriceV1(evidence.effectiveDate, categories, level.price);
+      if (evidence.unavailableReason === null) {
+        if (result.state !== 'available'
+          || result.tick !== level.tick
+          || result.executable !== level.executable) failCompleteness();
+      } else if (result.state !== 'unavailable'
+        || result.reason !== evidence.unavailableReason
+        || level.tick !== null
+        || level.executable !== null) failCompleteness();
+    }
+  };
+  const verifyOutcomeTickCheck = (check: StrategyValidationOutcomeTickCheckV1): void => {
+    if (check.prices.length === 0) failCompleteness();
+    const category = masterCategoryAt('outcome_master', check.date);
+    const categories = category === null ? [] : [category];
+    const results = check.prices.map(price => (
+      isExecutableTsePriceV1(check.date, categories, price)
+    ));
+    if (check.expected === 'executable') {
+      if (results.some(result => result.state !== 'available' || !result.executable)) {
+        failCompleteness();
+      }
+      return;
+    }
+    const matches = results.some(result => check.expected === 'non_executable_tick'
+      ? result.state === 'available' && !result.executable
+      : result.state === 'unavailable' && result.reason === check.expected);
+    if (!matches) failCompleteness();
+  };
   const requireMatchingUnavailable = (
     roles: readonly StrategyValidationSourceRoleV1[],
     reason: PointInTimeSourceUnavailableReasonV1,
@@ -388,12 +480,24 @@ export function validateStrategyValidationSourceCompletenessV1(
         return;
       case 'tick_category_unavailable':
         if (context.mode === 'campaign') requireCampaignCandidateGeometry(true);
-        requireAvailableDates('candidate_master', [context.decisionDate]);
+        requireAvailableDates('candidate_master', [context.initialTickDate ?? context.decisionDate]);
+        if (masterCategoryAt(
+          'candidate_master', context.initialTickDate ?? context.decisionDate,
+        ) !== null) failCompleteness();
         return;
       case 'non_executable_tick':
       case 'tick_rule_period_unsupported':
         if (context.mode === 'campaign') requireCampaignCandidateGeometry(true);
-        requireAvailableDates('candidate_master', [context.decisionDate]);
+        requireAvailableDates('candidate_master', [context.initialTickDate ?? context.decisionDate]);
+        if (context.unavailableReason === 'tick_rule_period_unsupported') {
+          const date = context.initialTickDate ?? context.decisionDate;
+          const category = masterCategoryAt('candidate_master', date);
+          const result = isExecutableTsePriceV1(
+            date, category === null ? [] : [category], 1,
+          );
+          if (result.state !== 'unavailable'
+            || result.reason !== 'tick_rule_period_unsupported') failCompleteness();
+        }
         return;
       case 'invalid_candidate':
         if (context.mode === 'campaign') requireCampaignCandidateGeometry(true);
@@ -404,17 +508,34 @@ export function validateStrategyValidationSourceCompletenessV1(
   }
 
   if (context.outcome === null) failCompleteness();
+  if (context.initialTickDate === null || context.initialTickEvidence === null) failCompleteness();
   if (context.mode === 'campaign') {
     requireCampaignCandidateGeometry(true);
-    requireAvailableDates('candidate_master', [context.decisionDate]);
   } else {
     const candidateCalendar = completeCalendar('candidate_calendar');
     if (![context.strategyDataDate ?? context.anchorDate, context.decisionDate]
-      .every(date => candidateCalendar.hasCalendarDate(date))) failCompleteness();
-    if (context.tickEvidenceUnavailableReason !== 'invalid_candidate') {
-      requireAvailableDates('candidate_master', [context.decisionDate]);
-    }
+      .every(date => candidateCalendar.hasCalendarDate(date))
+      || !candidateCalendar.isSession(context.initialTickDate)
+      || context.initialTickDate > context.decisionDate) failCompleteness();
   }
+  verifyInitialTickEvidence(context.initialTickEvidence);
+
+  const initialFailure = context.initialTickEvidence.unavailableReason === 'invalid_candidate'
+    ? 'invalid_candidate'
+    : context.initialTickEvidence.unavailableReason
+      ?? (Object.values(context.initialTickEvidence.levels).some(level => (
+        level.executable === false
+      )) ? 'non_executable_tick' : null);
+  if (initialFailure !== null
+    && (context.outcome.kind !== 'unavailable'
+      || context.outcome.unavailableReason !== initialFailure
+      || context.outcome.evaluationEndDate !== null)) failCompleteness();
+
+  if (context.outcome.kind === 'unavailable'
+    && context.outcome.evaluationEndDate === null
+    && ['tick_rule_period_unsupported', 'tick_category_unavailable', 'non_executable_tick']
+      .includes(context.outcome.unavailableReason ?? '')
+    && context.outcome.unavailableReason !== initialFailure) failCompleteness();
 
   if (context.outcome.kind === 'unavailable') {
     switch (context.outcome.unavailableReason) {
@@ -446,12 +567,24 @@ export function validateStrategyValidationSourceCompletenessV1(
 
   const evaluationEndDate = context.outcome.evaluationEndDate;
   if (evaluationEndDate === null) {
-    if (context.outcome.kind !== 'unavailable') failCompleteness();
+    if (context.outcome.kind !== 'unavailable'
+      || context.outcome.sessionFacts.length > 0
+      || context.outcome.tickChecks.length > 0
+      || context.outcome.horizonDates.length > 0
+      || context.outcome.terminalCompletionDate !== null) failCompleteness();
+    if (context.outcome.unavailableReason === 'outcome_not_matured') {
+      const calendar = completeCalendar('outcome_calendar');
+      if (calendar.sessions.some(date => (
+        date > context.decisionDate && date <= context.outcomeAsOfSession
+      ))) failCompleteness();
+    }
     return;
   }
   const sessions = outcomeSessionsThrough(evaluationEndDate);
   requireAvailableDates('outcome_daily_bars', sessions);
-  requireAvailableDates('outcome_master', context.outcome.tickValidationDates);
+  const tickDates = [...new Set(context.outcome.tickChecks.map(check => check.date))];
+  requireAvailableDates('outcome_master', tickDates);
+  for (const check of context.outcome.tickChecks) verifyOutcomeTickCheck(check);
   const sessionNumber = new Map(sessions.map((date, index) => [date, index + 1]));
   if (context.outcome.sessionFacts.some(fact => (
     sessionNumber.get(fact.date) !== fact.evaluationSession
@@ -467,6 +600,14 @@ export function validateStrategyValidationSourceCompletenessV1(
       || sessionNumber.get(date) === undefined
       || sessionNumber.get(date)! - entry.evaluationSession + 1 !== context.holdingSessions
     ))) failCompleteness();
+  }
+  if (context.outcome.hasOutcomeNotMatured) {
+    const entry = context.outcome.sessionFacts[0];
+    if ((entry === undefined && sessions.length >= context.entryWaitSessions)
+      || (entry !== undefined
+        && sessions.length - entry.evaluationSession + 1 >= context.holdingSessions)) {
+      failCompleteness();
+    }
   }
 }
 

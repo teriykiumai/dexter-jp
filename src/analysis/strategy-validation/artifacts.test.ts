@@ -283,7 +283,6 @@ describe('Strategy-validation V1 artifacts and identity', () => {
     const laterDecision = {
       ...snapshot,
       decisionDate: '2025-01-03',
-      tickEvidence: { ...snapshot.tickEvidence, effectiveDate: '2025-01-03' },
       outcome: {
         ...snapshot.outcome,
         evaluationEndDate: '2025-01-06',
@@ -298,11 +297,15 @@ describe('Strategy-validation V1 artifacts and identity', () => {
       ticker: '7203',
       anchorDate: '2025-01-02',
     });
+    if (campaign.caseKind !== 'candidate') throw new TypeError('Expected campaign candidate.');
     expect(StrategyValidationCaseV1Schema.safeParse({
       ...campaign,
       decisionDate: laterDecision.decisionDate,
-      tickEvidence: laterDecision.tickEvidence,
       outcome: laterDecision.outcome,
+    }).success).toBe(false);
+    expect(StrategyValidationCaseV1Schema.safeParse({
+      ...campaign,
+      tickEvidence: { ...campaign.tickEvidence, effectiveDate: '2025-01-01' },
     }).success).toBe(false);
   });
 

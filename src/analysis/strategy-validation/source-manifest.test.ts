@@ -20,6 +20,7 @@ const campaignContext = Object.freeze({
   anchorDate: '2025-01-02',
   decisionDate: '2025-01-02',
   strategyDataDate: null,
+  initialTickDate: '2025-01-02',
   startedAt: TEST_STARTED_AT,
   outcomeAsOfSession: TEST_OUTCOME_AS_OF,
 });

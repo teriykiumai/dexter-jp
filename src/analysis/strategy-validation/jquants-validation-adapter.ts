@@ -31,7 +31,10 @@ import {
   type PointInTimeSourceEnvelopeV1,
   type PointInTimeSourceUnavailableReasonV1,
 } from './source-envelope.js';
-import type { TseTickCategoryV1 } from './tick.js';
+import {
+  jQuantsScaleCategoryToTseTickCategoryV1,
+  type TseTickCategoryV1,
+} from './tick.js';
 
 export const JQUANTS_CALENDAR_SOURCE_MAPPING_VERSION_V1 = 'jquants_calendar_v1' as const;
 export const JQUANTS_MASTER_SOURCE_MAPPING_VERSION_V1 = 'jquants_master_v1' as const;
@@ -165,14 +168,6 @@ function equalDateDuplicate<T>(rows: readonly T[], dateOf: (row: T) => unknown, 
     if (seen.has(date)) return sourceInvalid(`J-Quants ${label} rows contain a duplicate date.`);
     seen.add(date);
   }
-}
-
-function tickCategory(scaleCategory: string | null): TseTickCategoryV1 | null {
-  if (scaleCategory === null || scaleCategory.length === 0) return null;
-  if (scaleCategory === 'TOPIX Core30') return 'topix_core30';
-  if (scaleCategory === 'TOPIX Large70') return 'topix_large70';
-  if (scaleCategory === 'TOPIX Mid400') return 'topix_mid400';
-  return 'other';
 }
 
 export class JQuantsValidationAdapterV1 {
@@ -322,7 +317,7 @@ export class JQuantsValidationAdapterV1 {
       code,
       ticker,
       scaleCategory: row.ScaleCat,
-      tickCategory: tickCategory(row.ScaleCat),
+      tickCategory: jQuantsScaleCategoryToTseTickCategoryV1(row.ScaleCat),
       marketCode: row.Mkt,
       productCategory: '011' as const,
     });

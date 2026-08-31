@@ -2,11 +2,21 @@ import { describe, expect, test } from 'bun:test';
 import {
   TSE_TICK_BANDS_V1,
   isExecutableTsePriceV1,
+  jQuantsScaleCategoryToTseTickCategoryV1,
   nextTseQuoteAboveV1,
   resolveTseTickV1,
 } from './index.js';
 
 describe('TseTickRuleV1', () => {
+  test('maps J-Quants scale categories through the shared V1 resolver', () => {
+    expect(jQuantsScaleCategoryToTseTickCategoryV1('TOPIX Core30')).toBe('topix_core30');
+    expect(jQuantsScaleCategoryToTseTickCategoryV1('TOPIX Large70')).toBe('topix_large70');
+    expect(jQuantsScaleCategoryToTseTickCategoryV1('TOPIX Mid400')).toBe('topix_mid400');
+    expect(jQuantsScaleCategoryToTseTickCategoryV1('その他')).toBe('other');
+    expect(jQuantsScaleCategoryToTseTickCategoryV1('')).toBeNull();
+    expect(jQuantsScaleCategoryToTseTickCategoryV1(null)).toBeNull();
+  });
+
   test('matches every fine and ordinary tick band at its inclusive upper boundary', () => {
     for (const band of TSE_TICK_BANDS_V1) {
       if (band.upper === null) continue;
