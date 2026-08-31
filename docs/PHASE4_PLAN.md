@@ -413,16 +413,36 @@ upgrade to source-verified evidence.
 
 Saved candidates use the versioned `snapshot_candidate_identity_v1` envelope in
 Section 5.4. Identical duplicates remain separate cases and are explicitly marked.
-A Snapshot with `strategy === null`, no candidates, malformed chronology, or a future
-Strategy date produces an unavailable case/run record rather than a fabricated
-candidate.
+A Snapshot with `strategy === null` or no candidates produces exactly one
+`anchor_unavailable` case with `invalid_candidate`; it does not enter candidate
+identity or outcome collection.
 
-Let `generatedTokyoDate` be the Tokyo calendar date containing the exact
-`generatedAt` instant. If `strategy.dataDate > generatedTokyoDate`, reason is
-`future_strategy_data`. Otherwise the decision date is the later of
-`strategy.dataDate` and `generatedTokyoDate`. The first eligible evaluation session
-is the first official TSE session strictly after that decision date. Confidence is
-`precommitted`.
+When one or more stored candidates exist, Snapshot audit applies this fail-closed
+order after exact Snapshot schema/digest/identity validation and before constructing
+any candidate identity or requesting any outcome bar:
+
+1. parse `strategy.dataDate` with the strict `YYYY-MM-DD` Gregorian parser from
+   Section 3.1; `null`, malformed/non-Gregorian text, and impossible calendar dates
+   produce exactly one `anchor_unavailable` case with
+   `strategy_data_date_invalid`;
+2. let `generatedTokyoDate` be the Tokyo calendar date containing the exact
+   `generatedAt` instant; a parsed Strategy date later than it produces exactly one
+   `anchor_unavailable` case with `future_strategy_data`;
+3. require the parsed Strategy date to be an official session in
+   `TseSessionCalendarV1`; a complete calendar that proves it is not an official TSE
+   session produces exactly one `anchor_unavailable` case with
+   `strategy_data_date_invalid`, while missing/incomplete calendar coverage keeps the
+   distinct `calendar_incomplete` reason; and
+4. only then derive the decision date as the later of the validated Strategy date
+   and `generatedTokyoDate`, construct `snapshot_candidate_identity_v1`, and permit
+   outcome-bar planning/collection.
+
+The invalid/future anchor case has no candidate, `candidateId`, duplicate ordinal,
+fill, R, or outcome-bar source envelope. A locally invalid date is rejected before
+any J-Quants request. Official-session validation may use the explicitly confirmed
+calendar request, but no daily-bar outcome request is made unless all four guards
+pass. The first eligible evaluation session is the first official TSE session
+strictly after the decision date. Confidence is `precommitted`.
 
 ### 5.3 Campaign manifest
 
@@ -724,6 +744,7 @@ tick_rule_period_unsupported
 tick_category_unavailable
 non_executable_tick
 entry_gap_beyond_target
+strategy_data_date_invalid
 future_strategy_data
 invalid_candidate
 resistance_evidence_invalid
@@ -783,9 +804,10 @@ anchor_unavailable | candidate
 
 `anchor_unavailable` represents a valid requested anchor for which no candidate can
 be produced or audited, for example missing source history, invalid resistance
-evidence, `strategy === null`, or null required technical input. It contains the
-anchor/selector identity, confidence, exact unavailable reason, applicable evidence
-digests, and versions, but no invented candidate, price, fill, or R field.
+evidence, `strategy === null`, an invalid Snapshot Strategy date, or null required
+technical input. It contains the anchor/selector identity, confidence, exact
+unavailable reason, applicable evidence digests, and versions, but no invented
+candidate, candidate identity, price, fill, or R field.
 
 `candidate` is then discriminated by the Section 6 result union. It contains:
 
@@ -1447,8 +1469,8 @@ reviewed plan and user decision.
 | P4-I0 | strict dates/time zones; future-row isolation; official-session arithmetic; `outcomeAsOfSession` strictly before started Tokyo date; null/no-row distinction; cumulative factor boundaries and rounding golden vectors; corporate-action flags; all tick bands/dates/categories; decimal executability; canonical source digest; input immutability |
 | P4-I1 | exact endpoint/query/field schemas; `ProdCat`; master/date identity; pagination duplicate/repeat; same startedAt before/after same-day publication yields identical accepted outcome rows; `rolling_attempt_log_v1` monotonic scheduling; `minimumDispatchDurationMs` at 1/min, 2/min, default 5/min, exactly feasible, and one-attempt-over boundaries; preflight/runtime frozen-control parity; 4xx/429/5xx/network retry matrix; `Retry-After`; rate and 250-attempt accounting; required `acceptedAt`; 30s/90m deadline; abort priority; no secret/body logging; stub CI; manual <=10-attempt matured-anchor smoke |
 | P4-V1 | t1/t20/t60/t79 boundaries; no-trade sessions; every entry/open/threshold gap branch; entry-bar stop-only with `C <= stop`, `stop < C < target`, target-only, and dual-touch vectors; `UL=1/LL=0` with deterministic lower stop; `LL=1/UL=0` with deterministic upper-side fill; buy-entry exactly at flagged `H`; sell-stop exactly at flagged `L`; same flags with fill strictly inside the boundary; gap/open and entry-bar limit-bound variants; precedence over intraday bounds; all corporate-action boundaries; invalid ticks/candidates; immature outcomes; actual-risk zero; exact/mark/ambiguous R; no input mutation |
-| P4-R1 | 1 MiB/UTF-8/duplicate keys/strict fields; required/absent/mismatched `limitQueueEvidence`; 1/500 anchors; duplicate anchor; 0/8 refs; 16 resistance dedup; UUID/path containment; canonical manifest/case/run/source digests; both candidate-identity golden envelopes; same tuple across anchors/tickers, true duplicate ordinals, and equal rerun IDs/order despite new run/case UUIDs; atomic no-replace and temp cleanup; rerun new ID; corruption never skipped; track-level all-anchor coverage and candidate-stratum denominators with mostly-unavailable/multi-stratum fixtures; multi-ticker campaign whose global and per-ticker rates differ while only global aggregates persist |
-| P4-S1 | V1-V9 exact history load; ticker/ID/digest; no latest fallback; generatedAt Tokyo date; future strategy date; all stored 2R/resistance and duplicates; `snapshot_candidate_identity_v1` stability; default-No/noninteractive confirmation; error/cancel no run |
+| P4-R1 | 1 MiB/UTF-8/duplicate keys/strict fields; required/absent/mismatched `limitQueueEvidence`; closed unavailable-reason schema including `strategy_data_date_invalid`; 1/500 anchors; duplicate anchor; 0/8 refs; 16 resistance dedup; UUID/path containment; canonical manifest/case/run/source digests; both candidate-identity golden envelopes; same tuple across anchors/tickers, true duplicate ordinals, and equal rerun IDs/order despite new run/case UUIDs; atomic no-replace and temp cleanup; rerun new ID; corruption never skipped; track-level all-anchor coverage and candidate-stratum denominators with mostly-unavailable/multi-stratum fixtures; multi-ticker campaign whose global and per-ticker rates differ while only global aggregates persist |
+| P4-S1 | V1-V9 exact history load; ticker/ID/digest; no latest fallback; generatedAt Tokyo date; stored candidates paired with `strategy.dataDate` null, malformed/non-Gregorian text, impossible date, proven non-session date, valid date, future session/non-session dates, and incomplete calendar coverage; exact `strategy_data_date_invalid`/`future_strategy_data`/`calendar_incomplete` precedence; invalid/future date yields one anchor case with no candidate identity or daily-bar outcome fetch; all stored 2R/resistance and duplicates; `snapshot_candidate_identity_v1` stability after date validation; default-No/noninteractive confirmation; error/cancel no run |
 | P4-C1 | exact `technical_251_strategy_v1` t0-bounded sessions; adding older rows outside the final 251 leaves reconstruction unchanged; differential >251-bar fixture where full-history production input retains an older latest Swing/candidate but the 251 policy does not; `reconstructed_251_as_of` and non-production warning; no current AdjOHLC/future influence; missing OHLC/no candidate; same Engine code/reasons/defaults with no input-window parity claim; entry-tick injection and per-level validation; resistance Snapshot generatedTokyoDate guard before extraction; only persisted `resistance_level` target prices; raw-to-Engine-target evidence mapping including normalization collisions and candidate-specific digests; ticker/dataDate/digest; resistance tiers; `campaign_candidate_identity_v1`; latest t20 entry through holding day60 |
 | P4-J1 | Host/Origin/CSRF; token restart/constant-time check; JSON/media/body limits; frozen preflight startedAt/execution controls; `external_schedule_infeasible` before preflight ID/confirmation; expiry/one-time/digest mismatch; one global job; every lifecycle transition; crash before promotion, after promotion/before completion rewrite, and after completion; reconciliation digest/identity/corruption; cancel during wait/fetch/validate/publish; 200/202/400/403/404/409/413/415/500 and inherited 405; canonical candidate-ID pagination ties; run ticker membership and ticker-filtered cases with unchanged campaign-global aggregate; corruption 500; no credential/path response |
 | P4-D1 | six stable tabs/label/order; no auto selection/open; Snapshot picker/file size; minimum attempts/duration/rate/deadline warning before default-No confirmation; `technical_251_strategy_v1` and non-production-parity warning; polling/cancel/recovery; deep link/Back/Forward/reload; invalid/orphan/cross-ticker case URL; ticker/list transitions; latest-request-wins; multi-ticker global-vs-current-ticker fixture with exact campaign-global heading/warning, ticker-filtered cases, and no Browser aggregate derivation or ticker-specific metric label; focus/live region/keyboard; exact tables and ambiguity; 320/768/1280 px; document overflow; Playwright |

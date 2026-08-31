@@ -426,6 +426,10 @@ membershipで絞り、選択run内ではcase一覧・詳細だけを絞り込む
 run/case UUIDや時刻に依存しないversioned canonical digestとし、同一入力の再実行で
 安定させる。
 
+Backward-readable Snapshotで候補が存在しても`strategy.dataDate`がstrictな暦日・
+official sessionとして成立しない場合、candidate identityやoutcome取得へ進めず、
+専用のunavailable状態としてfail-closedする。future Strategy dateとは区別する。
+
 `docs/PHASE3_SCORE_EVALUATION_PLAN.md` のscore検証はPhase 4の自動的な要件では
 なく、runtime採用も許可しない。point-in-time基盤の適用範囲をscoreへ広げる
 場合は、Strategy outcome検証とは別のreviewed planと明示的な採否判断を必要とする。

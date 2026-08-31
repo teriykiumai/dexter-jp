@@ -177,6 +177,14 @@ ordinal. It excludes run/case UUIDs, manifest identity, timestamps, and outcomes
 equal reruns preserve candidate IDs/order while cross-anchor, cross-ticker, and true
 duplicate candidates remain distinct.
 
+Legacy V1-V9 permits stored candidates with a null or non-calendar
+`strategy.dataDate`. Snapshot audit therefore parses and validates that field before
+candidate identity or outcome bars. Null, malformed, impossible, or non-session dates
+that are not later than generation produce one `anchor_unavailable` with
+`strategy_data_date_invalid`; any parsed date later than generation takes the earlier
+`future_strategy_data` precedence. Neither branch has a candidate ID, fill, R, or
+outcome-bar request.
+
 Campaign aggregates are deliberately `campaign_global` across every ticker and
 anchor in the run. Version 1 persists no per-ticker aggregates and the Browser never
 derives them from cases. The current ticker limits the run picker by membership and,
