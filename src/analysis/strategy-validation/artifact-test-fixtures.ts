@@ -19,6 +19,7 @@ import { planJQuantsExecutionV1 } from './jquants-execution.js';
 import { STRATEGY_ENTRY_WAIT_SESSIONS_V1, STRATEGY_HOLDING_SESSIONS_V1 } from './outcome-validator.js';
 import { STRATEGY_VALIDATION_RUN_SCHEMA_VERSION, StrategyValidationRunV1Schema } from './run-artifact.js';
 import { createPointInTimeSourceEnvelopeV1 } from './source-envelope.js';
+import { createPointInTimeSourceManifestV1 } from './source-manifest.js';
 
 export const TEST_RUN_ID = '11111111-1111-4111-8111-111111111111';
 export const TEST_CASE_ID = '22222222-2222-4222-8222-222222222222';
@@ -131,7 +132,11 @@ export function snapshotCandidateCase(
     outcomeAsOfSession: TEST_OUTCOME_AS_OF,
     entryWaitSessions: STRATEGY_ENTRY_WAIT_SESSIONS_V1,
     holdingSessions: STRATEGY_HOLDING_SESSIONS_V1,
-    sourceDigests: [sourceDigest],
+    sourceManifest: createPointInTimeSourceManifestV1({
+      startedAt: TEST_STARTED_AT,
+      outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+      sources: [{ role: 'outcome_calendar', digest: sourceDigest }],
+    }),
     caseKind: 'candidate',
     candidateIdentityVersion: 'snapshot_candidate_identity_v1',
     candidateId: digestSnapshotCandidateIdentityV1({
@@ -213,13 +218,13 @@ export function campaignCandidateCase(
 }
 
 export function anchorUnavailableCase(
-  sourceDigest: SnapshotDigest,
+  _sourceDigest: SnapshotDigest,
   overrides: Readonly<{
     runId?: string;
     caseId: string;
     ticker: string;
     anchorDate: string;
-    reason?: 'source_history_unavailable' | 'strategy_data_date_invalid';
+    reason?: 'source_history_unavailable' | 'resistance_evidence_invalid';
   }>,
 ): StrategyValidationCaseV1 {
   return StrategyValidationCaseV1Schema.parse({
@@ -239,7 +244,11 @@ export function anchorUnavailableCase(
     outcomeAsOfSession: TEST_OUTCOME_AS_OF,
     entryWaitSessions: STRATEGY_ENTRY_WAIT_SESSIONS_V1,
     holdingSessions: STRATEGY_HOLDING_SESSIONS_V1,
-    sourceDigests: [sourceDigest],
+    sourceManifest: createPointInTimeSourceManifestV1({
+      startedAt: TEST_STARTED_AT,
+      outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+      sources: [],
+    }),
     caseKind: 'anchor_unavailable',
     unavailableReason: overrides.reason ?? 'source_history_unavailable',
   });

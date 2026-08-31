@@ -34,6 +34,10 @@ import {
   validatePointInTimeSourceEnvelopeV1,
   type PointInTimeSourceEnvelopeV1,
 } from './source-envelope.js';
+import {
+  sourceManifestDigestsV1,
+  validateStrategyValidationSourceBindingV1,
+} from './source-manifest.js';
 import { parseStrictJsonBytesV1 } from './strict-json.js';
 
 export type StrategyValidationRunRepositoryErrorKindV1 =
@@ -348,7 +352,9 @@ export class StrategyValidationRunRepositoryV1 {
         'identity_mismatch', 'Source envelope digests must be unique within a run.',
       );
     }
-    const referencedSources = new Set(sortedCases.flatMap(value => value.sourceDigests));
+    const referencedSources = new Set(sortedCases.flatMap(value => (
+      sourceManifestDigestsV1(value.sourceManifest)
+    )));
     if (referencedSources.size !== sourceByDigest.size
       || [...referencedSources].some(digest => !sourceByDigest.has(digest))) {
       throw new StrategyValidationRunRepositoryErrorV1(
@@ -361,6 +367,32 @@ export class StrategyValidationRunRepositoryV1 {
         throw new StrategyValidationRunRepositoryErrorV1(
           'identity_mismatch', 'A source envelope ticker is outside the run scope.',
         );
+      }
+    }
+    for (const value of sortedCases) {
+      for (const reference of value.sourceManifest.sources) {
+        const source = sourceByDigest.get(reference.digest);
+        if (source === undefined) {
+          throw new StrategyValidationRunRepositoryErrorV1(
+            'artifact_incomplete', 'A case source manifest references a missing envelope.',
+          );
+        }
+        try {
+          validateStrategyValidationSourceBindingV1(reference, source, {
+            mode: value.mode,
+            caseKind: value.caseKind,
+            ticker: value.ticker,
+            anchorDate: value.anchorDate,
+            decisionDate: value.decisionDate,
+            strategyDataDate: value.strategyDataDate,
+            startedAt: value.startedAt,
+            outcomeAsOfSession: value.outcomeAsOfSession,
+          });
+        } catch (error) {
+          throw new StrategyValidationRunRepositoryErrorV1(
+            'identity_mismatch', 'A case source manifest does not match its envelope.', error,
+          );
+        }
       }
     }
     const requestedAnchors: StrategyValidationRequestedAnchorV1[] = [];
@@ -488,7 +520,9 @@ export class StrategyValidationRunRepositoryV1 {
         }
         cases.push(parsed.data);
       }
-      const referenced = new Set(cases.flatMap(value => value.sourceDigests));
+      const referenced = new Set(cases.flatMap(value => (
+        sourceManifestDigestsV1(value.sourceManifest)
+      )));
       const sourceFiles = (await readdir(sourcesDirectory)).sort();
       const expectedSourceFiles = [...referenced]
         .map(digest => `${digest.slice('sha256:'.length)}.json`)

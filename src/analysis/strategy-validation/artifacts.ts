@@ -23,11 +23,13 @@ import {
   STRATEGY_HOLDING_SESSIONS_V1,
   STRATEGY_LIMIT_QUEUE_VERSION_V1,
   STRATEGY_OUTCOME_ALGORITHM_VERSION_V1,
-  STRATEGY_OUTCOME_UNAVAILABLE_REASONS_V1,
   type StrategyOutcomeCandidateV1,
   type StrategyOutcomeResultV1,
 } from './outcome-validator.js';
 import { TSE_TICK_CATEGORIES_V1, TSE_TICK_RULE_VERSION } from './tick.js';
+import {
+  PointInTimeSourceManifestV1Schema,
+} from './source-manifest.js';
 
 export const STRATEGY_VALIDATION_CASE_SCHEMA_VERSION =
   'strategy_validation_case_v1' as const;
@@ -209,9 +211,60 @@ const OutcomeAmbiguousSchema = z.object({
     context.addIssue({ code: 'custom', message: 'Ambiguity bounds are reversed.' });
   }
 });
-const nonQueueUnavailableReasons = STRATEGY_OUTCOME_UNAVAILABLE_REASONS_V1.filter(
+export const STRATEGY_VALIDATION_CANDIDATE_UNAVAILABLE_REASONS_V1 = Object.freeze(
+  [
+    'outcome_not_matured',
+    'source_plan_unavailable',
+    'source_history_unavailable',
+    'source_response_invalid',
+    'calendar_incomplete',
+    'price_history_incomplete',
+    'corporate_action_in_outcome_window',
+    'tick_rule_period_unsupported',
+    'tick_category_unavailable',
+    'non_executable_tick',
+    'entry_gap_beyond_target',
+    'limit_queue_ambiguous',
+  ] as const,
+);
+const nonQueueUnavailableReasons = STRATEGY_VALIDATION_CANDIDATE_UNAVAILABLE_REASONS_V1.filter(
   reason => reason !== 'limit_queue_ambiguous',
 );
+export const STRATEGY_VALIDATION_SNAPSHOT_ANCHOR_UNAVAILABLE_REASONS_V1 = Object.freeze([
+  'source_plan_unavailable',
+  'source_history_unavailable',
+  'source_response_invalid',
+  'calendar_incomplete',
+  'strategy_data_date_invalid',
+  'future_strategy_data',
+  'invalid_candidate',
+] as const);
+export const STRATEGY_VALIDATION_CAMPAIGN_ANCHOR_UNAVAILABLE_REASONS_V1 = Object.freeze([
+  'source_plan_unavailable',
+  'source_history_unavailable',
+  'source_response_invalid',
+  'calendar_incomplete',
+  'price_history_incomplete',
+  'tick_rule_period_unsupported',
+  'tick_category_unavailable',
+  'non_executable_tick',
+  'invalid_candidate',
+  'resistance_evidence_invalid',
+] as const);
+export const STRATEGY_VALIDATION_ANCHOR_UNAVAILABLE_REASONS_V1 = Object.freeze([
+  'source_plan_unavailable',
+  'source_history_unavailable',
+  'source_response_invalid',
+  'calendar_incomplete',
+  'price_history_incomplete',
+  'tick_rule_period_unsupported',
+  'tick_category_unavailable',
+  'non_executable_tick',
+  'strategy_data_date_invalid',
+  'future_strategy_data',
+  'invalid_candidate',
+  'resistance_evidence_invalid',
+] as const);
 const OutcomeUnavailableSchema = z.union([
   z.object({
     ...outcomeBaseShape,
@@ -307,13 +360,13 @@ const caseCommonShape = {
   outcomeAsOfSession: strictDate,
   entryWaitSessions: z.literal(STRATEGY_ENTRY_WAIT_SESSIONS_V1),
   holdingSessions: z.literal(STRATEGY_HOLDING_SESSIONS_V1),
-  sourceDigests: digestArray,
+  sourceManifest: PointInTimeSourceManifestV1Schema,
 } as const;
 
 const AnchorUnavailableCaseSchema = z.object({
   ...caseCommonShape,
   caseKind: z.literal('anchor_unavailable'),
-  unavailableReason: z.enum(STRATEGY_OUTCOME_UNAVAILABLE_REASONS_V1),
+  unavailableReason: z.enum(STRATEGY_VALIDATION_ANCHOR_UNAVAILABLE_REASONS_V1),
 }).strict();
 
 const CandidateCaseSchema = z.object({
@@ -352,7 +405,22 @@ export const StrategyValidationCaseV1Schema = z.discriminatedUnion('caseKind', [
     context.addIssue({ code: 'custom', message: 'Case mode fields are inconsistent.' });
     return;
   }
-  if (value.caseKind !== 'candidate') return;
+  if (!snapshotMode && value.decisionDate !== value.anchorDate) {
+    context.addIssue({ code: 'custom', message: 'Campaign decisionDate must equal anchorDate.' });
+  }
+  if (value.sourceManifest.startedAt !== value.startedAt
+    || value.sourceManifest.outcomeAsOfSession !== value.outcomeAsOfSession) {
+    context.addIssue({ code: 'custom', message: 'Source manifest does not match case time identity.' });
+  }
+  if (value.caseKind !== 'candidate') {
+    const allowed = snapshotMode
+      ? STRATEGY_VALIDATION_SNAPSHOT_ANCHOR_UNAVAILABLE_REASONS_V1
+      : STRATEGY_VALIDATION_CAMPAIGN_ANCHOR_UNAVAILABLE_REASONS_V1;
+    if (!allowed.includes(value.unavailableReason as never)) {
+      context.addIssue({ code: 'custom', message: 'Anchor unavailable reason is invalid for its mode.' });
+    }
+    return;
+  }
   if (snapshotMode && value.strategyDataDate === null) {
     context.addIssue({ code: 'custom', message: 'A Snapshot candidate requires strategyDataDate.' });
     return;

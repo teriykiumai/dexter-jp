@@ -12,6 +12,8 @@ import {
 } from './index.js';
 import {
   TEST_SNAPSHOT_DIGEST,
+  anchorUnavailableCase,
+  campaignCandidateCase,
   snapshotCandidateCase,
   validationSource,
 } from './artifact-test-fixtures.js';
@@ -207,6 +209,100 @@ describe('Strategy-validation V1 artifacts and identity', () => {
     expect(StrategyValidationCaseV1Schema.safeParse({
       ...candidate,
       outcome: { ...('outcome' in candidate ? candidate.outcome : {}), reason: 'future_reason' },
+    }).success).toBe(false);
+  });
+
+  test('partitions unavailable reasons by case stage and mode', () => {
+    const source = validationSource();
+    const candidate = snapshotCandidateCase(source.digest, { outcomeKind: 'not_triggered' });
+    if (candidate.caseKind !== 'candidate') throw new TypeError('Expected candidate fixture.');
+    expect(StrategyValidationCaseV1Schema.safeParse({
+      ...candidate,
+      outcome: {
+        ...candidate.outcome,
+        kind: 'unavailable',
+        reason: 'resistance_evidence_invalid',
+        entryProven: false,
+        entryFill: null,
+        actualRisk: null,
+      },
+    }).success).toBe(false);
+
+    const campaignAnchor = anchorUnavailableCase(source.digest, {
+      caseId: '55555555-5555-4555-8555-555555555555',
+      ticker: '7203',
+      anchorDate: '2025-01-02',
+      reason: 'resistance_evidence_invalid',
+    });
+    expect(StrategyValidationCaseV1Schema.safeParse(campaignAnchor).success).toBe(true);
+    expect(StrategyValidationCaseV1Schema.safeParse({
+      ...campaignAnchor,
+      unavailableReason: 'corporate_action_in_outcome_window',
+    }).success).toBe(false);
+    expect(StrategyValidationCaseV1Schema.safeParse({
+      ...campaignAnchor,
+      unavailableReason: 'strategy_data_date_invalid',
+    }).success).toBe(false);
+
+    expect(StrategyValidationCaseV1Schema.safeParse({
+      ...campaignAnchor,
+      mode: 'snapshot',
+      confidence: 'precommitted',
+      strategyDataDate: '2025-01-02',
+      selector: candidate.selector,
+      candidateGenerationPolicy: null,
+      unavailableReason: 'strategy_data_date_invalid',
+    }).success).toBe(true);
+  });
+
+  test('binds source-manifest time identity to the case', () => {
+    const source = validationSource();
+    const candidate = snapshotCandidateCase(source.digest);
+    expect(StrategyValidationCaseV1Schema.safeParse({
+      ...candidate,
+      sourceManifest: {
+        ...candidate.sourceManifest,
+        startedAt: '2025-04-01T00:00:01.000Z',
+      },
+    }).success).toBe(false);
+    expect(StrategyValidationCaseV1Schema.safeParse({
+      ...candidate,
+      sourceManifest: {
+        ...candidate.sourceManifest,
+        outcomeAsOfSession: '2025-03-28',
+      },
+    }).success).toBe(false);
+  });
+
+  test('requires exact t0 decision identity for campaign but preserves later Snapshot decisions', () => {
+    const source = validationSource();
+    const snapshot = snapshotCandidateCase(source.digest);
+    if (snapshot.caseKind !== 'candidate' || snapshot.outcome.kind !== 'target_hit') {
+      throw new TypeError('Expected terminal candidate fixture.');
+    }
+    const laterDecision = {
+      ...snapshot,
+      decisionDate: '2025-01-03',
+      tickEvidence: { ...snapshot.tickEvidence, effectiveDate: '2025-01-03' },
+      outcome: {
+        ...snapshot.outcome,
+        evaluationEndDate: '2025-01-06',
+        entryFill: { ...snapshot.outcome.entryFill, date: '2025-01-06' },
+        exitFill: { ...snapshot.outcome.exitFill, date: '2025-01-06' },
+      },
+    };
+    expect(StrategyValidationCaseV1Schema.safeParse(laterDecision).success).toBe(true);
+
+    const campaign = campaignCandidateCase(source.digest, {
+      caseId: '66666666-6666-4666-8666-666666666666',
+      ticker: '7203',
+      anchorDate: '2025-01-02',
+    });
+    expect(StrategyValidationCaseV1Schema.safeParse({
+      ...campaign,
+      decisionDate: laterDecision.decisionDate,
+      tickEvidence: laterDecision.tickEvidence,
+      outcome: laterDecision.outcome,
     }).success).toBe(false);
   });
 

@@ -13,5 +13,6 @@ export * from './outcome-validator.js';
 export * from './run-artifact.js';
 export * from './run-repository.js';
 export * from './source-envelope.js';
+export * from './source-manifest.js';
 export * from './strict-json.js';
 export * from './tick.js';

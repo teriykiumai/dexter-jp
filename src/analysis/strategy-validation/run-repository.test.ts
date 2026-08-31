@@ -4,13 +4,19 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { canonicalJsonV1, type CanonicalJsonValue } from '../snapshot/canonical-json.js';
 import {
+  createPointInTimeSourceEnvelopeV1,
+  createPointInTimeSourceManifestV1,
   digestStrategyValidationCaseV1,
   digestStrategyValidationRunV1,
+  StrategyValidationCaseV1Schema,
   StrategyValidationRunRepositoryErrorV1,
   StrategyValidationRunRepositoryV1,
   type PromoteStrategyValidationRunDirectoryV1,
 } from './index.js';
 import {
+  TEST_OUTCOME_AS_OF,
+  TEST_STARTED_AT,
+  campaignCandidateCase,
   snapshotCandidateCase,
   validationRun,
   validationSource,
@@ -58,6 +64,60 @@ function publication(overrides: { runId?: string; caseId?: string } = {}) {
     run: validationRun([candidate]),
     cases: Object.freeze([candidate]),
     sources: Object.freeze([source]),
+  });
+}
+
+function outcomeDailySource(ticker: string, dateFrom: string) {
+  return createPointInTimeSourceEnvelopeV1({
+    sourceMappingVersion: 'test_outcome_daily_v1',
+    endpoint: '/v2/equities/bars/daily',
+    query: [{ name: 'from', value: dateFrom }, { name: 'to', value: TEST_OUTCOME_AS_OF }],
+    request: {
+      ticker,
+      dateFrom,
+      dateTo: TEST_OUTCOME_AS_OF,
+      asOfCutoff: TEST_STARTED_AT,
+    },
+    fetchedAt: '2025-04-01T00:00:01.000Z',
+    result: { state: 'available', rows: [{ Date: dateFrom }] },
+  });
+}
+
+function twoTickerCampaignPublication(swapSources: boolean) {
+  const firstSource = outcomeDailySource('7203', '2025-01-03');
+  const secondSource = outcomeDailySource('6758', '2025-01-04');
+  const firstBase = campaignCandidateCase(firstSource.digest, {
+    caseId: '55555555-5555-4555-8555-555555555555',
+    ticker: '7203',
+    anchorDate: '2025-01-02',
+  });
+  const secondBase = campaignCandidateCase(secondSource.digest, {
+    caseId: '66666666-6666-4666-8666-666666666666',
+    ticker: '6758',
+    anchorDate: '2025-01-03',
+  });
+  const firstDigest = swapSources ? secondSource.digest : firstSource.digest;
+  const secondDigest = swapSources ? firstSource.digest : secondSource.digest;
+  const first = StrategyValidationCaseV1Schema.parse({
+    ...firstBase,
+    sourceManifest: createPointInTimeSourceManifestV1({
+      startedAt: TEST_STARTED_AT,
+      outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+      sources: [{ role: 'outcome_daily_bars', digest: firstDigest }],
+    }),
+  });
+  const second = StrategyValidationCaseV1Schema.parse({
+    ...secondBase,
+    sourceManifest: createPointInTimeSourceManifestV1({
+      startedAt: TEST_STARTED_AT,
+      outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+      sources: [{ role: 'outcome_daily_bars', digest: secondDigest }],
+    }),
+  });
+  return Object.freeze({
+    run: validationRun([first, second]),
+    cases: Object.freeze([first, second]),
+    sources: Object.freeze([firstSource, secondSource]),
   });
 }
 
@@ -128,6 +188,29 @@ describe('Strategy-validation immutable run repository V1', () => {
       ]);
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('accepts exact case source roles and rejects a cross-ticker digest swap', async () => {
+    for (const swapSources of [false, true]) {
+      const { temporaryRoot, repository } = await temporaryRepository();
+      try {
+        const value = twoTickerCampaignPublication(swapSources);
+        if (swapSources) {
+          await expectRepositoryKind(repository.publish(value), 'identity_mismatch');
+        } else {
+          await expect(repository.publish(value)).resolves.toMatchObject({ state: 'created' });
+          const loaded = await repository.load(value.run.runId);
+          expect(new Set(loaded.cases.map(item => item.caseId))).toEqual(
+            new Set(value.cases.map(item => item.caseId)),
+          );
+          expect(new Set(loaded.sources.map(item => item.digest))).toEqual(
+            new Set(value.sources.map(item => item.digest)),
+          );
+        }
+      } finally {
+        await rm(temporaryRoot, { recursive: true, force: true });
+      }
     }
   });
 

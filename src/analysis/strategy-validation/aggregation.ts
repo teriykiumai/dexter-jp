@@ -1,16 +1,17 @@
 import { z } from 'zod';
 import { CanonicalTickerSchema } from '../snapshot/schema.js';
+import type { SnapshotDigest } from '../snapshot/canonical-json.js';
+import type { StrategyAmbiguityBoundV1 } from './outcome-validator.js';
 import {
-  STRATEGY_OUTCOME_UNAVAILABLE_REASONS_V1,
-  type StrategyAmbiguityBoundV1,
-} from './outcome-validator.js';
-import {
+  STRATEGY_VALIDATION_ANCHOR_UNAVAILABLE_REASONS_V1,
   STRATEGY_VALIDATION_AGGREGATION_VERSION,
+  assignCampaignCandidateIdentitiesV1,
+  assignSnapshotCandidateIdentitiesV1,
   StrategyValidationCaseV1Schema,
   type StrategyValidationCandidateCaseV1,
   type StrategyValidationCaseV1,
 } from './artifacts.js';
-import { isStrictGregorianDate } from './date.js';
+import { isStrictGregorianDate, type TseSessionDate } from './date.js';
 
 export const STRATEGY_VALIDATION_AGGREGATION_SCOPE_VERSION =
   'strategy_validation_aggregation_scope_v1' as const;
@@ -99,7 +100,7 @@ const CountRateSchema = z.object({
 }).strict();
 
 const AnchorUnavailableMetricSchema = z.object({
-  reason: z.enum(STRATEGY_OUTCOME_UNAVAILABLE_REASONS_V1),
+  reason: z.enum(STRATEGY_VALIDATION_ANCHOR_UNAVAILABLE_REASONS_V1),
   count: nonnegativeSafeInteger,
   rate: StrategyValidationRateV1Schema,
 }).strict();
@@ -113,7 +114,7 @@ export const StrategyValidationTrackMetricsV1Schema = z.object({
   eligibleAnchorEntryRate: StrategyValidationRateV1Schema,
   requestedAnchorEntryRate: StrategyValidationRateV1Schema,
   anchorUnavailableByReason: z.array(AnchorUnavailableMetricSchema)
-    .length(STRATEGY_OUTCOME_UNAVAILABLE_REASONS_V1.length),
+    .length(STRATEGY_VALIDATION_ANCHOR_UNAVAILABLE_REASONS_V1.length),
 }).strict();
 
 export const StrategyValidationCandidateStratumV1Schema = z.object({
@@ -334,6 +335,50 @@ function buildStratum(cases: readonly StrategyValidationCandidateCaseV1[]) {
   });
 }
 
+function validateCandidateIdentityCollection(
+  scope: StrategyValidationAggregationScopeV1,
+  candidates: readonly StrategyValidationCandidateCaseV1[],
+): void {
+  if (candidates.length === 0) return;
+  const expected = scope.kind === 'snapshot_ticker'
+    ? (() => {
+      const first = candidates[0]!;
+      if (first.mode !== 'snapshot' || first.selector.mode !== 'snapshot'
+        || first.strategyDataDate === null
+        || candidates.some(value => value.mode !== 'snapshot')) {
+        throw new TypeError('Snapshot aggregation contains an incompatible candidate case.');
+      }
+      return assignSnapshotCandidateIdentitiesV1({
+        snapshotDigest: first.selector.snapshotDigest as SnapshotDigest,
+        strategyDataDate: first.strategyDataDate as TseSessionDate,
+        candidates: candidates.map(value => value.candidate),
+      });
+    })()
+    : assignCampaignCandidateIdentitiesV1(candidates.map(value => {
+      if (value.mode !== 'campaign') {
+        throw new TypeError('Campaign aggregation contains an incompatible candidate case.');
+      }
+      return {
+        ticker: value.ticker,
+        anchorDate: value.anchorDate as TseSessionDate,
+        resistanceEvidenceTier: value.resistanceEvidenceTier,
+        resistanceEvidenceSnapshotDigests:
+          value.resistanceEvidenceSnapshotDigests as SnapshotDigest[],
+        candidate: value.candidate,
+      };
+    }));
+  const actual = [...candidates].sort((left, right) => (
+    left.candidateId < right.candidateId ? -1 : left.candidateId > right.candidateId ? 1 : 0
+  ));
+  if (expected.length !== actual.length
+    || expected.some((value, index) => (
+      value.candidateId !== actual[index]!.candidateId
+      || value.duplicateOrdinal !== actual[index]!.duplicateOrdinal
+    ))) {
+    throw new TypeError('Candidate duplicate ordinals are not the canonical zero-based sequence.');
+  }
+}
+
 export function aggregateStrategyValidationCasesV1(
   scopeValue: StrategyValidationAggregationScopeV1,
   requestedAnchors: readonly StrategyValidationRequestedAnchorV1[],
@@ -379,12 +424,13 @@ export function aggregateStrategyValidationCasesV1(
   const candidateCases = cases.filter((value): value is StrategyValidationCandidateCaseV1 => (
     value.caseKind === 'candidate'
   ));
+  validateCandidateIdentityCollection(scope, candidateCases);
   const candidateAnchors = new Set(candidateCases.map(anchorIdentity));
   const enteredAnchors = new Set(
     candidateCases.filter(value => value.outcome.entryProven).map(anchorIdentity),
   );
   const requestedCount = requestedAnchors.length;
-  const unavailableByReason = STRATEGY_OUTCOME_UNAVAILABLE_REASONS_V1.map(reason => {
+  const unavailableByReason = STRATEGY_VALIDATION_ANCHOR_UNAVAILABLE_REASONS_V1.map(reason => {
     const count = unavailableCases.filter(value => value.unavailableReason === reason).length;
     return Object.freeze({
       reason,

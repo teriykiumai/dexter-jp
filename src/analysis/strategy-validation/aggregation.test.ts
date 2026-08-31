@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   aggregateStrategyValidationCasesV1,
   buildStrategyValidationAggregationScopeV1,
+  type StrategyValidationCaseV1,
   StrategyValidationCaseV1Schema,
 } from './index.js';
 import {
@@ -29,7 +30,7 @@ describe('Strategy-validation V1 aggregation', () => {
     const cases = [
       anchorUnavailableCase(source.digest, { ...anchors[0]!, caseId: IDS[0] }),
       anchorUnavailableCase(source.digest, {
-        ...anchors[1]!, caseId: IDS[1], reason: 'strategy_data_date_invalid',
+        ...anchors[1]!, caseId: IDS[1], reason: 'resistance_evidence_invalid',
       }),
     ];
     const scope = buildStrategyValidationAggregationScopeV1('campaign', anchors);
@@ -50,7 +51,7 @@ describe('Strategy-validation V1 aggregation', () => {
     });
     expect(result.candidateStrata).toEqual([]);
     expect(result.track.anchorUnavailableByReason.find(
-      value => value.reason === 'strategy_data_date_invalid',
+      value => value.reason === 'resistance_evidence_invalid',
     )?.count).toBe(1);
   });
 
@@ -223,5 +224,72 @@ describe('Strategy-validation V1 aggregation', () => {
         ticker: '9984', anchorDate: '2025-01-06', caseId: IDS[2],
       }),
     ])).toThrow('outside');
+  });
+
+  test('rejects noncanonical duplicate ordinals before aggregation', () => {
+    const source = validationSource();
+    const anchor = { ticker: '7203', anchorDate: '2025-01-02' };
+    const scope = buildStrategyValidationAggregationScopeV1('campaign', [anchor]);
+    const uniqueOrdinalOne = campaignCandidateCase(source.digest, {
+      ...anchor, caseId: IDS[0], duplicateOrdinal: 1,
+    });
+    expect(() => aggregateStrategyValidationCasesV1(
+      scope, [anchor], [uniqueOrdinalOne],
+    )).toThrow('canonical zero-based sequence');
+
+    const ordinalOne = campaignCandidateCase(source.digest, {
+      ...anchor, caseId: IDS[0], duplicateOrdinal: 1,
+    });
+    const ordinalTwo = campaignCandidateCase(source.digest, {
+      ...anchor, caseId: IDS[1], duplicateOrdinal: 2,
+    });
+    expect(() => aggregateStrategyValidationCasesV1(
+      scope, [anchor], [ordinalOne, ordinalTwo],
+    )).toThrow('canonical zero-based sequence');
+
+    const ordinalZero = campaignCandidateCase(source.digest, {
+      ...anchor, caseId: IDS[0], duplicateOrdinal: 0,
+    });
+    const validOrdinalOne = campaignCandidateCase(source.digest, {
+      ...anchor, caseId: IDS[1], duplicateOrdinal: 1,
+    });
+    expect(() => aggregateStrategyValidationCasesV1(
+      scope, [anchor], [validOrdinalOne, ordinalZero],
+    )).not.toThrow();
+  });
+
+  test('rejects cross-stage unavailable reasons before they can alter coverage', () => {
+    const source = validationSource();
+    const anchor = { ticker: '7203', anchorDate: '2025-01-02' };
+    const scope = buildStrategyValidationAggregationScopeV1('campaign', [anchor]);
+    const candidate = campaignCandidateCase(source.digest, {
+      ...anchor, caseId: IDS[0], outcomeKind: 'not_triggered',
+    });
+    if (candidate.caseKind !== 'candidate') throw new TypeError('Expected candidate fixture.');
+    const invalidCandidateReason = {
+      ...candidate,
+      outcome: {
+        ...candidate.outcome,
+        kind: 'unavailable',
+        reason: 'resistance_evidence_invalid',
+        entryProven: false,
+        entryFill: null,
+        actualRisk: null,
+      },
+    } as unknown as StrategyValidationCaseV1;
+    expect(() => aggregateStrategyValidationCasesV1(
+      scope, [anchor], [invalidCandidateReason],
+    )).toThrow();
+
+    const unavailable = anchorUnavailableCase(source.digest, {
+      ...anchor, caseId: IDS[1],
+    });
+    const invalidAnchorReason = {
+      ...unavailable,
+      unavailableReason: 'corporate_action_in_outcome_window',
+    } as unknown as StrategyValidationCaseV1;
+    expect(() => aggregateStrategyValidationCasesV1(
+      scope, [anchor], [invalidAnchorReason],
+    )).toThrow();
   });
 });
