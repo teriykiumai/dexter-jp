@@ -325,6 +325,75 @@ export function strategyValidationOutcomeEvidenceDatesV1(
   return Object.freeze([...new Set(dates)].sort());
 }
 
+export function strategyValidationOutcomeTickDatesV1(
+  outcome: StrategyOutcomeResultV1,
+): readonly string[] {
+  const dates: string[] = [];
+  if (outcome.entryFill !== null) dates.push(outcome.entryFill.date);
+  if (outcome.kind === 'stop_hit' || outcome.kind === 'target_hit') {
+    dates.push(outcome.exitFill.date);
+  } else if (outcome.kind === 'ambiguous_intraday') {
+    for (const bound of [outcome.pessimistic, outcome.optimistic]) {
+      if (bound.kind === 'stop_hit' || bound.kind === 'target_hit') {
+        dates.push(bound.exitFill.date);
+      }
+    }
+  } else if (outcome.kind === 'unavailable') {
+    if (outcome.reason === 'limit_queue_ambiguous') {
+      dates.push(outcome.limitQueueEvidence.date);
+    } else if (outcome.evaluationEndDate !== null && [
+      'tick_rule_period_unsupported',
+      'tick_category_unavailable',
+      'non_executable_tick',
+      'invalid_candidate',
+    ].includes(outcome.reason)) {
+      dates.push(outcome.evaluationEndDate);
+    }
+  }
+  return Object.freeze([...new Set(dates)].sort());
+}
+
+export function strategyValidationOutcomeSessionFactsV1(
+  outcome: StrategyOutcomeResultV1,
+): readonly Readonly<{ date: string; evaluationSession: number }>[] {
+  const facts: Array<Readonly<{ date: string; evaluationSession: number }>> = [];
+  if (outcome.entryFill !== null) {
+    facts.push({
+      date: outcome.entryFill.date,
+      evaluationSession: outcome.entryFill.evaluationSession,
+    });
+  }
+  if (outcome.kind === 'stop_hit' || outcome.kind === 'target_hit') {
+    facts.push({
+      date: outcome.exitFill.date,
+      evaluationSession: outcome.exitFill.evaluationSession,
+    });
+  } else if (outcome.kind === 'ambiguous_intraday') {
+    for (const bound of [outcome.pessimistic, outcome.optimistic]) {
+      if (bound.kind === 'stop_hit' || bound.kind === 'target_hit') {
+        facts.push({
+          date: bound.exitFill.date,
+          evaluationSession: bound.exitFill.evaluationSession,
+        });
+      }
+    }
+  }
+  return Object.freeze(facts.map(value => Object.freeze(value)));
+}
+
+export function strategyValidationOutcomeHorizonDatesV1(
+  outcome: StrategyOutcomeResultV1,
+): readonly string[] {
+  const dates: string[] = [];
+  if (outcome.kind === 'horizon_expired') dates.push(outcome.mark.date);
+  if (outcome.kind === 'ambiguous_intraday') {
+    for (const bound of [outcome.pessimistic, outcome.optimistic]) {
+      if (bound.kind === 'horizon_expired') dates.push(bound.mark.date);
+    }
+  }
+  return Object.freeze([...new Set(dates)].sort());
+}
+
 const TickLevelSchema = z.object({
   tick: positiveFinite.nullable(),
   executable: z.boolean().nullable(),

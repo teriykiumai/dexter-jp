@@ -19,7 +19,9 @@ import {
 import {
   compareStrategyValidationCasesV1,
   digestStrategyValidationCaseV1,
-  strategyValidationOutcomeEvidenceDatesV1,
+  strategyValidationOutcomeHorizonDatesV1,
+  strategyValidationOutcomeSessionFactsV1,
+  strategyValidationOutcomeTickDatesV1,
   STRATEGY_VALIDATION_CASE_SCHEMA_VERSION,
   StrategyValidationCaseV1Schema,
   STRATEGY_VALIDATION_UUID_V4_PATTERN,
@@ -403,9 +405,12 @@ export class StrategyValidationRunRepositoryV1 {
         validateStrategyValidationSourceCompletenessV1(bindings, {
           mode: value.mode,
           caseKind: value.caseKind,
+          ticker: value.ticker,
           anchorDate: value.anchorDate,
           decisionDate: value.decisionDate,
           strategyDataDate: value.strategyDataDate,
+          entryWaitSessions: value.entryWaitSessions,
+          holdingSessions: value.holdingSessions,
           unavailableReason: value.caseKind === 'anchor_unavailable'
             ? value.unavailableReason
             : null,
@@ -419,7 +424,13 @@ export class StrategyValidationRunRepositoryV1 {
                 ? value.outcome.reason
                 : null,
               evaluationEndDate: value.outcome.evaluationEndDate,
-              evidenceDates: strategyValidationOutcomeEvidenceDatesV1(value.outcome),
+              tickValidationDates: strategyValidationOutcomeTickDatesV1(value.outcome),
+              sessionFacts: strategyValidationOutcomeSessionFactsV1(value.outcome),
+              horizonDates: strategyValidationOutcomeHorizonDatesV1(value.outcome),
+              terminalCompletionDate: value.outcome.kind === 'stop_hit'
+                || value.outcome.kind === 'target_hit'
+                ? value.outcome.exitFill.date
+                : null,
             }
             : null,
         });

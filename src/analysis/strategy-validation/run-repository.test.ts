@@ -35,6 +35,47 @@ import {
 const RUN_2 = '33333333-3333-4333-8333-333333333333';
 const CASE_2 = '44444444-4444-4444-8444-444444444444';
 
+function shiftDate(value: string, days: number): string {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function dateRange(dateFrom: string, dateTo: string): readonly string[] {
+  const dates: string[] = [];
+  for (let date = dateFrom; date <= dateTo; date = shiftDate(date, 1)) dates.push(date);
+  return Object.freeze(dates);
+}
+
+function calendarRows(dateFrom: string, dateTo: string) {
+  return dateRange(dateFrom, dateTo).map(Date => Object.freeze({ Date, HolDiv: '1' }));
+}
+
+function masterRow(date: string, ticker: string) {
+  return Object.freeze({
+    Date: date,
+    Code: `${ticker}0`,
+    ScaleCat: 'TOPIX Core30',
+    Mkt: '0111',
+    ProdCat: '011',
+  });
+}
+
+function dailyRows(dates: readonly string[], ticker: string) {
+  return dates.map(Date => Object.freeze({
+    Date,
+    Code: `${ticker}0`,
+    O: 100,
+    H: 120,
+    L: 90,
+    C: 110,
+    UL: '0',
+    LL: '0',
+    AdjFactor: 1,
+    ExRT: null,
+  }));
+}
+
 function nodeError(code: string): NodeJS.ErrnoException {
   return Object.assign(new Error(code), { code });
 }
@@ -98,21 +139,44 @@ function roleSource(input: Readonly<{
   anchorDate: string;
   evaluationDate: string;
   outcomeDailyDateFrom?: string;
+  omitDates?: readonly string[];
+  candidateDateFrom?: string;
+  unavailableReason?:
+    | 'source_plan_unavailable'
+    | 'source_history_unavailable'
+    | 'source_response_invalid'
+    | 'calendar_incomplete'
+    | 'price_history_incomplete';
 }>) {
   const candidateRole = input.role.startsWith('candidate_');
   const calendarRole = input.role.endsWith('_calendar');
   const masterRole = input.role.endsWith('_master');
-  const dateFrom = input.role === 'outcome_daily_bars'
-    ? (input.outcomeDailyDateFrom ?? input.evaluationDate)
-    : input.anchorDate;
+  const campaignStart = input.candidateDateFrom ?? shiftDate(input.anchorDate, -250);
+  const dateFrom = input.role === 'candidate_calendar' || input.role === 'candidate_daily_bars'
+    ? (input.mode === 'campaign' ? campaignStart : input.anchorDate)
+    : input.role === 'outcome_calendar'
+      ? input.anchorDate
+      : input.role === 'outcome_master'
+        ? input.evaluationDate
+        : input.role === 'outcome_daily_bars'
+          ? (input.outcomeDailyDateFrom ?? shiftDate(input.anchorDate, 1))
+          : input.anchorDate;
   const dateTo = input.role === 'outcome_calendar'
     ? TEST_OUTCOME_AS_OF
     : input.role === 'outcome_daily_bars'
       ? (input.outcomeDailyDateFrom === undefined ? input.evaluationDate : TEST_OUTCOME_AS_OF)
-      : input.anchorDate;
-  const rows = input.role === 'outcome_calendar'
-    ? [{ Date: input.anchorDate }, { Date: input.evaluationDate }]
-    : [{ Date: masterRole ? input.anchorDate : dateFrom }];
+      : input.role === 'outcome_master'
+        ? input.evaluationDate
+        : input.anchorDate;
+  const omitted = new Set(input.omitDates ?? []);
+  const rows = calendarRole
+    ? calendarRows(dateFrom, dateTo)
+    : masterRole
+      ? [masterRow(dateFrom, input.ticker)]
+      : dailyRows(
+        dateRange(dateFrom, dateTo).filter(date => !omitted.has(date)),
+        input.ticker,
+      );
   return createPointInTimeSourceEnvelopeV1({
     sourceMappingVersion: `test_${input.role}_v1`,
     endpoint: endpointForRole(input.role),
@@ -126,10 +190,9 @@ function roleSource(input: Readonly<{
         : TEST_STARTED_AT,
     },
     fetchedAt: '2025-04-01T00:00:01.000Z',
-    result: {
-      state: 'available',
-      rows,
-    },
+    result: input.unavailableReason === undefined
+      ? { state: 'available', rows }
+      : { state: 'unavailable', reason: input.unavailableReason, rows: [] },
   });
 }
 
@@ -139,18 +202,21 @@ function completeCandidateSources(
   anchorDate: string,
   evaluationDate: string,
   outcomeDailyDateFrom?: string,
+  omitOutcomeDailyDates: readonly string[] = [],
 ) {
   const roles: StrategyValidationSourceRoleV1[] = [
     'candidate_calendar',
     'candidate_master',
     ...(mode === 'campaign' ? ['candidate_daily_bars' as const] : []),
     'outcome_calendar',
+    'outcome_master',
     'outcome_daily_bars',
   ];
   const roleSources = roles.map(role => ({
     role,
     source: roleSource({
       role, mode, ticker, anchorDate, evaluationDate, outcomeDailyDateFrom,
+      omitDates: role === 'outcome_daily_bars' ? omitOutcomeDailyDates : [],
     }),
   }));
   return Object.freeze({
@@ -159,6 +225,27 @@ function completeCandidateSources(
       digest: value.source.digest,
     }))),
     sources: Object.freeze(roleSources.map(value => value.source).sort((left, right) => (
+      left.digest < right.digest ? -1 : left.digest > right.digest ? 1 : 0
+    ))),
+  });
+}
+
+function replaceRoleSource(
+  evidence: ReturnType<typeof completeCandidateSources>,
+  role: StrategyValidationSourceRoleV1,
+  source: ReturnType<typeof roleSource> | null,
+) {
+  const references = evidence.references.filter(value => value.role !== role);
+  const sources = evidence.sources.filter(value => (
+    !evidence.references.some(reference => reference.role === role && reference.digest === value.digest)
+  ));
+  if (source !== null) {
+    references.push({ role, digest: source.digest });
+    sources.push(source);
+  }
+  return Object.freeze({
+    references: Object.freeze(references),
+    sources: Object.freeze(sources.sort((left, right) => (
       left.digest < right.digest ? -1 : left.digest > right.digest ? 1 : 0
     ))),
   });
@@ -416,6 +503,430 @@ describe('Strategy-validation immutable run repository V1', () => {
       await expect(repository.loadCase(value.run.runId, invalid.caseId)).resolves.toEqual(invalid);
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects campaign reconstruction evidence missing one of the exact 251 sessions', async () => {
+    const { temporaryRoot, repository } = await temporaryRepository();
+    try {
+      const anchorDate = '2025-01-02';
+      const complete = completeCandidateSources('campaign', '7203', anchorDate, '2025-01-03');
+      const missingDaily = roleSource({
+        role: 'candidate_daily_bars',
+        mode: 'campaign',
+        ticker: '7203',
+        anchorDate,
+        evaluationDate: '2025-01-03',
+        omitDates: [shiftDate(anchorDate, -100)],
+      });
+      const evidence = replaceRoleSource(complete, 'candidate_daily_bars', missingDaily);
+      const base = campaignCandidateCase(evidence.sources[0]!.digest, {
+        caseId: '77777777-7777-4777-8777-777777777777',
+        ticker: '7203',
+        anchorDate,
+      });
+      const candidate = StrategyValidationCaseV1Schema.parse({
+        ...base,
+        sourceManifest: createPointInTimeSourceManifestV1({
+          startedAt: TEST_STARTED_AT,
+          outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+          sources: evidence.references,
+        }),
+      });
+      await expectRepositoryKind(repository.publish({
+        run: validationRun([candidate]), cases: [candidate], sources: evidence.sources,
+      }), 'artifact_incomplete');
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects a campaign calendar that proves only 250 reconstruction sessions', async () => {
+    const { temporaryRoot, repository } = await temporaryRepository();
+    try {
+      const anchorDate = '2025-01-02';
+      const complete = completeCandidateSources('campaign', '7203', anchorDate, '2025-01-03');
+      const shortCalendar = roleSource({
+        role: 'candidate_calendar',
+        mode: 'campaign',
+        ticker: '7203',
+        anchorDate,
+        evaluationDate: '2025-01-03',
+        candidateDateFrom: shiftDate(anchorDate, -249),
+      });
+      const evidence = replaceRoleSource(complete, 'candidate_calendar', shortCalendar);
+      const base = campaignCandidateCase(evidence.sources[0]!.digest, {
+        caseId: '99999999-9999-4999-8999-999999999999',
+        ticker: '7203',
+        anchorDate,
+      });
+      const candidate = StrategyValidationCaseV1Schema.parse({
+        ...base,
+        sourceManifest: createPointInTimeSourceManifestV1({
+          startedAt: TEST_STARTED_AT,
+          outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+          sources: evidence.references,
+        }),
+      });
+      await expectRepositoryKind(repository.publish({
+        run: validationRun([candidate]), cases: [candidate], sources: evidence.sources,
+      }), 'artifact_incomplete');
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects an outcome whose daily evidence skips an intermediate official session', async () => {
+    const { temporaryRoot, repository } = await temporaryRepository();
+    try {
+      const evaluationDate = '2025-01-05';
+      const evidence = completeCandidateSources(
+        'snapshot', '7203', '2025-01-02', evaluationDate, undefined, ['2025-01-04'],
+      );
+      const base = snapshotCandidateCase(evidence.sources[0]!.digest);
+      if (base.caseKind !== 'candidate' || base.outcome.kind !== 'target_hit') {
+        throw new TypeError('Expected terminal Snapshot fixture.');
+      }
+      const entryFill = {
+        ...base.outcome.entryFill,
+        date: evaluationDate,
+        evaluationSession: 3,
+      };
+      const candidate = StrategyValidationCaseV1Schema.parse({
+        ...base,
+        outcome: {
+          ...base.outcome,
+          evaluationEndDate: evaluationDate,
+          entryFill,
+          exitFill: {
+            ...base.outcome.exitFill,
+            date: evaluationDate,
+            evaluationSession: 3,
+          },
+        },
+        sourceManifest: createPointInTimeSourceManifestV1({
+          startedAt: TEST_STARTED_AT,
+          outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+          sources: evidence.references,
+        }),
+      });
+      await expectRepositoryKind(repository.publish({
+        run: validationRun([candidate]), cases: [candidate], sources: evidence.sources,
+      }), 'artifact_incomplete');
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('requires not_triggered evidence through the exact t20 session', async () => {
+    const { temporaryRoot, repository } = await temporaryRepository();
+    try {
+      const candidateFor = (evaluationDate: string) => {
+        const complete = completeCandidateSources(
+          'snapshot', '7203', '2025-01-02', evaluationDate,
+        );
+        const evidence = replaceRoleSource(complete, 'outcome_master', null);
+        const base = snapshotCandidateCase(evidence.sources[0]!.digest);
+        if (base.caseKind !== 'candidate') throw new TypeError('Expected candidate fixture.');
+        const candidate = StrategyValidationCaseV1Schema.parse({
+          ...base,
+          outcome: {
+            algorithmVersion: base.outcome.algorithmVersion,
+            limitQueueVersion: base.outcome.limitQueueVersion,
+            plannedRisk: 10,
+            evaluationEndDate: evaluationDate,
+            kind: 'not_triggered',
+            entryProven: false,
+            entryFill: null,
+            actualRisk: null,
+          },
+          sourceManifest: createPointInTimeSourceManifestV1({
+            startedAt: TEST_STARTED_AT,
+            outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+            sources: evidence.references,
+          }),
+        });
+        return { candidate, evidence };
+      };
+      const premature = candidateFor('2025-01-03');
+      await expectRepositoryKind(repository.publish({
+        run: validationRun([premature.candidate]),
+        cases: [premature.candidate],
+        sources: premature.evidence.sources,
+      }), 'artifact_incomplete');
+
+      const t20 = candidateFor('2025-01-22');
+      await expect(repository.publish({
+        run: validationRun([t20.candidate]),
+        cases: [t20.candidate],
+        sources: t20.evidence.sources,
+      })).resolves.toMatchObject({ state: 'created' });
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('requires horizon evidence through holding day 60', async () => {
+    const { temporaryRoot, repository } = await temporaryRepository();
+    try {
+      const candidateFor = (evaluationDate: string) => {
+        const complete = completeCandidateSources(
+          'snapshot', '7203', '2025-01-02', evaluationDate,
+        );
+        const entryMaster = roleSource({
+          role: 'outcome_master',
+          mode: 'snapshot',
+          ticker: '7203',
+          anchorDate: '2025-01-02',
+          evaluationDate: '2025-01-03',
+        });
+        const evidence = replaceRoleSource(complete, 'outcome_master', entryMaster);
+        const base = snapshotCandidateCase(evidence.sources[0]!.digest);
+        if (base.caseKind !== 'candidate') throw new TypeError('Expected candidate fixture.');
+        const candidate = StrategyValidationCaseV1Schema.parse({
+          ...base,
+          outcome: {
+            algorithmVersion: base.outcome.algorithmVersion,
+            limitQueueVersion: base.outcome.limitQueueVersion,
+            plannedRisk: 10,
+            evaluationEndDate: evaluationDate,
+            kind: 'horizon_expired',
+            entryProven: true,
+            entryFill: {
+              date: '2025-01-03',
+              evaluationSession: 1,
+              holdingDay: 1,
+              order: 'entry',
+              method: 'entry_level',
+              price: 100,
+            },
+            actualRisk: 10,
+            mark: { state: 'available', date: evaluationDate, price: 110, markR: 1 },
+          },
+          sourceManifest: createPointInTimeSourceManifestV1({
+            startedAt: TEST_STARTED_AT,
+            outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+            sources: evidence.references,
+          }),
+        });
+        return { candidate, evidence };
+      };
+      const premature = candidateFor('2025-01-03');
+      await expectRepositoryKind(repository.publish({
+        run: validationRun([premature.candidate]),
+        cases: [premature.candidate],
+        sources: premature.evidence.sources,
+      }), 'artifact_incomplete');
+
+      const day60 = candidateFor('2025-03-03');
+      await expect(repository.publish({
+        run: validationRun([day60.candidate]),
+        cases: [day60.candidate],
+        sources: day60.evidence.sources,
+      })).resolves.toMatchObject({ state: 'created' });
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects a terminal fill without dated outcome master evidence', async () => {
+    const { temporaryRoot, repository } = await temporaryRepository();
+    try {
+      const complete = completeCandidateSources('snapshot', '7203', '2025-01-02', '2025-01-03');
+      const evidence = replaceRoleSource(complete, 'outcome_master', null);
+      const base = snapshotCandidateCase(evidence.sources[0]!.digest);
+      const candidate = StrategyValidationCaseV1Schema.parse({
+        ...base,
+        sourceManifest: createPointInTimeSourceManifestV1({
+          startedAt: TEST_STARTED_AT,
+          outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+          sources: evidence.references,
+        }),
+      });
+      await expectRepositoryKind(repository.publish({
+        run: validationRun([candidate]), cases: [candidate], sources: evidence.sources,
+      }), 'artifact_incomplete');
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects date-only rows that cannot reproduce normalized daily inputs', async () => {
+    const { temporaryRoot, repository } = await temporaryRepository();
+    try {
+      const complete = completeCandidateSources('snapshot', '7203', '2025-01-02', '2025-01-03');
+      const dateOnly = createPointInTimeSourceEnvelopeV1({
+        sourceMappingVersion: 'test_outcome_daily_bars_v1',
+        endpoint: '/v2/equities/bars/daily',
+        query: [{ name: 'from', value: '2025-01-03' }, { name: 'to', value: '2025-01-03' }],
+        request: {
+          ticker: '7203',
+          dateFrom: '2025-01-03',
+          dateTo: '2025-01-03',
+          asOfCutoff: TEST_STARTED_AT,
+        },
+        fetchedAt: '2025-04-01T00:00:01.000Z',
+        result: { state: 'available', rows: [{ Date: '2025-01-03' }] },
+      });
+      const evidence = replaceRoleSource(complete, 'outcome_daily_bars', dateOnly);
+      const base = snapshotCandidateCase(evidence.sources[0]!.digest);
+      const candidate = StrategyValidationCaseV1Schema.parse({
+        ...base,
+        sourceManifest: createPointInTimeSourceManifestV1({
+          startedAt: TEST_STARTED_AT,
+          outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+          sources: evidence.references,
+        }),
+      });
+      await expectRepositoryKind(repository.publish({
+        run: validationRun([candidate]), cases: [candidate], sources: evidence.sources,
+      }), 'artifact_incomplete');
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('publishes price_history_incomplete only when the named official session is absent', async () => {
+    const { temporaryRoot, repository } = await temporaryRepository();
+    try {
+      const missingDate = '2025-01-04';
+      const candidateFor = (evidence: ReturnType<typeof completeCandidateSources>) => {
+        const base = snapshotCandidateCase(evidence.sources[0]!.digest);
+        if (base.caseKind !== 'candidate') throw new TypeError('Expected candidate fixture.');
+        return StrategyValidationCaseV1Schema.parse({
+          ...base,
+          outcome: {
+            algorithmVersion: base.outcome.algorithmVersion,
+            limitQueueVersion: base.outcome.limitQueueVersion,
+            plannedRisk: 10,
+            evaluationEndDate: missingDate,
+            kind: 'unavailable',
+            reason: 'price_history_incomplete',
+            entryProven: false,
+            entryFill: null,
+            actualRisk: null,
+          },
+          sourceManifest: createPointInTimeSourceManifestV1({
+            startedAt: TEST_STARTED_AT,
+            outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+            sources: evidence.references,
+          }),
+        });
+      };
+      const contradictory = replaceRoleSource(
+        completeCandidateSources('snapshot', '7203', '2025-01-02', missingDate),
+        'outcome_master',
+        null,
+      );
+      const contradictoryCandidate = candidateFor(contradictory);
+      await expectRepositoryKind(repository.publish({
+        run: validationRun([contradictoryCandidate]),
+        cases: [contradictoryCandidate],
+        sources: contradictory.sources,
+      }), 'artifact_incomplete');
+
+      const evidence = replaceRoleSource(completeCandidateSources(
+        'snapshot', '7203', '2025-01-02', missingDate, undefined, [missingDate],
+      ), 'outcome_master', null);
+      const candidate = candidateFor(evidence);
+      const value = {
+        run: validationRun([candidate]), cases: [candidate], sources: evidence.sources,
+      };
+      await expect(repository.publish(value)).resolves.toMatchObject({ state: 'created' });
+      await expect(repository.loadCase(value.run.runId, candidate.caseId)).resolves.toEqual(candidate);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('binds outcome source failures to matching unavailable envelopes', async () => {
+    for (const matching of [false, true]) {
+      const { temporaryRoot, repository } = await temporaryRepository();
+      try {
+        const complete = completeCandidateSources('snapshot', '7203', '2025-01-02', '2025-01-03');
+        const outcomeCalendar = roleSource({
+          role: 'outcome_calendar',
+          mode: 'snapshot',
+          ticker: '7203',
+          anchorDate: '2025-01-02',
+          evaluationDate: '2025-01-03',
+          unavailableReason: matching ? 'source_history_unavailable' : undefined,
+        });
+        let evidence = replaceRoleSource(complete, 'outcome_calendar', outcomeCalendar);
+        evidence = replaceRoleSource(evidence, 'outcome_master', null);
+        evidence = replaceRoleSource(evidence, 'outcome_daily_bars', null);
+        const base = snapshotCandidateCase(evidence.sources[0]!.digest);
+        if (base.caseKind !== 'candidate') throw new TypeError('Expected candidate fixture.');
+        const candidate = StrategyValidationCaseV1Schema.parse({
+          ...base,
+          outcome: {
+            algorithmVersion: base.outcome.algorithmVersion,
+            limitQueueVersion: base.outcome.limitQueueVersion,
+            plannedRisk: 10,
+            evaluationEndDate: null,
+            kind: 'unavailable',
+            reason: 'source_history_unavailable',
+            entryProven: false,
+            entryFill: null,
+            actualRisk: null,
+          },
+          sourceManifest: createPointInTimeSourceManifestV1({
+            startedAt: TEST_STARTED_AT,
+            outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+            sources: evidence.references,
+          }),
+        });
+        const value = {
+          run: validationRun([candidate]), cases: [candidate], sources: evidence.sources,
+        };
+        if (matching) {
+          await expect(repository.publish(value)).resolves.toMatchObject({ state: 'created' });
+        } else {
+          await expectRepositoryKind(repository.publish(value), 'artifact_incomplete');
+        }
+      } finally {
+        await rm(temporaryRoot, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('binds source-derived unavailable reasons to matching unavailable envelopes', async () => {
+    for (const matching of [false, true]) {
+      const { temporaryRoot, repository } = await temporaryRepository();
+      try {
+        const source = roleSource({
+          role: 'candidate_calendar',
+          mode: 'campaign',
+          ticker: '7203',
+          anchorDate: '2025-01-02',
+          evaluationDate: '2025-01-03',
+          unavailableReason: matching ? 'source_history_unavailable' : undefined,
+        });
+        const base = anchorUnavailableCase(source.digest, {
+          caseId: '88888888-8888-4888-8888-888888888888',
+          ticker: '7203',
+          anchorDate: '2025-01-02',
+          reason: 'source_history_unavailable',
+        });
+        const unavailable = StrategyValidationCaseV1Schema.parse({
+          ...base,
+          sourceManifest: createPointInTimeSourceManifestV1({
+            startedAt: TEST_STARTED_AT,
+            outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+            sources: [{ role: 'candidate_calendar', digest: source.digest }],
+          }),
+        });
+        const value = {
+          run: validationRun([unavailable]), cases: [unavailable], sources: [source],
+        };
+        if (matching) {
+          await expect(repository.publish(value)).resolves.toMatchObject({ state: 'created' });
+        } else {
+          await expectRepositoryKind(repository.publish(value), 'artifact_incomplete');
+        }
+      } finally {
+        await rm(temporaryRoot, { recursive: true, force: true });
+      }
     }
   });
 
