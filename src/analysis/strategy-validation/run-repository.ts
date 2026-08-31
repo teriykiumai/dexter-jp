@@ -19,6 +19,7 @@ import {
 import {
   compareStrategyValidationCasesV1,
   digestStrategyValidationCaseV1,
+  strategyValidationOutcomeEvidenceDatesV1,
   STRATEGY_VALIDATION_CASE_SCHEMA_VERSION,
   StrategyValidationCaseV1Schema,
   STRATEGY_VALIDATION_UUID_V4_PATTERN,
@@ -37,6 +38,8 @@ import {
 import {
   sourceManifestDigestsV1,
   validateStrategyValidationSourceBindingV1,
+  validateStrategyValidationSourceCompletenessV1,
+  type BoundStrategyValidationSourceV1,
 } from './source-manifest.js';
 import { parseStrictJsonBytesV1 } from './strict-json.js';
 
@@ -370,6 +373,7 @@ export class StrategyValidationRunRepositoryV1 {
       }
     }
     for (const value of sortedCases) {
+      const bindings: BoundStrategyValidationSourceV1[] = [];
       for (const reference of value.sourceManifest.sources) {
         const source = sourceByDigest.get(reference.digest);
         if (source === undefined) {
@@ -393,6 +397,36 @@ export class StrategyValidationRunRepositoryV1 {
             'identity_mismatch', 'A case source manifest does not match its envelope.', error,
           );
         }
+        bindings.push({ reference, envelope: source });
+      }
+      try {
+        validateStrategyValidationSourceCompletenessV1(bindings, {
+          mode: value.mode,
+          caseKind: value.caseKind,
+          anchorDate: value.anchorDate,
+          decisionDate: value.decisionDate,
+          strategyDataDate: value.strategyDataDate,
+          unavailableReason: value.caseKind === 'anchor_unavailable'
+            ? value.unavailableReason
+            : null,
+          tickEvidenceUnavailableReason: value.caseKind === 'candidate'
+            ? value.tickEvidence.unavailableReason
+            : null,
+          outcome: value.caseKind === 'candidate'
+            ? {
+              kind: value.outcome.kind,
+              unavailableReason: value.outcome.kind === 'unavailable'
+                ? value.outcome.reason
+                : null,
+              evaluationEndDate: value.outcome.evaluationEndDate,
+              evidenceDates: strategyValidationOutcomeEvidenceDatesV1(value.outcome),
+            }
+            : null,
+        });
+      } catch (error) {
+        throw new StrategyValidationRunRepositoryErrorV1(
+          'artifact_incomplete', 'A case source manifest is incomplete for its result.', error,
+        );
       }
     }
     const requestedAnchors: StrategyValidationRequestedAnchorV1[] = [];

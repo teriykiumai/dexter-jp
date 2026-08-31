@@ -102,8 +102,37 @@ export type StrategyValidationSourceBindingContextV1 = Readonly<{
   outcomeAsOfSession: string;
 }>;
 
+export type StrategyValidationSourceCompletenessContextV1 = Readonly<{
+  mode: 'snapshot' | 'campaign';
+  caseKind: 'anchor_unavailable' | 'candidate';
+  anchorDate: string;
+  decisionDate: string;
+  strategyDataDate: string | null;
+  unavailableReason: string | null;
+  tickEvidenceUnavailableReason:
+    | 'tick_rule_period_unsupported'
+    | 'tick_category_unavailable'
+    | 'invalid_candidate'
+    | null;
+  outcome: Readonly<{
+    kind: string;
+    unavailableReason: string | null;
+    evaluationEndDate: string | null;
+    evidenceDates: readonly string[];
+  }> | null;
+}>;
+
+export type BoundStrategyValidationSourceV1 = Readonly<{
+  reference: PointInTimeSourceManifestReferenceV1;
+  envelope: PointInTimeSourceEnvelopeV1;
+}>;
+
 function failBinding(): never {
   throw new TypeError('A source-manifest role does not match its envelope or case.');
+}
+
+function failCompleteness(): never {
+  throw new TypeError('A source manifest is incomplete for its case stage or result.');
 }
 
 function expectedEndpoint(role: StrategyValidationSourceRoleV1) {
@@ -168,6 +197,119 @@ export function validateStrategyValidationSourceBindingV1(
     case 'outcome_daily_bars':
       if (envelope.request.dateFrom <= context.decisionDate
         || envelope.request.dateTo > context.outcomeAsOfSession) failBinding();
+  }
+}
+
+export function validateStrategyValidationSourceCompletenessV1(
+  bindings: readonly BoundStrategyValidationSourceV1[],
+  context: StrategyValidationSourceCompletenessContextV1,
+): void {
+  const forRole = (role: StrategyValidationSourceRoleV1) => bindings.filter(
+    value => value.reference.role === role,
+  );
+  const availableForRole = (role: StrategyValidationSourceRoleV1) => forRole(role).filter(
+    value => value.envelope.result.state === 'available',
+  );
+  const requirePresent = (role: StrategyValidationSourceRoleV1): void => {
+    if (forRole(role).length === 0) failCompleteness();
+  };
+  const requireAvailable = (role: StrategyValidationSourceRoleV1): void => {
+    if (availableForRole(role).length === 0) failCompleteness();
+  };
+  const requireAvailableDates = (
+    role: StrategyValidationSourceRoleV1,
+    dates: readonly string[],
+  ): void => {
+    const available = availableForRole(role);
+    if (available.length === 0 || dates.some(date => !available.some(value => (
+      covers(value.envelope, date)
+      && value.envelope.result.state === 'available'
+      && value.envelope.result.rows.some(row => row.Date === date)
+    )))) {
+      failCompleteness();
+    }
+  };
+  const requireAnyPresent = (roles: readonly StrategyValidationSourceRoleV1[]): void => {
+    if (!roles.some(role => forRole(role).length > 0)) failCompleteness();
+  };
+
+  if (context.caseKind === 'anchor_unavailable') {
+    switch (context.unavailableReason) {
+      case 'source_plan_unavailable':
+      case 'source_history_unavailable':
+      case 'source_response_invalid':
+        requireAnyPresent(['candidate_calendar', 'candidate_master', 'candidate_daily_bars']);
+        return;
+      case 'calendar_incomplete':
+        requirePresent('candidate_calendar');
+        return;
+      case 'price_history_incomplete':
+        requireAvailable('candidate_calendar');
+        requirePresent('candidate_daily_bars');
+        return;
+      case 'tick_category_unavailable':
+        requirePresent('candidate_master');
+        return;
+      case 'non_executable_tick':
+        requireAvailable('candidate_master');
+        if (context.mode === 'campaign') {
+          requireAvailable('candidate_calendar');
+          requireAvailable('candidate_daily_bars');
+        }
+        return;
+      case 'tick_rule_period_unsupported':
+      case 'invalid_candidate':
+        if (context.mode === 'campaign') {
+          requireAvailable('candidate_calendar');
+          requireAvailable('candidate_daily_bars');
+        }
+        return;
+      default:
+        return;
+    }
+  }
+
+  if (context.outcome === null) failCompleteness();
+  if (context.mode === 'campaign') {
+    requireAvailableDates('candidate_calendar', [context.anchorDate]);
+    requireAvailableDates('candidate_master', [context.decisionDate]);
+    requireAvailableDates('candidate_daily_bars', [context.anchorDate]);
+  } else {
+    requireAvailableDates('candidate_calendar', [
+      context.strategyDataDate ?? context.anchorDate,
+      context.decisionDate,
+    ]);
+    if (context.tickEvidenceUnavailableReason === null
+      || context.tickEvidenceUnavailableReason === 'tick_category_unavailable') {
+      requireAvailableDates('candidate_master', [context.decisionDate]);
+    }
+  }
+
+  const outcomeDates = [...new Set([
+    ...context.outcome.evidenceDates,
+    ...(context.outcome.evaluationEndDate === null
+      ? []
+      : [context.outcome.evaluationEndDate]),
+  ])];
+  if (outcomeDates.length > 0) {
+    requireAvailableDates('outcome_calendar', [context.decisionDate, ...outcomeDates]);
+    requireAvailableDates('outcome_daily_bars', outcomeDates);
+    return;
+  }
+
+  if (context.outcome.kind !== 'unavailable') failCompleteness();
+  switch (context.outcome.unavailableReason) {
+    case 'source_plan_unavailable':
+    case 'source_history_unavailable':
+    case 'source_response_invalid':
+      requireAnyPresent(['outcome_calendar', 'outcome_master', 'outcome_daily_bars']);
+      return;
+    case 'calendar_incomplete':
+      requirePresent('outcome_calendar');
+      return;
+    case 'price_history_incomplete':
+      requireAvailable('outcome_calendar');
+      requirePresent('outcome_daily_bars');
   }
 }
 

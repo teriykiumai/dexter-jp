@@ -224,6 +224,7 @@ export const STRATEGY_VALIDATION_CANDIDATE_UNAVAILABLE_REASONS_V1 = Object.freez
     'tick_category_unavailable',
     'non_executable_tick',
     'entry_gap_beyond_target',
+    'invalid_candidate',
     'limit_queue_ambiguous',
   ] as const,
 );
@@ -296,6 +297,33 @@ export const StrategyOutcomeResultArtifactV1Schema = z.union([
   OutcomeAmbiguousSchema,
   OutcomeUnavailableSchema,
 ]) as z.ZodType<StrategyOutcomeResultV1>;
+
+export function strategyValidationOutcomeEvidenceDatesV1(
+  outcome: StrategyOutcomeResultV1,
+): readonly string[] {
+  const dates: string[] = outcome.evaluationEndDate === null
+    ? []
+    : [outcome.evaluationEndDate];
+  if (outcome.entryFill !== null) dates.push(outcome.entryFill.date);
+  if (outcome.kind === 'stop_hit' || outcome.kind === 'target_hit') {
+    dates.push(outcome.exitFill.date);
+  } else if (outcome.kind === 'horizon_expired') {
+    dates.push(outcome.mark.date);
+  } else if (outcome.kind === 'ambiguous_intraday') {
+    dates.push(outcome.ambiguityDate);
+    for (const bound of [outcome.pessimistic, outcome.optimistic]) {
+      if (bound.kind === 'stop_hit' || bound.kind === 'target_hit') {
+        dates.push(bound.exitFill.date);
+      } else if (bound.kind === 'horizon_expired') {
+        dates.push(bound.mark.date);
+      }
+    }
+  } else if (outcome.kind === 'unavailable'
+    && outcome.reason === 'limit_queue_ambiguous') {
+    dates.push(outcome.limitQueueEvidence.date);
+  }
+  return Object.freeze([...new Set(dates)].sort());
+}
 
 const TickLevelSchema = z.object({
   tick: positiveFinite.nullable(),
@@ -444,28 +472,7 @@ export const StrategyValidationCaseV1Schema = z.discriminatedUnion('caseKind', [
   if (value.tickEvidence.effectiveDate !== value.decisionDate) {
     context.addIssue({ code: 'custom', message: 'Tick evidence date differs from decisionDate.' });
   }
-  const outcomeDates: string[] = [];
-  if (value.outcome.evaluationEndDate !== null) {
-    outcomeDates.push(value.outcome.evaluationEndDate);
-  }
-  if (value.outcome.entryFill !== null) outcomeDates.push(value.outcome.entryFill.date);
-  if (value.outcome.kind === 'stop_hit' || value.outcome.kind === 'target_hit') {
-    outcomeDates.push(value.outcome.exitFill.date);
-  } else if (value.outcome.kind === 'horizon_expired') {
-    outcomeDates.push(value.outcome.mark.date);
-  } else if (value.outcome.kind === 'ambiguous_intraday') {
-    outcomeDates.push(value.outcome.ambiguityDate);
-    for (const bound of [value.outcome.pessimistic, value.outcome.optimistic]) {
-      if (bound.kind === 'stop_hit' || bound.kind === 'target_hit') {
-        outcomeDates.push(bound.exitFill.date);
-      } else if (bound.kind === 'horizon_expired') {
-        outcomeDates.push(bound.mark.date);
-      }
-    }
-  } else if (value.outcome.kind === 'unavailable'
-    && value.outcome.reason === 'limit_queue_ambiguous') {
-    outcomeDates.push(value.outcome.limitQueueEvidence.date);
-  }
+  const outcomeDates = strategyValidationOutcomeEvidenceDatesV1(value.outcome);
   if (outcomeDates.some(date => date <= value.decisionDate || date > value.outcomeAsOfSession)) {
     context.addIssue({ code: 'custom', message: 'Outcome evidence date is outside its frozen window.' });
   }
