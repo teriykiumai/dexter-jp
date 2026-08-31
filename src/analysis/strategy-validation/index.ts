@@ -3,5 +3,8 @@ export * from './calendar.js';
 export * from './daily-bar.js';
 export * from './date.js';
 export * from './errors.js';
+export * from './jquants-execution.js';
+export * from './jquants-feasibility-smoke.js';
+export * from './jquants-validation-adapter.js';
 export * from './source-envelope.js';
 export * from './tick.js';
