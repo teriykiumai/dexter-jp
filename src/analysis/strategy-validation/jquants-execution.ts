@@ -307,6 +307,11 @@ type RetryableHttpFailure = Readonly<{
   retryAfterMs: number | null;
 }>;
 
+type CompletedHttpAttempt = Readonly<{
+  response: Response;
+  body: unknown;
+}>;
+
 function isRetryableHttpFailure(value: unknown): value is RetryableHttpFailure {
   return isJsonObject(value)
     && typeof value.status === 'number'
@@ -483,8 +488,7 @@ export class JQuantsExecutionRuntimeV1 {
     for (let attempt = 0; attempt < JQUANTS_MAX_ATTEMPTS_PER_REQUEST_V1; attempt += 1) {
       this.assertCanContinue(signal);
       try {
-        const response = await this.#attempt(endpoint, query, signal);
-        const body = await responseBody(response);
+        const { response, body } = await this.#attempt(endpoint, query, signal);
         if (!response.ok) {
           if (planRestriction(response.status, body)) {
             throw new JQuantsValidationErrorV1(
@@ -548,7 +552,11 @@ export class JQuantsExecutionRuntimeV1 {
     throw new JQuantsValidationErrorV1('network_error', 'The bounded J-Quants request failed.');
   }
 
-  async #attempt(endpoint: string, query: JQuantsQueryV1, signal?: AbortSignal): Promise<Response> {
+  async #attempt(
+    endpoint: string,
+    query: JQuantsQueryV1,
+    signal?: AbortSignal,
+  ): Promise<CompletedHttpAttempt> {
     await this.#reserveAttempt(signal);
     this.assertCanContinue(signal);
     const remainingMs = this.#remainingMs();
@@ -574,15 +582,21 @@ export class JQuantsExecutionRuntimeV1 {
         method: 'GET',
         headers: { 'x-api-key': this.#apiKey },
         signal: controller.signal,
-      }).catch(() => {
+      }).then(async response => Object.freeze({
+        response,
+        body: await responseBody(response),
+      })).catch(error => {
         if (signal?.aborted) throw cancelled();
         if (timedOut) throw timeout();
+        if (error instanceof JQuantsValidationErrorV1) throw error;
         throw new JQuantsValidationErrorV1(
           'network_error',
-          'Could not connect to the allowlisted J-Quants endpoint.',
+          'Could not complete the allowlisted J-Quants request.',
         );
       });
-      return await Promise.race([fetchPromise, timeoutPromise]);
+      const completed = await Promise.race([fetchPromise, timeoutPromise]);
+      this.assertCanContinue(signal);
+      return completed;
     } finally {
       timeoutController.abort();
       signal?.removeEventListener('abort', onCancel);

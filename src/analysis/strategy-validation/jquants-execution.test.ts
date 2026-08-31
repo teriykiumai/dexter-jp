@@ -94,6 +94,96 @@ function jsonResponse(body: unknown, status = 200, headers?: HeadersInit): Respo
   });
 }
 
+function deferredBodyHarness(elapsedBeforeRequestMs = 0): Readonly<{
+  runtime: JQuantsExecutionRuntimeV1;
+  bodyStarted: Promise<void>;
+  timeoutScheduled: Promise<void>;
+  timeoutDurationMs: () => number | null;
+  completeBody: () => void;
+  fireTimeout: () => void;
+  advance: (durationMs: number) => void;
+  bodyWasAborted: () => boolean;
+}> {
+  let wallMs = WALL_START;
+  let monotonicMs = 10_000;
+  let timeoutDurationMs: number | null = null;
+  let completeBody = (): void => {};
+  let fireTimeout = (): void => {};
+  let bodyWasAborted = false;
+  let markBodyStarted = (): void => {};
+  let markTimeoutScheduled = (): void => {};
+  const bodyStarted = new Promise<void>(resolve => { markBodyStarted = resolve; });
+  const timeoutScheduled = new Promise<void>(resolve => { markTimeoutScheduled = resolve; });
+  const executionEnvironment: JQuantsExecutionEnvironmentV1 = Object.freeze({
+    fetch: async (_input, init) => {
+      const requestSignal = init?.signal;
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        text: () => new Promise<string>((resolve, reject) => {
+          let settled = false;
+          const onAbort = (): void => {
+            if (settled) return;
+            settled = true;
+            bodyWasAborted = true;
+            reject(new Error('body aborted'));
+          };
+          requestSignal?.addEventListener('abort', onAbort, { once: true });
+          completeBody = (): void => {
+            if (settled) return;
+            settled = true;
+            requestSignal?.removeEventListener('abort', onAbort);
+            resolve(JSON.stringify({ data: [] }));
+          };
+          markBodyStarted();
+        }),
+      } as unknown as Response;
+    },
+    wallNowMs: () => wallMs,
+    monotonicNowMs: () => monotonicMs,
+    sleep: (durationMs, signal) => new Promise<void>((resolve, reject) => {
+      let settled = false;
+      timeoutDurationMs = durationMs;
+      const onAbort = (): void => {
+        if (settled) return;
+        settled = true;
+        reject(signal?.reason);
+      };
+      signal?.addEventListener('abort', onAbort, { once: true });
+      fireTimeout = (): void => {
+        if (settled) return;
+        settled = true;
+        signal?.removeEventListener('abort', onAbort);
+        wallMs += durationMs;
+        monotonicMs += durationMs;
+        resolve();
+      };
+      markTimeoutScheduled();
+    }),
+    apiKey: () => 'test-key',
+  });
+  const accepted = acceptJQuantsExecutionV1(
+    planJQuantsExecutionV1(1, 5),
+    executionEnvironment,
+  );
+  wallMs += elapsedBeforeRequestMs;
+  monotonicMs += elapsedBeforeRequestMs;
+  return Object.freeze({
+    runtime: new JQuantsExecutionRuntimeV1(accepted, { environment: executionEnvironment }),
+    bodyStarted,
+    timeoutScheduled,
+    timeoutDurationMs: () => timeoutDurationMs,
+    completeBody: () => completeBody(),
+    fireTimeout: () => fireTimeout(),
+    advance: durationMs => {
+      wallMs += durationMs;
+      monotonicMs += durationMs;
+    },
+    bodyWasAborted: () => bodyWasAborted,
+  });
+}
+
 describe('J-Quants execution planning', () => {
   test('resolves the configured rate strictly and defaults to five', () => {
     expect(resolveJQuantsRequestsPerMinuteV1(undefined)).toBe(5);
@@ -392,6 +482,73 @@ describe('J-Quants request runtime', () => {
       code: '67580', date: '2026-08-28',
     })).rejects.toMatchObject({ code: 'attempt_limit_exceeded' });
     expect(actual.attempts).toHaveLength(250);
+  });
+
+  test('keeps the per-attempt timeout active while the response body is pending', async () => {
+    const harness = deferredBodyHarness();
+    const outcome = harness.runtime.getAll('/v2/equities/master', {
+      code: '72030', date: '2026-08-28',
+    }).catch(error => error as unknown);
+    await Promise.all([harness.bodyStarted, harness.timeoutScheduled]);
+    expect(harness.timeoutDurationMs()).toBe(JQUANTS_REQUEST_TIMEOUT_MS_V1);
+    harness.fireTimeout();
+
+    await expect(outcome).resolves.toMatchObject({ code: 'execution_timeout' });
+    expect(harness.bodyWasAborted()).toBe(true);
+    expect(harness.runtime.attempts).toHaveLength(1);
+  });
+
+  test('cancels a request after headers while its response body is pending', async () => {
+    const harness = deferredBodyHarness();
+    const controller = new AbortController();
+    const outcome = harness.runtime.getAll('/v2/equities/master', {
+      code: '72030', date: '2026-08-28',
+    }, controller.signal).catch(error => error as unknown);
+    await Promise.all([harness.bodyStarted, harness.timeoutScheduled]);
+    controller.abort();
+
+    await expect(outcome).resolves.toMatchObject({ code: 'cancelled' });
+    expect(harness.bodyWasAborted()).toBe(true);
+    expect(harness.runtime.attempts).toHaveLength(1);
+  });
+
+  test('accepts a complete response body just inside the per-attempt timeout', async () => {
+    const harness = deferredBodyHarness();
+    const request = harness.runtime.getAll('/v2/equities/master', {
+      code: '72030', date: '2026-08-28',
+    });
+    await Promise.all([harness.bodyStarted, harness.timeoutScheduled]);
+    harness.advance(JQUANTS_REQUEST_TIMEOUT_MS_V1 - 1);
+    harness.completeBody();
+
+    await expect(request).resolves.toMatchObject({ rows: [] });
+    expect(harness.bodyWasAborted()).toBe(false);
+    expect(harness.runtime.attempts).toHaveLength(1);
+  });
+
+  test('clamps the body timeout to the remaining execution budget', async () => {
+    const remainingMs = 250;
+    const justInside = deferredBodyHarness(JQUANTS_EXECUTION_BUDGET_MS_V1 - remainingMs);
+    const completed = justInside.runtime.getAll('/v2/equities/master', {
+      code: '72030', date: '2026-08-28',
+    });
+    await Promise.all([justInside.bodyStarted, justInside.timeoutScheduled]);
+    expect(justInside.timeoutDurationMs()).toBe(remainingMs);
+    justInside.advance(remainingMs - 1);
+    justInside.completeBody();
+    await expect(completed).resolves.toMatchObject({ rows: [] });
+
+    const harness = deferredBodyHarness(JQUANTS_EXECUTION_BUDGET_MS_V1 - remainingMs);
+    const outcome = harness.runtime.getAll('/v2/equities/master', {
+      code: '72030', date: '2026-08-28',
+    }).catch(error => error as unknown);
+    await Promise.all([harness.bodyStarted, harness.timeoutScheduled]);
+    expect(harness.timeoutDurationMs()).toBe(remainingMs);
+    harness.fireTimeout();
+
+    await expect(outcome).resolves.toMatchObject({ code: 'execution_timeout' });
+    expect(harness.bodyWasAborted()).toBe(true);
+    expect(harness.runtime.attempts).toHaveLength(1);
   });
 
   test('gives cancellation and timeout precedence and prevents retry', async () => {
