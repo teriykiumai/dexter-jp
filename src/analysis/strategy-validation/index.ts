@@ -6,5 +6,6 @@ export * from './errors.js';
 export * from './jquants-execution.js';
 export * from './jquants-feasibility-smoke.js';
 export * from './jquants-validation-adapter.js';
+export * from './outcome-validator.js';
 export * from './source-envelope.js';
 export * from './tick.js';
