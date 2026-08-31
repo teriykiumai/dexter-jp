@@ -181,7 +181,8 @@ describe('J-Quants request runtime', () => {
     });
 
     expect(first).toBe(second);
-    expect(first).toEqual([{ Date: '2026-08-28' }, { Date: '2026-08-29' }]);
+    expect(first.rows).toEqual([{ Date: '2026-08-28' }, { Date: '2026-08-29' }]);
+    expect(String(first.fetchedAt)).toBe('2026-08-31T00:00:00.000Z');
     expect(requests).toHaveLength(2);
     expect(requests[0]?.url.origin).toBe('https://api.jquants.com');
     expect(requests[0]?.url.pathname).toBe('/v2/equities/bars/daily');
@@ -226,7 +227,7 @@ describe('J-Quants request runtime', () => {
     await expect(actual.getAll('/v2/equities/master', query)).rejects.toMatchObject({
       code: 'http_error', status: 400,
     });
-    await expect(actual.getAll('/v2/equities/master', query)).resolves.toEqual([]);
+    await expect(actual.getAll('/v2/equities/master', query)).resolves.toMatchObject({ rows: [] });
     expect(calls).toBe(2);
   });
 
@@ -286,7 +287,7 @@ describe('J-Quants request runtime', () => {
       }, { clock }).runtime;
       await expect(actual.getAll('/v2/equities/master', {
         code: '72030', date: '2026-08-28',
-      })).resolves.toEqual([]);
+      })).resolves.toMatchObject({ rows: [] });
       expect(actual.attempts).toHaveLength(retryCase.responses.length);
       expect(clock.delays).toEqual([...retryCase.expectedDelays]);
     }

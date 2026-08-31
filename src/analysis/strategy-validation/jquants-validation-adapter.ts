@@ -191,8 +191,11 @@ export class JQuantsValidationAdapterV1 {
     const query = Object.freeze({ from: dateFrom, to: dateTo });
     const request = Object.freeze({ ticker: null, dateFrom, dateTo, asOfCutoff });
     let rows: readonly unknown[];
+    let fetchedAt: AsOfCutoff;
     try {
-      rows = await this.runtime.getAll(CALENDAR_ENDPOINT, query, input.signal);
+      const fetched = await this.runtime.getAll(CALENDAR_ENDPOINT, query, input.signal);
+      rows = fetched.rows;
+      fetchedAt = fetched.fetchedAt;
     } catch (error) {
       if (error instanceof JQuantsValidationErrorV1 && error.code === 'source_plan_unavailable') {
         return unavailable(
@@ -213,7 +216,7 @@ export class JQuantsValidationAdapterV1 {
         JQUANTS_CALENDAR_SOURCE_MAPPING_VERSION_V1,
         query,
         request,
-        this.runtime.nowUtc(),
+        fetchedAt,
         'source_history_unavailable',
       );
     }
@@ -233,7 +236,7 @@ export class JQuantsValidationAdapterV1 {
         JQUANTS_CALENDAR_SOURCE_MAPPING_VERSION_V1,
         query,
         request,
-        this.runtime.nowUtc(),
+        fetchedAt,
         selected as readonly Readonly<Record<string, string | number | null>>[],
       ),
     });
@@ -252,8 +255,11 @@ export class JQuantsValidationAdapterV1 {
     const query = Object.freeze({ code, date });
     const request = Object.freeze({ ticker, dateFrom: date, dateTo: date, asOfCutoff });
     let rows: readonly unknown[];
+    let fetchedAt: AsOfCutoff;
     try {
-      rows = await this.runtime.getAll(MASTER_ENDPOINT, query, input.signal);
+      const fetched = await this.runtime.getAll(MASTER_ENDPOINT, query, input.signal);
+      rows = fetched.rows;
+      fetchedAt = fetched.fetchedAt;
     } catch (error) {
       if (error instanceof JQuantsValidationErrorV1 && error.code === 'source_plan_unavailable') {
         return unavailable(
@@ -285,7 +291,7 @@ export class JQuantsValidationAdapterV1 {
         JQUANTS_MASTER_SOURCE_MAPPING_VERSION_V1,
         query,
         request,
-        this.runtime.nowUtc(),
+        fetchedAt,
         'source_history_unavailable',
       );
     }
@@ -301,7 +307,7 @@ export class JQuantsValidationAdapterV1 {
         JQUANTS_MASTER_SOURCE_MAPPING_VERSION_V1,
         query,
         request,
-        this.runtime.nowUtc(),
+        fetchedAt,
         'source_history_unavailable',
       );
     }
@@ -329,7 +335,7 @@ export class JQuantsValidationAdapterV1 {
         JQUANTS_MASTER_SOURCE_MAPPING_VERSION_V1,
         query,
         request,
-        this.runtime.nowUtc(),
+        fetchedAt,
         [row] as readonly Readonly<Record<string, string | number | null>>[],
       ),
     });
@@ -351,8 +357,11 @@ export class JQuantsValidationAdapterV1 {
     const query = Object.freeze({ code, from: dateFrom, to: dateTo });
     const request = Object.freeze({ ticker, dateFrom, dateTo, asOfCutoff });
     let rows: readonly unknown[];
+    let fetchedAt: AsOfCutoff;
     try {
-      rows = await this.runtime.getAll(DAILY_BAR_ENDPOINT, query, input.signal);
+      const fetched = await this.runtime.getAll(DAILY_BAR_ENDPOINT, query, input.signal);
+      rows = fetched.rows;
+      fetchedAt = fetched.fetchedAt;
     } catch (error) {
       if (error instanceof JQuantsValidationErrorV1 && error.code === 'source_plan_unavailable') {
         return unavailable(
@@ -373,7 +382,7 @@ export class JQuantsValidationAdapterV1 {
         JQUANTS_DAILY_BAR_SOURCE_MAPPING_VERSION_V1,
         query,
         request,
-        this.runtime.nowUtc(),
+        fetchedAt,
         'source_history_unavailable',
       );
     }
@@ -418,7 +427,7 @@ export class JQuantsValidationAdapterV1 {
         JQUANTS_DAILY_BAR_SOURCE_MAPPING_VERSION_V1,
         query,
         request,
-        this.runtime.nowUtc(),
+        fetchedAt,
         'source_history_unavailable',
       );
     }
@@ -431,7 +440,7 @@ export class JQuantsValidationAdapterV1 {
         JQUANTS_DAILY_BAR_SOURCE_MAPPING_VERSION_V1,
         query,
         request,
-        this.runtime.nowUtc(),
+        fetchedAt,
         selected as readonly Readonly<Record<string, string | number | null>>[],
       ),
     });

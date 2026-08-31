@@ -23,6 +23,7 @@ function createAdapter(
 ): Readonly<{
   adapter: JQuantsValidationAdapterV1;
   runtime: JQuantsExecutionRuntimeV1;
+  advanceWall: (durationMs: number) => void;
 }> {
   let monotonicMs = 0;
   let wallNowMs = options.wallNowMs ?? Date.parse('2026-08-31T00:00:00.000Z');
@@ -49,7 +50,11 @@ function createAdapter(
     environment,
     actualAttemptLimit: options.attemptLimit,
   });
-  return Object.freeze({ adapter: new JQuantsValidationAdapterV1(runtime), runtime });
+  return Object.freeze({
+    adapter: new JQuantsValidationAdapterV1(runtime),
+    runtime,
+    advanceWall: (durationMs: number) => { wallNowMs += durationMs; },
+  });
 }
 
 const CUTOFF = '2026-08-29T14:59:59.999Z';
@@ -210,6 +215,29 @@ describe('JQuantsValidationAdapterV1', () => {
     expect(JSON.stringify(result)).not.toContain('secret');
   });
 
+  test('keeps an unrecognized 403 fatal and sanitizes invalid-key response content', async () => {
+    let calls = 0;
+    const secret = 'invalid-secret-api-key';
+    const { adapter, runtime } = createAdapter(async () => {
+      calls += 1;
+      return jsonResponse({ message: `Invalid API key: ${secret} at /private/path` }, 403);
+    });
+    try {
+      await adapter.fetchCalendar({
+        dateFrom: '2026-08-28', dateTo: '2026-08-29', asOfCutoff: CUTOFF,
+      });
+      throw new Error('Expected an unrecognized 403 to fail.');
+    } catch (error) {
+      expect(error).toMatchObject({ code: 'http_error', status: 403 });
+      const message = (error as Error).message;
+      expect(message).not.toContain(secret);
+      expect(message).not.toContain('private');
+      expect(message).not.toContain('Invalid API key');
+    }
+    expect(calls).toBe(1);
+    expect(runtime.attempts).toHaveLength(1);
+  });
+
   test('rejects master date/ticker conflicts, duplicate identities, and missing market evidence', async () => {
     const cases = [
       [{ Date: '2026-08-27', Code: '72030', ScaleCat: 'その他', Mkt: '0111', ProdCat: '011' }],
@@ -301,16 +329,19 @@ describe('JQuantsValidationAdapterV1', () => {
 
   test('shares identical completed adapter requests without another external attempt', async () => {
     let calls = 0;
-    const { adapter, runtime } = createAdapter(async () => {
+    const { adapter, runtime, advanceWall } = createAdapter(async () => {
       calls += 1;
       return jsonResponse({ data: [tradedBar('2026-08-28')] });
     });
     const input = {
       ticker: '7203', dateFrom: '2026-08-28', dateTo: '2026-08-28', asOfCutoff: CUTOFF,
     } as const;
-    await adapter.fetchDailyBars(input);
-    await adapter.fetchDailyBars(input);
+    const first = await adapter.fetchDailyBars(input);
+    advanceWall(60_000);
+    const second = await adapter.fetchDailyBars(input);
     expect(calls).toBe(1);
     expect(runtime.attempts).toHaveLength(1);
+    expect(first.envelope.fetchedAt).toBe(second.envelope.fetchedAt);
+    expect(first.envelope.digest).toBe(second.envelope.digest);
   });
 });

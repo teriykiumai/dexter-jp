@@ -72,6 +72,11 @@ export type JQuantsExecutionEnvironmentV1 = Readonly<{
 
 export type JQuantsQueryV1 = Readonly<Record<string, string>>;
 
+export type JQuantsFetchedRowsV1 = Readonly<{
+  rows: readonly unknown[];
+  fetchedAt: AsOfCutoff;
+}>;
+
 const defaultSleep = (durationMs: number, signal?: AbortSignal): Promise<void> =>
   new Promise((resolve, reject) => {
     if (signal?.aborted) {
@@ -259,7 +264,7 @@ function deepFreezeJson(value: unknown): unknown {
 }
 
 function planRestriction(status: number, body: unknown): boolean {
-  if (status === 403) return true;
+  if (status !== 400 && status !== 403) return false;
   if (!isJsonObject(body)) return false;
   const detail = body.message ?? body.error;
   return typeof detail === 'string'
@@ -334,7 +339,7 @@ export class JQuantsExecutionRuntimeV1 {
   readonly #apiKey!: string;
   readonly #attempts: JQuantsAttemptAuditV1[] = [];
   readonly #attemptTimes: number[] = [];
-  readonly #cache = new Map<string, Promise<readonly unknown[]>>();
+  readonly #cache = new Map<string, Promise<JQuantsFetchedRowsV1>>();
   readonly #operationController = new AbortController();
   #limiterTail: Promise<void> = Promise.resolve();
 
@@ -422,7 +427,7 @@ export class JQuantsExecutionRuntimeV1 {
     endpoint: string,
     query: JQuantsQueryV1,
     signal?: AbortSignal,
-  ): Promise<readonly unknown[]> {
+  ): Promise<JQuantsFetchedRowsV1> {
     this.#bindCancellation(signal);
     const operationSignal = this.#operationController.signal;
     this.assertCanContinue(operationSignal);
@@ -443,7 +448,7 @@ export class JQuantsExecutionRuntimeV1 {
     endpoint: string,
     query: JQuantsQueryV1,
     signal?: AbortSignal,
-  ): Promise<readonly unknown[]> {
+  ): Promise<JQuantsFetchedRowsV1> {
     const rows: unknown[] = [];
     const seenPaginationKeys = new Set<string>();
     let paginationKey: string | undefined;
@@ -463,7 +468,11 @@ export class JQuantsExecutionRuntimeV1 {
         seenPaginationKeys.add(paginationKey);
       }
     } while (paginationKey !== undefined);
-    return deepFreezeJson(rows) as readonly unknown[];
+    this.assertCanContinue(signal);
+    return Object.freeze({
+      rows: deepFreezeJson(rows) as readonly unknown[],
+      fetchedAt: this.nowUtc(),
+    });
   }
 
   async #requestPage(
