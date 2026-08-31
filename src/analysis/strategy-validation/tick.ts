@@ -23,6 +23,25 @@ export const TSE_TICK_CATEGORIES_V1 = Object.freeze([
 ] as const);
 export type TseTickCategoryV1 = (typeof TSE_TICK_CATEGORIES_V1)[number];
 
+export function jQuantsScaleCategoryToTseTickCategoryV1(
+  scaleCategory: string | null,
+): TseTickCategoryV1 | null {
+  switch (scaleCategory) {
+    case 'TOPIX Core30':
+      return 'topix_core30';
+    case 'TOPIX Large70':
+      return 'topix_large70';
+    case 'TOPIX Mid400':
+      return 'topix_mid400';
+    case 'TOPIX Small 1':
+    case 'TOPIX Small 2':
+    case 'その他':
+      return 'other';
+    default:
+      return null;
+  }
+}
+
 export type TseTickUnavailableReasonV1 =
   | 'tick_rule_period_unsupported'
   | 'tick_category_unavailable';
