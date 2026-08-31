@@ -12,7 +12,10 @@ describe('TseTickRuleV1', () => {
     expect(jQuantsScaleCategoryToTseTickCategoryV1('TOPIX Core30')).toBe('topix_core30');
     expect(jQuantsScaleCategoryToTseTickCategoryV1('TOPIX Large70')).toBe('topix_large70');
     expect(jQuantsScaleCategoryToTseTickCategoryV1('TOPIX Mid400')).toBe('topix_mid400');
+    expect(jQuantsScaleCategoryToTseTickCategoryV1('TOPIX Small 1')).toBe('other');
+    expect(jQuantsScaleCategoryToTseTickCategoryV1('TOPIX Small 2')).toBe('other');
     expect(jQuantsScaleCategoryToTseTickCategoryV1('その他')).toBe('other');
+    expect(jQuantsScaleCategoryToTseTickCategoryV1('TOPIX Core3O')).toBeNull();
     expect(jQuantsScaleCategoryToTseTickCategoryV1('')).toBeNull();
     expect(jQuantsScaleCategoryToTseTickCategoryV1(null)).toBeNull();
   });

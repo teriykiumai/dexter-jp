@@ -177,6 +177,23 @@ describe('JQuantsValidationAdapterV1', () => {
     expect(requested[0]?.searchParams.get('code')).toBe('130A0');
   });
 
+  test('preserves an unknown ScaleCat but does not assign the ordinary tick table', async () => {
+    const { adapter } = createAdapter(async () => jsonResponse({ data: [{
+      Date: '2026-08-28', Code: '72030', ScaleCat: 'TOPIX Core3O',
+      Mkt: '0111', ProdCat: '011',
+    }] }));
+    const result = await adapter.fetchMaster({
+      ticker: '7203', date: '2026-08-28', asOfCutoff: CUTOFF,
+    });
+    expect(result.state).toBe('available');
+    if (result.state === 'available') {
+      expect(result.observation).toMatchObject({
+        scaleCategory: 'TOPIX Core3O',
+        tickCategory: null,
+      });
+    }
+  });
+
   test('treats non-domestic products and empty endpoint rows as explicit unavailable states', async () => {
     const nonDomestic = createAdapter(async () => jsonResponse({ data: [{
       Date: '2026-08-28', Code: '72030', ScaleCat: 'TOPIX Core30',

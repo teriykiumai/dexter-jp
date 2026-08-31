@@ -47,6 +47,17 @@ export const STRATEGY_VALIDATION_SOURCE_ROLES_V1 = Object.freeze([
 export type StrategyValidationSourceRoleV1 =
   (typeof STRATEGY_VALIDATION_SOURCE_ROLES_V1)[number];
 
+const SOURCE_FAILURE_REASONS_V1 = Object.freeze([
+  'source_plan_unavailable',
+  'source_history_unavailable',
+  'source_response_invalid',
+] as const);
+type SourceFailureReasonV1 = (typeof SOURCE_FAILURE_REASONS_V1)[number];
+
+function isSourceFailureReasonV1(value: unknown): value is SourceFailureReasonV1 {
+  return SOURCE_FAILURE_REASONS_V1.includes(value as SourceFailureReasonV1);
+}
+
 const roleOrder = new Map<StrategyValidationSourceRoleV1, number>(
   STRATEGY_VALIDATION_SOURCE_ROLES_V1.map((role, index) => [role, index]),
 );
@@ -131,6 +142,9 @@ export type StrategyValidationInitialTickEvidenceContextV1 = Readonly<{
   effectiveDate: string;
   category: TseTickCategoryV1 | null;
   unavailableReason:
+    | 'source_plan_unavailable'
+    | 'source_history_unavailable'
+    | 'source_response_invalid'
     | 'tick_rule_period_unsupported'
     | 'tick_category_unavailable'
     | 'invalid_candidate'
@@ -348,11 +362,24 @@ export function validateStrategyValidationSourceCompletenessV1(
       matchingRow.ScaleCat as string | null,
     );
   };
+  const requireMatchingUnavailable = (
+    roles: readonly StrategyValidationSourceRoleV1[],
+    reason: PointInTimeSourceUnavailableReasonV1,
+  ): void => {
+    if (!roles.some(role => unavailableForRole(role).some(value => (
+      value.envelope.result.state === 'unavailable'
+      && value.envelope.result.reason === reason
+    )))) failCompleteness();
+  };
   const verifyInitialTickEvidence = (
     evidence: StrategyValidationInitialTickEvidenceContextV1,
   ): void => {
     if (evidence.effectiveDate !== context.initialTickDate) failCompleteness();
     if (evidence.unavailableReason === 'invalid_candidate') return;
+    if (isSourceFailureReasonV1(evidence.unavailableReason)) {
+      requireMatchingUnavailable(['candidate_master'], evidence.unavailableReason);
+      return;
+    }
     requireAvailableDates('candidate_master', [evidence.effectiveDate]);
     const category = masterCategoryAt('candidate_master', evidence.effectiveDate);
     if (category !== evidence.category) failCompleteness();
@@ -368,15 +395,6 @@ export function validateStrategyValidationSourceCompletenessV1(
         || level.tick !== null
         || level.executable !== null) failCompleteness();
     }
-  };
-  const requireMatchingUnavailable = (
-    roles: readonly StrategyValidationSourceRoleV1[],
-    reason: PointInTimeSourceUnavailableReasonV1,
-  ): void => {
-    if (!roles.some(role => unavailableForRole(role).some(value => (
-      value.envelope.result.state === 'unavailable'
-      && value.envelope.result.reason === reason
-    )))) failCompleteness();
   };
   const completeCalendar = (role: 'candidate_calendar' | 'outcome_calendar') => {
     const available = availableForRole(role);
@@ -477,17 +495,16 @@ export function validateStrategyValidationSourceCompletenessV1(
       left.date.localeCompare(right.date)
     )));
   };
-  const verifyPersistedOutcome = (): void => {
+  const replayOutcome = (): StrategyOutcomeResultV1 => {
     if (context.candidate === null
       || context.persistedOutcome === null
       || context.initialTickDate === null
       || context.outcome === null) failCompleteness();
-    requireAvailableDates('outcome_master', context.outcome.tickEvidenceDates);
     const calendar = replayCalendar();
     const allowedDates = new Set<string>(calendar.sessions
       .filter(date => date > context.decisionDate && date <= context.outcomeAsOfSession)
       .slice(0, STRATEGY_WORST_CASE_EVALUATION_SESSION_V1));
-    const replayed = validateLongStrategyOutcomeV1({
+    return validateLongStrategyOutcomeV1({
       candidate: context.candidate,
       decisionDate: parseTseSessionDate(context.decisionDate),
       outcomeAsOfSession: parseTseSessionDate(
@@ -498,10 +515,18 @@ export function validateStrategyValidationSourceCompletenessV1(
       calendar,
       bars: replayBars(allowedDates),
     });
+  };
+  const requireOutcomeMatch = (replayed: StrategyOutcomeResultV1): void => {
+    if (context.persistedOutcome === null) failCompleteness();
     if (canonicalJsonV1(replayed as unknown as CanonicalJsonValue)
       !== canonicalJsonV1(context.persistedOutcome as unknown as CanonicalJsonValue)) {
       failCompleteness();
     }
+  };
+  const verifyPersistedOutcome = (): void => {
+    if (context.outcome === null) failCompleteness();
+    requireAvailableDates('outcome_master', context.outcome.tickEvidenceDates);
+    requireOutcomeMatch(replayOutcome());
   };
   const requireExactAvailableDates = (
     role: StrategyValidationSourceRoleV1,
@@ -553,6 +578,54 @@ export function validateStrategyValidationSourceCompletenessV1(
       failCompleteness();
     }
     return sessions;
+  };
+  const verifyOutcomeSourceFailure = (reason: SourceFailureReasonV1): void => {
+    if (context.outcome === null || context.persistedOutcome === null) failCompleteness();
+    const outcomeRoles = [
+      'outcome_calendar', 'outcome_master', 'outcome_daily_bars',
+    ] as const;
+    const unavailable = outcomeRoles.flatMap(role => unavailableForRole(role).map(binding => ({
+      role,
+      binding,
+    })));
+    const matching = unavailable.filter(value => (
+      value.binding.envelope.result.state === 'unavailable'
+      && value.binding.envelope.result.reason === reason
+    ));
+    if (unavailable.length !== 1 || matching.length !== 1) failCompleteness();
+    const failure = matching[0]!;
+
+    if (failure.role === 'outcome_calendar') {
+      if (forRole('outcome_calendar').length !== 1
+        || forRole('outcome_master').length !== 0
+        || forRole('outcome_daily_bars').length !== 0
+        || context.persistedOutcome.kind !== 'unavailable'
+        || context.persistedOutcome.reason !== reason
+        || context.persistedOutcome.evaluationEndDate !== null
+        || context.persistedOutcome.entryProven
+        || context.persistedOutcome.entryFill !== null
+        || context.persistedOutcome.actualRisk !== null
+        || context.outcome.sessionFacts.length !== 0
+        || context.outcome.tickEvidenceDates.length !== 0
+        || context.outcome.horizonDates.length !== 0
+        || context.outcome.terminalCompletionDate !== null) failCompleteness();
+      return;
+    }
+
+    requireAvailableDates('outcome_master', context.outcome.tickEvidenceDates);
+    const replayed = replayOutcome();
+    if (replayed.kind !== 'unavailable') failCompleteness();
+    if (failure.role === 'outcome_daily_bars') {
+      if (replayed.reason !== 'price_history_incomplete'
+        || replayed.evaluationEndDate === null
+        || !covers(failure.binding.envelope, replayed.evaluationEndDate)) failCompleteness();
+    } else if (replayed.reason !== 'tick_category_unavailable'
+      || replayed.evaluationEndDate === null
+      || String(failure.binding.envelope.request.dateFrom) !== replayed.evaluationEndDate
+      || availableDates('outcome_master').has(replayed.evaluationEndDate)) {
+      failCompleteness();
+    }
+    requireOutcomeMatch(Object.freeze({ ...replayed, reason }) as StrategyOutcomeResultV1);
   };
 
   if (context.caseKind === 'anchor_unavailable') {
@@ -625,6 +698,28 @@ export function validateStrategyValidationSourceCompletenessV1(
       || context.outcome.unavailableReason !== initialFailure
       || context.outcome.evaluationEndDate !== null)) failCompleteness();
 
+  if (isSourceFailureReasonV1(initialFailure)) {
+    const candidateMaster = forRole('candidate_master');
+    if (context.mode !== 'snapshot'
+      || candidateMaster.length !== 1
+      || candidateMaster[0]!.envelope.result.state !== 'unavailable'
+      || candidateMaster[0]!.envelope.result.reason !== initialFailure
+      || (['outcome_calendar', 'outcome_master', 'outcome_daily_bars'] as const).some(role => (
+        forRole(role).length !== 0
+      ))
+      || context.persistedOutcome === null
+      || context.persistedOutcome.kind !== 'unavailable'
+      || context.persistedOutcome.reason !== initialFailure
+      || context.persistedOutcome.entryProven
+      || context.persistedOutcome.entryFill !== null
+      || context.persistedOutcome.actualRisk !== null
+      || context.outcome.sessionFacts.length !== 0
+      || context.outcome.tickEvidenceDates.length !== 0
+      || context.outcome.horizonDates.length !== 0
+      || context.outcome.terminalCompletionDate !== null) failCompleteness();
+    return;
+  }
+
   if (context.outcome.kind === 'unavailable'
     && context.outcome.evaluationEndDate === null
     && ['tick_rule_period_unsupported', 'tick_category_unavailable', 'non_executable_tick']
@@ -636,10 +731,7 @@ export function validateStrategyValidationSourceCompletenessV1(
       case 'source_plan_unavailable':
       case 'source_history_unavailable':
       case 'source_response_invalid':
-        requireMatchingUnavailable(
-          ['outcome_calendar', 'outcome_master', 'outcome_daily_bars'],
-          context.outcome.unavailableReason,
-        );
+        verifyOutcomeSourceFailure(context.outcome.unavailableReason);
         return;
       case 'calendar_incomplete':
         requireMatchingUnavailable(['outcome_calendar'], 'calendar_incomplete');

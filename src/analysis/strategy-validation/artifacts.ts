@@ -402,6 +402,9 @@ export const StrategyValidationTickEvidenceV1Schema = z.object({
   effectiveDate: strictDate,
   category: z.enum(TSE_TICK_CATEGORIES_V1).nullable(),
   unavailableReason: z.enum([
+    'source_plan_unavailable',
+    'source_history_unavailable',
+    'source_response_invalid',
     'tick_rule_period_unsupported',
     'tick_category_unavailable',
     'invalid_candidate',
@@ -420,7 +423,12 @@ export const StrategyValidationTickEvidenceV1Schema = z.object({
   } else if (levels.some(level => level.tick !== null || level.executable !== null)) {
     context.addIssue({ code: 'custom', message: 'Unavailable tick evidence must not contain level results.' });
   }
-  if (value.unavailableReason === 'tick_category_unavailable' && value.category !== null) {
+  if (value.unavailableReason !== null && [
+    'source_plan_unavailable',
+    'source_history_unavailable',
+    'source_response_invalid',
+    'tick_category_unavailable',
+  ].includes(value.unavailableReason) && value.category !== null) {
     context.addIssue({ code: 'custom', message: 'Unavailable tick category evidence is inconsistent.' });
   }
 });

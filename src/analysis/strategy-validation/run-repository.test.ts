@@ -322,11 +322,19 @@ function replaceRoleSource(
   role: StrategyValidationSourceRoleV1,
   source: ReturnType<typeof roleSource> | null,
 ) {
+  return replaceRoleSources(evidence, role, source === null ? [] : [source]);
+}
+
+function replaceRoleSources(
+  evidence: ReturnType<typeof completeCandidateSources>,
+  role: StrategyValidationSourceRoleV1,
+  replacements: readonly ReturnType<typeof roleSource>[],
+) {
   const references = evidence.references.filter(value => value.role !== role);
   const sources = evidence.sources.filter(value => (
     !evidence.references.some(reference => reference.role === role && reference.digest === value.digest)
   ));
-  if (source !== null) {
+  for (const source of replacements) {
     references.push({ role, digest: source.digest });
     sources.push(source);
   }
@@ -1109,6 +1117,36 @@ describe('Strategy-validation immutable run repository V1', () => {
         run: validationRun([candidate]), cases: [candidate], sources: evidence.sources,
       }), 'artifact_incomplete');
 
+      const unknownEvidence = completeCandidateSources(
+        'snapshot', '7203', '2025-01-02', '2025-01-03', undefined, [],
+        { candidateScaleCategory: 'TOPIX Core3O' },
+      );
+      const unknownBase = snapshotCandidateCase(unknownEvidence.sources[0]!.digest);
+      if (unknownBase.caseKind !== 'candidate') throw new TypeError('Expected candidate fixture.');
+      const silentlyOrdinary = StrategyValidationCaseV1Schema.parse({
+        ...unknownBase,
+        tickEvidence: {
+          effectiveDate: '2025-01-02',
+          category: 'other',
+          unavailableReason: null,
+          levels: {
+            entry: { tick: 1, executable: true },
+            stop: { tick: 1, executable: true },
+            target: { tick: 1, executable: true },
+          },
+        },
+        sourceManifest: createPointInTimeSourceManifestV1({
+          startedAt: TEST_STARTED_AT,
+          outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+          sources: unknownEvidence.references,
+        }),
+      });
+      await expectRepositoryKind(repository.publish({
+        run: validationRun([silentlyOrdinary]),
+        cases: [silentlyOrdinary],
+        sources: unknownEvidence.sources,
+      }), 'artifact_incomplete');
+
       const exactEvidence = completeCandidateSources(
         'snapshot', '7203', '2025-01-02', '2025-01-03',
       );
@@ -1415,6 +1453,136 @@ describe('Strategy-validation immutable run repository V1', () => {
       };
       await expect(repository.publish(value)).resolves.toMatchObject({ state: 'created' });
       await expect(repository.loadCase(value.run.runId, candidate.caseId)).resolves.toEqual(candidate);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('persists an initial Master source failure on each frozen Snapshot candidate', async () => {
+    for (const reason of [
+      'source_plan_unavailable',
+      'source_history_unavailable',
+      'source_response_invalid',
+    ] as const) {
+      const { temporaryRoot, repository } = await temporaryRepository();
+      try {
+        const complete = completeCandidateSources(
+          'snapshot', '7203', '2025-01-02', '2025-01-03',
+        );
+        const candidateMaster = roleSource({
+          role: 'candidate_master',
+          mode: 'snapshot',
+          ticker: '7203',
+          anchorDate: '2025-01-02',
+          evaluationDate: '2025-01-03',
+          unavailableReason: reason,
+        });
+        let evidence = replaceRoleSource(complete, 'candidate_master', candidateMaster);
+        evidence = replaceRoleSource(evidence, 'outcome_calendar', null);
+        evidence = replaceRoleSource(evidence, 'outcome_master', null);
+        evidence = replaceRoleSource(evidence, 'outcome_daily_bars', null);
+        const base = snapshotCandidateCase(evidence.sources[0]!.digest);
+        if (base.caseKind !== 'candidate') throw new TypeError('Expected candidate fixture.');
+        const candidate = StrategyValidationCaseV1Schema.parse({
+          ...base,
+          tickEvidence: {
+            effectiveDate: '2025-01-02',
+            category: null,
+            unavailableReason: reason,
+            levels: {
+              entry: { tick: null, executable: null },
+              stop: { tick: null, executable: null },
+              target: { tick: null, executable: null },
+            },
+          },
+          outcome: {
+            algorithmVersion: base.outcome.algorithmVersion,
+            limitQueueVersion: base.outcome.limitQueueVersion,
+            plannedRisk: 10,
+            evaluationEndDate: null,
+            kind: 'unavailable',
+            reason,
+            entryProven: false,
+            entryFill: null,
+            actualRisk: null,
+          },
+          sourceManifest: createPointInTimeSourceManifestV1({
+            startedAt: TEST_STARTED_AT,
+            outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+            sources: evidence.references,
+          }),
+        });
+        await expect(repository.publish({
+          run: validationRun([candidate]), cases: [candidate], sources: evidence.sources,
+        })).resolves.toMatchObject({ state: 'created' });
+      } finally {
+        await rm(temporaryRoot, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('replays prior outcome progress before accepting a later Master source failure', async () => {
+    const { temporaryRoot, repository } = await temporaryRepository();
+    try {
+      const failureDate = '2025-01-04';
+      const complete = completeCandidateSources(
+        'snapshot', '7203', '2025-01-02', failureDate, undefined, [], {
+          outcomeDailyValuesForDate: date => date === '2025-01-03'
+            ? { ...OPEN_POSITION_DAILY_VALUES, O: 95, L: 95, H: 105 }
+            : { ...OPEN_POSITION_DAILY_VALUES, L: 89 },
+        },
+      );
+      const entryMaster = roleSource({
+        role: 'outcome_master', mode: 'snapshot', ticker: '7203',
+        anchorDate: '2025-01-02', evaluationDate: '2025-01-03',
+      });
+      const failedMaster = roleSource({
+        role: 'outcome_master', mode: 'snapshot', ticker: '7203',
+        anchorDate: '2025-01-02', evaluationDate: failureDate,
+        unavailableReason: 'source_plan_unavailable',
+      });
+      const evidence = replaceRoleSources(
+        complete, 'outcome_master', [entryMaster, failedMaster],
+      );
+      const candidateFor = (candidateEvidence: typeof evidence) => {
+        const base = snapshotCandidateCase(candidateEvidence.sources[0]!.digest);
+        if (base.caseKind !== 'candidate') throw new TypeError('Expected candidate fixture.');
+        return StrategyValidationCaseV1Schema.parse({
+          ...base,
+          outcome: {
+            algorithmVersion: base.outcome.algorithmVersion,
+            limitQueueVersion: base.outcome.limitQueueVersion,
+            plannedRisk: 10,
+            evaluationEndDate: failureDate,
+            kind: 'unavailable',
+            reason: 'source_plan_unavailable',
+            entryProven: true,
+            entryFill: {
+              date: '2025-01-03', evaluationSession: 1, holdingDay: 1,
+              order: 'entry', method: 'entry_level', price: 100,
+            },
+            actualRisk: 10,
+          },
+          sourceManifest: createPointInTimeSourceManifestV1({
+            startedAt: TEST_STARTED_AT,
+            outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+            sources: candidateEvidence.references,
+          }),
+        });
+      };
+
+      const fabricated = replaceRoleSource(evidence, 'outcome_daily_bars', null);
+      const fabricatedCandidate = candidateFor(fabricated);
+      await expectRepositoryKind(repository.publish({
+        run: validationRun([fabricatedCandidate]),
+        cases: [fabricatedCandidate],
+        sources: fabricated.sources,
+      }), 'artifact_incomplete');
+
+      const candidate = candidateFor(evidence);
+      await expect(repository.publish({
+        run: validationRun([candidate]), cases: [candidate], sources: evidence.sources,
+      })).resolves.toMatchObject({ state: 'created' });
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
