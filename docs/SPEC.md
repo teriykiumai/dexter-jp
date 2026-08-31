@@ -413,10 +413,11 @@ Phase 1.5の非目標:
 - 検証runを明示選択して閲覧するlocal Dashboard
 
 Phase 4の結果はresearch-onlyであり、`precommitted`（保存済みSnapshot監査）と
-`reconstructed_as_of`（現在取得できるofficial sourceからの過去時点再構成）を
-混同または合算しない。後者は過去に配信されていた訂正前vintageの完全再現を
-意味しない。Phase 4ではportfolio backtest、取引コストを含む損益、Strategyの
-合否、Buy / Sell signal、runtime composite scoreを実装しない。詳細は
+`reconstructed_251_as_of`（exact 251-sessionのversioned policyによる過去時点
+再構成）を混同または合算しない。後者は、complete retrieved historyを渡す現在の
+production Technical / Strategy経路の再現・検証でも、過去に配信されていた訂正前
+vintageの完全再現でもない。Phase 4ではportfolio backtest、取引コストを含む損益、
+Strategyの合否、Buy / Sell signal、runtime composite scoreを実装しない。詳細は
 `docs/PHASE4_PLAN.md` を参照する。
 
 `docs/PHASE3_SCORE_EVALUATION_PLAN.md` のscore検証はPhase 4の自動的な要件では

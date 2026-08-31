@@ -64,14 +64,15 @@ Phase 4 keeps two separate confidence tracks:
 
 ```text
 precommitted
-reconstructed_as_of
+reconstructed_251_as_of
 ```
 
 The first audits Entry / Stop / Target already stored in an immutable Snapshot. The
-second reconstructs the current deterministic Strategy from official J-Quants rows
-bounded at a historical anchor. Current source access does not prove the exact
-correction vintage delivered at that past time, so the second track is not called a
-full historical point-in-time reproduction and is never combined with the first.
+second applies `technical_251_strategy_v1` to exactly 251 official J-Quants sessions
+bounded at a historical anchor. The production comprehensive-analysis path instead
+passes its complete retrieved history to the base Technical Engine, so this track is
+not production-pipeline replay. Current source access also does not prove the exact
+correction vintage delivered at that past time. It is never combined with the first.
 
 ### 4.2 Source boundary
 
@@ -88,9 +89,11 @@ fields, filters future rows before domain parsing, uses official sessions, and
 preserves normalized source evidence and canonical digests without raw HTTP data or
 credentials.
 
-Technical input is exactly t0 plus 250 preceding official sessions. Raw historical
-OHLC is adjusted only through t0 using cumulative `AdjFactor`; current API AdjOHLC is
-not reused. Any action after t0 through evaluation end fails the case closed.
+Campaign Technical input is exactly t0 plus 250 preceding official sessions under
+`technical_251_strategy_v1`. Raw historical OHLC is adjusted only through t0 using
+cumulative `AdjFactor`; current API AdjOHLC is not reused. Any action after t0 through
+evaluation end fails the case closed. Campaign artifacts/UI must expose the policy
+and warn that it does not validate the current full-history production path.
 
 Local preflight freezes `startedAt`; outcome uses only rows through the greatest
 official session strictly before its Tokyo date. The derived
@@ -104,10 +107,11 @@ Tokyo generation date and exactly matches the anchor.
 ### 4.3 Existing Engine boundary
 
 `analyzeTechnical`, `analyzeStrategy`, Strategy reasons/defaults, and the production
-single-`tickSize` interface remain unchanged. Reconstruction resolves the entry's
-next quote, calls the existing Engine, then validates every produced level against
-its own price-band tick. An invalid cross-band level is `non_executable_tick`, not
-silently re-rounded.
+single-`tickSize` interface remain unchanged. Reconstruction reuses those Engine
+algorithms only inside `technical_251_strategy_v1`; it does not claim production
+input-window parity. It resolves the entry's next quote, calls the existing Engine,
+then validates every produced level against its own price-band tick. An invalid
+cross-band level is `non_executable_tick`, not silently re-rounded.
 
 Tick rules support 2015-09-24 through 2027-02-28 only. The 2027 STR regime is
 explicitly deferred.
@@ -163,8 +167,10 @@ candidate cases and use separately named candidate-bearing denominators; unavail
 anchors are never omitted, replicated, or placed in a null candidate stratum.
 
 CLI external fetches and Dashboard jobs require explicit default-No confirmation.
-Normal CI never calls J-Quants. Rate/timeout/retry/attempt limits are fixed in the
-normative plan.
+Normal CI never calls J-Quants. Before confirmation, preflight applies the runtime's
+same `rolling_attempt_log_v1` formula and rejects a minimum schedule that cannot
+dispatch before the 90-minute deadline. The minimum duration and frozen controls are
+shown and persisted; pagination/retry/latency may still cause timeout.
 
 ### 4.6 Dashboard boundary
 
@@ -227,6 +233,8 @@ For P4-I0 after that gate:
 
 - Historical J-Quants responses may contain later corrections; the confidence label
   and warning are mandatory, not cosmetic.
+- The 251-session campaign policy can differ from the full-history production
+  Technical/Strategy result; it must never be presented as production validation.
 - Daily bars cannot establish intraday order or queue priority; ambiguity must remain
   first-class rather than being forced into a win/loss.
 - A daily stop-high/stop-low flag does not censor unrelated fills; queue ambiguity is
@@ -244,6 +252,8 @@ For P4-I0 after that gate:
   must remain intact.
 - A crash after run promotion must reconcile the reserved run rather than create an
   orphan or erase a suspect artifact.
+- Low configured request rates can make a selector impossible within 90 minutes;
+  preflight must reject that condition before quota authorization.
 
 ## 8. Maintenance boundary
 
