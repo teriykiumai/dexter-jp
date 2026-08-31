@@ -21,6 +21,7 @@ import { requireDailyBarsForSessionsV1 } from './daily-bar.js';
 
 export const JQUANTS_FEASIBILITY_SMOKE_ATTEMPT_LIMIT_V1 = 10 as const;
 export const JQUANTS_FEASIBILITY_SMOKE_MINIMUM_ATTEMPTS_V1 = 3 as const;
+export const JQUANTS_FEASIBILITY_WORST_CASE_SESSION_V1 = 79 as const;
 
 export type JQuantsFeasibilitySmokeArgsV1 = Readonly<{
   ticker: string;
@@ -109,7 +110,10 @@ export async function proveJQuantsMaturedAnchorV1(
   if (!calendarResult.calendar.isSession(anchor)) {
     throw new PointInTimeErrorV1('calendar_incomplete', 'The feasibility anchor is not a TSE session.');
   }
-  const maturityThrough = calendarResult.calendar.shiftSession(anchor, 60);
+  const maturityThrough = calendarResult.calendar.shiftSession(
+    anchor,
+    JQUANTS_FEASIBILITY_WORST_CASE_SESSION_V1,
+  );
   const masterResult = await adapter.fetchMaster({
     ticker: input.ticker,
     date: anchor,
@@ -126,7 +130,10 @@ export async function proveJQuantsMaturedAnchorV1(
   });
   if (dailyResult.state === 'unavailable') unavailable(dailyResult.reason);
   const anchorIndex = calendarResult.calendar.sessions.indexOf(anchor);
-  const requiredSessions = calendarResult.calendar.sessions.slice(anchorIndex, anchorIndex + 61);
+  const requiredSessions = calendarResult.calendar.sessions.slice(
+    anchorIndex,
+    anchorIndex + JQUANTS_FEASIBILITY_WORST_CASE_SESSION_V1 + 1,
+  );
   const requiredBars = requireDailyBarsForSessionsV1(dailyResult.bars, requiredSessions);
   if (requiredBars[0]?.open === null) {
     throw new PointInTimeErrorV1(

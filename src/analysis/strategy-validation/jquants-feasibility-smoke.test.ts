@@ -7,6 +7,7 @@ import {
 } from './jquants-execution.js';
 import {
   JQUANTS_FEASIBILITY_SMOKE_ATTEMPT_LIMIT_V1,
+  JQUANTS_FEASIBILITY_WORST_CASE_SESSION_V1,
   parseJQuantsFeasibilitySmokeArgsV1,
   proveJQuantsMaturedAnchorV1,
 } from './jquants-feasibility-smoke.js';
@@ -40,24 +41,24 @@ describe('Phase 4 J-Quants feasibility smoke', () => {
     expect(parseJQuantsFeasibilitySmokeArgsV1([
       '--ticker', '7203',
       '--anchor', '2026-01-05',
-      '--outcome-to', '2026-04-09',
+      '--outcome-to', '2026-04-30',
       '--confirm-external-fetch',
     ])).toEqual({
       ticker: '7203',
       anchor: '2026-01-05',
-      outcomeTo: '2026-04-09',
+      outcomeTo: '2026-04-30',
       confirmedExternalFetch: true,
     });
     expect(parseJQuantsFeasibilitySmokeArgsV1([
       '--ticker', '130A',
       '--anchor', '2026-01-05',
-      '--outcome-to', '2026-04-09',
+      '--outcome-to', '2026-04-30',
     ])).toMatchObject({ ticker: '130A', confirmedExternalFetch: false });
     for (const invalid of [
       ['--ticker', '7203'],
       ['--ticker', '7203', '--anchor', '2026-01-05', '--outcome-to', '2026-01-05'],
-      ['--ticker', '7203', '--anchor', '2026-01-05', '--outcome-to', '2026-04-09', '--unknown'],
-      ['--ticker', '7203', '--ticker', '6758', '--anchor', '2026-01-05', '--outcome-to', '2026-04-09'],
+      ['--ticker', '7203', '--anchor', '2026-01-05', '--outcome-to', '2026-04-30', '--unknown'],
+      ['--ticker', '7203', '--ticker', '6758', '--anchor', '2026-01-05', '--outcome-to', '2026-04-30'],
     ]) {
       expect(() => parseJQuantsFeasibilitySmokeArgsV1(invalid)).toThrow(
         expect.objectContaining({ code: 'invalid_configuration' }),
@@ -66,13 +67,13 @@ describe('Phase 4 J-Quants feasibility smoke', () => {
   });
 
   test('proves one matured anchor with all three strict sources in at most ten attempts', async () => {
-    let wallMs = Date.parse('2026-04-10T00:00:00.000Z');
+    let wallMs = Date.parse('2026-05-01T00:00:00.000Z');
     let monotonicMs = 0;
-    const requestedPaths: string[] = [];
+    const requestedUrls: URL[] = [];
     const executionEnvironment: JQuantsExecutionEnvironmentV1 = Object.freeze({
       fetch: async input => {
         const url = new URL(String(input));
-        requestedPaths.push(url.pathname);
+        requestedUrls.push(url);
         if (url.pathname === '/v2/markets/calendar') {
           return jsonResponse({
             data: dates(url.searchParams.get('from')!, url.searchParams.get('to')!).map(date => ({
@@ -135,21 +136,23 @@ describe('Phase 4 J-Quants feasibility smoke', () => {
       {
         ticker: '7203',
         anchor: '2026-01-05',
-        outcomeTo: '2026-04-09',
-        startedAt: '2026-04-10T00:00:00.000Z' as AsOfCutoff,
+        outcomeTo: '2026-04-30',
+        startedAt: '2026-05-01T00:00:00.000Z' as AsOfCutoff,
       },
     );
 
     expect(String(evidence.anchor)).toBe('2026-01-05');
-    expect(String(evidence.maturityThrough)).toBe('2026-03-30');
+    expect(JQUANTS_FEASIBILITY_WORST_CASE_SESSION_V1).toBe(79);
+    expect(String(evidence.maturityThrough)).toBe('2026-04-24');
     expect(evidence).toMatchObject({
       ticker: '7203', marketCode: '0111', scaleCategory: 'TOPIX Large70', attempts: 3,
     });
     expect([evidence.calendarDigest, evidence.masterDigest, evidence.dailyBarsDigest]
       .every(digest => /^sha256:[0-9a-f]{64}$/.test(digest))).toBe(true);
-    expect(requestedPaths).toEqual([
+    expect(requestedUrls.map(url => url.pathname)).toEqual([
       '/v2/markets/calendar', '/v2/equities/master', '/v2/equities/bars/daily',
     ]);
+    expect(requestedUrls[2]?.searchParams.get('to')).toBe(String(evidence.maturityThrough));
   });
 
   test('rejects an outcome boundary on the startedAt Tokyo date before external access', async () => {
