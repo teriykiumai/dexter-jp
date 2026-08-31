@@ -245,6 +245,13 @@ an order and cannot supply a mark price. Missing an official-session row is not
 equivalent to a returned all-null row and fails the required window as
 `price_history_incomplete`.
 
+The source defines `UL` only as the daily stop-high flag and `LL` only as the daily
+stop-low flag. Neither flag is a generic statement that every order on the row was
+queue-blocked. For the narrow V1 fill check, `UL === "1"` identifies `H` as the
+flagged upper boundary and `LL === "1"` identifies `L` as the flagged lower
+boundary. Phase 4 does not reconstruct a theoretical limit price from a prior close,
+static limit-width table, or an assumed expansion regime.
+
 ### 4.4 t0-relative price basis
 
 Current API `AdjO/AdjH/AdjL/AdjC` values are not used because they may include
@@ -511,6 +518,10 @@ executable tick for each level. Failure is `invalid_candidate` or
 
 ### 6.3 Daily fill algorithm
 
+The algorithm version is `daily_long_fill_v1`; its queue subrule is
+`adverse_flagged_boundary_v1`. Phase 4 validates long candidates only: Entry is a
+buy, while Stop and Target are sells.
+
 No-trade rows consume an official session but cause no touch or fill. For a complete
 bar before entry:
 
@@ -545,10 +556,58 @@ same holding-day count; it does not reset entry or horizon. Later dual-touch bar
 stop and target as the two bounds. Branches use the same later rows and cannot read
 beyond the common horizon. Source geometry already guarantees `L <= C <= H`.
 
-If `UL === "1"` or `LL === "1"` on a row whose entry or exit fill would otherwise be
-selected, daily data cannot establish queue execution. The result is unavailable
-with `limit_queue_ambiguous`. A limit flag on a no-touch row or on a final mark-only
-row does not by itself change the result.
+After the OHLC algorithm selects a hypothetical fill, the V1 adverse-side queue
+check is exactly:
+
+```text
+buy entry  is limit-bound iff UL === "1" && selectedFillPrice === H
+sell stop  is limit-bound iff LL === "1" && selectedFillPrice === L
+sell target is never made queue-ambiguous by UL/LL alone
+```
+
+Prices are compared as exact canonical decimals on the already validated common
+price basis; there is no epsilon, clamp, or inferred boundary. A limit-bound buy
+entry or sell stop is unavailable with `limit_queue_ambiguous`, because a daily bar
+does not prove the hypothetical order's priority or execution at that adverse
+boundary. If the ambiguous event is the entry, `entryProven` remains false. If it is
+a later stop, the already proven entry remains true but no realized R is emitted.
+When a reported intraday bound requires that stop fill, the queue ambiguity takes
+precedence over `ambiguous_intraday` because the stop bound itself is not executable
+from daily evidence.
+
+All other combinations retain the result chosen by the OHLC algorithm. In
+particular:
+
+- `UL === "1"` does not censor a lower sell-stop fill;
+- `LL === "1"` does not censor a buy-entry or upper sell-target fill;
+- a buy entry below `H` is not limit-bound even when `UL === "1"`;
+- a sell stop above `L` is not limit-bound even when `LL === "1"`; and
+- no-touch and final mark-only rows retain both flags only as source evidence.
+
+The same rule applies to threshold, gap/open, and entry-bar fills. Thus an entry
+selected at `O` is ambiguous only when it is a buy at `O === H` with `UL === "1"`;
+a gap stop selected at `O` is ambiguous only when it is a sell at `O === L` with
+`LL === "1"`. A case unavailable for this reason records the exact date, order side,
+selected fill price, boundary kind/price, and source flag; it does not claim that the
+order definitely failed.
+
+The strict unavailable member for this reason alone requires:
+
+```ts
+limitQueueEvidence: {
+  date: TseSessionDate;
+  orderSide: 'buy' | 'sell';
+  fillKind: 'entry' | 'stop';
+  selectedFillPrice: number;
+  boundaryKind: 'upper' | 'lower';
+  boundaryPrice: number;
+  sourceFlag: 'UL' | 'LL';
+}
+```
+
+The allowed pairs are exactly buy/entry/upper/UL and sell/stop/lower/LL. The field is
+absent for every other result/reason; mismatched or extra combinations are schema
+errors.
 
 ### 6.4 Result union and reason vocabulary
 
@@ -645,7 +704,8 @@ digests, and versions, but no invented candidate, price, fill, or R field.
 - `schemaVersion: "strategy_validation_case_v1"`;
 - case/run identity, mode, confidence, ticker, and anchor/decision dates;
 - Snapshot ID/schema/digest or campaign manifest digest, as applicable;
-- technical/Strategy/tick/source-contract version literals;
+- technical/Strategy/tick/source-contract, daily-fill, and limit-queue version
+  literals;
 - canonical candidate identity and duplicate ordinal;
 - exact entry, stop, and target values and reason literals;
 - tick category/effective date, per-level tick, and executability state;
@@ -653,7 +713,9 @@ digests, and versions, but no invented candidate, price, fill, or R field.
 - frozen `startedAt`, `outcomeAsOfSession`, entry-wait and holding-window boundaries;
 - independent `entryProven` plus exact entry fill identity when true;
 - result union, exact fill/mark dates and prices, planned/actual risk, R values,
-  ambiguity bounds, and unavailable reasons; and
+  ambiguity bounds, and unavailable reasons;
+- for `limit_queue_ambiguous` only, exact date, order side, selected fill price,
+  boundary kind/price, and source flag; and
 - ordered unique source-envelope digest references.
 
 It does not contain a report body, raw prompt/response, API key, HTTP header, request
@@ -1170,8 +1232,8 @@ reviewed plan and user decision.
 | P4-0 | Source of Truth agreement; predecessor docs unchanged; no runtime/dependency/Snapshot/UI diff |
 | P4-I0 | strict dates/time zones; future-row isolation; official-session arithmetic; `outcomeAsOfSession` strictly before started Tokyo date; null/no-row distinction; cumulative factor boundaries and rounding golden vectors; corporate-action flags; all tick bands/dates/categories; decimal executability; canonical source digest; input immutability |
 | P4-I1 | exact endpoint/query/field schemas; `ProdCat`; master/date identity; pagination duplicate/repeat; same startedAt before/after same-day publication yields identical accepted outcome rows; 4xx/429/5xx/network retry matrix; `Retry-After`; rate and 250-attempt accounting; 30s/90m timeout; abort priority; no secret/body logging; stub CI; manual <=10-attempt matured-anchor smoke |
-| P4-V1 | t1/t20/t60/t79 boundaries; no-trade sessions; every entry/open/threshold gap branch; entry-bar stop-only with `C <= stop`, `stop < C < target`, target-only, and dual-touch vectors; `UL/LL`; all corporate-action boundaries; invalid ticks/candidates; immature outcomes; actual-risk zero; exact/mark/ambiguous R; no input mutation |
-| P4-R1 | 1 MiB/UTF-8/duplicate keys/strict fields; 1/500 anchors; duplicate anchor; 0/8 refs; 16 resistance dedup; UUID/path containment; canonical manifest/case/run/source digests; atomic no-replace and temp cleanup; rerun new ID; corruption never skipped; track-level all-anchor coverage and candidate-stratum denominators with mostly-unavailable/multi-stratum fixtures |
+| P4-V1 | t1/t20/t60/t79 boundaries; no-trade sessions; every entry/open/threshold gap branch; entry-bar stop-only with `C <= stop`, `stop < C < target`, target-only, and dual-touch vectors; `UL=1/LL=0` with deterministic lower stop; `LL=1/UL=0` with deterministic upper-side fill; buy-entry exactly at flagged `H`; sell-stop exactly at flagged `L`; same flags with fill strictly inside the boundary; gap/open and entry-bar limit-bound variants; precedence over intraday bounds; all corporate-action boundaries; invalid ticks/candidates; immature outcomes; actual-risk zero; exact/mark/ambiguous R; no input mutation |
+| P4-R1 | 1 MiB/UTF-8/duplicate keys/strict fields; required/absent/mismatched `limitQueueEvidence`; 1/500 anchors; duplicate anchor; 0/8 refs; 16 resistance dedup; UUID/path containment; canonical manifest/case/run/source digests; atomic no-replace and temp cleanup; rerun new ID; corruption never skipped; track-level all-anchor coverage and candidate-stratum denominators with mostly-unavailable/multi-stratum fixtures |
 | P4-S1 | V1-V9 exact history load; ticker/ID/digest; no latest fallback; generatedAt Tokyo date; future strategy date; all stored 2R/resistance and duplicates; default-No/noninteractive confirmation; error/cancel no run |
 | P4-C1 | exact 251 t0-bounded sessions; no current AdjOHLC/future influence; missing OHLC/no candidate; unchanged Engine parity; entry-tick injection and per-level validation; resistance Snapshot generatedTokyoDate guard before extraction; only persisted `resistance_level` target prices; ticker/dataDate/digest; resistance tiers; latest t20 entry through holding day60 |
 | P4-J1 | Host/Origin/CSRF; token restart/constant-time check; JSON/media/body limits; frozen preflight startedAt; expiry/one-time/digest mismatch; one global job; every lifecycle transition; crash before promotion, after promotion/before completion rewrite, and after completion; reconciliation digest/identity/corruption; cancel during wait/fetch/validate/publish; 200/202/400/403/404/409/413/415/500 and inherited 405; pagination ties; corruption 500; no credential/path response |
@@ -1233,6 +1295,8 @@ current revisions and freeze any code-relevant mapping version before implementa
 
 - J-Quants daily bars and exact `O/H/L/C`, `UL/LL`, `AdjFactor`, and `ExRT` semantics:
   <https://jpx-jquants.com/ja/spec/eq-bars-daily>
+- JPX daily price-limit boundaries and exceptional expansion context:
+  <https://www.jpx.co.jp/equities/trading/domestic/06.html>
 - J-Quants cumulative adjustment method:
   <https://jpx-jquants.com/ja/spec/eq-bars-daily/adj>
 - J-Quants historical master semantics and fields:

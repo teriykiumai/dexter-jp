@@ -117,8 +117,10 @@ explicitly deferred.
 Entry waits t1-t20. Entry day is holding day 1 and a filled case observes through
 holding day 60, so a t20 entry can require evaluation session 79. Daily OHLC applies
 fixed conservative gap rules. Same-bar sequence that daily data cannot prove is
-bounded as `ambiguous_intraday`; a required fill on a daily price-limit-flag day is
-`limit_queue_ambiguous`. No-trade rows count as sessions but not touches.
+bounded as `ambiguous_intraday`. `UL`/`LL` are evidence flags, not generic execution
+flags: only a buy Entry exactly at flagged `H` or a sell Stop exactly at flagged `L`
+is `limit_queue_ambiguous`. Opposite-side and boundary-inside fills remain governed
+by the OHLC algorithm. No-trade rows count as sessions but not touches.
 
 For an entry bar with open below entry and a stop touch, close at or below stop makes
 the stop provable after entry; only a close above stop permits the optimistic
@@ -227,6 +229,8 @@ For P4-I0 after that gate:
   and warning are mandatory, not cosmetic.
 - Daily bars cannot establish intraday order or queue priority; ambiguity must remain
   first-class rather than being forced into a win/loss.
+- A daily stop-high/stop-low flag does not censor unrelated fills; queue ambiguity is
+  limited to adverse-side fills exactly at the flagged OHLC boundary.
 - Same-day outcome bars are excluded even if a job crosses their publication time;
   otherwise the immutable cutoff would be false.
 - Historical master/tick evidence and plan retention may fail feasibility; this is an
