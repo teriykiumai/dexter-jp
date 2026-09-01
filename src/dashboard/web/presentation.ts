@@ -9,6 +9,7 @@ import {
   type PeerRadarAxisState,
   type PeerRadarSelectionState,
 } from './peer-radar.js';
+import { clearStrategyValidationQuery } from './strategy-validation.js';
 
 export const UNAVAILABLE_TEXT = '利用不可' as const;
 
@@ -18,6 +19,7 @@ export const DASHBOARD_TABS = [
   { id: 'fundamentals', label: '比較・配当' },
   { id: 'supply-demand', label: '需給・空売り' },
   { id: 'market', label: '市場・セクター' },
+  { id: 'validation', label: '戦略検証' },
 ] as const;
 
 export type DashboardTabId = (typeof DASHBOARD_TABS)[number]['id'];
@@ -693,6 +695,7 @@ export function buildDetailPath(
   parameters.set('tab', tab);
   parameters.delete('base');
   parameters.delete('target');
+  clearStrategyValidationQuery(parameters);
   return `/?${parameters.toString()}`;
 }
 
@@ -713,6 +716,7 @@ export function buildWatchlistPath(currentSearch = ''): string {
   parameters.delete('tab');
   parameters.delete('base');
   parameters.delete('target');
+  clearStrategyValidationQuery(parameters);
   const search = parameters.toString();
   return search ? `/?${search}` : '/';
 }

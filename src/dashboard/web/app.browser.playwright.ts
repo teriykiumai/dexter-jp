@@ -30,6 +30,13 @@ import {
   type DashboardTabId,
 } from './presentation.js';
 import { COMPARISON_PAIR_REQUIREMENT } from './comparison.js';
+import {
+  campaignCandidateCase,
+  snapshotCandidateCase,
+  validationRun,
+  validationSource,
+} from '../../analysis/strategy-validation/artifact-test-fixtures.js';
+import { StrategyValidationCaseV1Schema } from '../../analysis/strategy-validation/artifacts.js';
 
 type RadarMetric = 'per' | 'pbr' | 'roe' | 'roic' | 'operatingMargin'
   | 'revenueGrowth' | 'dividendYield';
@@ -621,6 +628,7 @@ const snapshots = new Map<string, AnalysisSnapshot>([
   ['1009', versionedSnapshot('1009', 9)],
   ['1010', completeV9Snapshot()],
   ['1011', duplicateStateSnapshot()],
+  ['7203', versionedSnapshot('7203', 9)],
 ]);
 
 const EXPECTED_UNCOLLECTED_SECTIONS = [
@@ -903,6 +911,267 @@ async function mockComparisonApi(
       contentType: 'application/json; charset=utf-8',
       status: 200,
     });
+  });
+}
+
+function strategyValidationBrowserFixture() {
+  const source = validationSource();
+  const snapshotCase = snapshotCandidateCase(source.digest);
+  const snapshotRun = validationRun([snapshotCase]);
+  const campaignRunId = '33333333-3333-4333-8333-333333333333';
+  const currentTickerCase = campaignCandidateCase(source.digest, {
+    runId: campaignRunId,
+    caseId: '44444444-4444-4444-8444-444444444444',
+    ticker: '7203',
+    anchorDate: '2025-01-06',
+    targetReason: 'resistance_level',
+  });
+  const otherTickerCase = campaignCandidateCase(source.digest, {
+    runId: campaignRunId,
+    caseId: '55555555-5555-4555-8555-555555555555',
+    ticker: '6758',
+    anchorDate: '2025-01-07',
+  });
+  const ambiguousBase = campaignCandidateCase(source.digest, {
+    runId: campaignRunId,
+    caseId: '77777777-7777-4777-8777-777777777777',
+    ticker: '7203',
+    anchorDate: '2025-01-08',
+  });
+  if (ambiguousBase.caseKind !== 'candidate' || ambiguousBase.outcome.kind !== 'target_hit') {
+    throw new TypeError('Expected a terminal campaign candidate fixture.');
+  }
+  const ambiguousCase = StrategyValidationCaseV1Schema.parse({
+    ...ambiguousBase,
+    outcome: {
+      algorithmVersion: ambiguousBase.outcome.algorithmVersion,
+      limitQueueVersion: ambiguousBase.outcome.limitQueueVersion,
+      plannedRisk: 10,
+      evaluationEndDate: '2025-01-09',
+      kind: 'ambiguous_intraday',
+      entryProven: true,
+      entryFill: ambiguousBase.outcome.entryFill,
+      actualRisk: 10,
+      ambiguityDate: '2025-01-09',
+      pessimistic: {
+        kind: 'stop_hit',
+        exitFill: {
+          date: '2025-01-09', evaluationSession: 1, holdingDay: 1,
+          order: 'stop', method: 'stop_level', price: 90,
+        },
+        realizedR: -1,
+      },
+      optimistic: {
+        kind: 'target_hit',
+        exitFill: {
+          date: '2025-01-09', evaluationSession: 1, holdingDay: 1,
+          order: 'target', method: 'target_level', price: 120,
+        },
+        realizedR: 2,
+      },
+    },
+  });
+  const limitQueueBase = campaignCandidateCase(source.digest, {
+    runId: campaignRunId,
+    caseId: '88888888-8888-4888-8888-888888888888',
+    ticker: '7203',
+    anchorDate: '2025-01-10',
+  });
+  const limitQueueCase = StrategyValidationCaseV1Schema.parse({
+    ...limitQueueBase,
+    outcome: {
+      algorithmVersion: 'daily_long_fill_v1',
+      limitQueueVersion: 'adverse_flagged_boundary_v1',
+      plannedRisk: 10,
+      evaluationEndDate: '2025-01-11',
+      kind: 'unavailable',
+      reason: 'limit_queue_ambiguous',
+      entryProven: false,
+      entryFill: null,
+      actualRisk: null,
+      limitQueueEvidence: {
+        date: '2025-01-11',
+        orderSide: 'buy',
+        fillKind: 'entry',
+        selectedFillPrice: 100,
+        boundaryKind: 'upper',
+        boundaryPrice: 100,
+        sourceFlag: 'UL',
+      },
+    },
+  });
+  const campaignRun = {
+    ...validationRun([currentTickerCase, otherTickerCase, ambiguousCase, limitQueueCase]),
+    warnings: [
+      'reconstructed_251_as_of: technical_251_strategy_v1 is a standardized retrospective policy and is not production-pipeline parity.',
+    ],
+  };
+  const job = {
+    schemaVersion: 'strategy_validation_job_view_v1' as const,
+    jobId: '66666666-6666-4666-8666-666666666666',
+    runId: snapshotRun.runId,
+    mode: 'snapshot' as const,
+    inputDigest: `sha256:${'6'.repeat(64)}` as const,
+    selector: snapshotRun.selector,
+    startedAt: snapshotRun.startedAt,
+    acceptedAt: snapshotRun.acceptedAt,
+    executionDeadline: snapshotRun.executionDeadline,
+    executionControls: snapshotRun.execution.controls,
+    status: 'completed' as const,
+    createdAt: snapshotRun.acceptedAt,
+    updatedAt: snapshotRun.completedAt,
+    finishedAt: snapshotRun.completedAt,
+    cancellationRequestedAt: null,
+    outcomeAsOfSession: snapshotRun.outcomeAsOfSession,
+    expectedRunPayloadDigest: `sha256:${'7'.repeat(64)}` as const,
+    progress: {
+      attemptCount: snapshotRun.execution.attemptCount,
+      caseCount: snapshotRun.caseReferences.length,
+    },
+    failure: null,
+  };
+  return {
+    ambiguousCase,
+    campaignRun,
+    currentTickerCase,
+    job,
+    limitQueueCase,
+    otherTickerCase,
+    requests: [] as Array<Readonly<{ method: string; path: string; body: unknown; csrf: string | null }>>,
+    snapshotCase,
+    snapshotRun,
+  };
+}
+
+async function mockStrategyValidationApi(
+  page: Page,
+  fixture: ReturnType<typeof strategyValidationBrowserFixture>,
+): Promise<void> {
+  const csrfToken = 'x'.repeat(43);
+  const runs = [fixture.campaignRun, fixture.snapshotRun];
+  const casesByRun = new Map([
+    [fixture.snapshotRun.runId, [fixture.snapshotCase]],
+    [fixture.campaignRun.runId, [
+      fixture.currentTickerCase,
+      fixture.otherTickerCase,
+      fixture.ambiguousCase,
+      fixture.limitQueueCase,
+    ]],
+  ]);
+  const summary = (run: typeof fixture.snapshotRun | typeof fixture.campaignRun) => ({
+    schemaVersion: 'strategy_validation_run_summary_v1',
+    runId: run.runId,
+    mode: run.mode,
+    confidence: run.confidence,
+    campaignName: run.campaignName,
+    completedAt: run.completedAt,
+    outcomeAsOfSession: run.outcomeAsOfSession,
+    aggregationScope: run.aggregationScope,
+    caseCount: run.caseReferences.length,
+    warnings: run.warnings,
+  });
+  const fulfill = async (route: Parameters<Parameters<Page['route']>[1]>[0], body: unknown, status = 200) => {
+    await route.fulfill({
+      body: JSON.stringify(body),
+      contentType: 'application/json; charset=utf-8',
+      status,
+    });
+  };
+  await page.route('**/api/session', async route => {
+    await fulfill(route, {
+      schemaVersion: 'dashboard_session_v1',
+      csrfHeader: 'X-Dexter-CSRF',
+      csrfToken,
+    });
+  });
+  await page.route('**/api/strategy-validation/**', async route => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const segments = url.pathname.split('/').filter(Boolean);
+    const method = request.method();
+    const body = request.postData() ? request.postDataJSON() as unknown : null;
+    fixture.requests.push({
+      method,
+      path: `${url.pathname}${url.search}`,
+      body,
+      csrf: request.headers()['x-dexter-csrf'] ?? null,
+    });
+    if (segments[2] === 'preflights' && method === 'POST') {
+      await fulfill(route, {
+        schemaVersion: 'strategy_validation_preflight_v1',
+        preflightId: '77777777-7777-4777-8777-777777777777',
+        mode: 'snapshot',
+        startedAt: '2026-09-01T00:00:00.000Z',
+        expiresAt: '2026-09-01T00:10:00.000Z',
+        outcomeSessionRule: 'last_official_tse_session_strictly_before_started_tokyo_date',
+        inputDigest: `sha256:${'8'.repeat(64)}`,
+        tickerCount: 1,
+        anchorCount: 1,
+        estimatedMinimumAttempts: 3,
+        minimumDispatchDurationMs: 24_000,
+        rateLimitVersion: 'rolling_attempt_log_v1',
+        requestsPerMinute: 5,
+        hardMaximumAttempts: 250,
+        requestTimeoutMs: 30_000,
+        executionBudgetMs: 5_400_000,
+        warnings: ['Pagination and retries can increase requests.'],
+      });
+      return;
+    }
+    if (segments[2] === 'jobs' && segments[3] === 'active') {
+      await fulfill(route, { schemaVersion: 'strategy_validation_active_job_v1', job: null });
+      return;
+    }
+    if (segments[2] === 'jobs' && segments.length === 3 && method === 'POST') {
+      await fulfill(route, {
+        schemaVersion: 'strategy_validation_job_accepted_v1',
+        job: fixture.job,
+        statusUrl: `/api/strategy-validation/jobs/${fixture.job.jobId}`,
+      }, 202);
+      return;
+    }
+    if (segments[2] === 'jobs' && segments[3] === fixture.job.jobId) {
+      await fulfill(route, fixture.job);
+      return;
+    }
+    if (segments[2] !== 'runs') {
+      await fulfill(route, { error: { code: 'invalid_route_parameter', message: 'Invalid route.' } }, 400);
+      return;
+    }
+    if (segments.length === 3) {
+      const ticker = url.searchParams.get('ticker');
+      await fulfill(route, {
+        schemaVersion: 'strategy_validation_list_v1',
+        items: runs.filter(run => ticker === null || run.aggregationScope.tickers.includes(ticker)).map(summary),
+        nextCursor: null,
+      });
+      return;
+    }
+    const run = runs.find(value => value.runId === segments[3]);
+    if (!run) {
+      await fulfill(route, { error: { code: 'run_not_found', message: 'Run not found.' } }, 404);
+      return;
+    }
+    if (segments.length === 4) {
+      await fulfill(route, run);
+      return;
+    }
+    const runCases = casesByRun.get(run.runId) ?? [];
+    if (segments.length === 5 && segments[4] === 'cases') {
+      const ticker = url.searchParams.get('ticker');
+      await fulfill(route, {
+        schemaVersion: 'strategy_validation_list_v1',
+        items: runCases.filter(value => ticker === null || value.ticker === ticker),
+        nextCursor: null,
+      });
+      return;
+    }
+    const selectedCase = runCases.find(value => value.caseId === segments[5]);
+    if (!selectedCase) {
+      await fulfill(route, { error: { code: 'case_not_found', message: 'Case not found.' } }, 404);
+      return;
+    }
+    await fulfill(route, selectedCase);
   });
 }
 
@@ -1511,6 +1780,371 @@ test.describe('saved-analysis Comparison browser interaction', () => {
   });
 });
 
+test.describe('strategy validation Dashboard interaction', () => {
+  test('requires a local preflight and default-No confirmation before starting a job', async ({ browser }) => {
+    const page = await browser.newPage();
+    const fixture = strategyValidationBrowserFixture();
+    try {
+      await mockSnapshotApi(page);
+      await mockStrategyValidationApi(page, fixture);
+      await openDetail(page, '7203', 'validation');
+
+      await expect(page.getByRole('tab')).toHaveCount(6);
+      expect(await page.locator('.detail-tab-label').allTextContents()).toEqual([
+        '概要・レポート',
+        '株価・テクニカル',
+        '比較・配当',
+        '需給・空売り',
+        '市場・セクター',
+        '戦略検証',
+      ]);
+      await expect(page.getByRole('heading', { name: /保存済みSnapshot監査|キャンペーン全体/ }))
+        .toHaveCount(0);
+      expect(new URL(page.url()).searchParams.has('validationRun')).toBe(false);
+
+      await page.getByLabel('Campaign JSON', { exact: true }).check();
+      await page.locator('input[type="file"]').setInputFiles({
+        name: 'oversized.json',
+        mimeType: 'application/json',
+        buffer: Buffer.alloc(1_048_577, 0x20),
+      });
+      await expect(page.getByText('Manifestは1,048,576 bytes以下である必要があります。'))
+        .toBeVisible();
+      await page.locator('input[type="file"]').setInputFiles({
+        name: 'campaign.json',
+        mimeType: 'application/json',
+        buffer: Buffer.from(JSON.stringify({
+          schemaVersion: 'strategy_validation_campaign_v1',
+          name: '日本株検証',
+          anchors: [{ ticker: '7203', anchorDate: '2025-01-06', resistanceEvidence: [] }],
+        })),
+      });
+      await expect(page.getByText('日本株検証 / 1基準日を検証しました。', { exact: true }))
+        .toBeVisible();
+
+      await page.getByLabel('保存済みSnapshot', { exact: true }).check();
+      await page.locator('.validation-field select').selectOption({ index: 1 });
+      await page.getByRole('button', { name: 'ローカルPreflightを実行' }).click();
+
+      const confirmation = page.getByRole('heading', { name: '外部送信・利用枠の確認' });
+      await expect(confirmation).toBeVisible();
+      const estimate = page.getByRole('table', { name: 'Preflight estimate' });
+      await expect(estimate).toContainText('最小request数3');
+      await expect(estimate).toContainText('最小dispatch時間24秒');
+      await expect(estimate).toContainText('Rate5 requests/min');
+      await expect(estimate).toContainText('Execution budget90分');
+      await expect(page.getByText(/pagination、retry、response latency/)).toBeVisible();
+
+      const consent = page.getByRole('checkbox', {
+        name: '上記の外部送信と利用枠消費の可能性を確認しました',
+      });
+      const start = page.getByRole('button', { name: 'Jobを開始' });
+      await expect(consent).not.toBeChecked();
+      await expect(start).toBeDisabled();
+      await consent.check();
+      await start.click();
+      await expect(page.getByRole('status').filter({ hasText: '状態 completed' })).toBeVisible();
+      expect(new URL(page.url()).searchParams.has('validationRun')).toBe(false);
+
+      const preflightRequest = fixture.requests.find(request => (
+        request.method === 'POST' && request.path === '/api/strategy-validation/preflights'
+      ));
+      expect(preflightRequest?.body).toMatchObject({ mode: 'snapshot', ticker: '7203' });
+      expect(preflightRequest?.csrf).toBe('x'.repeat(43));
+      const jobRequest = fixture.requests.find(request => (
+        request.method === 'POST' && request.path === '/api/strategy-validation/jobs'
+      ));
+      expect(jobRequest?.body).toEqual({
+        preflightId: '77777777-7777-4777-8777-777777777777',
+        confirmExternalFetch: true,
+      });
+      expect(jobRequest?.csrf).toBe('x'.repeat(43));
+
+      await page.getByRole('button', { name: '結果を明示的に開く' }).click();
+      await expect(page.getByRole('heading', { name: '保存済みSnapshot監査（7203）' }))
+        .toBeVisible();
+      expect(new URL(page.url()).searchParams.get('validationRun')).toBe(fixture.snapshotRun.runId);
+      await expect(page.getByRole('heading', { name: '保存済みSnapshot監査（7203）' }))
+        .toBeFocused();
+    } finally {
+      await page.close();
+    }
+  });
+
+  test('restores campaign and case deep links without deriving a ticker-local aggregate', async ({ browser }) => {
+    const page = await browser.newPage();
+    const fixture = strategyValidationBrowserFixture();
+    try {
+      await mockSnapshotApi(page);
+      await mockStrategyValidationApi(page, fixture);
+      await openDetail(
+        page,
+        '7203',
+        'validation',
+        `&validationRun=${fixture.campaignRun.runId}`,
+      );
+
+      await expect(page.getByRole('heading', { name: 'キャンペーン全体（2銘柄・4基準日）' }))
+        .toBeVisible();
+      await expect(page.getByText(
+        '集計値はキャンペーン全体です。表示中の銘柄は7203ですが、ケース一覧だけがこの銘柄に絞り込まれています。',
+        { exact: true },
+      )).toBeVisible();
+      await expect(page.getByText('technical_251_strategy_v1', { exact: true })).toBeVisible();
+      await expect(page.getByText(/not production-pipeline parity/)).toBeVisible();
+      const caseList = page.locator('.validation-case-list');
+      await expect(caseList.locator('tbody tr')).toHaveCount(3);
+      await expect(caseList).toContainText('7203');
+      await expect(caseList).not.toContainText('6758');
+
+      await caseList.getByRole('button', {
+        name: new RegExp(`${fixture.currentTickerCase.caseId} を開く$`),
+      }).click();
+      await expect(page.getByRole('heading', { name: 'ケース詳細' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'ケース詳細' })).toBeFocused();
+      expect(new URL(page.url()).searchParams.get('validationCase'))
+        .toBe(fixture.currentTickerCase.caseId);
+      await page.reload();
+      await waitForSelectedTab(page, 'validation');
+      await expect(page.getByRole('heading', { name: 'ケース詳細' })).toBeVisible();
+      expect(new URL(page.url()).searchParams.get('validationCase'))
+        .toBe(fixture.currentTickerCase.caseId);
+
+      await page.goBack();
+      await expect(page.getByRole('heading', { name: 'キャンペーン全体（2銘柄・4基準日）' }))
+        .toBeVisible();
+      expect(new URL(page.url()).searchParams.has('validationCase')).toBe(false);
+      await page.goForward();
+      const restoredCaseHeading = page.getByRole('heading', { name: 'ケース詳細' });
+      await expect(restoredCaseHeading).toBeVisible();
+      await expect(restoredCaseHeading).not.toBeFocused();
+      expect(new URL(page.url()).searchParams.get('validationRun')).toBe(fixture.campaignRun.runId);
+      expect(new URL(page.url()).searchParams.get('validationCase'))
+        .toBe(fixture.currentTickerCase.caseId);
+      await expect(page.getByRole('table', { name: 'Case metadata' })).toContainText('Ticker7203');
+      await page.goBack();
+      await expect(page.getByRole('heading', { name: 'キャンペーン全体（2銘柄・4基準日）' }))
+        .toBeVisible();
+      await page.getByRole('button', { name: '← Analysis Portfolio' }).click();
+      await expect(page.getByRole('heading', { name: 'Analysis Watchlist' })).toBeVisible();
+      expect(new URL(page.url()).searchParams.has('validationRun')).toBe(false);
+      expect(new URL(page.url()).searchParams.has('validationCase')).toBe(false);
+
+      await page.goto(
+        `${baseUrl}/?ticker=7203&tab=validation&validationRun=${fixture.campaignRun.runId}`
+        + `&validationCase=${fixture.otherTickerCase.caseId}`,
+      );
+      await waitForSelectedTab(page, 'validation');
+      const crossTickerError = page.getByRole('alert').filter({
+        hasText: 'このcaseは表示中の銘柄に属していません。',
+      });
+      await expect(crossTickerError).toBeVisible();
+      await expect(crossTickerError).toBeFocused();
+      await expect(page.getByRole('heading', { name: 'ケース詳細' })).toHaveCount(0);
+      expect(new URL(page.url()).searchParams.get('validationCase'))
+        .toBe(fixture.otherTickerCase.caseId);
+
+      await page.goto(`${baseUrl}/?ticker=7203&tab=validation&validationCase=invalid`);
+      await waitForSelectedTab(page, 'validation');
+      const orphanError = page.getByRole('alert').filter({
+        hasText: 'caseを指定するにはvalidationRunが必要です。',
+      });
+      await expect(orphanError).toBeVisible();
+      await expect(orphanError).toBeFocused();
+      expect(new URL(page.url()).searchParams.get('validationCase')).toBe('invalid');
+    } finally {
+      await page.close();
+    }
+  });
+
+  test('keeps ambiguity bounds distinct and maps limit-queue evidence to neutral wording', async ({ browser }) => {
+    const page = await browser.newPage();
+    const fixture = strategyValidationBrowserFixture();
+    try {
+      await mockSnapshotApi(page);
+      await mockStrategyValidationApi(page, fixture);
+      await openDetail(
+        page,
+        '7203',
+        'validation',
+        `&validationRun=${fixture.campaignRun.runId}&validationCase=${fixture.ambiguousCase.caseId}`,
+      );
+
+      const ambiguousOutcome = page.locator('.validation-outcome');
+      await expect(ambiguousOutcome.getByRole('heading', {
+        name: '観測結果: ambiguous_intraday',
+      })).toBeVisible();
+      await expect(ambiguousOutcome.getByRole('heading', { name: '悲観境界: stop_hit' }))
+        .toBeVisible();
+      await expect(ambiguousOutcome.getByRole('heading', { name: '楽観境界: target_hit' }))
+        .toBeVisible();
+      await expect(ambiguousOutcome.getByText('実現R -1', { exact: true })).toBeVisible();
+      await expect(ambiguousOutcome.getByText('実現R 2', { exact: true })).toBeVisible();
+      await expect(ambiguousOutcome.locator('.validation-exact-value')).toHaveCount(0);
+
+      await page.goto(
+        `${baseUrl}/?ticker=7203&tab=validation&validationRun=${fixture.campaignRun.runId}`
+        + `&validationCase=${fixture.limitQueueCase.caseId}`,
+      );
+      await waitForSelectedTab(page, 'validation');
+      const limitEvidence = page.getByRole('table', { name: 'Limit queue evidence' });
+      await expect(limitEvidence).toContainText('日付2025-01-11');
+      await expect(limitEvidence).toContainText('注文役割エントリー側');
+      await expect(limitEvidence).toContainText('fill kindentry');
+      await expect(limitEvidence).toContainText('選択価格100');
+      await expect(limitEvidence).toContainText('境界upper / 100');
+      await expect(limitEvidence).toContainText('source flagUL');
+      expect(await page.locator('.validation-case-detail').innerText()).not.toMatch(/\b(?:buy|sell)\b/i);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test('keeps the newest explicit run selection when an older request finishes late', async ({ browser }) => {
+    const page = await browser.newPage();
+    const fixture = strategyValidationBrowserFixture();
+    try {
+      await mockSnapshotApi(page);
+      await mockStrategyValidationApi(page, fixture);
+      await page.route(url => (
+        url.pathname === `/api/strategy-validation/runs/${fixture.campaignRun.runId}`
+      ), async route => {
+        await new Promise(resolve => setTimeout(resolve, 350));
+        await route.fulfill({
+          body: JSON.stringify(fixture.campaignRun),
+          contentType: 'application/json; charset=utf-8',
+          status: 200,
+        });
+      });
+      await openDetail(page, '7203', 'validation');
+
+      const campaignRequest = page.waitForRequest(request => (
+        new URL(request.url()).pathname
+          === `/api/strategy-validation/runs/${fixture.campaignRun.runId}`
+      ));
+      await page.locator('.validation-run-list button').filter({ hasText: '検証キャンペーン' }).click();
+      await campaignRequest;
+      await page.locator('.validation-run-list button').filter({ hasText: '保存Snapshot' }).click();
+      await expect(page.getByRole('heading', { name: '保存済みSnapshot監査（7203）' }))
+        .toBeVisible();
+      await page.waitForTimeout(450);
+
+      expect(new URL(page.url()).searchParams.get('validationRun')).toBe(fixture.snapshotRun.runId);
+      await expect(page.getByRole('heading', { name: '保存済みSnapshot監査（7203）' }))
+        .toBeVisible();
+      await expect(page.getByRole('heading', { name: 'キャンペーン全体（2銘柄・4基準日）' }))
+        .toHaveCount(0);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test('never lets a stale poll regress an authenticated cancellation', async ({ browser }) => {
+    const page = await browser.newPage();
+    const fixture = strategyValidationBrowserFixture();
+    const activeJob = {
+      ...fixture.job,
+      status: 'collecting' as const,
+      finishedAt: null,
+      updatedAt: fixture.job.startedAt,
+      progress: { attemptCount: 1, caseCount: 0 },
+    };
+    const cancelledJob = {
+      ...activeJob,
+      status: 'cancelled' as const,
+      updatedAt: fixture.job.finishedAt,
+      finishedAt: fixture.job.finishedAt,
+      cancellationRequestedAt: fixture.job.finishedAt,
+    };
+    let pollCount = 0;
+    let cancelCsrf: string | null = null;
+    let releaseStalePoll = () => {};
+    let markStalePollStarted = () => {};
+    let releaseCancel = () => {};
+    let markCancelStarted = () => {};
+    const stalePollRelease = new Promise<void>(resolve => { releaseStalePoll = resolve; });
+    const stalePollStarted = new Promise<void>(resolve => { markStalePollStarted = resolve; });
+    const cancelRelease = new Promise<void>(resolve => { releaseCancel = resolve; });
+    const cancelStarted = new Promise<void>(resolve => { markCancelStarted = resolve; });
+    try {
+      await mockSnapshotApi(page);
+      await mockStrategyValidationApi(page, fixture);
+      await page.route(url => url.pathname === '/api/strategy-validation/jobs/active', async route => {
+        await route.fulfill({
+          body: JSON.stringify({ schemaVersion: 'strategy_validation_active_job_v1', job: activeJob }),
+          contentType: 'application/json; charset=utf-8',
+          status: 200,
+        });
+      });
+      await page.route(url => (
+        url.pathname === `/api/strategy-validation/jobs/${fixture.job.jobId}`
+      ), async route => {
+        if (route.request().method() === 'DELETE') {
+          cancelCsrf = route.request().headers()['x-dexter-csrf'] ?? null;
+          markCancelStarted();
+          await cancelRelease;
+          await route.fulfill({
+            body: JSON.stringify(cancelledJob),
+            contentType: 'application/json; charset=utf-8',
+            status: 200,
+          });
+          return;
+        }
+        pollCount += 1;
+        markStalePollStarted();
+        await stalePollRelease;
+        await route.fulfill({
+          body: JSON.stringify(activeJob),
+          contentType: 'application/json; charset=utf-8',
+          status: 200,
+        }).catch(() => undefined);
+      });
+
+      await openDetail(page, '7203', 'validation');
+      await expect(page.getByRole('status').filter({ hasText: '状態 collecting' })).toBeVisible();
+      await stalePollStarted;
+      expect(pollCount).toBe(1);
+      await page.getByRole('button', { name: '実行をキャンセル' }).click();
+      await cancelStarted;
+      await expect(page.getByRole('button', { name: '実行をキャンセル' })).toBeDisabled();
+      releaseCancel();
+      await expect(page.getByRole('status').filter({ hasText: '状態 cancelled' })).toBeVisible();
+      releaseStalePoll();
+      await page.waitForTimeout(200);
+      await expect(page.getByRole('status').filter({ hasText: '状態 collecting' })).toHaveCount(0);
+      await expect(page.getByRole('status').filter({ hasText: '状態 cancelled' })).toBeVisible();
+      await expect(page.getByRole('button', { name: '実行をキャンセル' })).toHaveCount(0);
+      expect(cancelCsrf).toBe('x'.repeat(43));
+      expect(new URL(page.url()).searchParams.has('validationRun')).toBe(false);
+    } finally {
+      await page.close();
+    }
+  });
+
+  for (const width of [320, 768, 1280]) {
+    test(`keeps validation tables within the document at ${width}px`, async ({ browser }) => {
+      const context = await browser.newContext({ viewport: { width, height: 900 } });
+      const page = await context.newPage();
+      const fixture = strategyValidationBrowserFixture();
+      try {
+        await mockSnapshotApi(page);
+        await mockStrategyValidationApi(page, fixture);
+        await openDetail(
+          page,
+          '7203',
+          'validation',
+          `&validationRun=${fixture.campaignRun.runId}&validationCase=${fixture.currentTickerCase.caseId}`,
+        );
+        await expect(page.getByRole('heading', { name: 'ケース詳細' })).toBeVisible();
+        expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth))
+          .toBeLessThanOrEqual(0);
+      } finally {
+        await context.close();
+      }
+    });
+  }
+});
+
 test.describe('Peer Radar browser presentation', () => {
   test('renders accessible sparse stored positions identically without raw-metric replay', async ({ browser }) => {
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
@@ -1632,14 +2266,14 @@ test.describe('Dashboard detail tab browser interaction', () => {
       await openDetail(page);
       await page.locator('#dashboard-tab-report').focus();
       await page.keyboard.press('ArrowLeft');
-      await expectSelectedTab(page, 'market');
+      await expectSelectedTab(page, 'validation');
       expect(await page.evaluate(() => (document.activeElement as HTMLElement | null)?.id))
-        .toBe('dashboard-tab-market');
+        .toBe('dashboard-tab-validation');
 
       await page.keyboard.press('ArrowRight');
       await expectSelectedTab(page, 'report');
       await page.keyboard.press('End');
-      await expectSelectedTab(page, 'market');
+      await expectSelectedTab(page, 'validation');
       await page.keyboard.press('Home');
       await expectSelectedTab(page, 'report');
 
@@ -2127,7 +2761,7 @@ test.describe('Dashboard detail tab browser interaction', () => {
       await page.locator('#dashboard-tab-market').focus();
       for (const key of ['Home', 'End', 'ArrowLeft'] as const) {
         await page.keyboard.press(key);
-        const selectedTab = key === 'Home' ? 'report' : key === 'End' ? 'market' : 'supply-demand';
+        const selectedTab = key === 'Home' ? 'report' : key === 'End' ? 'validation' : 'market';
         await expectSelectedTab(page, selectedTab);
         const stickyState = await page.evaluate(() => {
           const rect = document.querySelector('[role="tablist"]')!.getBoundingClientRect();
@@ -2519,6 +3153,7 @@ test.describe('Dashboard detail tab browser interaction', () => {
       fundamentals: ['同業比較', '配当分析'],
       'supply-demand': ['信用需給', '公開空売り残高報告'],
       market: ['投資部門別売買', '市場相関', '業種指数比較', '業種別空売り売買代金'],
+      validation: ['戦略検証を実行', '保存済み検証結果'],
     } as const satisfies Record<DashboardTabId, readonly string[]>;
     try {
       await mockSnapshotApi(page);

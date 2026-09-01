@@ -1,4 +1,3 @@
-import { posix, win32 } from 'node:path';
 import { z } from 'zod';
 import {
   sha256CanonicalJsonV1,
@@ -94,8 +93,8 @@ export function normalizeStrategyValidationCampaignNameV1(
     || normalized === '.'
     || normalized === '..'
     || /^[A-Za-z]:/.test(normalized)
-    || win32.isAbsolute(normalized)
-    || posix.isAbsolute(normalized)) {
+    || normalized.startsWith('/')
+    || normalized.startsWith('\\')) {
     throw new StrategyValidationManifestErrorV1('unsafe_name');
   }
   try {

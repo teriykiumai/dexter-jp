@@ -2121,15 +2121,15 @@ describe('watchlist presentation mapping', () => {
     expect(buildDetailPath(
       '6758',
       'report',
-      '?ticker=7203&tab=market&base=old&target=new&future=keep',
+      '?ticker=7203&tab=market&base=old&target=new&validationRun=run&validationCase=case&future=keep',
     )).toBe('/?ticker=6758&tab=report&future=keep');
     expect(buildDashboardTabPath(
       '7203',
       'technical',
-      '?ticker=7203&tab=report&base=old&target=new&future=keep',
-    )).toBe('/?ticker=7203&tab=technical&base=old&target=new&future=keep');
+      '?ticker=7203&tab=report&base=old&target=new&validationRun=run&validationCase=case&future=keep',
+    )).toBe('/?ticker=7203&tab=technical&base=old&target=new&validationRun=run&validationCase=case&future=keep');
     expect(buildWatchlistPath(
-      '?ticker=7203&tab=report&base=old&target=new&future=keep',
+      '?ticker=7203&tab=report&base=old&target=new&validationRun=run&validationCase=case&future=keep',
     )).toBe('/?future=keep');
     expect(parseDetailTicker('?ticker=7203')).toBe('7203');
     expect(parseDetailTicker('?ticker=130A')).toBe('130A');
@@ -2144,6 +2144,7 @@ describe('watchlist presentation mapping', () => {
       'fundamentals',
       'supply-demand',
       'market',
+      'validation',
     ]);
     expect(new Set(DASHBOARD_TABS.map(tab => tab.id)).size).toBe(DASHBOARD_TABS.length);
     expect(DEFAULT_DASHBOARD_TAB).toBe('report');
@@ -2189,6 +2190,7 @@ describe('watchlist presentation mapping', () => {
         fundamentals: { unavailable: 1, uncollected: 1 },
         'supply-demand': { unavailable: 1, uncollected: 1 },
         market: { unavailable: 1, uncollected: 3 },
+        validation: { unavailable: 0, uncollected: 0 },
       });
     }
   });
@@ -2248,6 +2250,7 @@ describe('watchlist presentation mapping', () => {
       { unavailable: 0, uncollected: 0 },
       { unavailable: 0, uncollected: 0 },
       { unavailable: 0, uncollected: 0 },
+      { unavailable: 0, uncollected: 0 },
     ]);
   });
 
@@ -2268,10 +2271,11 @@ describe('watchlist presentation mapping', () => {
   });
 
   test('moves automatic tab activation with wrapping and Home/End behavior', () => {
-    expect(moveDashboardTab('report', 'ArrowLeft')).toBe('market');
-    expect(moveDashboardTab('market', 'ArrowRight')).toBe('report');
+    expect(moveDashboardTab('report', 'ArrowLeft')).toBe('validation');
+    expect(moveDashboardTab('market', 'ArrowRight')).toBe('validation');
+    expect(moveDashboardTab('validation', 'ArrowRight')).toBe('report');
     expect(moveDashboardTab('technical', 'ArrowRight')).toBe('fundamentals');
     expect(moveDashboardTab('market', 'Home')).toBe('report');
-    expect(moveDashboardTab('report', 'End')).toBe('market');
+    expect(moveDashboardTab('report', 'End')).toBe('validation');
   });
 });
