@@ -458,11 +458,13 @@ describe('historical Strategy reconstruction', () => {
     });
     const accepted = acceptJQuantsExecutionV1(preflight.executionPlan, environment);
     const runtime = new JQuantsExecutionRuntimeV1(accepted, { environment });
+    const derivedOutcomeAsOfSessions: string[] = [];
     const result = await executeCampaignReconstructionV1(preflight, {
       source: new JQuantsValidationAdapterV1(runtime),
       runtime,
       accepted,
       runRepository: runs,
+      onOutcomeAsOfSession: value => { derivedOutcomeAsOfSessions.push(value); },
     });
     const loaded = await runs.load(result.runId);
     expect(loaded.cases).toMatchObject([{
@@ -473,6 +475,7 @@ describe('historical Strategy reconstruction', () => {
     }]);
     expect(loaded.sources).toHaveLength(1);
     expect(loaded.sources[0]!.result.state).toBe('available');
+    expect(derivedOutcomeAsOfSessions).toEqual(['2026-07-31']);
     expect(requests.map(url => url.pathname)).toEqual(['/v2/markets/calendar']);
   });
 

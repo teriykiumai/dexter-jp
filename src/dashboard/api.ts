@@ -14,6 +14,7 @@ import {
   type ComparisonRequestSelectorsV1,
 } from '../analysis/comparison/index.js';
 import { loadDashboardAsset } from './assets.js';
+import type { StrategyValidationDashboardApiV1 } from './strategy-validation-api.js';
 
 export type AnalysisSnapshotReader = Pick<
   AnalysisSnapshotRepository,
@@ -207,11 +208,23 @@ export function isAllowedDashboardHost(host: string | null): boolean {
 export async function handleDashboardRequest(
   request: Request,
   repository: AnalysisSnapshotReader,
+  strategyValidationApi?: StrategyValidationDashboardApiV1,
 ): Promise<Response> {
   const url = new URL(request.url);
   if (!isAllowedDashboardHost(request.headers.get('host'))) {
     return errorResponse(403, 'forbidden_host', 'The request Host is not allowed.');
   }
+
+  const segments = decodedSegments(url.pathname);
+  if (segments === null) {
+    return errorResponse(400, 'invalid_route_parameter', 'The route contains invalid encoding.');
+  }
+
+  if (strategyValidationApi !== undefined) {
+    const strategyResponse = await strategyValidationApi.handle(request, url, segments);
+    if (strategyResponse !== null) return strategyResponse;
+  }
+
   if (request.method !== 'GET') {
     return errorResponse(405, 'method_not_allowed', 'Only GET requests are supported.', {
       Allow: 'GET',
@@ -225,11 +238,6 @@ export async function handleDashboardRequest(
     } catch {
       return internalServerErrorResponse();
     }
-  }
-
-  const segments = decodedSegments(url.pathname);
-  if (segments === null) {
-    return errorResponse(400, 'invalid_route_parameter', 'The route contains invalid encoding.');
   }
 
   try {
