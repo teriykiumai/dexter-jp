@@ -85,6 +85,10 @@ export type StrategyValidationRunPublicationV1 = Readonly<{
   sources: readonly PointInTimeSourceEnvelopeV1[];
 }>;
 
+export type StrategyValidationRunPublishOptionsV1 = Readonly<{
+  assertCanPromote?: () => void;
+}>;
+
 export type LoadedStrategyValidationRunV1 = StrategyValidationRunPublicationV1 & Readonly<{
   runPayloadDigest: SnapshotDigest;
 }>;
@@ -160,7 +164,10 @@ export class StrategyValidationRunRepositoryV1 {
     this.promoteDirectory = options.promoteDirectory ?? defaultPromoteDirectory;
   }
 
-  async publish(rawPublication: StrategyValidationRunPublicationV1): Promise<Readonly<{
+  async publish(
+    rawPublication: StrategyValidationRunPublicationV1,
+    options: StrategyValidationRunPublishOptionsV1 = {},
+  ): Promise<Readonly<{
     state: 'created';
     runId: string;
     runPayloadDigest: SnapshotDigest;
@@ -180,6 +187,7 @@ export class StrategyValidationRunRepositoryV1 {
     );
     this.assertContained(temporaryDirectory);
     let promoted = false;
+    let promotionGuardFailed = false;
     let failure: unknown;
     try {
       await mkdir(temporaryDirectory);
@@ -188,6 +196,12 @@ export class StrategyValidationRunRepositoryV1 {
       await this.writePublication(temporaryDirectory, publication);
       const reread = await this.loadFromDirectory(temporaryDirectory, runId, 'temporary run');
       this.assertEqualPublication(publication, reread);
+      try {
+        options.assertCanPromote?.();
+      } catch (error) {
+        promotionGuardFailed = true;
+        throw error;
+      }
       try {
         await this.promoteDirectory(temporaryDirectory, finalDirectory);
         promoted = true;
@@ -232,6 +246,7 @@ export class StrategyValidationRunRepositoryV1 {
       }
     }
     if (failure instanceof StrategyValidationRunRepositoryErrorV1) throw failure;
+    if (promotionGuardFailed) throw failure;
     throw new StrategyValidationRunRepositoryErrorV1(
       'filesystem_error', 'Could not publish the Strategy-validation run.', failure,
     );

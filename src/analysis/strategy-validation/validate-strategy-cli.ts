@@ -11,6 +11,7 @@ import {
   JQuantsValidationErrorV1,
   acceptJQuantsExecutionV1,
   requireFeasibleJQuantsExecutionV1,
+  type JQuantsExecutionEnvironmentV1,
 } from './jquants-execution.js';
 import {
   StrategyValidationRunRepositoryErrorV1,
@@ -106,6 +107,7 @@ export async function runValidateStrategyCliV1(
     signal?: AbortSignal;
     startedAt?: string;
     requestsPerMinute?: number;
+    executionEnvironment?: JQuantsExecutionEnvironmentV1;
   }> = {},
 ): Promise<Awaited<ReturnType<typeof executeSnapshotAuditV1>>> {
   const parsed = parseValidateStrategyCliArgsV1(args);
@@ -115,19 +117,28 @@ export async function runValidateStrategyCliV1(
     requestsPerMinute: options.requestsPerMinute,
   });
   requireFeasibleJQuantsExecutionV1(preflight.executionPlan);
-  const warning = formatSnapshotAuditWarningV1(preflight);
-  const confirmed = parsed.confirmedExternalFetch
-    || await (options.confirm ?? interactiveConfirmation)(warning);
-  if (!confirmed) {
-    throw new JQuantsValidationErrorV1(
-      'cancelled',
-      'External fetch was not confirmed. Non-interactive use requires --confirm-external-fetch.',
-    );
-  }
   const writeOutput = options.writeOutput ?? (value => stdout.write(value));
-  if (parsed.confirmedExternalFetch) writeOutput(`${warning}\n`);
-  const accepted = acceptJQuantsExecutionV1(preflight.executionPlan);
-  const runtime = new JQuantsExecutionRuntimeV1(accepted, { signal: options.signal });
+  const externalFetchRequired = preflight.executionPlan.estimatedMinimumAttempts > 0;
+  if (externalFetchRequired) {
+    const warning = formatSnapshotAuditWarningV1(preflight);
+    const confirmed = parsed.confirmedExternalFetch
+      || await (options.confirm ?? interactiveConfirmation)(warning);
+    if (!confirmed) {
+      throw new JQuantsValidationErrorV1(
+        'cancelled',
+        'External fetch was not confirmed. Non-interactive use requires --confirm-external-fetch.',
+      );
+    }
+    if (parsed.confirmedExternalFetch) writeOutput(`${warning}\n`);
+  }
+  const accepted = acceptJQuantsExecutionV1(
+    preflight.executionPlan,
+    options.executionEnvironment,
+  );
+  const runtime = new JQuantsExecutionRuntimeV1(accepted, {
+    environment: options.executionEnvironment,
+    signal: options.signal,
+  });
   const result = await executeSnapshotAuditV1(preflight, {
     source: createSnapshotAuditSourceV1(runtime),
     runtime,

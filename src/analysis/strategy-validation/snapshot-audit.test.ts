@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { access, mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { comparisonSnapshot, snapshotAtVersion } from '../comparison/test-fixtures.js';
@@ -12,7 +12,11 @@ import {
   type JQuantsExecutionEnvironmentV1,
 } from './jquants-execution.js';
 import { JQuantsValidationAdapterV1 } from './jquants-validation-adapter.js';
-import { StrategyValidationRunRepositoryV1 } from './run-repository.js';
+import {
+  StrategyValidationRunRepositoryV1,
+  type StrategyValidationRunPublicationV1,
+  type StrategyValidationRunPublishOptionsV1,
+} from './run-repository.js';
 import {
   createSnapshotAuditPreflightV1,
   executeSnapshotAuditV1,
@@ -65,7 +69,10 @@ function response(body: unknown): Response {
   });
 }
 
-function runtimeFor(preflight: Awaited<ReturnType<typeof createSnapshotAuditPreflightV1>>) {
+function runtimeFor(
+  preflight: Awaited<ReturnType<typeof createSnapshotAuditPreflightV1>>,
+  fetchOverride?: (url: URL) => Promise<Response>,
+) {
   let wallMs = Date.parse('2026-12-01T00:00:01.000Z');
   let monotonicMs = 0;
   const paths: string[] = [];
@@ -73,6 +80,7 @@ function runtimeFor(preflight: Awaited<ReturnType<typeof createSnapshotAuditPref
     fetch: async input => {
       const url = new URL(String(input));
       paths.push(url.pathname);
+      if (fetchOverride !== undefined) return fetchOverride(url);
       if (url.pathname === '/v2/markets/calendar') {
         return response({
           data: dates(url.searchParams.get('from')!, url.searchParams.get('to')!).map(date => ({
@@ -123,7 +131,11 @@ function runtimeFor(preflight: Awaited<ReturnType<typeof createSnapshotAuditPref
   });
   const accepted = acceptJQuantsExecutionV1(preflight.executionPlan, environment);
   const runtime = new JQuantsExecutionRuntimeV1(accepted, { environment });
-  return { runtime, accepted, paths };
+  const advance = (durationMs: number): void => {
+    wallMs += durationMs;
+    monotonicMs += durationMs;
+  };
+  return { runtime, accepted, environment, paths, advance };
 }
 
 describe('saved-Snapshot Strategy audit', () => {
@@ -176,6 +188,7 @@ describe('saved-Snapshot Strategy audit', () => {
       { dataDate: '2026/08/21', expected: 'strategy_data_date_invalid' },
       { dataDate: '2026-02-30', expected: 'strategy_data_date_invalid' },
       { dataDate: '2026-08-23', expected: 'future_strategy_data' },
+      { dataDate: '2026-08-24', expected: 'future_strategy_data' },
     ] as const;
     for (const value of cases) {
       const snapshot = structuredClone(base);
@@ -192,7 +205,7 @@ describe('saved-Snapshot Strategy audit', () => {
       });
       expect(preflight.localUnavailableReason).toBe(value.expected);
       expect(preflight.candidates).toHaveLength(0);
-      expect(preflight.executionPlan.estimatedMinimumAttempts).toBe(1);
+      expect(preflight.executionPlan.estimatedMinimumAttempts).toBe(0);
     }
   });
 
@@ -240,11 +253,13 @@ describe('saved-Snapshot Strategy audit', () => {
     expect(paths.filter(path => path === '/v2/equities/master').length).toBeLessThanOrEqual(2);
   });
 
-  test('publishes one anchor case and never fetches bars for invalid or non-session dates', async () => {
+  test('publishes local invalid and future anchor cases without confirmation or J-Quants', async () => {
     for (const input of [
       { dataDate: null, reason: 'strategy_data_date_invalid' },
-      { dataDate: '2026-08-22', reason: 'strategy_data_date_invalid' },
+      { dataDate: '2026/08/21', reason: 'strategy_data_date_invalid' },
+      { dataDate: '2026-02-30', reason: 'strategy_data_date_invalid' },
       { dataDate: '2026-08-23', reason: 'future_strategy_data' },
+      { dataDate: '2026-08-24', reason: 'future_strategy_data' },
     ] as const) {
       const { snapshots, runs } = await repositories();
       const snapshot = comparisonSnapshot();
@@ -258,21 +273,60 @@ describe('saved-Snapshot Strategy audit', () => {
         startedAt: '2026-12-01T00:00:00.000Z',
         requestsPerMinute: 500,
       });
-      const { runtime, accepted, paths } = runtimeFor(preflight);
-      const result = await executeSnapshotAuditV1(preflight, {
-        source: new JQuantsValidationAdapterV1(runtime),
-        runtime,
-        accepted,
+      let confirmationCount = 0;
+      const { environment, paths } = runtimeFor(preflight);
+      const result = await runValidateStrategyCliV1([
+        '--ticker', saved.canonicalTicker,
+        '--snapshot-id', saved.snapshotId,
+      ], {
+        snapshotRepository: snapshots,
         runRepository: runs,
+        startedAt: '2026-12-01T00:00:00.000Z',
+        requestsPerMinute: 500,
+        executionEnvironment: environment,
+        confirm: async () => {
+          confirmationCount += 1;
+          return false;
+        },
+        writeOutput: () => {},
       });
       const loaded = await runs.load(result.runId);
+      expect(result.attemptCount).toBe(0);
+      expect(confirmationCount).toBe(0);
+      expect(paths).toEqual([]);
       expect(loaded.cases).toHaveLength(1);
       expect(loaded.cases[0]).toMatchObject({
         caseKind: 'anchor_unavailable',
         unavailableReason: input.reason,
       });
-      expect(paths).toEqual(['/v2/markets/calendar']);
+      expect(loaded.cases[0]!.sourceManifest.sources).toEqual([]);
+      expect(loaded.sources).toEqual([]);
     }
+  });
+
+  test('uses only the official calendar to reject a proven non-session date', async () => {
+    const { snapshots, runs } = await repositories();
+    const snapshot = comparisonSnapshot();
+    snapshot.strategy!.dataDate = '2026-08-22';
+    const saved = await snapshots.save(snapshot);
+    const preflight = await createSnapshotAuditPreflightV1({
+      ticker: saved.canonicalTicker,
+      snapshotId: saved.snapshotId,
+    }, {
+      snapshotRepository: snapshots,
+      startedAt: '2026-12-01T00:00:00.000Z',
+      requestsPerMinute: 500,
+    });
+    const { runtime, accepted, paths } = runtimeFor(preflight);
+    const result = await executeSnapshotAuditV1(preflight, {
+      source: new JQuantsValidationAdapterV1(runtime), runtime, accepted, runRepository: runs,
+    });
+    const loaded = await runs.load(result.runId);
+    expect(loaded.cases).toHaveLength(1);
+    expect(loaded.cases[0]).toMatchObject({
+      caseKind: 'anchor_unavailable', unavailableReason: 'strategy_data_date_invalid',
+    });
+    expect(paths).toEqual(['/v2/markets/calendar']);
   });
 
   test('declined confirmation creates no run and performs no external request', async () => {
@@ -324,5 +378,133 @@ describe('saved-Snapshot Strategy audit', () => {
     await expect(access(join(directory, 'research', 'runs'))).rejects.toMatchObject({
       code: 'ENOENT',
     });
+  });
+
+  test('preserves a typed calendar-source failure and publishes no run', async () => {
+    const { directory, snapshots, runs } = await repositories();
+    const saved = await snapshots.save(comparisonSnapshot());
+    const preflight = await createSnapshotAuditPreflightV1({
+      ticker: saved.canonicalTicker,
+      snapshotId: saved.snapshotId,
+    }, {
+      snapshotRepository: snapshots,
+      startedAt: '2026-12-01T00:00:00.000Z',
+      requestsPerMinute: 500,
+    });
+    const { runtime, accepted, paths } = runtimeFor(
+      preflight,
+      async () => response({ data: [] }),
+    );
+    await expect(executeSnapshotAuditV1(preflight, {
+      source: new JQuantsValidationAdapterV1(runtime), runtime, accepted, runRepository: runs,
+    })).rejects.toMatchObject({ code: 'source_history_unavailable' });
+    expect(paths).toEqual(['/v2/markets/calendar']);
+    await expect(access(join(directory, 'research', 'runs'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
+  test('cleans temporary data when cancellation arrives during pre-promotion assembly', async () => {
+    const { directory, snapshots } = await repositories();
+    const saved = await snapshots.save(comparisonSnapshot());
+    const preflight = await createSnapshotAuditPreflightV1({
+      ticker: saved.canonicalTicker,
+      snapshotId: saved.snapshotId,
+    }, {
+      snapshotRepository: snapshots,
+      startedAt: '2026-12-01T00:00:00.000Z',
+      requestsPerMinute: 500,
+    });
+    const controller = new AbortController();
+    class AbortAfterPublishStartsRepository extends StrategyValidationRunRepositoryV1 {
+      override publish(
+        publication: StrategyValidationRunPublicationV1,
+        options: StrategyValidationRunPublishOptionsV1 = {},
+      ) {
+        const publishing = super.publish(publication, options);
+        controller.abort();
+        return publishing;
+      }
+    }
+    const runs = new AbortAfterPublishStartsRepository(join(directory, 'cancel-before-promote'), {
+      promoteDirectory: rename,
+    });
+    const { runtime, accepted } = runtimeFor(preflight);
+    await expect(executeSnapshotAuditV1(preflight, {
+      source: new JQuantsValidationAdapterV1(runtime),
+      runtime,
+      accepted,
+      runRepository: runs,
+      signal: controller.signal,
+    })).rejects.toMatchObject({ code: 'cancelled' });
+    expect(await readdir(runs.runsDirectory)).toEqual([]);
+  });
+
+  test('finishes publication when cancellation arrives after atomic promotion begins', async () => {
+    const { directory, snapshots } = await repositories();
+    const saved = await snapshots.save(comparisonSnapshot());
+    const preflight = await createSnapshotAuditPreflightV1({
+      ticker: saved.canonicalTicker,
+      snapshotId: saved.snapshotId,
+    }, {
+      snapshotRepository: snapshots,
+      startedAt: '2026-12-01T00:00:00.000Z',
+      requestsPerMinute: 500,
+    });
+    const controller = new AbortController();
+    const runs = new StrategyValidationRunRepositoryV1(join(directory, 'cancel-after-promote'), {
+      promoteDirectory: async (temporaryDirectory, finalDirectory) => {
+        controller.abort();
+        await rename(temporaryDirectory, finalDirectory);
+      },
+    });
+    const { runtime, accepted } = runtimeFor(preflight);
+    const result = await executeSnapshotAuditV1(preflight, {
+      source: new JQuantsValidationAdapterV1(runtime),
+      runtime,
+      accepted,
+      runRepository: runs,
+      signal: controller.signal,
+    });
+    expect(controller.signal.aborted).toBe(true);
+    await expect(runs.load(result.runId)).resolves.toMatchObject({
+      run: { runId: result.runId },
+    });
+  });
+
+  test('cleans temporary data when the execution deadline expires before promotion', async () => {
+    const { directory, snapshots } = await repositories();
+    const saved = await snapshots.save(comparisonSnapshot());
+    const preflight = await createSnapshotAuditPreflightV1({
+      ticker: saved.canonicalTicker,
+      snapshotId: saved.snapshotId,
+    }, {
+      snapshotRepository: snapshots,
+      startedAt: '2026-12-01T00:00:00.000Z',
+      requestsPerMinute: 500,
+    });
+    let advance = (_durationMs: number): void => {};
+    class ExpireAfterPublishStartsRepository extends StrategyValidationRunRepositoryV1 {
+      override publish(
+        publication: StrategyValidationRunPublicationV1,
+        options: StrategyValidationRunPublishOptionsV1 = {},
+      ) {
+        const publishing = super.publish(publication, options);
+        advance(preflight.executionPlan.executionBudgetMs);
+        return publishing;
+      }
+    }
+    const runs = new ExpireAfterPublishStartsRepository(join(directory, 'expire-before-promote'), {
+      promoteDirectory: rename,
+    });
+    const execution = runtimeFor(preflight);
+    advance = execution.advance;
+    await expect(executeSnapshotAuditV1(preflight, {
+      source: new JQuantsValidationAdapterV1(execution.runtime),
+      runtime: execution.runtime,
+      accepted: execution.accepted,
+      runRepository: runs,
+    })).rejects.toMatchObject({ code: 'execution_timeout' });
+    expect(await readdir(runs.runsDirectory)).toEqual([]);
   });
 });

@@ -251,6 +251,38 @@ describe('J-Quants execution planning', () => {
 });
 
 describe('J-Quants request runtime', () => {
+  test('allows a zero-attempt local plan without credentials and forbids dispatch', async () => {
+    const clock = new FakeClock();
+    let fetchCount = 0;
+    const executionEnvironment: JQuantsExecutionEnvironmentV1 = Object.freeze({
+      fetch: async () => {
+        fetchCount += 1;
+        return jsonResponse({ data: [] });
+      },
+      wallNowMs: () => clock.wallMs,
+      monotonicNowMs: () => clock.monotonicMs,
+      sleep: clock.sleep,
+      apiKey: () => undefined,
+    });
+    const accepted = acceptJQuantsExecutionV1(
+      planJQuantsExecutionV1(0, 5),
+      executionEnvironment,
+    );
+    expect(() => new JQuantsExecutionRuntimeV1(accepted, {
+      environment: executionEnvironment,
+      actualAttemptLimit: 1,
+    })).toThrow(expect.objectContaining({ code: 'invalid_configuration' }));
+    const actual = new JQuantsExecutionRuntimeV1(accepted, {
+      environment: executionEnvironment,
+    });
+
+    await expect(actual.getAll('/v2/markets/calendar', {
+      from: '2026-08-01', to: '2026-08-31',
+    })).rejects.toMatchObject({ code: 'attempt_limit_exceeded' });
+    expect(fetchCount).toBe(0);
+    expect(actual.attempts).toEqual([]);
+  });
+
   test('uses exact GET query parameters, follows pages, and shares a same-job cache', async () => {
     const requests: Readonly<{ url: URL; apiKey: string | null }>[] = [];
     const fetcher: Fetcher = async (input, init) => {

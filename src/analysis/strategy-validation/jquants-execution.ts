@@ -384,18 +384,20 @@ export class JQuantsExecutionRuntimeV1 {
     });
     this.#environment = options.environment ?? DEFAULT_JQUANTS_EXECUTION_ENVIRONMENT_V1;
     const apiKey = this.#environment.apiKey();
-    if (typeof apiKey !== 'string' || apiKey.length === 0) {
+    const localOnly = controls.estimatedMinimumAttempts === 0;
+    if (!localOnly && (typeof apiKey !== 'string' || apiKey.length === 0)) {
       throw new JQuantsValidationErrorV1(
         'missing_api_key',
         'JQUANTS_API_KEY is not set for the J-Quants validation adapter.',
       );
     }
-    this.#apiKey = apiKey;
-    const actualAttemptLimit = options.actualAttemptLimit ?? accepted.controls.hardMaximumAttempts;
+    this.#apiKey = apiKey ?? '';
+    const actualAttemptLimit = options.actualAttemptLimit
+      ?? (localOnly ? 0 : accepted.controls.hardMaximumAttempts);
     if (!Number.isSafeInteger(actualAttemptLimit)
-      || actualAttemptLimit < 1
+      || (localOnly ? actualAttemptLimit !== 0 : actualAttemptLimit < 1)
       || actualAttemptLimit > accepted.controls.hardMaximumAttempts) {
-      invalidConfiguration('actualAttemptLimit must be within the frozen hard attempt cap.');
+      invalidConfiguration('actualAttemptLimit must match the frozen external-request plan.');
     }
     this.#actualAttemptLimit = actualAttemptLimit;
     this.#bindCancellation(options.signal);

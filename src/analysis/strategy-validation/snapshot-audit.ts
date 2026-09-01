@@ -38,6 +38,7 @@ import {
   type AcceptedJQuantsExecutionV1,
   type JQuantsExecutionPlanV1,
   JQuantsExecutionRuntimeV1,
+  JQuantsValidationErrorV1,
   planJQuantsExecutionV1,
   resolveJQuantsRequestsPerMinuteV1,
 } from './jquants-execution.js';
@@ -76,7 +77,7 @@ import {
 } from './source-manifest.js';
 import { isExecutableTsePriceV1 } from './tick.js';
 
-export const SNAPSHOT_AUDIT_ESTIMATED_LOCAL_ATTEMPTS_V1 = 1 as const;
+export const SNAPSHOT_AUDIT_ESTIMATED_LOCAL_ATTEMPTS_V1 = 0 as const;
 export const SNAPSHOT_AUDIT_ESTIMATED_CANDIDATE_ATTEMPTS_V1 = 2 as const;
 export const SNAPSHOT_AUDIT_CALENDAR_LOOKBACK_DAYS_V1 = 370 as const;
 
@@ -150,6 +151,12 @@ function calendarLookback(startedTokyoDate: TseSessionDate): TseSessionDate {
     cursor = previousGregorianDateV1(cursor);
   }
   return parseTseSessionDate(cursor);
+}
+
+function localAnchorOutcomeBoundary(startedAt: AsOfCutoff): OutcomeAsOfSession {
+  return parseTseSessionDate(
+    previousGregorianDateV1(tokyoDateFromUtcInstantV1(startedAt)),
+  ) as OutcomeAsOfSession;
 }
 
 function snapshotCandidate(
@@ -485,49 +492,63 @@ export async function executeSnapshotAuditV1(
   options.runtime.assertCanContinue(options.signal);
   const runId = createStrategyValidationRunIdV1();
   const sources = new Map<SnapshotDigest, PointInTimeSourceEnvelopeV1>();
-  const candidateCalendarResult: JQuantsCalendarResultV1 = await options.source.fetchCalendar({
-    dateFrom: preflight.calendarDateFrom,
-    dateTo: preflight.calendarDateTo,
-    asOfCutoff: preflight.startedAt,
-    signal: options.signal,
-  });
-  addSource(sources, candidateCalendarResult.envelope);
-  if (candidateCalendarResult.state === 'unavailable') {
-    throw new TypeError('The official calendar cannot derive the frozen outcome boundary.');
-  }
-  const candidateCalendar = candidateCalendarResult.calendar;
-  const outcomeAsOfSession = deriveOutcomeAsOfSessionV1(
-    candidateCalendar,
-    preflight.startedAt,
-  );
-  const candidateCalendarReference = sourceReference(
-    'candidate_calendar',
-    candidateCalendarResult.envelope,
-  );
-  let cases: readonly StrategyValidationCaseV1[];
+  let candidateCalendar: TseSessionCalendarV1 | null = null;
+  let outcomeAsOfSession: OutcomeAsOfSession;
+  let candidateCalendarReference: PointInTimeSourceManifestReferenceV1 | null = null;
+  let cases: readonly StrategyValidationCaseV1[] = Object.freeze([]);
 
   if (preflight.localUnavailableReason !== null) {
+    outcomeAsOfSession = localAnchorOutcomeBoundary(preflight.startedAt);
     cases = Object.freeze([anchorUnavailableCase(
       preflight,
       runId,
       outcomeAsOfSession,
       preflight.localUnavailableReason,
-      [candidateCalendarReference],
+      [],
     )]);
-  } else if (preflight.strategyDataDate === null) {
-    throw new TypeError('A candidate-bearing Snapshot has no validated Strategy date.');
-  } else if (!candidateCalendar.isSession(preflight.strategyDataDate)) {
+  } else {
+    if (preflight.strategyDataDate === null) {
+      throw new TypeError('A candidate-bearing Snapshot has no validated Strategy date.');
+    }
+    const candidateCalendarResult: JQuantsCalendarResultV1 = await options.source.fetchCalendar({
+      dateFrom: preflight.calendarDateFrom,
+      dateTo: preflight.calendarDateTo,
+      asOfCutoff: preflight.startedAt,
+      signal: options.signal,
+    });
+    addSource(sources, candidateCalendarResult.envelope);
+    if (candidateCalendarResult.state === 'unavailable') {
+      throw new JQuantsValidationErrorV1(
+        candidateCalendarResult.reason,
+        'The official calendar cannot derive the frozen outcome boundary.',
+      );
+    }
+    candidateCalendar = candidateCalendarResult.calendar;
+    outcomeAsOfSession = deriveOutcomeAsOfSessionV1(
+      candidateCalendar,
+      preflight.startedAt,
+    );
+    candidateCalendarReference = sourceReference(
+      'candidate_calendar',
+      candidateCalendarResult.envelope,
+    );
+  }
+
+  if (preflight.localUnavailableReason !== null) {
+    // The source-free anchor case was fully determined during local preflight.
+  } else if (!candidateCalendar!.isSession(preflight.strategyDataDate!)) {
     cases = Object.freeze([anchorUnavailableCase(
       preflight,
       runId,
       outcomeAsOfSession,
       'strategy_data_date_invalid',
-      [candidateCalendarReference],
+      [candidateCalendarReference!],
     )]);
   } else {
+    const strategyDataDate = preflight.strategyDataDate!;
     const assigned = assignSnapshotCandidateIdentitiesV1({
       snapshotDigest: preflight.selector.snapshotDigest,
-      strategyDataDate: preflight.strategyDataDate,
+      strategyDataDate,
       candidates: preflight.candidates,
     });
     const needsMaster = assigned.some(value => (
@@ -539,7 +560,7 @@ export async function executeSnapshotAuditV1(
     const candidateMaster = needsMaster
       ? await options.source.fetchMaster({
         ticker: preflight.ticker,
-        date: preflight.strategyDataDate,
+        date: strategyDataDate,
         asOfCutoff: preflight.startedAt,
         signal: options.signal,
       })
@@ -595,7 +616,7 @@ export async function executeSnapshotAuditV1(
 
     const builtCases: StrategyValidationCaseV1[] = [];
     for (const value of initial) {
-      const references: PointInTimeSourceManifestReferenceV1[] = [candidateCalendarReference];
+      const references: PointInTimeSourceManifestReferenceV1[] = [candidateCalendarReference!];
       if (candidateMasterReference !== null
         && value.tickEvidence.unavailableReason !== 'invalid_candidate') {
         references.push(candidateMasterReference);
@@ -610,9 +631,9 @@ export async function executeSnapshotAuditV1(
           candidate: value.assigned.candidate,
           decisionDate: preflight.decisionDate,
           outcomeAsOfSession,
-          initialTickDate: preflight.strategyDataDate,
+          initialTickDate: strategyDataDate,
           tickCategoryEvidence: tickEvidence === null ? [] : [tickEvidence],
-          calendar: candidateCalendar,
+          calendar: candidateCalendar!,
           bars: [],
         });
         if (candidateMaster?.state === 'unavailable'
@@ -638,9 +659,9 @@ export async function executeSnapshotAuditV1(
             candidate: value.assigned.candidate,
             decisionDate: preflight.decisionDate,
             outcomeAsOfSession,
-            initialTickDate: preflight.strategyDataDate,
+            initialTickDate: strategyDataDate,
             tickCategoryEvidence: [tickCategoryEvidence(candidateMaster!)!],
-            calendar: candidateCalendar,
+            calendar: candidateCalendar!,
             bars: [],
           });
         } else if (dailyResult === null) {
@@ -651,9 +672,9 @@ export async function executeSnapshotAuditV1(
             candidate: value.assigned.candidate,
             decisionDate: preflight.decisionDate,
             outcomeAsOfSession,
-            initialTickDate: preflight.strategyDataDate,
+            initialTickDate: strategyDataDate,
             tickCategoryEvidence: [tickCategoryEvidence(candidateMaster!)!],
-            calendar: candidateCalendar,
+            calendar: candidateCalendar!,
             bars: [],
           });
           outcome = replayed.kind === 'unavailable'
@@ -670,11 +691,11 @@ export async function executeSnapshotAuditV1(
               candidate: value.assigned.candidate,
               decisionDate: preflight.decisionDate,
               outcomeAsOfSession,
-              initialTickDate: preflight.strategyDataDate,
+              initialTickDate: strategyDataDate,
               tickCategoryEvidence: [...masterEvidence].sort((left, right) => (
                 left.date < right.date ? -1 : left.date > right.date ? 1 : 0
               )),
-              calendar: candidateCalendar,
+              calendar: candidateCalendar!,
               bars: dailyResult.bars,
             });
             if (outcome.kind !== 'unavailable'
@@ -772,6 +793,8 @@ export async function executeSnapshotAuditV1(
     run,
     cases,
     sources: publicationSources,
+  }, {
+    assertCanPromote: () => options.runtime.assertCanContinue(options.signal),
   });
   return Object.freeze({
     state: 'created',
