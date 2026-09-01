@@ -36,6 +36,7 @@ import {
   validationRun,
   validationSource,
 } from '../../analysis/strategy-validation/artifact-test-fixtures.js';
+import { StrategyValidationCaseV1Schema } from '../../analysis/strategy-validation/artifacts.js';
 
 type RadarMetric = 'per' | 'pbr' | 'roe' | 'roic' | 'operatingMargin'
   | 'revenueGrowth' | 'dividendYield';
@@ -931,8 +932,76 @@ function strategyValidationBrowserFixture() {
     ticker: '6758',
     anchorDate: '2025-01-07',
   });
+  const ambiguousBase = campaignCandidateCase(source.digest, {
+    runId: campaignRunId,
+    caseId: '77777777-7777-4777-8777-777777777777',
+    ticker: '7203',
+    anchorDate: '2025-01-08',
+  });
+  if (ambiguousBase.caseKind !== 'candidate' || ambiguousBase.outcome.kind !== 'target_hit') {
+    throw new TypeError('Expected a terminal campaign candidate fixture.');
+  }
+  const ambiguousCase = StrategyValidationCaseV1Schema.parse({
+    ...ambiguousBase,
+    outcome: {
+      algorithmVersion: ambiguousBase.outcome.algorithmVersion,
+      limitQueueVersion: ambiguousBase.outcome.limitQueueVersion,
+      plannedRisk: 10,
+      evaluationEndDate: '2025-01-09',
+      kind: 'ambiguous_intraday',
+      entryProven: true,
+      entryFill: ambiguousBase.outcome.entryFill,
+      actualRisk: 10,
+      ambiguityDate: '2025-01-09',
+      pessimistic: {
+        kind: 'stop_hit',
+        exitFill: {
+          date: '2025-01-09', evaluationSession: 1, holdingDay: 1,
+          order: 'stop', method: 'stop_level', price: 90,
+        },
+        realizedR: -1,
+      },
+      optimistic: {
+        kind: 'target_hit',
+        exitFill: {
+          date: '2025-01-09', evaluationSession: 1, holdingDay: 1,
+          order: 'target', method: 'target_level', price: 120,
+        },
+        realizedR: 2,
+      },
+    },
+  });
+  const limitQueueBase = campaignCandidateCase(source.digest, {
+    runId: campaignRunId,
+    caseId: '88888888-8888-4888-8888-888888888888',
+    ticker: '7203',
+    anchorDate: '2025-01-10',
+  });
+  const limitQueueCase = StrategyValidationCaseV1Schema.parse({
+    ...limitQueueBase,
+    outcome: {
+      algorithmVersion: 'daily_long_fill_v1',
+      limitQueueVersion: 'adverse_flagged_boundary_v1',
+      plannedRisk: 10,
+      evaluationEndDate: '2025-01-11',
+      kind: 'unavailable',
+      reason: 'limit_queue_ambiguous',
+      entryProven: false,
+      entryFill: null,
+      actualRisk: null,
+      limitQueueEvidence: {
+        date: '2025-01-11',
+        orderSide: 'buy',
+        fillKind: 'entry',
+        selectedFillPrice: 100,
+        boundaryKind: 'upper',
+        boundaryPrice: 100,
+        sourceFlag: 'UL',
+      },
+    },
+  });
   const campaignRun = {
-    ...validationRun([currentTickerCase, otherTickerCase]),
+    ...validationRun([currentTickerCase, otherTickerCase, ambiguousCase, limitQueueCase]),
     warnings: [
       'reconstructed_251_as_of: technical_251_strategy_v1 is a standardized retrospective policy and is not production-pipeline parity.',
     ],
@@ -962,9 +1031,11 @@ function strategyValidationBrowserFixture() {
     failure: null,
   };
   return {
+    ambiguousCase,
     campaignRun,
     currentTickerCase,
     job,
+    limitQueueCase,
     otherTickerCase,
     requests: [] as Array<Readonly<{ method: string; path: string; body: unknown; csrf: string | null }>>,
     snapshotCase,
@@ -980,7 +1051,12 @@ async function mockStrategyValidationApi(
   const runs = [fixture.campaignRun, fixture.snapshotRun];
   const casesByRun = new Map([
     [fixture.snapshotRun.runId, [fixture.snapshotCase]],
-    [fixture.campaignRun.runId, [fixture.currentTickerCase, fixture.otherTickerCase]],
+    [fixture.campaignRun.runId, [
+      fixture.currentTickerCase,
+      fixture.otherTickerCase,
+      fixture.ambiguousCase,
+      fixture.limitQueueCase,
+    ]],
   ]);
   const summary = (run: typeof fixture.snapshotRun | typeof fixture.campaignRun) => ({
     schemaVersion: 'strategy_validation_run_summary_v1',
@@ -1808,7 +1884,7 @@ test.describe('strategy validation Dashboard interaction', () => {
         `&validationRun=${fixture.campaignRun.runId}`,
       );
 
-      await expect(page.getByRole('heading', { name: 'キャンペーン全体（2銘柄・2基準日）' }))
+      await expect(page.getByRole('heading', { name: 'キャンペーン全体（2銘柄・4基準日）' }))
         .toBeVisible();
       await expect(page.getByText(
         '集計値はキャンペーン全体です。表示中の銘柄は7203ですが、ケース一覧だけがこの銘柄に絞り込まれています。',
@@ -1817,7 +1893,7 @@ test.describe('strategy validation Dashboard interaction', () => {
       await expect(page.getByText('technical_251_strategy_v1', { exact: true })).toBeVisible();
       await expect(page.getByText(/not production-pipeline parity/)).toBeVisible();
       const caseList = page.locator('.validation-case-list');
-      await expect(caseList.locator('tbody tr')).toHaveCount(1);
+      await expect(caseList.locator('tbody tr')).toHaveCount(3);
       await expect(caseList).toContainText('7203');
       await expect(caseList).not.toContainText('6758');
 
@@ -1835,9 +1911,20 @@ test.describe('strategy validation Dashboard interaction', () => {
         .toBe(fixture.currentTickerCase.caseId);
 
       await page.goBack();
-      await expect(page.getByRole('heading', { name: 'キャンペーン全体（2銘柄・2基準日）' }))
+      await expect(page.getByRole('heading', { name: 'キャンペーン全体（2銘柄・4基準日）' }))
         .toBeVisible();
       expect(new URL(page.url()).searchParams.has('validationCase')).toBe(false);
+      await page.goForward();
+      const restoredCaseHeading = page.getByRole('heading', { name: 'ケース詳細' });
+      await expect(restoredCaseHeading).toBeVisible();
+      await expect(restoredCaseHeading).not.toBeFocused();
+      expect(new URL(page.url()).searchParams.get('validationRun')).toBe(fixture.campaignRun.runId);
+      expect(new URL(page.url()).searchParams.get('validationCase'))
+        .toBe(fixture.currentTickerCase.caseId);
+      await expect(page.getByRole('table', { name: 'Case metadata' })).toContainText('Ticker7203');
+      await page.goBack();
+      await expect(page.getByRole('heading', { name: 'キャンペーン全体（2銘柄・4基準日）' }))
+        .toBeVisible();
       await page.getByRole('button', { name: '← Analysis Portfolio' }).click();
       await expect(page.getByRole('heading', { name: 'Analysis Watchlist' })).toBeVisible();
       expect(new URL(page.url()).searchParams.has('validationRun')).toBe(false);
@@ -1865,6 +1952,49 @@ test.describe('strategy validation Dashboard interaction', () => {
       await expect(orphanError).toBeVisible();
       await expect(orphanError).toBeFocused();
       expect(new URL(page.url()).searchParams.get('validationCase')).toBe('invalid');
+    } finally {
+      await page.close();
+    }
+  });
+
+  test('keeps ambiguity bounds distinct and maps limit-queue evidence to neutral wording', async ({ browser }) => {
+    const page = await browser.newPage();
+    const fixture = strategyValidationBrowserFixture();
+    try {
+      await mockSnapshotApi(page);
+      await mockStrategyValidationApi(page, fixture);
+      await openDetail(
+        page,
+        '7203',
+        'validation',
+        `&validationRun=${fixture.campaignRun.runId}&validationCase=${fixture.ambiguousCase.caseId}`,
+      );
+
+      const ambiguousOutcome = page.locator('.validation-outcome');
+      await expect(ambiguousOutcome.getByRole('heading', {
+        name: '観測結果: ambiguous_intraday',
+      })).toBeVisible();
+      await expect(ambiguousOutcome.getByRole('heading', { name: '悲観境界: stop_hit' }))
+        .toBeVisible();
+      await expect(ambiguousOutcome.getByRole('heading', { name: '楽観境界: target_hit' }))
+        .toBeVisible();
+      await expect(ambiguousOutcome.getByText('実現R -1', { exact: true })).toBeVisible();
+      await expect(ambiguousOutcome.getByText('実現R 2', { exact: true })).toBeVisible();
+      await expect(ambiguousOutcome.locator('.validation-exact-value')).toHaveCount(0);
+
+      await page.goto(
+        `${baseUrl}/?ticker=7203&tab=validation&validationRun=${fixture.campaignRun.runId}`
+        + `&validationCase=${fixture.limitQueueCase.caseId}`,
+      );
+      await waitForSelectedTab(page, 'validation');
+      const limitEvidence = page.getByRole('table', { name: 'Limit queue evidence' });
+      await expect(limitEvidence).toContainText('日付2025-01-11');
+      await expect(limitEvidence).toContainText('注文役割エントリー側');
+      await expect(limitEvidence).toContainText('fill kindentry');
+      await expect(limitEvidence).toContainText('選択価格100');
+      await expect(limitEvidence).toContainText('境界upper / 100');
+      await expect(limitEvidence).toContainText('source flagUL');
+      expect(await page.locator('.validation-case-detail').innerText()).not.toMatch(/\b(?:buy|sell)\b/i);
     } finally {
       await page.close();
     }
@@ -1902,14 +2032,14 @@ test.describe('strategy validation Dashboard interaction', () => {
       expect(new URL(page.url()).searchParams.get('validationRun')).toBe(fixture.snapshotRun.runId);
       await expect(page.getByRole('heading', { name: '保存済みSnapshot監査（7203）' }))
         .toBeVisible();
-      await expect(page.getByRole('heading', { name: 'キャンペーン全体（2銘柄・2基準日）' }))
+      await expect(page.getByRole('heading', { name: 'キャンペーン全体（2銘柄・4基準日）' }))
         .toHaveCount(0);
     } finally {
       await page.close();
     }
   });
 
-  test('recovers an active job, polls it every two seconds, and sends an authenticated cancel', async ({ browser }) => {
+  test('never lets a stale poll regress an authenticated cancellation', async ({ browser }) => {
     const page = await browser.newPage();
     const fixture = strategyValidationBrowserFixture();
     const activeJob = {
@@ -1928,6 +2058,14 @@ test.describe('strategy validation Dashboard interaction', () => {
     };
     let pollCount = 0;
     let cancelCsrf: string | null = null;
+    let releaseStalePoll = () => {};
+    let markStalePollStarted = () => {};
+    let releaseCancel = () => {};
+    let markCancelStarted = () => {};
+    const stalePollRelease = new Promise<void>(resolve => { releaseStalePoll = resolve; });
+    const stalePollStarted = new Promise<void>(resolve => { markStalePollStarted = resolve; });
+    const cancelRelease = new Promise<void>(resolve => { releaseCancel = resolve; });
+    const cancelStarted = new Promise<void>(resolve => { markCancelStarted = resolve; });
     try {
       await mockSnapshotApi(page);
       await mockStrategyValidationApi(page, fixture);
@@ -1943,6 +2081,8 @@ test.describe('strategy validation Dashboard interaction', () => {
       ), async route => {
         if (route.request().method() === 'DELETE') {
           cancelCsrf = route.request().headers()['x-dexter-csrf'] ?? null;
+          markCancelStarted();
+          await cancelRelease;
           await route.fulfill({
             body: JSON.stringify(cancelledJob),
             contentType: 'application/json; charset=utf-8',
@@ -1951,18 +2091,29 @@ test.describe('strategy validation Dashboard interaction', () => {
           return;
         }
         pollCount += 1;
+        markStalePollStarted();
+        await stalePollRelease;
         await route.fulfill({
           body: JSON.stringify(activeJob),
           contentType: 'application/json; charset=utf-8',
           status: 200,
-        });
+        }).catch(() => undefined);
       });
 
       await openDetail(page, '7203', 'validation');
       await expect(page.getByRole('status').filter({ hasText: '状態 collecting' })).toBeVisible();
-      await expect.poll(() => pollCount, { timeout: 4_000 }).toBeGreaterThanOrEqual(1);
+      await stalePollStarted;
+      expect(pollCount).toBe(1);
       await page.getByRole('button', { name: '実行をキャンセル' }).click();
+      await cancelStarted;
+      await expect(page.getByRole('button', { name: '実行をキャンセル' })).toBeDisabled();
+      releaseCancel();
       await expect(page.getByRole('status').filter({ hasText: '状態 cancelled' })).toBeVisible();
+      releaseStalePoll();
+      await page.waitForTimeout(200);
+      await expect(page.getByRole('status').filter({ hasText: '状態 collecting' })).toHaveCount(0);
+      await expect(page.getByRole('status').filter({ hasText: '状態 cancelled' })).toBeVisible();
+      await expect(page.getByRole('button', { name: '実行をキャンセル' })).toHaveCount(0);
       expect(cancelCsrf).toBe('x'.repeat(43));
       expect(new URL(page.url()).searchParams.has('validationRun')).toBe(false);
     } finally {

@@ -68,6 +68,7 @@ async function mutateJson<T>(
   session: DashboardSessionV1,
   method: 'POST' | 'DELETE',
   body?: unknown,
+  signal?: AbortSignal,
 ): Promise<T> {
   return responseJson<T>(await fetch(path, {
     method,
@@ -77,6 +78,7 @@ async function mutateJson<T>(
       ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}),
     },
     body: method === 'POST' ? JSON.stringify(body) : undefined,
+    signal,
   }));
 }
 
@@ -106,6 +108,10 @@ function summaryText(value: StrategyValidationRunV1['aggregation']['candidateStr
   return value.state === 'available'
     ? `件数 ${value.count} / 平均 ${value.mean}R / 中央値 ${value.median}R`
     : `利用不可 (${value.reason}; 件数 ${value.count})`;
+}
+
+function limitQueueOrderRole(orderSide: 'buy' | 'sell'): 'エントリー側' | 'ストップ側' {
+  return orderSide === 'buy' ? 'エントリー側' : 'ストップ側';
 }
 
 function KeyValueTable({ rows, label }: {
@@ -220,7 +226,7 @@ function OutcomeView({ value }: {
           {value.reason === 'limit_queue_ambiguous' && value.limitQueueEvidence ? (
             <KeyValueTable label="Limit queue evidence" rows={[
               ['日付', value.limitQueueEvidence.date],
-              ['注文side', value.limitQueueEvidence.orderSide],
+              ['注文役割', limitQueueOrderRole(value.limitQueueEvidence.orderSide)],
               ['fill kind', value.limitQueueEvidence.fillKind],
               ['選択価格', value.limitQueueEvidence.selectedFillPrice],
               ['境界', `${value.limitQueueEvidence.boundaryKind} / ${value.limitQueueEvidence.boundaryPrice}`],
@@ -376,10 +382,12 @@ function CaseView({ value }: { value: StrategyValidationCaseV1 }) {
 }
 
 function JobView({
+  busy,
   job,
   onCancel,
   onOpenResults,
 }: {
+  busy: boolean;
   job: StrategyValidationJobViewV1;
   onCancel: () => void;
   onOpenResults: () => void;
@@ -400,9 +408,9 @@ function JobView({
         ['Failure', job.failure ? `${job.failure.code}: ${job.failure.message}` : 'なし'],
       ]} />
       <div className="validation-actions">
-        {cancellable ? <button type="button" onClick={onCancel}>実行をキャンセル</button> : null}
+        {cancellable ? <button disabled={busy} type="button" onClick={onCancel}>実行をキャンセル</button> : null}
         {job.status === 'completed' ? (
-          <button type="button" onClick={onOpenResults}>結果を明示的に開く</button>
+          <button disabled={busy} type="button" onClick={onOpenResults}>結果を明示的に開く</button>
         ) : null}
       </div>
     </section>
@@ -450,6 +458,35 @@ export function StrategyValidationPanel({
   const runsPageTokenRef = useRef(0);
   const casesPageTokenRef = useRef(0);
   const formRevisionRef = useRef(0);
+  const jobGenerationRef = useRef(0);
+  const jobRequestRef = useRef<AbortController | null>(null);
+
+  const beginJobRequest = useCallback(() => {
+    jobRequestRef.current?.abort();
+    const controller = new AbortController();
+    const generation = jobGenerationRef.current + 1;
+    jobGenerationRef.current = generation;
+    jobRequestRef.current = controller;
+    return { controller, generation };
+  }, []);
+
+  const isCurrentJobRequest = useCallback((
+    controller: AbortController,
+    generation: number,
+  ) => !controller.signal.aborted
+    && jobRequestRef.current === controller
+    && jobGenerationRef.current === generation, []);
+
+  const finishJobRequest = useCallback((controller: AbortController) => {
+    if (jobRequestRef.current === controller) jobRequestRef.current = null;
+  }, []);
+
+  const invalidateJobRequest = useCallback((controller?: AbortController) => {
+    if (controller !== undefined && jobRequestRef.current !== controller) return;
+    jobRequestRef.current?.abort();
+    jobRequestRef.current = null;
+    jobGenerationRef.current += 1;
+  }, []);
 
   const invalidatePreflight = useCallback(() => {
     formRevisionRef.current += 1;
@@ -487,8 +524,7 @@ export function StrategyValidationPanel({
         `/api/strategy-validation/runs?ticker=${encodeURIComponent(ticker)}&limit=20`,
         controller.signal,
       ),
-      getJson<StrategyValidationActiveJobV1>('/api/strategy-validation/jobs/active', controller.signal),
-    ]).then(([nextSession, runList, active]) => {
+    ]).then(([nextSession, runList]) => {
       if (!current()) return;
       const issues: string[] = [];
       if (nextSession.status === 'fulfilled') setSession(nextSession.value);
@@ -501,13 +537,26 @@ export function StrategyValidationPanel({
         issues.push(runList.reason instanceof Error
           ? runList.reason.message : 'Run一覧を読み込めませんでした。');
       }
-      if (active.status === 'fulfilled') setJob(active.value.job);
-      else issues.push(active.reason instanceof Error
-        ? active.reason.message : 'Active jobを読み込めませんでした。');
       setListIssue(issues.length ? issues.join(' / ') : null);
     });
     return () => controller.abort();
   }, [runsRevision, ticker]);
+
+  useEffect(() => {
+    const { controller, generation } = beginJobRequest();
+    void getJson<StrategyValidationActiveJobV1>(
+      '/api/strategy-validation/jobs/active',
+      controller.signal,
+    ).then(active => {
+      if (isCurrentJobRequest(controller, generation)) setJob(active.job);
+    }).catch((cause: unknown) => {
+      if (isCurrentJobRequest(controller, generation)) {
+        setOperationIssue(cause instanceof Error
+          ? cause.message : 'Active jobを読み込めませんでした。');
+      }
+    }).finally(() => finishJobRequest(controller));
+    return () => invalidateJobRequest(controller);
+  }, [beginJobRequest, finishJobRequest, invalidateJobRequest, isCurrentJobRequest, ticker]);
 
   const selectionKey = strategyValidationSelectionKey(selection);
   useEffect(() => {
@@ -566,26 +615,36 @@ export function StrategyValidationPanel({
   }, [selectionKey, ticker]);
 
   useEffect(() => {
-    if (job === null || isStrategyValidationJobTerminal(job.status)) return;
-    const controller = new AbortController();
+    if (operationBusy || job === null || isStrategyValidationJobTerminal(job.status)) return;
+    let request: ReturnType<typeof beginJobRequest> | null = null;
     const timeout = window.setTimeout(() => {
+      request = beginJobRequest();
+      const { controller, generation } = request;
       void getJson<StrategyValidationJobViewV1>(
         `/api/strategy-validation/jobs/${job.jobId}`,
         controller.signal,
       ).then(next => {
+        if (!isCurrentJobRequest(controller, generation)) return;
         setJob(next);
         if (next.status === 'completed') setRunsRevision(current => current + 1);
       }).catch((cause: unknown) => {
-        if (!controller.signal.aborted) {
+        if (isCurrentJobRequest(controller, generation)) {
           setOperationIssue(cause instanceof Error ? cause.message : 'Job状態を確認できませんでした。');
         }
-      });
+      }).finally(() => finishJobRequest(controller));
     }, 2_000);
     return () => {
-      controller.abort();
       window.clearTimeout(timeout);
+      if (request !== null) invalidateJobRequest(request.controller);
     };
-  }, [job]);
+  }, [
+    beginJobRequest,
+    finishJobRequest,
+    invalidateJobRequest,
+    isCurrentJobRequest,
+    job,
+    operationBusy,
+  ]);
 
   const navigate = (next: Extract<StrategyValidationPageSelection, { kind: 'none' | 'valid' }>, focus?: 'run' | 'case') => {
     explicitFocusRef.current = focus ?? null;
@@ -630,6 +689,7 @@ export function StrategyValidationPanel({
 
   const startJob = async () => {
     if (session === null || preflight === null || !confirmed) return;
+    const { controller, generation } = beginJobRequest();
     setOperationBusy(true);
     setOperationIssue(null);
     try {
@@ -638,29 +698,44 @@ export function StrategyValidationPanel({
         session,
         'POST',
         { preflightId: preflight.preflightId, confirmExternalFetch: true },
+        controller.signal,
       );
+      if (!isCurrentJobRequest(controller, generation)) return;
       setJob(accepted.job);
       setPreflight(null);
       setConfirmed(false);
     } catch (cause) {
-      setOperationIssue(cause instanceof Error ? cause.message : 'Jobを開始できませんでした。');
+      if (isCurrentJobRequest(controller, generation)) {
+        setOperationIssue(cause instanceof Error ? cause.message : 'Jobを開始できませんでした。');
+      }
     } finally {
-      setOperationBusy(false);
+      if (isCurrentJobRequest(controller, generation)) setOperationBusy(false);
+      finishJobRequest(controller);
     }
   };
 
   const cancelJob = async () => {
-    if (session === null || job === null) return;
+    if (session === null || job === null || operationBusy) return;
+    const selectedJobId = job.jobId;
+    const { controller, generation } = beginJobRequest();
     setOperationBusy(true);
     setOperationIssue(null);
     try {
-      setJob(await mutateJson<StrategyValidationJobViewV1>(
-        `/api/strategy-validation/jobs/${job.jobId}`, session, 'DELETE',
-      ));
+      const cancelled = await mutateJson<StrategyValidationJobViewV1>(
+        `/api/strategy-validation/jobs/${selectedJobId}`,
+        session,
+        'DELETE',
+        undefined,
+        controller.signal,
+      );
+      if (isCurrentJobRequest(controller, generation)) setJob(cancelled);
     } catch (cause) {
-      setOperationIssue(cause instanceof Error ? cause.message : 'Jobをキャンセルできませんでした。');
+      if (isCurrentJobRequest(controller, generation)) {
+        setOperationIssue(cause instanceof Error ? cause.message : 'Jobをキャンセルできませんでした。');
+      }
     } finally {
-      setOperationBusy(false);
+      if (isCurrentJobRequest(controller, generation)) setOperationBusy(false);
+      finishJobRequest(controller);
     }
   };
 
@@ -811,6 +886,7 @@ export function StrategyValidationPanel({
       </section>
 
       {job ? <JobView
+        busy={operationBusy}
         job={job}
         onCancel={() => void cancelJob()}
         onOpenResults={() => navigate({ kind: 'valid', runId: job.runId, caseId: null }, 'run')}
