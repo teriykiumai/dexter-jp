@@ -610,6 +610,12 @@ describe('Strategy-validation immutable run repository V1', () => {
         selector: snapshot.selector,
         candidateGenerationPolicy: null,
         unavailableReason: 'strategy_data_date_invalid',
+        outcomeAsOfSession: null,
+        sourceManifest: createPointInTimeSourceManifestV1({
+          startedAt: TEST_STARTED_AT,
+          outcomeAsOfSession: null,
+          sources: [],
+        }),
       });
       const value = {
         run: validationRun([unavailable]),

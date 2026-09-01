@@ -391,6 +391,14 @@ export class StrategyValidationRunRepositoryV1 {
       }
     }
     for (const value of sortedCases) {
+      if (value.outcomeAsOfSession === null) {
+        if (value.sourceManifest.sources.length !== 0) {
+          throw new StrategyValidationRunRepositoryErrorV1(
+            'artifact_incomplete', 'A source-free local case cannot reference source envelopes.',
+          );
+        }
+        continue;
+      }
       const bindings: BoundStrategyValidationSourceV1[] = [];
       for (const reference of value.sourceManifest.sources) {
         const source = sourceByDigest.get(reference.digest);

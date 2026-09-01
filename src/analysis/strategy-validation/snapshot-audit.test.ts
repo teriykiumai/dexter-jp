@@ -254,6 +254,7 @@ describe('saved-Snapshot Strategy audit', () => {
   });
 
   test('publishes local invalid and future anchor cases without confirmation or J-Quants', async () => {
+    const mondayAfterWeekend = '2026-08-24T00:00:00.000Z';
     for (const input of [
       { dataDate: null, reason: 'strategy_data_date_invalid' },
       { dataDate: '2026/08/21', reason: 'strategy_data_date_invalid' },
@@ -270,7 +271,7 @@ describe('saved-Snapshot Strategy audit', () => {
         snapshotId: saved.snapshotId,
       }, {
         snapshotRepository: snapshots,
-        startedAt: '2026-12-01T00:00:00.000Z',
+        startedAt: mondayAfterWeekend,
         requestsPerMinute: 500,
       });
       let confirmationCount = 0;
@@ -281,7 +282,7 @@ describe('saved-Snapshot Strategy audit', () => {
       ], {
         snapshotRepository: snapshots,
         runRepository: runs,
-        startedAt: '2026-12-01T00:00:00.000Z',
+        startedAt: mondayAfterWeekend,
         requestsPerMinute: 500,
         executionEnvironment: environment,
         confirm: async () => {
@@ -298,7 +299,10 @@ describe('saved-Snapshot Strategy audit', () => {
       expect(loaded.cases[0]).toMatchObject({
         caseKind: 'anchor_unavailable',
         unavailableReason: input.reason,
+        outcomeAsOfSession: null,
       });
+      expect(loaded.run.outcomeAsOfSession).toBeNull();
+      expect(loaded.cases[0]!.sourceManifest.outcomeAsOfSession).toBeNull();
       expect(loaded.cases[0]!.sourceManifest.sources).toEqual([]);
       expect(loaded.sources).toEqual([]);
     }
@@ -327,6 +331,96 @@ describe('saved-Snapshot Strategy audit', () => {
       caseKind: 'anchor_unavailable', unavailableReason: 'strategy_data_date_invalid',
     });
     expect(paths).toEqual(['/v2/markets/calendar']);
+  });
+
+  test('checks the official session before publishing a relationally invalid candidate', async () => {
+    const { snapshots, runs } = await repositories();
+    const snapshot = comparisonSnapshot();
+    const candidate = structuredClone(snapshot.strategy!.candidates[0]!);
+    candidate.entry.price = 100;
+    candidate.stop.price = 110;
+    candidate.target.price = 120;
+    snapshot.strategy!.candidates = [candidate];
+    const saved = await snapshots.save(snapshot);
+    const preflight = await createSnapshotAuditPreflightV1({
+      ticker: saved.canonicalTicker,
+      snapshotId: saved.snapshotId,
+    }, {
+      snapshotRepository: snapshots,
+      startedAt: '2026-12-01T00:00:00.000Z',
+      requestsPerMinute: 500,
+    });
+    expect(preflight.localUnavailableReason).toBeNull();
+    expect(preflight.candidateNormalizationInvalid).toBe(false);
+    expect(preflight.executionPlan.estimatedMinimumAttempts).toBe(1);
+    const { runtime, accepted, paths } = runtimeFor(preflight);
+    const result = await executeSnapshotAuditV1(preflight, {
+      source: new JQuantsValidationAdapterV1(runtime), runtime, accepted, runRepository: runs,
+    });
+    const loaded = await runs.load(result.runId);
+    expect(paths).toEqual(['/v2/markets/calendar']);
+    expect(loaded.cases).toHaveLength(1);
+    expect(loaded.cases[0]).toMatchObject({
+      caseKind: 'candidate',
+      outcome: { kind: 'unavailable', reason: 'invalid_candidate' },
+    });
+  });
+
+  test('gives a proven non-session date precedence over a nonnormalizable candidate', async () => {
+    const { snapshots, runs } = await repositories();
+    const snapshot = comparisonSnapshot();
+    snapshot.strategy!.dataDate = '2026-08-22';
+    snapshot.strategy!.candidates[0]!.entry.price = 0;
+    const saved = await snapshots.save(snapshot);
+    const preflight = await createSnapshotAuditPreflightV1({
+      ticker: saved.canonicalTicker,
+      snapshotId: saved.snapshotId,
+    }, {
+      snapshotRepository: snapshots,
+      startedAt: '2026-12-01T00:00:00.000Z',
+      requestsPerMinute: 500,
+    });
+    expect(preflight.localUnavailableReason).toBeNull();
+    expect(preflight.candidateNormalizationInvalid).toBe(true);
+    expect(preflight.executionPlan.estimatedMinimumAttempts).toBe(1);
+    const { runtime, accepted, paths } = runtimeFor(preflight);
+    const result = await executeSnapshotAuditV1(preflight, {
+      source: new JQuantsValidationAdapterV1(runtime), runtime, accepted, runRepository: runs,
+    });
+    const loaded = await runs.load(result.runId);
+    expect(paths).toEqual(['/v2/markets/calendar']);
+    expect(loaded.cases).toHaveLength(1);
+    expect(loaded.cases[0]).toMatchObject({
+      caseKind: 'anchor_unavailable', unavailableReason: 'strategy_data_date_invalid',
+    });
+  });
+
+  test('publishes a nonnormalizable candidate only after the official-session guard', async () => {
+    const { snapshots, runs } = await repositories();
+    const snapshot = comparisonSnapshot();
+    snapshot.strategy!.candidates[0]!.entry.price = 0;
+    const saved = await snapshots.save(snapshot);
+    const preflight = await createSnapshotAuditPreflightV1({
+      ticker: saved.canonicalTicker,
+      snapshotId: saved.snapshotId,
+    }, {
+      snapshotRepository: snapshots,
+      startedAt: '2026-12-01T00:00:00.000Z',
+      requestsPerMinute: 500,
+    });
+    const { runtime, accepted, paths } = runtimeFor(preflight);
+    const result = await executeSnapshotAuditV1(preflight, {
+      source: new JQuantsValidationAdapterV1(runtime), runtime, accepted, runRepository: runs,
+    });
+    const loaded = await runs.load(result.runId);
+    expect(paths).toEqual(['/v2/markets/calendar']);
+    expect(loaded.cases).toHaveLength(1);
+    expect(loaded.cases[0]).toMatchObject({
+      caseKind: 'anchor_unavailable',
+      unavailableReason: 'invalid_candidate',
+      outcomeAsOfSession: '2026-11-30',
+      sourceManifest: { sources: [{ role: 'candidate_calendar' }] },
+    });
   });
 
   test('declined confirmation creates no run and performs no external request', async () => {

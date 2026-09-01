@@ -121,6 +121,20 @@ describe('Point-in-time source manifest V1', () => {
     }).success).toBe(false);
   });
 
+  test('allows a null outcome boundary only without source references', () => {
+    const empty = createPointInTimeSourceManifestV1({
+      startedAt: TEST_STARTED_AT,
+      outcomeAsOfSession: null,
+      sources: [],
+    });
+    expect(empty.outcomeAsOfSession).toBeNull();
+    const source = roleSource('candidate_calendar');
+    expect(PointInTimeSourceManifestV1Schema.safeParse({
+      ...empty,
+      sources: [{ role: 'candidate_calendar', digest: source.digest }],
+    }).success).toBe(false);
+  });
+
   test('rejects t0/outcome role swaps and role-specific ticker, cutoff, or dates', () => {
     const candidateDaily = roleSource('candidate_daily_bars');
     const outcomeDaily = roleSource('outcome_daily_bars');

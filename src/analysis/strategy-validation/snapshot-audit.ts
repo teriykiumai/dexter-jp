@@ -78,6 +78,7 @@ import {
 import { isExecutableTsePriceV1 } from './tick.js';
 
 export const SNAPSHOT_AUDIT_ESTIMATED_LOCAL_ATTEMPTS_V1 = 0 as const;
+export const SNAPSHOT_AUDIT_ESTIMATED_CALENDAR_ATTEMPTS_V1 = 1 as const;
 export const SNAPSHOT_AUDIT_ESTIMATED_CANDIDATE_ATTEMPTS_V1 = 2 as const;
 export const SNAPSHOT_AUDIT_CALENDAR_LOOKBACK_DAYS_V1 = 370 as const;
 
@@ -104,6 +105,7 @@ export type SnapshotAuditPreflightV1 = Readonly<{
   decisionDate: TseSessionDate;
   strategyDataDate: TseSessionDate | null;
   localUnavailableReason: SnapshotAnchorUnavailableReasonV1 | null;
+  candidateNormalizationInvalid: boolean;
   candidates: readonly StrategyOutcomeCandidateV1[];
   calendarDateFrom: TseSessionDate;
   calendarDateTo: TseSessionDate;
@@ -153,12 +155,6 @@ function calendarLookback(startedTokyoDate: TseSessionDate): TseSessionDate {
   return parseTseSessionDate(cursor);
 }
 
-function localAnchorOutcomeBoundary(startedAt: AsOfCutoff): OutcomeAsOfSession {
-  return parseTseSessionDate(
-    previousGregorianDateV1(tokyoDateFromUtcInstantV1(startedAt)),
-  ) as OutcomeAsOfSession;
-}
-
 function snapshotCandidate(
   value: NonNullable<AnalysisSnapshot['strategy']>['candidates'][number],
 ): StrategyOutcomeCandidateV1 | null {
@@ -195,6 +191,7 @@ export async function createSnapshotAuditPreflightV1(
   const strategy = snapshot.strategy;
   let localUnavailableReason: SnapshotAnchorUnavailableReasonV1 | null = null;
   let strategyDataDate: TseSessionDate | null = null;
+  let candidateNormalizationInvalid = false;
   let candidates: readonly StrategyOutcomeCandidateV1[] = Object.freeze([]);
 
   if (strategy === null || strategy.candidates.length === 0) {
@@ -208,7 +205,7 @@ export async function createSnapshotAuditPreflightV1(
     } else {
       const normalized = strategy.candidates.map(snapshotCandidate);
       if (normalized.some(value => value === null)) {
-        localUnavailableReason = 'invalid_candidate';
+        candidateNormalizationInvalid = true;
       } else {
         candidates = Object.freeze(normalized as StrategyOutcomeCandidateV1[]);
       }
@@ -223,14 +220,17 @@ export async function createSnapshotAuditPreflightV1(
   const calendarDateFrom = earlier(rangeAnchor, calendarLookback(startedTokyoDate));
   const calendarDateTo = later(later(anchorDate, decisionDate), startedTokyoDate);
   const candidateMasterRequired = localUnavailableReason === null
+    && !candidateNormalizationInvalid
     && strategyDataDate !== null
     && candidates.some(candidate => (
       resolveLongStrategyInitialFailureWithoutMasterV1(candidate, strategyDataDate)
         !== 'invalid_candidate'
     ));
-  const estimatedMinimumAttempts = candidateMasterRequired
-    ? SNAPSHOT_AUDIT_ESTIMATED_CANDIDATE_ATTEMPTS_V1
-    : SNAPSHOT_AUDIT_ESTIMATED_LOCAL_ATTEMPTS_V1;
+  const estimatedMinimumAttempts = localUnavailableReason !== null
+    ? SNAPSHOT_AUDIT_ESTIMATED_LOCAL_ATTEMPTS_V1
+    : candidateMasterRequired
+      ? SNAPSHOT_AUDIT_ESTIMATED_CANDIDATE_ATTEMPTS_V1
+      : SNAPSHOT_AUDIT_ESTIMATED_CALENDAR_ATTEMPTS_V1;
 
   return Object.freeze({
     mode: 'snapshot',
@@ -248,6 +248,7 @@ export async function createSnapshotAuditPreflightV1(
     decisionDate,
     strategyDataDate,
     localUnavailableReason,
+    candidateNormalizationInvalid,
     candidates,
     calendarDateFrom,
     calendarDateTo,
@@ -383,7 +384,7 @@ function tickCategoryEvidence(
 
 function manifest(
   preflight: SnapshotAuditPreflightV1,
-  outcomeAsOfSession: OutcomeAsOfSession,
+  outcomeAsOfSession: OutcomeAsOfSession | null,
   references: readonly PointInTimeSourceManifestReferenceV1[],
 ) {
   return createPointInTimeSourceManifestV1({
@@ -396,7 +397,7 @@ function manifest(
 function anchorUnavailableCase(
   preflight: SnapshotAuditPreflightV1,
   runId: string,
-  outcomeAsOfSession: OutcomeAsOfSession,
+  outcomeAsOfSession: OutcomeAsOfSession | null,
   reason: SnapshotAnchorUnavailableReasonV1 | 'calendar_incomplete',
   references: readonly PointInTimeSourceManifestReferenceV1[],
 ): StrategyValidationCaseV1 {
@@ -493,12 +494,12 @@ export async function executeSnapshotAuditV1(
   const runId = createStrategyValidationRunIdV1();
   const sources = new Map<SnapshotDigest, PointInTimeSourceEnvelopeV1>();
   let candidateCalendar: TseSessionCalendarV1 | null = null;
-  let outcomeAsOfSession: OutcomeAsOfSession;
+  let outcomeAsOfSession: OutcomeAsOfSession | null;
   let candidateCalendarReference: PointInTimeSourceManifestReferenceV1 | null = null;
   let cases: readonly StrategyValidationCaseV1[] = Object.freeze([]);
 
   if (preflight.localUnavailableReason !== null) {
-    outcomeAsOfSession = localAnchorOutcomeBoundary(preflight.startedAt);
+    outcomeAsOfSession = null;
     cases = Object.freeze([anchorUnavailableCase(
       preflight,
       runId,
@@ -544,7 +545,18 @@ export async function executeSnapshotAuditV1(
       'strategy_data_date_invalid',
       [candidateCalendarReference!],
     )]);
+  } else if (preflight.candidateNormalizationInvalid) {
+    cases = Object.freeze([anchorUnavailableCase(
+      preflight,
+      runId,
+      outcomeAsOfSession,
+      'invalid_candidate',
+      [candidateCalendarReference!],
+    )]);
   } else {
+    if (outcomeAsOfSession === null) {
+      throw new TypeError('A source-backed Snapshot audit has no official outcome boundary.');
+    }
     const strategyDataDate = preflight.strategyDataDate!;
     const assigned = assignSnapshotCandidateIdentitiesV1({
       snapshotDigest: preflight.selector.snapshotDigest,

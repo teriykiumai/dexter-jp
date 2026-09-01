@@ -268,7 +268,9 @@ export function validationRun(
   );
   const aggregation = aggregateStrategyValidationCasesV1(scope, anchors, cases);
   const sortedCases = [...cases].sort(compareStrategyValidationCasesV1);
-  const controls = planJQuantsExecutionV1(1, 5);
+  const outcomeAsOfSession = cases[0]?.outcomeAsOfSession ?? null;
+  const sourceFreeLocal = !campaign && outcomeAsOfSession === null;
+  const controls = planJQuantsExecutionV1(sourceFreeLocal ? 0 : 1, 5);
   return StrategyValidationRunV1Schema.parse({
     schemaVersion: STRATEGY_VALIDATION_RUN_SCHEMA_VERSION,
     runId: cases[0]?.runId ?? TEST_RUN_ID,
@@ -279,7 +281,7 @@ export function validationRun(
     acceptedAt: TEST_ACCEPTED_AT,
     executionDeadline: TEST_DEADLINE,
     completedAt: TEST_COMPLETED_AT,
-    outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+    outcomeAsOfSession,
     selector: campaign
       ? { mode: 'campaign', manifestDigest: TEST_MANIFEST_DIGEST }
       : {
@@ -295,9 +297,9 @@ export function validationRun(
     })),
     aggregation,
     execution: {
-      attemptCount: 1,
+      attemptCount: sourceFreeLocal ? 0 : 1,
       cacheHitCount: 0,
-      durationMs: 1_000,
+      durationMs: sourceFreeLocal ? 0 : 1_000,
       controls,
     },
     terminationState: 'completed',

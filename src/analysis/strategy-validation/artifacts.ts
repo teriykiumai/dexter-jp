@@ -240,6 +240,11 @@ export const STRATEGY_VALIDATION_SNAPSHOT_ANCHOR_UNAVAILABLE_REASONS_V1 = Object
   'future_strategy_data',
   'invalid_candidate',
 ] as const);
+const STRATEGY_VALIDATION_LOCAL_SNAPSHOT_ANCHOR_REASONS_V1 = Object.freeze([
+  'strategy_data_date_invalid',
+  'future_strategy_data',
+  'invalid_candidate',
+] as const);
 export const STRATEGY_VALIDATION_CAMPAIGN_ANCHOR_UNAVAILABLE_REASONS_V1 = Object.freeze([
   'source_plan_unavailable',
   'source_history_unavailable',
@@ -462,7 +467,6 @@ const caseCommonShape = {
   versions: StrategyValidationVersionsV1Schema,
   candidateGenerationPolicy: z.literal(STRATEGY_VALIDATION_CAMPAIGN_POLICY).nullable(),
   startedAt: canonicalUtcInstant,
-  outcomeAsOfSession: strictDate,
   entryWaitSessions: z.literal(STRATEGY_ENTRY_WAIT_SESSIONS_V1),
   holdingSessions: z.literal(STRATEGY_HOLDING_SESSIONS_V1),
   sourceManifest: PointInTimeSourceManifestV1Schema,
@@ -470,12 +474,14 @@ const caseCommonShape = {
 
 const AnchorUnavailableCaseSchema = z.object({
   ...caseCommonShape,
+  outcomeAsOfSession: strictDate.nullable(),
   caseKind: z.literal('anchor_unavailable'),
   unavailableReason: z.enum(STRATEGY_VALIDATION_ANCHOR_UNAVAILABLE_REASONS_V1),
 }).strict();
 
 const CandidateCaseSchema = z.object({
   ...caseCommonShape,
+  outcomeAsOfSession: strictDate,
   caseKind: z.literal('candidate'),
   candidateIdentityVersion: z.enum([
     'snapshot_candidate_identity_v1',
@@ -497,7 +503,8 @@ export const StrategyValidationCaseV1Schema = z.discriminatedUnion('caseKind', [
   if (value.decisionDate < value.anchorDate) {
     context.addIssue({ code: 'custom', message: 'decisionDate precedes anchorDate.' });
   }
-  if (value.outcomeAsOfSession >= tokyoDateFromUtcInstantV1(value.startedAt)) {
+  if (value.outcomeAsOfSession !== null
+    && value.outcomeAsOfSession >= tokyoDateFromUtcInstantV1(value.startedAt)) {
     context.addIssue({
       code: 'custom', message: 'outcomeAsOfSession is not before the Tokyo start date.',
     });
@@ -523,6 +530,17 @@ export const StrategyValidationCaseV1Schema = z.discriminatedUnion('caseKind', [
       : STRATEGY_VALIDATION_CAMPAIGN_ANCHOR_UNAVAILABLE_REASONS_V1;
     if (!allowed.includes(value.unavailableReason as never)) {
       context.addIssue({ code: 'custom', message: 'Anchor unavailable reason is invalid for its mode.' });
+    }
+    const sourceFreeLocalSnapshotFailure = snapshotMode
+      && STRATEGY_VALIDATION_LOCAL_SNAPSHOT_ANCHOR_REASONS_V1.includes(
+        value.unavailableReason as never,
+      )
+      && value.sourceManifest.sources.length === 0;
+    if ((value.outcomeAsOfSession === null) !== sourceFreeLocalSnapshotFailure) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Only a source-free local Snapshot anchor failure has a null outcome boundary.',
+      });
     }
     return;
   }

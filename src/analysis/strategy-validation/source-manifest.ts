@@ -81,9 +81,15 @@ export const PointInTimeSourceManifestV1Schema = z.object({
   schemaVersion: z.literal(POINT_IN_TIME_SOURCE_MANIFEST_VERSION),
   roleVersion: z.literal(STRATEGY_VALIDATION_SOURCE_ROLE_VERSION),
   startedAt: canonicalUtcInstant,
-  outcomeAsOfSession: strictDate,
+  outcomeAsOfSession: strictDate.nullable(),
   sources: z.array(PointInTimeSourceManifestReferenceV1Schema).max(250),
 }).strict().superRefine((value, context) => {
+  if (value.outcomeAsOfSession === null && value.sources.length !== 0) {
+    context.addIssue({
+      code: 'custom', message: 'A null outcome boundary cannot reference source envelopes.',
+    });
+    return;
+  }
   const digests = new Set<string>();
   for (let index = 0; index < value.sources.length; index += 1) {
     const current = value.sources[index]!;
@@ -112,7 +118,7 @@ export type PointInTimeSourceManifestV1 = z.infer<typeof PointInTimeSourceManife
 
 export function createPointInTimeSourceManifestV1(input: Readonly<{
   startedAt: string;
-  outcomeAsOfSession: string;
+  outcomeAsOfSession: string | null;
   sources: readonly PointInTimeSourceManifestReferenceV1[];
 }>): PointInTimeSourceManifestV1 {
   return PointInTimeSourceManifestV1Schema.parse({

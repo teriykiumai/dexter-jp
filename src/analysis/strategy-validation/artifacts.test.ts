@@ -244,7 +244,7 @@ describe('Strategy-validation V1 artifacts and identity', () => {
       unavailableReason: 'strategy_data_date_invalid',
     }).success).toBe(false);
 
-    expect(StrategyValidationCaseV1Schema.safeParse({
+    const sourceFreeSnapshotAnchor = {
       ...campaignAnchor,
       mode: 'snapshot',
       confidence: 'precommitted',
@@ -252,7 +252,34 @@ describe('Strategy-validation V1 artifacts and identity', () => {
       selector: candidate.selector,
       candidateGenerationPolicy: null,
       unavailableReason: 'strategy_data_date_invalid',
+    } as const;
+    expect(StrategyValidationCaseV1Schema.safeParse(sourceFreeSnapshotAnchor).success).toBe(false);
+    expect(StrategyValidationCaseV1Schema.safeParse({
+      ...sourceFreeSnapshotAnchor,
+      outcomeAsOfSession: null,
+      sourceManifest: {
+        ...sourceFreeSnapshotAnchor.sourceManifest,
+        outcomeAsOfSession: null,
+      },
     }).success).toBe(true);
+    expect(StrategyValidationCaseV1Schema.safeParse({
+      ...sourceFreeSnapshotAnchor,
+      outcomeAsOfSession: null,
+      sourceManifest: {
+        ...candidate.sourceManifest,
+        outcomeAsOfSession: null,
+      },
+    }).success).toBe(false);
+    expect(StrategyValidationCaseV1Schema.safeParse({
+      ...candidate,
+      outcomeAsOfSession: null,
+      sourceManifest: { ...candidate.sourceManifest, outcomeAsOfSession: null },
+    }).success).toBe(false);
+    expect(StrategyValidationCaseV1Schema.safeParse({
+      ...campaignAnchor,
+      outcomeAsOfSession: null,
+      sourceManifest: { ...campaignAnchor.sourceManifest, outcomeAsOfSession: null },
+    }).success).toBe(false);
   });
 
   test('binds source-manifest time identity to the case', () => {
