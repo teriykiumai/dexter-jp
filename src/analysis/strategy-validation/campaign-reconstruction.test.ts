@@ -434,6 +434,48 @@ describe('historical Strategy reconstruction', () => {
     expect(await runs.list()).toEqual([]);
   });
 
+  test('retains the shared planning calendar when resistance evidence ends the anchor early', async () => {
+    const { snapshots, runs } = await repositories('dexter-campaign-planning-evidence-');
+    const preflight = await createCampaignReconstructionPreflightV1({
+      schemaVersion: 'strategy_validation_campaign_v1',
+      name: 'planning-evidence',
+      anchors: [{
+        ticker: '7203',
+        anchorDate: '2025-12-31',
+        resistanceEvidence: [{
+          kind: 'analysis_snapshot',
+          snapshotId: '2025-01-01T00-00-00-000Z',
+        }],
+      }],
+    }, {
+      snapshotRepository: snapshots,
+      startedAt: '2026-08-01T00:00:00.000Z',
+      requestsPerMinute: 500,
+    });
+    expect(preflight.anchors[0]!.resistanceEvidence.state).toBe('unavailable');
+    const { environment, requests } = validationEnvironment({
+      dailyBars: (_url, sessions) => flatBars(sessions, 50),
+    });
+    const accepted = acceptJQuantsExecutionV1(preflight.executionPlan, environment);
+    const runtime = new JQuantsExecutionRuntimeV1(accepted, { environment });
+    const result = await executeCampaignReconstructionV1(preflight, {
+      source: new JQuantsValidationAdapterV1(runtime),
+      runtime,
+      accepted,
+      runRepository: runs,
+    });
+    const loaded = await runs.load(result.runId);
+    expect(loaded.cases).toMatchObject([{
+      caseKind: 'anchor_unavailable',
+      unavailableReason: 'resistance_evidence_invalid',
+      outcomeAsOfSession: '2026-07-31',
+      sourceManifest: { sources: [{ role: 'outcome_calendar' }] },
+    }]);
+    expect(loaded.sources).toHaveLength(1);
+    expect(loaded.sources[0]!.result.state).toBe('available');
+    expect(requests.map(url => url.pathname)).toEqual(['/v2/markets/calendar']);
+  });
+
   test('keeps a campaign complete when one exact candidate calendar is incomplete', async () => {
     const { snapshots, runs } = await repositories('dexter-campaign-calendar-gap-');
     const campaign: StrategyValidationCampaignManifestV1 = {
@@ -473,7 +515,10 @@ describe('historical Strategy reconstruction', () => {
       outcomeAsOfSession: '2026-07-31',
       sourceManifest: {
         outcomeAsOfSession: '2026-07-31',
-        sources: [{ role: 'candidate_calendar' }],
+        sources: [
+          { role: 'candidate_calendar' },
+          { role: 'outcome_calendar' },
+        ],
       },
     });
     expect(loaded.cases.some(value => value.anchorDate === '2025-12-31'

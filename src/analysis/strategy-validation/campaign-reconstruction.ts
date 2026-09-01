@@ -644,6 +644,7 @@ async function collectCandidateCases(
       sourceReference('candidate_calendar', candidateCalendarEnvelope),
       sourceReference('candidate_master', master.envelope),
       sourceReference('candidate_daily_bars', candidateDailyEnvelope),
+      sourceReference('outcome_calendar', outcomeCalendarEnvelope),
     ];
     let outcome: StrategyOutcomeResultV1;
     if (value.tickEvidence.unavailableReason !== null
@@ -658,7 +659,6 @@ async function collectCandidateCases(
         bars: [],
       });
     } else {
-      references.push(sourceReference('outcome_calendar', outcomeCalendarEnvelope));
       if (outcomeSessions.length === 0) {
         outcome = validateLongStrategyOutcomeV1({
           candidate: value.assigned.candidate,
@@ -775,6 +775,9 @@ export async function executeCampaignReconstructionV1(
     globalCalendarResult.calendar,
     preflight.startedAt,
   );
+  const outcomeCalendarReference = sourceReference(
+    'outcome_calendar', globalCalendarResult.envelope,
+  );
   const cases: StrategyValidationCaseV1[] = [];
 
   for (const anchor of preflight.anchors) {
@@ -785,7 +788,12 @@ export async function executeCampaignReconstructionV1(
     );
     if (anchor.resistanceEvidence.state === 'unavailable') {
       cases.push(anchorUnavailableCase(
-        preflight, anchor, runId, outcomeAsOfSession, anchor.resistanceEvidence.reason, [],
+        preflight,
+        anchor,
+        runId,
+        outcomeAsOfSession,
+        anchor.resistanceEvidence.reason,
+        [outcomeCalendarReference],
       ));
       continue;
     }
@@ -807,7 +815,7 @@ export async function executeCampaignReconstructionV1(
           runId,
           outcomeAsOfSession,
           'calendar_incomplete',
-          [candidateCalendarReference],
+          [candidateCalendarReference, outcomeCalendarReference],
         ));
         continue;
       }
@@ -817,7 +825,7 @@ export async function executeCampaignReconstructionV1(
         runId,
         outcomeAsOfSession,
         candidateCalendarResult.reason,
-        [candidateCalendarReference],
+        [candidateCalendarReference, outcomeCalendarReference],
       ));
       continue;
     }
@@ -847,7 +855,7 @@ export async function executeCampaignReconstructionV1(
         runId,
         outcomeAsOfSession,
         candidateDailyResult.reason,
-        [candidateCalendarReference, candidateDailyReference],
+        [candidateCalendarReference, candidateDailyReference, outcomeCalendarReference],
       ));
       continue;
     }
@@ -864,7 +872,7 @@ export async function executeCampaignReconstructionV1(
         runId,
         outcomeAsOfSession,
         'price_history_incomplete',
-        [candidateCalendarReference, candidateDailyReference],
+        [candidateCalendarReference, candidateDailyReference, outcomeCalendarReference],
       ));
       continue;
     }
@@ -877,7 +885,7 @@ export async function executeCampaignReconstructionV1(
         runId,
         outcomeAsOfSession,
         'invalid_candidate',
-        [candidateCalendarReference, candidateDailyReference],
+        [candidateCalendarReference, candidateDailyReference, outcomeCalendarReference],
       ));
       continue;
     }
@@ -890,7 +898,7 @@ export async function executeCampaignReconstructionV1(
         runId,
         outcomeAsOfSession,
         'invalid_candidate',
-        [candidateCalendarReference, candidateDailyReference],
+        [candidateCalendarReference, candidateDailyReference, outcomeCalendarReference],
       ));
       continue;
     }
@@ -917,7 +925,12 @@ export async function executeCampaignReconstructionV1(
         runId,
         outcomeAsOfSession,
         reconstructed.reason,
-        [candidateCalendarReference, masterReference, candidateDailyReference],
+        [
+          candidateCalendarReference,
+          masterReference,
+          candidateDailyReference,
+          outcomeCalendarReference,
+        ],
       ));
       continue;
     }

@@ -172,12 +172,17 @@ describe('Point-in-time source manifest V1', () => {
     }
   });
 
-  test('rejects outcome roles for an unavailable anchor', () => {
+  test('permits only the campaign planning calendar for an unavailable anchor', () => {
     const source = roleSource('outcome_calendar');
     expect(() => validateStrategyValidationSourceBindingV1(
       { role: 'outcome_calendar', digest: source.digest },
       source,
       { ...campaignContext, caseKind: 'anchor_unavailable' },
+    )).not.toThrow();
+    expect(() => validateStrategyValidationSourceBindingV1(
+      { role: 'outcome_calendar', digest: source.digest },
+      source,
+      { ...campaignContext, mode: 'snapshot', caseKind: 'anchor_unavailable' },
     )).toThrow();
   });
 });

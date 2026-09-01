@@ -563,17 +563,21 @@ export const StrategyValidationCaseV1Schema = z.discriminatedUnion('caseKind', [
     const noSources = value.sourceManifest.sources.length === 0;
     const candidateCalendarOnly = value.sourceManifest.sources.length === 1
       && value.sourceManifest.sources[0]!.role === 'candidate_calendar';
+    const campaignCalendarEvidence = value.sourceManifest.sources.length === 2
+      && value.sourceManifest.sources[0]!.role === 'candidate_calendar'
+      && value.sourceManifest.sources[1]!.role === 'outcome_calendar';
     const invalidStage = (): void => context.addIssue({
       code: 'custom', message: 'Anchor unavailable reason does not match its source stage.',
     });
     if (value.unavailableReason === 'calendar_incomplete') {
       const snapshotCalendarFailure = snapshotMode
         && value.outcomeAsOfSession === null
-        && value.strategyDataDate !== null;
+        && value.strategyDataDate !== null
+        && candidateCalendarOnly;
       const campaignCalendarFailure = !snapshotMode
-        && value.outcomeAsOfSession !== null;
-      if (!candidateCalendarOnly
-        || (!snapshotCalendarFailure && !campaignCalendarFailure)) invalidStage();
+        && value.outcomeAsOfSession !== null
+        && campaignCalendarEvidence;
+      if (!snapshotCalendarFailure && !campaignCalendarFailure) invalidStage();
       return;
     }
     if (!snapshotMode) {

@@ -12,7 +12,10 @@ import {
   tokyoEndOfDayV1,
   type OutcomeAsOfSession,
 } from './date.js';
-import { createTseSessionCalendarV1 } from './calendar.js';
+import {
+  createTseSessionCalendarV1,
+  deriveOutcomeAsOfSessionV1,
+} from './calendar.js';
 import { parseDailyBarV1, type TseDailyBarV1 } from './daily-bar.js';
 import {
   STRATEGY_WORST_CASE_EVALUATION_SESSION_V1,
@@ -176,6 +179,7 @@ export type StrategyValidationSourceCompletenessContextV1 = Readonly<{
   decisionDate: string;
   strategyDataDate: string | null;
   initialTickDate: string | null;
+  startedAt: string;
   outcomeAsOfSession: string;
   entryWaitSessions: number;
   holdingSessions: number;
@@ -223,12 +227,16 @@ export function validateStrategyValidationSourceBindingV1(
   context: StrategyValidationSourceBindingContextV1,
 ): void {
   const candidateRole = reference.role.startsWith('candidate_');
+  const campaignPlanningRole = context.mode === 'campaign'
+    && reference.role === 'outcome_calendar';
   if (reference.digest !== envelope.digest
     || envelope.endpoint !== expectedEndpoint(reference.role)
     || (envelope.endpoint === '/v2/markets/calendar'
       ? envelope.request.ticker !== null
       : envelope.request.ticker !== context.ticker)
-    || (context.caseKind === 'anchor_unavailable' && !candidateRole)) {
+    || (context.caseKind === 'anchor_unavailable'
+      && !candidateRole
+      && !campaignPlanningRole)) {
     failBinding();
   }
 
@@ -562,12 +570,36 @@ export function validateStrategyValidationSourceCompletenessV1(
     }
     return !value.envelope.result.rows.some(row => row.Date === date);
   });
-  const campaignCandidateSessions = (): readonly string[] => {
-    const calendar = completeCalendar('candidate_calendar');
-    const sessions = calendar.sessions.map(String);
+  const campaignPlanningSessions = (): readonly string[] => {
+    if (context.mode !== 'campaign' || forRole('outcome_calendar').length !== 1) {
+      return failCompleteness();
+    }
+    const calendar = completeCalendar('outcome_calendar');
+    let derivedBoundary: string;
+    try {
+      derivedBoundary = deriveOutcomeAsOfSessionV1(calendar, context.startedAt);
+    } catch {
+      return failCompleteness();
+    }
+    if (derivedBoundary !== context.outcomeAsOfSession
+      || !calendar.isSession(context.anchorDate)) failCompleteness();
+    const sessions = calendar.sessions.filter(date => date <= context.anchorDate).slice(-251);
     if (sessions.length !== 251 || sessions.at(-1) !== context.anchorDate) {
       failCompleteness();
     }
+    return sessions.map(String);
+  };
+  const campaignCandidateSessions = (): readonly string[] => {
+    const planned = campaignPlanningSessions();
+    const bindings = forRole('candidate_calendar');
+    if (bindings.length !== 1
+      || bindings[0]!.envelope.request.dateFrom !== planned[0]
+      || bindings[0]!.envelope.request.dateTo !== context.anchorDate) {
+      failCompleteness();
+    }
+    const sessions = completeCalendar('candidate_calendar').sessions.map(String);
+    if (sessions.length !== planned.length
+      || sessions.some((date, index) => date !== planned[index])) failCompleteness();
     return sessions;
   };
   const requireCampaignCandidateGeometry = (completeDaily: boolean): void => {
@@ -643,6 +675,8 @@ export function validateStrategyValidationSourceCompletenessV1(
     requireOutcomeMatch(Object.freeze({ ...replayed, reason }) as StrategyOutcomeResultV1);
   };
 
+  if (context.mode === 'campaign') campaignPlanningSessions();
+
   if (context.caseKind === 'anchor_unavailable') {
     switch (context.unavailableReason) {
       case 'source_plan_unavailable':
@@ -668,10 +702,19 @@ export function validateStrategyValidationSourceCompletenessV1(
         if (calendar.length !== 1
           || calendar[0]!.envelope.result.state !== 'unavailable'
           || calendar[0]!.envelope.result.reason !== 'calendar_incomplete'
-          || (['candidate_master', 'candidate_daily_bars', 'outcome_calendar',
+          || (['candidate_master', 'candidate_daily_bars',
             'outcome_master', 'outcome_daily_bars'] as const).some(role => (
             forRole(role).length !== 0
           ))) failCompleteness();
+        if (context.mode === 'campaign') {
+          const planned = campaignPlanningSessions();
+          if (calendar[0]!.envelope.request.dateFrom !== planned[0]
+            || calendar[0]!.envelope.request.dateTo !== context.anchorDate) {
+            failCompleteness();
+          }
+        } else if (forRole('outcome_calendar').length !== 0) {
+          failCompleteness();
+        }
         return;
       }
       case 'price_history_incomplete':
