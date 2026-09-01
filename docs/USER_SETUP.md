@@ -1,14 +1,16 @@
 # 日本株AI分析システム — ユーザー準備手順
 
-**対象:** プロジェクト利用者  
-**目的:** Codexによる実装開始前に、人間側で必要な準備を済ませる。  
+**対象:** プロジェクト利用者
+
+**目的:** ローカルでの利用と開発に必要な人間側の準備を確認する。
+
 **前提:** 完全な個人利用・ローカル実行。
 
 ## 1. このファイルの役割
 
 このファイルには **ユーザー自身が行う作業だけ** を記載する。
 
-- Codexの実装作業 → `MVP_IMPLEMENTATION_PLAN.md`
+- Codexの実装作業 → 対象phaseの`docs/*_PLAN.md`
 - 開発ルール → `AGENTS.md`
 - 仕様 → `SPEC.md`
 
@@ -43,6 +45,7 @@ EDINETDB_API_KEY
 - 株価OHLCV
 - TOPIX
 - 信用取引データ
+- 過去のEntry / Stop / TargetのStrategy validation
 - 将来的な指数 / 需給関連データ
 
 作業:
@@ -53,6 +56,8 @@ EDINETDB_API_KEY
 プラン方針:
 - 最初はFreeでもよい
 - MVPでは信用残を利用するため、実APIテスト段階で必要なプランへ変更する可能性がある
+- Strategy validationでは、基準日の前251 official sessionsと最大t79までの
+  calendar / historical master / raw daily barsを取得できる履歴範囲が必要
 - プラン変更は、実装時点の公式仕様を確認して判断する
 
 完了条件:
@@ -170,6 +175,8 @@ APIキーはGit管理しない。
 ```bash
 EDINETDB_API_KEY=...
 JQUANTS_API_KEY=...
+# 任意。未設定時は5。1〜500の整数で契約上限以下に設定する。
+JQUANTS_REQUESTS_PER_MINUTE=5
 ```
 
 Dexter JP本体で利用するLLMに応じて、必要なLLM資格情報を追加する。
@@ -178,9 +185,24 @@ Dexter JP本体で利用するLLMに応じて、必要なLLM資格情報を追�
 - `.env` をGitHubへcommitしない
 - APIキーをREADME / issue / chat log等へ貼らない
 - APIキーをソースコードへ直接書かない
+- Strategy validationのCLI / Dashboardが表示する外部送信、最少request数、
+  rateとsubscription quotaのwarningを、実行ごとに確認する
+- `JQUANTS_REQUESTS_PER_MINUTE`は契約上限を自動取得しないため、契約値より
+  高い設定にしない
 
 - [ ] `.env`作成済み
 - [ ] APIキー設定済み
+
+### 8.1 Strategy validationを使用する場合
+
+- [ ] 対象基準日とoutcome horizonがJ-Quants契約プランの履歴範囲内
+- [ ] `JQUANTS_REQUESTS_PER_MINUTE`が契約のrequest上限以下
+- [ ] 外部送信とsubscription quota消費の可能性を実行ごとに確認できる
+- [ ] runを公開するPCがWindows
+
+Phase 4のdefault repositoryは、directoryのatomic no-replace publishを保証できる
+Windowsでのみrunを公開します。それ以外のplatformは`publish_unsupported`で
+fail closedし、partial runを代替公開しません。Python、Docker、別databaseは不要です。
 
 ## 9. Dexter JP自身が使用するLLM
 

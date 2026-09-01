@@ -1,315 +1,234 @@
 # Dexter JP Phase 4 Handoff
 
-**Status:** P4-0 candidate context; non-normative and not yet merged
+**Status:** P4-X closeout candidate; Phase 4 is not Done until this exact candidate passes independent review, is merged, and local `main` is fast-forwarded
 
-**Last Updated:** 2026-08-31
+**Last Updated:** 2026-09-01
 
 ## 1. How to use this file
 
 This handoff restores context only. It does not approve work, override
-`AGENTS.md`/`docs/SPEC.md`/`docs/PHASE4_PLAN.md`, replace merged code and tests, or
-prove a PR passed review. Resolve any conflict in favor of the applicable Source of
+`AGENTS.md` / `docs/SPEC.md` / `docs/PHASE4_PLAN.md`, replace merged code and tests,
+or prove a PR passed review. Resolve conflicts in favor of the applicable Source of
 Truth and the exact merged implementation.
 
 Before acting, verify the current checkout, `origin/main`, applicable PR head, CI,
-independent review, and Merge Gate. Do not infer current state from this file alone.
+independent review, and Merge Gate. Do not infer live Git or GitHub state from this
+file.
 
-## 2. Predecessor baseline
+## 2. Merged Phase 4 baseline
 
-P4-0 started from local and `origin/main` at:
-
-```text
-2da7062805a666654d3aafba761063eca0820c79
-Merge pull request #83 from teriykiumai/feat/phase3-closeout-step9
-```
-
-At that baseline Phase 3 is closed. Its relevant retained behavior is:
-
-- immutable, backward-readable Analysis Snapshot V1-V9 with V9 as writer;
-- canonical Snapshot JSON/digest and create-only history;
-- deterministic saved-analysis Comparison and Peer Radar;
-- five stable Dashboard tabs and inherited History API/race/focus/mobile behavior;
-- a dormant Evaluator evidence/sidecar foundation with no runtime producer/UI; and
-- a docs-only score protocol with no runtime score.
-
-Phase 3 does not authorize PDF, Evaluator runtime, composite score, Strategy signal,
-Snapshot V10, or a Phase 4 research run automatically.
-
-## 3. P4-0 candidate
-
-The user approved the Phase 4 design direction. The P4-0 branch is:
+P4-X starts from local and `origin/main` at:
 
 ```text
-feat/phase4-design-step0
+14d6fad0c2248e012da0e97338cd3a890c244765
+Merge pull request #92 from teriykiumai/feat/phase4-dashboard-validation-step8
 ```
 
-The candidate changes only:
+The required implementation steps were independently reviewed and merged in order:
 
-- `docs/SPEC.md` — narrows Phase 4 to point-in-time Strategy outcome validation and
-  states the research-only/no-score boundary;
-- `docs/PHASE4_PLAN.md` — normative decision-complete implementation contract; and
-- this handoff — non-normative recovery context.
+| Step | PR | Merge commit | Implemented boundary |
+| --- | --- | --- | --- |
+| P4-0 | #84 | `e4cb9fb` | Source of Truth and detailed design |
+| P4-I0 | #85 | `9691bfa` | pure point-in-time/calendar/adjustment/tick/source primitives |
+| P4-I1 | #86 | `b727ea7` | strict J-Quants adapter, bounded runtime, feasibility gate |
+| P4-V1 | #87 | `1acdbab` | pure daily-OHLC outcome validator |
+| P4-R1 | #88 | `82a73f5` | manifest, immutable run repository, aggregation |
+| P4-S1 | #89 | `a412904` | saved-Snapshot audit CLI |
+| P4-C1 | #90 | `ebb8203` | `technical_251_strategy_v1` campaign CLI |
+| P4-J1 | #91 | `03aed7f` | local job/CSRF/read API |
+| P4-D1 | #92 | `14d6fad` | sixth Dashboard tab and explicit run/case inspection |
 
-No code, package, command, environment, Snapshot, `.dexter` artifact, API, Dashboard,
-Usage, setup, Phase 3 plan, or historical predecessor plan changes in P4-0.
+This list records the predecessor baseline only. P4-X itself remains unmerged while
+this handoff is a candidate.
 
-The candidate must not be described as approved by independent review, merged, or
-implemented until those facts are verified on the exact head.
+## 3. Implemented operational surface
 
-## 4. Phase 4 decision summary
+### 3.1 Saved-Snapshot audit
 
-### 4.1 Two evidence tracks
+An exact stored Snapshot is selected without latest fallback:
 
-Phase 4 keeps two separate confidence tracks:
+```bash
+bun run validate:strategy -- --ticker <ticker> --snapshot-id <snapshotId>
+```
+
+The run uses the `precommitted` confidence track. Local date/candidate failures that
+need no source request do not prompt for J-Quants. Any path that requires external
+requests remains default-No and shows the bounded execution plan before acceptance.
+
+### 3.2 Historical campaign
+
+A strict UTF-8, no-BOM, at-most-1-MiB manifest is selected explicitly:
+
+```bash
+bun run validate:strategy -- --manifest <campaign.json>
+```
+
+The run uses `reconstructed_251_as_of` and
+`technical_251_strategy_v1`. It is a standardized retrospective policy, not a replay
+of the current full-history production analysis and not exact historical correction-
+vintage reproduction.
+
+Non-interactive external execution requires the explicit flag:
 
 ```text
-precommitted
-reconstructed_251_as_of
+--confirm-external-fetch
 ```
 
-The first audits Entry / Stop / Target already stored in an immutable Snapshot. The
-second applies `technical_251_strategy_v1` to exactly 251 official J-Quants sessions
-bounded at a historical anchor. The production comprehensive-analysis path instead
-passes its complete retrieved history to the base Technical Engine, so this track is
-not production-pipeline replay. Current source access also does not prove the exact
-correction vintage delivered at that past time. It is never combined with the first.
+### 3.3 Storage
 
-### 4.2 Source boundary
-
-Only these endpoints feed version 1:
-
-```text
-/v2/markets/calendar
-/v2/equities/master
-/v2/equities/bars/daily
-```
-
-Only `ProdCat === "011"` is eligible. The dedicated adapter maps exact allowlisted
-fields, filters future rows before domain parsing, uses official sessions, and
-preserves normalized source evidence and canonical digests without raw HTTP data or
-credentials.
-
-Campaign Technical input is exactly t0 plus 250 preceding official sessions under
-`technical_251_strategy_v1`. Raw historical OHLC is adjusted only through t0 using
-cumulative `AdjFactor`; current API AdjOHLC is not reused. Any action after t0 through
-evaluation end fails the case closed. Campaign artifacts/UI must expose the policy
-and warn that it does not validate the current full-history production path.
-
-Local preflight freezes `startedAt`; source-backed outcome uses only rows through the
-greatest official session strictly before its Tokyo date. The derived
-`outcomeAsOfSession` is persisted, so crossing a same-day J-Quants publication time
-cannot add a bar to an already confirmed run. An exact local Snapshot failure that
-terminates before source access instead persists `outcomeAsOfSession: null` with zero
-source references; it never casts the preceding Gregorian date as an official
-session. An attempted calendar request with missing internal dates or incomplete
-coverage also persists a null boundary, but only with one causal unavailable
-`candidate_calendar/calendar_incomplete` envelope.
-
-Campaign resistance accepts only persisted `resistance_level` target prices from a
-digest-valid Snapshot whose Strategy date is not later than that Snapshot's own
-Tokyo generation date and exactly matches the anchor. Each exact price retains its
-sorted source-Snapshot digests. Provenance then follows the unchanged Engine's exact
-resistance-to-entry-tick normalization, so a generated candidate records only the
-union of evidence that actually maps to its output target.
-
-### 4.3 Existing Engine boundary
-
-`analyzeTechnical`, `analyzeStrategy`, Strategy reasons/defaults, and the production
-single-`tickSize` interface remain unchanged. Reconstruction reuses those Engine
-algorithms only inside `technical_251_strategy_v1`; it does not claim production
-input-window parity. It resolves the entry's next quote, calls the existing Engine,
-then validates every produced level against its own price-band tick. An invalid
-cross-band level is `non_executable_tick`, not silently re-rounded.
-
-Tick rules support 2015-09-24 through 2027-02-28 only. The 2027 STR regime is
-explicitly deferred.
-
-### 4.4 Outcome boundary
-
-Entry waits t1-t20. Entry day is holding day 1 and a filled case observes through
-holding day 60, so a t20 entry can require evaluation session 79. Daily OHLC applies
-fixed conservative gap rules. Same-bar sequence that daily data cannot prove is
-bounded as `ambiguous_intraday`. `UL`/`LL` are evidence flags, not generic execution
-flags: only a buy Entry exactly at flagged `H` or a sell Stop exactly at flagged `L`
-is `limit_queue_ambiguous`. Opposite-side and boundary-inside fills remain governed
-by the OHLC algorithm. No-trade rows count as sessions but not touches.
-
-For an entry bar with open below entry and a stop touch, close at or below stop makes
-the stop provable after entry; only a close above stop permits the optimistic
-low-before-entry branch to remain open. Target-plus-stop remains bounded between the
-two terminal outcomes.
-
-The result union is:
-
-```text
-not_triggered
-stop_hit
-target_hit
-horizon_expired
-ambiguous_intraday
-unavailable
-```
-
-Exact R, horizon mark R, and ambiguity bounds remain distinct. No outcome is a
-Strategy PASS/FAIL or recommendation.
-
-### 4.5 Storage and operation
-
-Completed runs are immutable and self-contained under:
+Only complete, self-contained runs are atomically published under:
 
 ```text
 .dexter/research/strategy-validation/runs/<runId>/
 ```
 
-Equal reruns get new UUIDv4 run IDs. Partial runs are never published. Jobs alone are
-mutable, atomic state records; one global job may run, cancellation is bounded, and
-each job reserves its run ID before collection. Startup reconciles `publishing`: a
-promoted run whose recomputed canonical payload digest and identities match the
-publishing record completes the job, an absent run becomes interrupted, and a
-mismatched/corrupt run is retained and surfaced as a hard failure. Other nonterminal
-work becomes interrupted without automatic resume.
+Runs are create-only. Equal reruns receive new publication UUIDs while canonical
+candidate identities/order remain stable. Mutable job records are separate recovery
+state. Cancellation, failure, timeout, or interruption before promotion never
+publishes a partial run. The default no-replace directory promotion is supported on
+Windows; other platforms fail closed with `publish_unsupported`.
 
-Aggregation is hierarchical. Track-level coverage includes every requested anchor
-and all `anchor_unavailable` cases. Target/stop/resistance strata contain only
-candidate cases and use separately named candidate-bearing denominators; unavailable
-anchors are never omitted, replicated, or placed in a null candidate stratum.
+### 3.4 Dashboard
 
-Candidate IDs use separate `snapshot_candidate_identity_v1` and
-`campaign_candidate_identity_v1` canonical envelopes. Campaign identity includes
-ticker, anchor, the 251-session policy, exact Entry/Stop/Target tuple,
-candidate-specific resistance evidence, and a zero-based deterministic duplicate
-ordinal. It excludes run/case UUIDs, manifest identity, timestamps, and outcomes, so
-equal reruns preserve candidate IDs/order while cross-anchor, cross-ticker, and true
-duplicate candidates remain distinct.
-
-Legacy V1-V9 permits stored candidates with a null or non-calendar
-`strategy.dataDate`. Snapshot audit therefore parses and validates that field before
-candidate identity or outcome bars. Null, malformed, or impossible dates produce a
-source-free `strategy_data_date_invalid`; any parsed date later than generation takes
-the earlier source-free `future_strategy_data` precedence. Every remaining Snapshot
-first obtains the official calendar, so a proven non-session date takes precedence
-over candidate normalization failure. Only after the session guard may a candidate
-that fails Phase 4's positive-price schema erase the anchor; a positive relationally
-invalid Entry/Stop/Target tuple remains a candidate case with
-`unavailable/invalid_candidate`. Artifact validation binds each local/calendar stage
-to the exact `strategyDataDate`, boundary, and calendar-reference shape; in
-particular, a source-free parsed non-future date, a source-backed future date, and a
-source-free post-calendar candidate failure are invalid publications. It derives the
-Snapshot generation Tokyo date from the exact `selector.snapshotId`, so only a
-strictly later source-free Strategy date may claim `future_strategy_data`; same-day,
-earlier, calendar-backed, and candidate forms fail independent artifact validation,
-and anchor/decision dates must match the same derived generation identity. An
-incomplete calendar publishes one anchor with a null boundary and one unavailable
-calendar envelope. None of these branches requests Master or outcome bars.
-
-Campaign aggregates are deliberately `campaign_global` across every ticker and
-anchor in the run. Version 1 persists no per-ticker aggregates and the Browser never
-derives them from cases. The current ticker limits the run picker by membership and,
-within a selected run, filters only the case list/detail; it does not change run
-metadata or aggregate metrics.
-
-CLI external fetches and Dashboard jobs require explicit default-No confirmation.
-Normal CI never calls J-Quants. Before confirmation, preflight applies the runtime's
-same `rolling_attempt_log_v1` formula and rejects a minimum schedule that cannot
-dispatch before the 90-minute deadline. The minimum duration and frozen controls are
-shown and persisted; pagination/retry/latency may still cause timeout.
-
-### 4.6 Dashboard boundary
-
-P4-D1 appends:
+The Single Stock Dashboard has six stable tabs. The added identity is:
 
 ```text
 validation / 戦略検証
 ```
 
-Run and case selection is explicit in the URL; there is no automatic latest run or
-auto-open on completion. The local mutation API uses exact same-origin validation
-and a process-local CSRF token. The Browser never receives the J-Quants credential
-or a local filesystem path.
+The tab supports saved-Snapshot or Campaign JSON preflight, an explicit default-No
+quota/external-send confirmation, one global background job, polling, cancellation,
+and explicit run/case selection. Completion does not auto-open or auto-select a run.
 
-A campaign aggregate is headed
-`キャンペーン全体（{tickerCount}銘柄・{requestedAnchorCount}基準日）` and warns
-that only the case list is filtered to the displayed ticker. It is never labeled as
-that ticker's performance. A cross-ticker case deep link is rejected as a scoped
-selection error.
+Selection is hierarchical and URL-backed:
 
-## 5. Implementation order
+```text
+?ticker=<ticker>&tab=validation&validationRun=<runId>&validationCase=<caseId>
+```
 
-The only permitted order is:
+Campaign aggregates remain `campaign_global`; only the case list/detail is scoped to
+the current ticker. The Browser renders persisted research artifacts and does not
+derive ticker-local aggregates or replay financial calculations.
 
-1. P4-0 — docs and detailed design
-2. P4-I0 — pure point-in-time/calendar/adjustment/tick/source-envelope primitives
-3. P4-I1 — strict J-Quants adapter and manual feasibility gate
-4. P4-V1 — pure outcome validator
-5. P4-R1 — manifest/run repository/aggregation
-6. P4-S1 — saved-Snapshot audit CLI
-7. P4-C1 — historical reconstruction CLI
-8. P4-J1 — local job/CSRF/read API
-9. P4-D1 — sixth Dashboard tab
-10. P4-X — Usage/setup/handoff/final validation
+### 3.5 Local API boundary
 
-Every step is a separately reviewed PR and starts only after the prior exact head is
-merged and local `main` is fast-forwarded.
+`/api/analyses/*` remains GET-only. Strategy validation adds only the reviewed local
+session, preflight, job, cancellation, and run/case routes. Mutations require exact
+same-origin checks and a process-local CSRF token. Credentials and filesystem paths
+are never returned to the Browser.
 
-P4-I1 is a hard feasibility gate. Before P4-V1 it must prove, under the configured
-J-Quants plan and a default-No manual smoke of at most 10 attempts, at least one
-matured anchor with usable calendar, master, raw OHLC, `UL/LL`, `AdjFactor`, and
-`ExRT`. Failure stops dependent implementation; no fallback or relaxed source rule
-is authorized.
+## 4. External-source feasibility evidence
 
-## 6. Next-step checklist
+P4-I1 recorded a successful manual, default-No live smoke on 2026-08-31 after explicit
+authorization:
 
-For the P4-0 candidate:
+```text
+ticker: 7203
+anchor: 2026-01-05
+worst-case maturity: t79 / 2026-05-01
+requested outcome-through: 2026-05-15
+actual attempts: 3 of the 10-attempt cap
+result: usable official calendar, exact historical master identity, and raw daily
+        bars through t79 with UL/LL, AdjFactor, and ExRT fields
+```
 
-1. inspect the complete diff and verify only the three intended docs changed;
-2. run full Bun tests, type-check, and `git diff --check`;
-3. confirm historical Phase 3/predecessor plans are unchanged;
-4. commit and publish a Draft PR only with explicit user authorization;
-5. obtain independent review on the exact PR head and satisfy the Merge Gate; and
-6. after the user merges, fast-forward local `main` before creating the P4-I0 branch.
+No credential, raw response body, request ID, or external-source artifact was placed
+in Git, PR text, or test output. This evidence belongs to merged PR #86 and is not
+rerun by P4-X merely to restate the gate.
 
-For P4-I0 after that gate:
+## 5. Preserved product boundaries
 
-- reread the merged `docs/PHASE4_PLAN.md`, applicable predecessor contracts, and
-  current tests;
-- implement only pure no-I/O primitives;
-- do not contact J-Quants, create the research repository, add CLI/API/UI, change
-  Strategy/Snapshot, or implement any later step; and
-- use official-source golden vectors and explicit boundary/error tests.
+- Analysis Snapshot V9 remains the only writer; V1-V9 remain readable. There is no
+  V10, migration, or backfill.
+- `analyzeTechnical`, `analyzeStrategy`, their reasons/defaults, and the production
+  single-`tickSize` interface remain unchanged.
+- Outcome labels and R values are observations, not Strategy PASS/FAIL, predictive
+  proof, ranking, recommendation, or a new Buy/Sell/Hold signal.
+- There is no runtime composite score, score field, weighting, or Dashboard score.
+- No normal CI path calls J-Quants or an external AI provider.
+- There is no scheduled run, concurrent queue, automatic replay, WebSocket/SSE, or
+  automatic latest-result selection.
+- Evaluator runtime and PDF/export remain deferred.
 
-## 7. Risks to keep visible
+## 6. P4-X candidate
 
-- Historical J-Quants responses may contain later corrections; the confidence label
-  and warning are mandatory, not cosmetic.
-- The 251-session campaign policy can differ from the full-history production
-  Technical/Strategy result; it must never be presented as production validation.
-- Daily bars cannot establish intraday order or queue priority; ambiguity must remain
-  first-class rather than being forced into a win/loss.
-- A daily stop-high/stop-low flag does not censor unrelated fills; queue ambiguity is
-  limited to adverse-side fills exactly at the flagged OHLC boundary.
-- Same-day outcome bars are excluded even if a job crosses their publication time;
-  otherwise the immutable cutoff would be false.
-- Historical master/tick evidence and plan retention may fail feasibility; this is an
-  acceptable stop result.
-- A t20 entry requires data through evaluation session 79, not merely t60 from t0.
-- Existing Strategy uses one tick for generation; cross-band invalid output must be
-  rejected rather than repaired within Phase 4.
-- Selection-biased saved Snapshots cannot establish general predictive validity.
-- Broad campaign limits, sparse unavailable data, and multiple candidates per anchor
-  make naive win-rate interpretation misleading; mandatory strata and denominators
-  must remain intact.
-- Multi-ticker campaign metrics are global by contract; a single-stock page must not
-  imply that filtered cases make those aggregates ticker-specific.
-- Candidate identity stability depends on the exact versioned envelope and
-  candidate-specific resistance mapping; publication UUIDs and Engine order must not
-  leak into it.
-- A crash after run promotion must reconcile the reserved run rather than create an
-  orphan or erase a suspect artifact.
-- Low configured request rates can make a selector impossible within 90 minutes;
-  preflight must reject that condition before quota authorization.
+The P4-X branch is:
 
-## 8. Maintenance boundary
+```text
+feat/phase4-closeout-step9
+```
 
-Update this file only at an explicit Phase 4 recovery or closeout boundary. Do not
-use it as a live status ledger. Current branch, PR, CI, review, merge, and source-smoke
-state belongs in Git/GitHub and must be rechecked directly.
+The intended diff is limited to:
+
+- `Usage.md` — exact CLI, manifest, confirmation, Dashboard, API, storage, and
+  limitation guidance;
+- `docs/USER_SETUP.md` — J-Quants history/rate/quota and Windows publication setup;
+- `env.example` — the already-implemented optional J-Quants validation rate setting;
+- this handoff — merged baseline, feasibility evidence, operational surface, and
+  closeout gate.
+
+P4-X adds no runtime code, test fixture, dependency, environment-variable reader,
+Snapshot field, API route, Dashboard behavior, research artifact, or external
+request. It does not rewrite predecessor plans or declare Phase 4 Done before merge.
+
+## 7. P4-X validation and remaining Merge Gate
+
+Local candidate validation on 2026-09-01 produced:
+
+| Validation | Result |
+| --- | --- |
+| `bun test` | 925 passed, 0 failed |
+| `bun node_modules/typescript/bin/tsc --noEmit` | passed |
+| Playwright with the configured suite and bundled Node | 38 passed |
+| `git diff --check` | passed |
+
+On this Windows checkout, `bun run typecheck` stopped before TypeScript execution
+because Bun could not remap the local `tsc` bin, and
+`bun run test:dashboard-browser` stopped before Playwright execution because Bun
+could not start the local `node` command. The direct commands above ran the same
+TypeScript compiler and Playwright config without changing dependencies. The exact
+P4-X PR must still pass the canonical `bun run typecheck` and `bun test` CI jobs;
+these local launcher failures are not treated as a product-code pass or hidden.
+
+Before publication, also require `git diff --check origin/main...HEAD` on the committed
+candidate. Browser coverage is the recorded 38-test local Playwright run because it
+is not a normal CI job.
+
+Also confirm from merged code/tests that:
+
+- Snapshot writer/read compatibility remains V9/V1-V9;
+- saved-Snapshot and campaign fixture runs publish and reload under their distinct
+  confidence labels;
+- campaign reruns retain candidate IDs/order but receive new publication UUIDs;
+- cancellation/failure never publishes a partial run;
+- no runtime score, Strategy PASS/FAIL, recommendation signal, scheduled external
+  job, or external-request CI path exists; and
+- all Phase 4 predecessor PRs and the P4-X exact head have green CI and independent
+  review.
+
+After the P4-X exact head satisfies the Merge Gate and the user authorizes merge:
+
+1. merge the P4-X PR;
+2. fast-forward local `main` to the merged `origin/main`;
+3. confirm a clean checkout and green final CI; and
+4. only then report Phase 4 Done.
+
+## 8. Deferred scope and remaining risks
+
+- J-Quants can return later-corrected historical rows; reconstructed runs do not
+  prove the exact correction vintage visible at the historical anchor.
+- The 251-session policy can differ from the current production input window.
+- Daily OHLC cannot prove intraday sequence or queue priority; ambiguity remains a
+  first-class result.
+- Source retention and subscription limits can make a requested anchor unavailable.
+- The current default run publication is Windows-only and intentionally fails closed
+  elsewhere.
+- Broad backtests, portfolio/P&L simulation, transaction costs, Strategy V2,
+  per-ticker aggregates, 2027 STR ticks, runtime score adoption, scheduled jobs,
+  Evaluator runtime, and PDF/export require separate reviewed plans.
+
+## 9. Maintenance boundary
+
+Update this file only at an explicit Phase 4 recovery or closeout boundary. Current
+branch, PR, CI, review, merge, and external-source state must always be rechecked
+directly.
