@@ -2009,6 +2009,133 @@ describe('Strategy-validation immutable run repository V1', () => {
     }
   });
 
+  test('accepts exact campaign daily and Master source-failure stages', async () => {
+    for (const failedRole of ['candidate_daily_bars', 'candidate_master'] as const) {
+      const { temporaryRoot, repository } = await temporaryRepository();
+      try {
+        const anchorDate = '2025-01-02';
+        const roleSources = [
+          {
+            role: 'candidate_calendar' as const,
+            source: roleSource({
+              role: 'candidate_calendar', mode: 'campaign', ticker: '7203',
+              anchorDate, evaluationDate: '2025-01-03',
+            }),
+          },
+          {
+            role: 'candidate_daily_bars' as const,
+            source: roleSource({
+              role: 'candidate_daily_bars', mode: 'campaign', ticker: '7203',
+              anchorDate, evaluationDate: '2025-01-03',
+              unavailableReason: failedRole === 'candidate_daily_bars'
+                ? 'source_plan_unavailable'
+                : undefined,
+            }),
+          },
+          ...(failedRole === 'candidate_master' ? [{
+            role: 'candidate_master' as const,
+            source: roleSource({
+              role: 'candidate_master', mode: 'campaign', ticker: '7203',
+              anchorDate, evaluationDate: '2025-01-03',
+              unavailableReason: 'source_plan_unavailable',
+            }),
+          }] : []),
+          {
+            role: 'outcome_calendar' as const,
+            source: roleSource({
+              role: 'outcome_calendar', mode: 'campaign', ticker: '7203',
+              anchorDate, evaluationDate: '2025-01-03',
+            }),
+          },
+        ];
+        const base = anchorUnavailableCase(roleSources[0]!.source.digest, {
+          caseId: '88888888-8888-4888-8888-888888888888',
+          ticker: '7203', anchorDate, reason: 'source_history_unavailable',
+        });
+        const unavailable = StrategyValidationCaseV1Schema.parse({
+          ...base,
+          unavailableReason: 'source_plan_unavailable',
+          sourceManifest: createPointInTimeSourceManifestV1({
+            startedAt: TEST_STARTED_AT,
+            outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+            sources: roleSources.map(value => ({
+              role: value.role, digest: value.source.digest,
+            })),
+          }),
+        });
+        const sources = roleSources.map(value => value.source).sort((left, right) => (
+          left.digest < right.digest ? -1 : left.digest > right.digest ? 1 : 0
+        ));
+        await expect(repository.publish({
+          run: validationRun([unavailable]), cases: [unavailable], sources,
+        })).resolves.toMatchObject({ state: 'created' });
+      } finally {
+        await rm(temporaryRoot, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('rejects campaign source failures outside the exact producer stage', async () => {
+    const anchorDate = '2025-01-02';
+    const source = (
+      role: 'candidate_calendar' | 'candidate_daily_bars' | 'candidate_master',
+      unavailableReason: 'source_plan_unavailable' | 'source_history_unavailable',
+      candidateDateFrom?: string,
+    ) => ({
+      role,
+      source: roleSource({
+        role, mode: 'campaign', ticker: '7203', anchorDate,
+        evaluationDate: '2025-01-03', unavailableReason, candidateDateFrom,
+      }),
+    });
+    const planning = {
+      role: 'outcome_calendar' as const,
+      source: roleSource({
+        role: 'outcome_calendar', mode: 'campaign', ticker: '7203',
+        anchorDate, evaluationDate: '2025-01-03',
+      }),
+    };
+    const scenarios = [
+      [planning, source('candidate_calendar', 'source_plan_unavailable', anchorDate)],
+      [planning, source('candidate_master', 'source_plan_unavailable')],
+      [planning, source('candidate_daily_bars', 'source_plan_unavailable')],
+      [
+        planning,
+        source('candidate_calendar', 'source_plan_unavailable'),
+        source('candidate_daily_bars', 'source_history_unavailable'),
+      ],
+    ];
+    for (const roleSources of scenarios) {
+      const { temporaryRoot, repository } = await temporaryRepository();
+      try {
+        const base = anchorUnavailableCase(roleSources[0]!.source.digest, {
+          caseId: '88888888-8888-4888-8888-888888888888',
+          ticker: '7203', anchorDate, reason: 'source_history_unavailable',
+        });
+        const unavailable = StrategyValidationCaseV1Schema.parse({
+          ...base,
+          unavailableReason: 'source_plan_unavailable',
+          sourceManifest: createPointInTimeSourceManifestV1({
+            startedAt: TEST_STARTED_AT,
+            outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+            sources: roleSources.map(value => ({
+              role: value.role, digest: value.source.digest,
+            })),
+          }),
+        });
+        await expectRepositoryKind(repository.publish({
+          run: validationRun([unavailable]),
+          cases: [unavailable],
+          sources: roleSources.map(value => value.source).sort((left, right) => (
+            left.digest < right.digest ? -1 : left.digest > right.digest ? 1 : 0
+          )),
+        }), 'artifact_incomplete');
+      } finally {
+        await rm(temporaryRoot, { recursive: true, force: true });
+      }
+    }
+  });
+
   test('is create-only and equal reruns require new publication UUIDs', async () => {
     const { temporaryRoot, repository } = await temporaryRepository();
     try {

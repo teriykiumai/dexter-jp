@@ -95,7 +95,6 @@ export const CAMPAIGN_RECONSTRUCTION_WARNING_V1 =
 type CampaignAnchorUnavailableReasonV1 =
   | 'source_plan_unavailable'
   | 'source_history_unavailable'
-  | 'source_response_invalid'
   | 'calendar_incomplete'
   | 'price_history_incomplete'
   | 'tick_rule_period_unsupported'

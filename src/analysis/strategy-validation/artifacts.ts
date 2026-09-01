@@ -243,7 +243,6 @@ export const STRATEGY_VALIDATION_SNAPSHOT_ANCHOR_UNAVAILABLE_REASONS_V1 = Object
 export const STRATEGY_VALIDATION_CAMPAIGN_ANCHOR_UNAVAILABLE_REASONS_V1 = Object.freeze([
   'source_plan_unavailable',
   'source_history_unavailable',
-  'source_response_invalid',
   'calendar_incomplete',
   'price_history_incomplete',
   'tick_rule_period_unsupported',

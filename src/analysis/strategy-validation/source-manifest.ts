@@ -589,7 +589,7 @@ export function validateStrategyValidationSourceCompletenessV1(
     }
     return sessions.map(String);
   };
-  const campaignCandidateSessions = (): readonly string[] => {
+  const campaignCandidateRequestSessions = (): readonly string[] => {
     const planned = campaignPlanningSessions();
     const bindings = forRole('candidate_calendar');
     if (bindings.length !== 1
@@ -597,15 +597,31 @@ export function validateStrategyValidationSourceCompletenessV1(
       || bindings[0]!.envelope.request.dateTo !== context.anchorDate) {
       failCompleteness();
     }
+    return planned;
+  };
+  const campaignCandidateSessions = (): readonly string[] => {
+    const planned = campaignCandidateRequestSessions();
     const sessions = completeCalendar('candidate_calendar').sessions.map(String);
     if (sessions.length !== planned.length
       || sessions.some((date, index) => date !== planned[index])) failCompleteness();
     return sessions;
   };
+  const campaignCandidateDailyBinding = (
+    sessions: readonly string[],
+  ): BoundStrategyValidationSourceV1 => {
+    const bindings = forRole('candidate_daily_bars');
+    if (bindings.length !== 1
+      || bindings[0]!.envelope.request.dateFrom !== sessions[0]
+      || bindings[0]!.envelope.request.dateTo !== context.anchorDate) {
+      return failCompleteness();
+    }
+    return bindings[0]!;
+  };
   const requireCampaignCandidateGeometry = (completeDaily: boolean): void => {
     const sessions = campaignCandidateSessions();
-    requirePresent('candidate_daily_bars');
+    const daily = campaignCandidateDailyBinding(sessions);
     if (completeDaily) {
+      if (daily.envelope.result.state !== 'available') failCompleteness();
       requireExactAvailableDates('candidate_daily_bars', sessions);
       return;
     }
@@ -615,6 +631,42 @@ export function validateStrategyValidationSourceCompletenessV1(
     if (missing.length === 0 || missing.some(date => !provesMissingDate(
       'candidate_daily_bars', date,
     ))) failCompleteness();
+  };
+  const verifyCampaignAnchorSourceFailure = (
+    reason: SourceFailureReasonV1,
+  ): void => {
+    if (reason === 'source_response_invalid') failCompleteness();
+    const candidateRoles = [
+      'candidate_calendar', 'candidate_daily_bars', 'candidate_master',
+    ] as const;
+    const unavailable = candidateRoles.flatMap(role => unavailableForRole(role).map(binding => ({
+      role,
+      binding,
+    })));
+    if (unavailable.length !== 1
+      || unavailable[0]!.binding.envelope.result.state !== 'unavailable'
+      || unavailable[0]!.binding.envelope.result.reason !== reason
+      || forRole('outcome_master').length !== 0
+      || forRole('outcome_daily_bars').length !== 0) failCompleteness();
+
+    switch (unavailable[0]!.role) {
+      case 'candidate_calendar':
+        campaignCandidateRequestSessions();
+        if (forRole('candidate_master').length !== 0
+          || forRole('candidate_daily_bars').length !== 0) failCompleteness();
+        return;
+      case 'candidate_daily_bars': {
+        const sessions = campaignCandidateSessions();
+        const daily = campaignCandidateDailyBinding(sessions);
+        if (daily.envelope.result.state !== 'unavailable'
+          || forRole('candidate_master').length !== 0) failCompleteness();
+        return;
+      }
+      case 'candidate_master':
+        campaignCandidateSessions();
+        requireCampaignCandidateGeometry(true);
+        if (forRole('candidate_master').length !== 1) failCompleteness();
+    }
   };
   const outcomeSessionsThrough = (evaluationEndDate: string): readonly string[] => {
     const calendar = completeCalendar('outcome_calendar');
@@ -691,10 +743,7 @@ export function validateStrategyValidationSourceCompletenessV1(
             || forRole('candidate_daily_bars').length !== 0) failCompleteness();
           return;
         }
-        requireMatchingUnavailable(
-          ['candidate_calendar', 'candidate_master', 'candidate_daily_bars'],
-          context.unavailableReason,
-        );
+        verifyCampaignAnchorSourceFailure(context.unavailableReason);
         return;
       }
       case 'calendar_incomplete': {
@@ -707,11 +756,7 @@ export function validateStrategyValidationSourceCompletenessV1(
             forRole(role).length !== 0
           ))) failCompleteness();
         if (context.mode === 'campaign') {
-          const planned = campaignPlanningSessions();
-          if (calendar[0]!.envelope.request.dateFrom !== planned[0]
-            || calendar[0]!.envelope.request.dateTo !== context.anchorDate) {
-            failCompleteness();
-          }
+          campaignCandidateRequestSessions();
         } else if (forRole('outcome_calendar').length !== 0) {
           failCompleteness();
         }
