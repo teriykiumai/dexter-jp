@@ -2,6 +2,7 @@ export * from './adjustment.js';
 export * from './aggregation.js';
 export * from './artifacts.js';
 export * from './calendar.js';
+export * from './campaign-reconstruction.js';
 export * from './daily-bar.js';
 export * from './date.js';
 export * from './errors.js';
