@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtemp, rename, rm } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, rename, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { comparisonSnapshot } from '../comparison/test-fixtures.js';
@@ -243,7 +243,7 @@ describe('Strategy-validation Dashboard job service', () => {
     }
   }, 30_000);
 
-  test('reconciles pre-promotion crashes as interrupted and post-promotion crashes as completed', async () => {
+  test('reconciles collecting crashes as interrupted and post-promotion crashes as completed', async () => {
     {
       const store = await stores();
       await store.jobs.create(persistedJob('collecting'));
@@ -272,6 +272,28 @@ describe('Strategy-validation Dashboard job service', () => {
       expect(completed.status).toBe('completed');
       expect(completed.expectedRunPayloadDigest).toBe(published.runPayloadDigest);
     }
+  });
+
+  test('reconciles a publishing crash before promotion as interrupted and cleans its temp run', async () => {
+    const store = await stores();
+    const temporaryDirectory = join(
+      store.runs.runsDirectory,
+      `.run-${TEST_RUN_ID}-88888888-8888-4888-8888-888888888888.tmp`,
+    );
+    await mkdir(temporaryDirectory, { recursive: true });
+    await store.jobs.create(persistedJob('publishing'));
+
+    const service = new StrategyValidationJobServiceV1({
+      snapshotRepository: store.snapshots,
+      runRepository: store.runs,
+      jobRepository: store.jobs,
+    });
+    await service.initialize();
+
+    expect((await store.jobs.load(JOB_ID)).status).toBe('interrupted');
+    expect(await store.runs.hasRun(TEST_RUN_ID)).toBeFalse();
+    await expect(access(temporaryDirectory)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await service.listRuns()).toEqual([]);
   });
 
   test('retains a suspect promoted run and marks its publishing job failed', async () => {
