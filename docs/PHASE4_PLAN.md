@@ -143,8 +143,9 @@ substitution, weekend inference, or inference of official sessions from price ro
 be exactly `"0" | "1" | "2" | "3"`; `"1"` (business day) and `"2"` (TSE half-day
 session) are TSE sessions, while `"0"` and `"3"` are not. Unknown `HolDiv`, duplicate
 dates with unequal values, missing dates inside a required window, non-monotonic
-output, or an unavailable source plan fails closed as `calendar_incomplete` or
-`source_response_invalid`.
+output, or an unavailable source plan fails closed as `calendar_incomplete`,
+`source_response_invalid`, or `source_plan_unavailable` according to the exact
+cause.
 
 The calendar owns predecessor/successor and ordinal-session arithmetic. JavaScript
 weekday logic and the existence of an OHLC row never create a session. A required
@@ -214,8 +215,9 @@ observations carry the t0 end-of-day cutoff.
 At local preflight start, CLI and Dashboard freeze one UTC `startedAt`; every
 execution accepted after confirmation retains that value and records its later,
 required `acceptedAt` separately. `startedAt` controls outcome availability while
-`acceptedAt` starts the external-execution budget. After the official calendar is
-collected, the orchestrator derives `outcomeAsOfSession` as the greatest TSE session
+`acceptedAt` starts the external-execution budget. For every source-backed run,
+after the official calendar is collected the orchestrator derives
+`outcomeAsOfSession` as the greatest TSE session
 strictly before
 `TokyoDate(startedAt)`. Outcome observations carry `startedAt` as their immutable
 cutoff and are accepted only when:
@@ -226,7 +228,16 @@ decisionDate < Date <= outcomeAsOfSession
 
 Preflight returns the frozen `startedAt` and the conservative boundary rule, not a
 guessed session. The derived authoritative session is persisted in
-job/run/case/source-manifest metadata before outcome-bar collection. No bar whose
+job/run/case/source-manifest metadata before outcome-bar collection. The exact
+Snapshot failures decidable before any source access (`strategy === null` or no
+candidates, malformed/impossible Strategy date, and a Strategy date later than
+generation) instead persist `outcomeAsOfSession: null` in the run, case, and empty
+source manifest. They do not claim that the previous Gregorian date was an official
+session and contain no outcome observation. A calendar request whose returned
+envelope has missing internal dates or incomplete required coverage also cannot
+derive an official boundary: it persists `outcomeAsOfSession: null` with exactly one
+`candidate_calendar` reference to an unavailable `calendar_incomplete` envelope.
+It is not a zero-attempt local failure. No bar whose
 `Date === TokyoDate(startedAt)` is eligible, even if the fetch finishes after that
 bar is published. A job that crosses a same-day publication boundary therefore has
 the same accepted outcome set it had at start. Missing or incomplete calendar
@@ -368,9 +379,14 @@ deduplicates by digest. A digest collision or unequal content at an existing dig
 is a typed persistence failure.
 
 `PointInTimeSourceManifestV1` records the ordered unique envelope digests used by a
-case, their calculation role, the frozen `startedAt`, and `outcomeAsOfSession`. It
-never substitutes a digest for schema validation: envelopes are revalidated and
-redigested when loaded.
+case, their calculation role, the frozen `startedAt`, and `outcomeAsOfSession`. The
+boundary is `null` only for either the exact source-free local Snapshot failures in
+Section 5.2, where `sources` is empty, or an anchor-level `calendar_incomplete`, where
+`sources` contains exactly one `candidate_calendar` reference. The latter envelope
+must independently validate as unavailable with reason `calendar_incomplete`. A
+non-null boundary does not by itself prove source completeness. The manifest never
+substitutes a digest for schema validation: envelopes are revalidated and redigested
+when loaded.
 
 ## 5. Inputs and candidate creation
 
@@ -414,8 +430,9 @@ upgrade to source-verified evidence.
 Saved candidates use the versioned `snapshot_candidate_identity_v1` envelope in
 Section 5.4. Identical duplicates remain separate cases and are explicitly marked.
 A Snapshot with `strategy === null` or no candidates produces exactly one
-`anchor_unavailable` case with `invalid_candidate`; it does not enter candidate
-identity or outcome collection.
+source-free `anchor_unavailable` case with `invalid_candidate` and
+`outcomeAsOfSession: null`; it does not enter candidate identity or outcome
+collection.
 
 When one or more stored candidates exist, Snapshot audit applies this fail-closed
 order after exact Snapshot schema/digest/identity validation and before constructing
@@ -432,17 +449,48 @@ any candidate identity or requesting any outcome bar:
    `TseSessionCalendarV1`; a complete calendar that proves it is not an official TSE
    session produces exactly one `anchor_unavailable` case with
    `strategy_data_date_invalid`, while missing/incomplete calendar coverage keeps the
-   distinct `calendar_incomplete` reason; and
-4. only then derive the decision date as the later of the validated Strategy date
+   distinct `calendar_incomplete` reason and exactly one causal unavailable
+   `candidate_calendar` envelope;
+4. only after the official-session guard, normalize every stored candidate. A
+   candidate whose persisted finite fields cannot satisfy the positive candidate
+   schema produces one calendar-backed `anchor_unavailable` case with
+   `invalid_candidate`; a positive candidate with an invalid Entry/Stop/Target
+   relationship remains a frozen candidate case whose outcome is
+   `unavailable/invalid_candidate`; and
+5. only then derive the decision date as the later of the validated Strategy date
    and `generatedTokyoDate`, construct `snapshot_candidate_identity_v1`, and permit
    outcome-bar planning/collection.
 
-The invalid/future anchor case has no candidate, `candidateId`, duplicate ordinal,
-fill, R, or outcome-bar source envelope. A locally invalid date is rejected before
-any J-Quants request. Official-session validation may use the explicitly confirmed
-calendar request, but no daily-bar outcome request is made unless all four guards
-pass. The first eligible evaluation session is the first official TSE session
+The local invalid/future anchor case has no candidate, `candidateId`, duplicate
+ordinal, fill, R, source envelope, or invented official-session boundary. It plans
+zero requests and persists the null boundary described in Section 4.2. Every
+remaining Snapshot plans at least the official-calendar request; therefore a proven
+non-session Strategy date takes precedence over candidate normalization failure.
+No Master or daily-bar request is made for a relationally invalid candidate, and no
+daily-bar outcome request is made unless all five guards pass. The first eligible
+evaluation session is the first official TSE session
 strictly after the decision date. Confidence is `precommitted`.
+
+The immutable artifact binds these branches independently of producer behavior.
+For every Snapshot case, validation reverses the exact Windows-safe
+`selector.snapshotId` to its canonical UTC `generatedAt`, derives
+`generatedTokyoDate`, fixes `anchorDate = strategyDataDate ?? generatedTokyoDate`
+and `decisionDate = max(strategyDataDate, generatedTokyoDate)`, and reapplies the
+date guard. A non-null Strategy date is
+`future_strategy_data` if and only if it is strictly later than that derived Tokyo
+date. The same-day and earlier forms of that reason are invalid, and a future
+Strategy date cannot be published as a calendar-backed anchor or candidate case.
+Source-free `strategy_data_date_invalid` and `invalid_candidate` require
+`strategyDataDate: null`, equal anchor/decision dates, a null outcome boundary, and
+zero sources. Source-free `future_strategy_data` requires a non-null
+`strategyDataDate` equal to both anchor and decision date, a null boundary, and zero
+sources; `future_strategy_data` is invalid once any source is referenced.
+Calendar-backed `strategy_data_date_invalid` and candidate-normalization
+`invalid_candidate` require a non-null Strategy date, non-null official boundary,
+and exactly one available `candidate_calendar` reference. `calendar_incomplete`
+requires a null boundary and exactly one unavailable `candidate_calendar` reference
+with the same reason. Repository reread revalidates these stage/source invariants;
+it never skips completeness merely because the boundary is null.
 
 ### 5.3 Campaign manifest
 
@@ -825,7 +873,9 @@ candidate, candidate identity, price, fill, or R field.
 - resistance evidence tier and `resistanceEvidenceSnapshotDigests`: empty for
   Snapshot audit and campaign 2R, otherwise only the campaign evidence digests mapped
   to that exact resistance target price;
-- frozen `startedAt`, `outcomeAsOfSession`, entry-wait and holding-window boundaries;
+- frozen `startedAt`, entry-wait and holding-window boundaries, plus the official
+  `outcomeAsOfSession`; `null` is allowed only for an exact source-free local
+  Snapshot anchor failure or a causal calendar-incomplete anchor;
 - independent `entryProven` plus exact entry fill identity when true;
 - result union, exact fill/mark dates and prices, planned/actual risk, R values,
   ambiguity bounds, and unavailable reasons;
@@ -848,7 +898,9 @@ candidate cases.
 - `schemaVersion: "strategy_validation_run_v1"`;
 - run ID, mode, confidence, campaign-normalized name or `null` for Snapshot mode,
   frozen `startedAt`, required CLI/Dashboard `acceptedAt`, execution deadline,
-  completion timestamp, derived `outcomeAsOfSession`, and producer version;
+  completion timestamp, derived `outcomeAsOfSession` (`null` only for an exact
+  zero-attempt source-free local Snapshot failure or an attempted calendar-incomplete
+  boundary failure), and producer version;
 - exact input selector and canonical Snapshot or manifest digest;
 - source/technical/Strategy/outcome/tick/aggregation version literals and the same
   mode-constrained `candidateGenerationPolicy` value as every referenced case;
@@ -1466,11 +1518,11 @@ reviewed plan and user decision.
 | Step | Mandatory focused validation |
 | --- | --- |
 | P4-0 | Source of Truth agreement; predecessor docs unchanged; no runtime/dependency/Snapshot/UI diff |
-| P4-I0 | strict dates/time zones; future-row isolation; official-session arithmetic; `outcomeAsOfSession` strictly before started Tokyo date; null/no-row distinction; cumulative factor boundaries and rounding golden vectors; corporate-action flags; all tick bands/dates/categories; decimal executability; canonical source digest; input immutability |
+| P4-I0 | strict dates/time zones; future-row isolation; official-session arithmetic; every non-null `outcomeAsOfSession` strictly before started Tokyo date; null/no-row distinction; cumulative factor boundaries and rounding golden vectors; corporate-action flags; all tick bands/dates/categories; decimal executability; canonical source digest; input immutability |
 | P4-I1 | exact endpoint/query/field schemas; `ProdCat`; master/date identity; pagination duplicate/repeat; same startedAt before/after same-day publication yields identical accepted outcome rows; `rolling_attempt_log_v1` monotonic scheduling; `minimumDispatchDurationMs` at 1/min, 2/min, default 5/min, exactly feasible, and one-attempt-over boundaries; preflight/runtime frozen-control parity; 4xx/429/5xx/network retry matrix; `Retry-After`; rate and 250-attempt accounting; required `acceptedAt`; 30s/90m deadline; abort priority; no secret/body logging; stub CI; manual <=10-attempt matured-anchor smoke |
 | P4-V1 | t1/t20/t60/t79 boundaries; no-trade sessions; every entry/open/threshold gap branch; entry-bar stop-only with `C <= stop`, `stop < C < target`, target-only, and dual-touch vectors; `UL=1/LL=0` with deterministic lower stop; `LL=1/UL=0` with deterministic upper-side fill; buy-entry exactly at flagged `H`; sell-stop exactly at flagged `L`; same flags with fill strictly inside the boundary; gap/open and entry-bar limit-bound variants; precedence over intraday bounds; all corporate-action boundaries; invalid ticks/candidates; immature outcomes; actual-risk zero; exact/mark/ambiguous R; no input mutation |
 | P4-R1 | 1 MiB/UTF-8/duplicate keys/strict fields; required/absent/mismatched `limitQueueEvidence`; closed unavailable-reason schema including `strategy_data_date_invalid`; 1/500 anchors; duplicate anchor; 0/8 refs; 16 resistance dedup; UUID/path containment; canonical manifest/case/run/source digests; both candidate-identity golden envelopes; same tuple across anchors/tickers, true duplicate ordinals, and equal rerun IDs/order despite new run/case UUIDs; atomic no-replace and temp cleanup; rerun new ID; corruption never skipped; track-level all-anchor coverage and candidate-stratum denominators with mostly-unavailable/multi-stratum fixtures; multi-ticker campaign whose global and per-ticker rates differ while only global aggregates persist |
-| P4-S1 | V1-V9 exact history load; ticker/ID/digest; no latest fallback; generatedAt Tokyo date; stored candidates paired with `strategy.dataDate` null, malformed/non-Gregorian text, impossible date, proven non-session date, valid date, future session/non-session dates, and incomplete calendar coverage; exact `strategy_data_date_invalid`/`future_strategy_data`/`calendar_incomplete` precedence; invalid/future date yields one anchor case with no candidate identity or daily-bar outcome fetch; all stored 2R/resistance and duplicates; `snapshot_candidate_identity_v1` stability after date validation; default-No/noninteractive confirmation; error/cancel no run |
+| P4-S1 | V1-V9 exact history load; ticker/ID/digest; no latest fallback; generatedAt Tokyo date; stored candidates paired with `strategy.dataDate` null, malformed/non-Gregorian text, impossible date, proven non-session date, valid date, future session/non-session dates, and incomplete calendar coverage; exact `strategy_data_date_invalid`/`future_strategy_data`/`calendar_incomplete` precedence; immutable selector-derived generation date rejects same-day/earlier `future_strategy_data`, accepts only a strictly later source-free future date, and rejects a future date under every calendar-backed anchor/candidate branch; reason-specific local/calendar stage identity rejects source-free parsed-date invalidity, source-free post-calendar candidate invalidity, and source-backed future dates; local invalid/future branches use zero attempts, zero source refs, and null boundary even when the preceding Gregorian date is a weekend/holiday; incomplete calendar publishes one null-boundary anchor with one causal unavailable calendar envelope and no Master/daily request; every other Snapshot plans at least the calendar attempt; proven non-session precedes nonnormalizable candidate; official-session relationally invalid candidate remains a candidate case with `unavailable/invalid_candidate`; no Master/daily-bar fetch for that case; all stored 2R/resistance and duplicates; `snapshot_candidate_identity_v1` stability after date validation; default-No/noninteractive confirmation; error/cancel no run |
 | P4-C1 | exact `technical_251_strategy_v1` t0-bounded sessions; adding older rows outside the final 251 leaves reconstruction unchanged; differential >251-bar fixture where full-history production input retains an older latest Swing/candidate but the 251 policy does not; `reconstructed_251_as_of` and non-production warning; no current AdjOHLC/future influence; missing OHLC/no candidate; same Engine code/reasons/defaults with no input-window parity claim; entry-tick injection and per-level validation; resistance Snapshot generatedTokyoDate guard before extraction; only persisted `resistance_level` target prices; raw-to-Engine-target evidence mapping including normalization collisions and candidate-specific digests; ticker/dataDate/digest; resistance tiers; `campaign_candidate_identity_v1`; latest t20 entry through holding day60 |
 | P4-J1 | Host/Origin/CSRF; token restart/constant-time check; JSON/media/body limits; frozen preflight startedAt/execution controls; `external_schedule_infeasible` before preflight ID/confirmation; expiry/one-time/digest mismatch; one global job; every lifecycle transition; crash before promotion, after promotion/before completion rewrite, and after completion; reconciliation digest/identity/corruption; cancel during wait/fetch/validate/publish; 200/202/400/403/404/409/413/415/500 and inherited 405; canonical candidate-ID pagination ties; run ticker membership and ticker-filtered cases with unchanged campaign-global aggregate; corruption 500; no credential/path response |
 | P4-D1 | six stable tabs/label/order; no auto selection/open; Snapshot picker/file size; minimum attempts/duration/rate/deadline warning before default-No confirmation; `technical_251_strategy_v1` and non-production-parity warning; polling/cancel/recovery; deep link/Back/Forward/reload; invalid/orphan/cross-ticker case URL; ticker/list transitions; latest-request-wins; multi-ticker global-vs-current-ticker fixture with exact campaign-global heading/warning, ticker-filtered cases, and no Browser aggregate derivation or ticker-specific metric label; focus/live region/keyboard; exact tables and ambiguity; 320/768/1280 px; document overflow; Playwright |

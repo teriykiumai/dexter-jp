@@ -81,7 +81,7 @@ export const StrategyValidationRunV1Schema = z.object({
   acceptedAt: canonicalUtcInstant,
   executionDeadline: canonicalUtcInstant,
   completedAt: canonicalUtcInstant,
-  outcomeAsOfSession: strictDate,
+  outcomeAsOfSession: strictDate.nullable(),
   selector: StrategyValidationSelectorV1Schema,
   versions: StrategyValidationVersionsV1Schema,
   candidateGenerationPolicy: z.literal(STRATEGY_VALIDATION_CAMPAIGN_POLICY).nullable(),
@@ -111,9 +111,25 @@ export const StrategyValidationRunV1Schema = z.object({
       + JQUANTS_EXECUTION_BUDGET_MS_V1) {
     context.addIssue({ code: 'custom', message: 'Run timestamps are inconsistent.' });
   }
-  if (value.outcomeAsOfSession >= tokyoDateFromUtcInstantV1(value.startedAt)) {
+  if (value.outcomeAsOfSession !== null
+    && value.outcomeAsOfSession >= tokyoDateFromUtcInstantV1(value.startedAt)) {
     context.addIssue({
       code: 'custom', message: 'outcomeAsOfSession is not before the Tokyo start date.',
+    });
+  }
+  const sourceFreeLocalSnapshotFailure = snapshotMode
+    && value.execution.controls.estimatedMinimumAttempts === 0
+    && value.execution.attemptCount === 0
+    && value.execution.cacheHitCount === 0;
+  const attemptedCalendarBoundaryFailure = value.execution.controls.estimatedMinimumAttempts > 0
+    && value.execution.attemptCount + value.execution.cacheHitCount > 0;
+  if ((value.outcomeAsOfSession === null
+      && !sourceFreeLocalSnapshotFailure
+      && !attemptedCalendarBoundaryFailure)
+    || (value.outcomeAsOfSession !== null && sourceFreeLocalSnapshotFailure)) {
+    context.addIssue({
+      code: 'custom',
+      message: 'A null outcome boundary requires a local or attempted calendar-stage failure.',
     });
   }
   if (value.execution.attemptCount > value.execution.controls.hardMaximumAttempts) {

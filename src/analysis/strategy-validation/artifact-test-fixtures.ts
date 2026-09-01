@@ -123,7 +123,7 @@ export function snapshotCandidateCase(
     decisionDate: anchorDate,
     strategyDataDate: anchorDate,
     selector: {
-      mode: 'snapshot', snapshotId: TEST_SNAPSHOT_ID,
+      mode: 'snapshot', snapshotId: `${anchorDate}T00-00-00-000Z`,
       snapshotSchemaVersion: 9, snapshotDigest: TEST_SNAPSHOT_DIGEST,
     },
     versions: STRATEGY_VALIDATION_VERSIONS_V1,
@@ -268,7 +268,11 @@ export function validationRun(
   );
   const aggregation = aggregateStrategyValidationCasesV1(scope, anchors, cases);
   const sortedCases = [...cases].sort(compareStrategyValidationCasesV1);
-  const controls = planJQuantsExecutionV1(1, 5);
+  const outcomeAsOfSession = cases[0]?.outcomeAsOfSession ?? null;
+  const sourceFreeLocal = !campaign
+    && outcomeAsOfSession === null
+    && cases.every(value => value.sourceManifest.sources.length === 0);
+  const controls = planJQuantsExecutionV1(sourceFreeLocal ? 0 : 1, 5);
   return StrategyValidationRunV1Schema.parse({
     schemaVersion: STRATEGY_VALIDATION_RUN_SCHEMA_VERSION,
     runId: cases[0]?.runId ?? TEST_RUN_ID,
@@ -279,13 +283,15 @@ export function validationRun(
     acceptedAt: TEST_ACCEPTED_AT,
     executionDeadline: TEST_DEADLINE,
     completedAt: TEST_COMPLETED_AT,
-    outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+    outcomeAsOfSession,
     selector: campaign
       ? { mode: 'campaign', manifestDigest: TEST_MANIFEST_DIGEST }
-      : {
-        mode: 'snapshot', snapshotId: TEST_SNAPSHOT_ID,
-        snapshotSchemaVersion: 9, snapshotDigest: TEST_SNAPSHOT_DIGEST,
-      },
+      : sortedCases[0]?.selector.mode === 'snapshot'
+        ? sortedCases[0].selector
+        : {
+          mode: 'snapshot', snapshotId: TEST_SNAPSHOT_ID,
+          snapshotSchemaVersion: 9, snapshotDigest: TEST_SNAPSHOT_DIGEST,
+        },
     versions: STRATEGY_VALIDATION_VERSIONS_V1,
     candidateGenerationPolicy: campaign ? STRATEGY_VALIDATION_CAMPAIGN_POLICY : null,
     aggregationScope: scope,
@@ -295,9 +301,9 @@ export function validationRun(
     })),
     aggregation,
     execution: {
-      attemptCount: 1,
+      attemptCount: sourceFreeLocal ? 0 : 1,
       cacheHitCount: 0,
-      durationMs: 1_000,
+      durationMs: sourceFreeLocal ? 0 : 1_000,
       controls,
     },
     terminationState: 'completed',

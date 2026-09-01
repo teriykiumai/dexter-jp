@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   digestStrategyValidationRunV1,
+  planJQuantsExecutionV1,
   StrategyValidationRunV1Schema,
 } from './index.js';
 import {
@@ -90,6 +91,35 @@ describe('Strategy-validation run artifact V1', () => {
         ...run.execution,
         controls: { ...run.execution.controls, minimumDispatchDurationMs: 123 },
       },
+    }).success).toBe(false);
+  });
+
+  test('uses a null boundary only for a local or attempted calendar-stage failure', () => {
+    const source = validationSource();
+    const snapshot = validationRun([snapshotCandidateCase(source.digest)]);
+    const local = {
+      ...snapshot,
+      outcomeAsOfSession: null,
+      execution: {
+        attemptCount: 0,
+        cacheHitCount: 0,
+        durationMs: 0,
+        controls: planJQuantsExecutionV1(0, 5),
+      },
+    };
+    expect(StrategyValidationRunV1Schema.safeParse(local).success).toBe(true);
+    expect(StrategyValidationRunV1Schema.safeParse({
+      ...local,
+      outcomeAsOfSession: snapshot.outcomeAsOfSession,
+    }).success).toBe(false);
+    expect(StrategyValidationRunV1Schema.safeParse({
+      ...snapshot,
+      outcomeAsOfSession: null,
+    }).success).toBe(true);
+    expect(StrategyValidationRunV1Schema.safeParse({
+      ...snapshot,
+      outcomeAsOfSession: null,
+      execution: { ...snapshot.execution, attemptCount: 0, cacheHitCount: 0 },
     }).success).toBe(false);
   });
 });

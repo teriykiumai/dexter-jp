@@ -85,6 +85,10 @@ export type StrategyValidationRunPublicationV1 = Readonly<{
   sources: readonly PointInTimeSourceEnvelopeV1[];
 }>;
 
+export type StrategyValidationRunPublishOptionsV1 = Readonly<{
+  assertCanPromote?: () => void;
+}>;
+
 export type LoadedStrategyValidationRunV1 = StrategyValidationRunPublicationV1 & Readonly<{
   runPayloadDigest: SnapshotDigest;
 }>;
@@ -160,7 +164,10 @@ export class StrategyValidationRunRepositoryV1 {
     this.promoteDirectory = options.promoteDirectory ?? defaultPromoteDirectory;
   }
 
-  async publish(rawPublication: StrategyValidationRunPublicationV1): Promise<Readonly<{
+  async publish(
+    rawPublication: StrategyValidationRunPublicationV1,
+    options: StrategyValidationRunPublishOptionsV1 = {},
+  ): Promise<Readonly<{
     state: 'created';
     runId: string;
     runPayloadDigest: SnapshotDigest;
@@ -180,6 +187,7 @@ export class StrategyValidationRunRepositoryV1 {
     );
     this.assertContained(temporaryDirectory);
     let promoted = false;
+    let promotionGuardFailed = false;
     let failure: unknown;
     try {
       await mkdir(temporaryDirectory);
@@ -188,6 +196,12 @@ export class StrategyValidationRunRepositoryV1 {
       await this.writePublication(temporaryDirectory, publication);
       const reread = await this.loadFromDirectory(temporaryDirectory, runId, 'temporary run');
       this.assertEqualPublication(publication, reread);
+      try {
+        options.assertCanPromote?.();
+      } catch (error) {
+        promotionGuardFailed = true;
+        throw error;
+      }
       try {
         await this.promoteDirectory(temporaryDirectory, finalDirectory);
         promoted = true;
@@ -232,6 +246,7 @@ export class StrategyValidationRunRepositoryV1 {
       }
     }
     if (failure instanceof StrategyValidationRunRepositoryErrorV1) throw failure;
+    if (promotionGuardFailed) throw failure;
     throw new StrategyValidationRunRepositoryErrorV1(
       'filesystem_error', 'Could not publish the Strategy-validation run.', failure,
     );
@@ -367,6 +382,21 @@ export class StrategyValidationRunRepositoryV1 {
         'artifact_incomplete', 'Run source envelopes do not exactly match case references.',
       );
     }
+    if (run.outcomeAsOfSession === null) {
+      const casesAreSourceFreeLocal = sortedCases.every(value => (
+        value.sourceManifest.sources.length === 0
+      ));
+      const executionIsSourceFreeLocal = run.mode === 'snapshot'
+        && run.execution.controls.estimatedMinimumAttempts === 0
+        && run.execution.attemptCount === 0
+        && run.execution.cacheHitCount === 0;
+      if (casesAreSourceFreeLocal !== executionIsSourceFreeLocal) {
+        throw new StrategyValidationRunRepositoryErrorV1(
+          'artifact_incomplete',
+          'Null-boundary case evidence does not match the recorded execution stage.',
+        );
+      }
+    }
     for (const source of publication.sources) {
       const ticker = source.request.ticker;
       if (ticker !== null && !run.aggregationScope.tickers.includes(ticker)) {
@@ -404,6 +434,22 @@ export class StrategyValidationRunRepositoryV1 {
           );
         }
         bindings.push({ reference, envelope: source });
+      }
+      if (value.outcomeAsOfSession === null) {
+        if (value.sourceManifest.sources.length === 0) continue;
+        const calendarIncomplete = value.caseKind === 'anchor_unavailable'
+          && value.unavailableReason === 'calendar_incomplete'
+          && bindings.length === 1
+          && bindings[0]!.reference.role === 'candidate_calendar'
+          && bindings[0]!.envelope.result.state === 'unavailable'
+          && bindings[0]!.envelope.result.reason === 'calendar_incomplete';
+        if (!calendarIncomplete) {
+          throw new StrategyValidationRunRepositoryErrorV1(
+            'artifact_incomplete',
+            'A null outcome boundary lacks exact local or calendar-incomplete evidence.',
+          );
+        }
+        continue;
       }
       try {
         validateStrategyValidationSourceCompletenessV1(bindings, {

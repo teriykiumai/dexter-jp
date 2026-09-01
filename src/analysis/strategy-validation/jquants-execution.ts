@@ -347,6 +347,7 @@ export class JQuantsExecutionRuntimeV1 {
   readonly #cache = new Map<string, Promise<JQuantsFetchedRowsV1>>();
   readonly #operationController = new AbortController();
   #limiterTail: Promise<void> = Promise.resolve();
+  #cacheHitCount = 0;
 
   constructor(
     accepted: AcceptedJQuantsExecutionV1,
@@ -383,18 +384,20 @@ export class JQuantsExecutionRuntimeV1 {
     });
     this.#environment = options.environment ?? DEFAULT_JQUANTS_EXECUTION_ENVIRONMENT_V1;
     const apiKey = this.#environment.apiKey();
-    if (typeof apiKey !== 'string' || apiKey.length === 0) {
+    const localOnly = controls.estimatedMinimumAttempts === 0;
+    if (!localOnly && (typeof apiKey !== 'string' || apiKey.length === 0)) {
       throw new JQuantsValidationErrorV1(
         'missing_api_key',
         'JQUANTS_API_KEY is not set for the J-Quants validation adapter.',
       );
     }
-    this.#apiKey = apiKey;
-    const actualAttemptLimit = options.actualAttemptLimit ?? accepted.controls.hardMaximumAttempts;
+    this.#apiKey = apiKey ?? '';
+    const actualAttemptLimit = options.actualAttemptLimit
+      ?? (localOnly ? 0 : accepted.controls.hardMaximumAttempts);
     if (!Number.isSafeInteger(actualAttemptLimit)
-      || actualAttemptLimit < 1
+      || (localOnly ? actualAttemptLimit !== 0 : actualAttemptLimit < 1)
       || actualAttemptLimit > accepted.controls.hardMaximumAttempts) {
-      invalidConfiguration('actualAttemptLimit must be within the frozen hard attempt cap.');
+      invalidConfiguration('actualAttemptLimit must match the frozen external-request plan.');
     }
     this.#actualAttemptLimit = actualAttemptLimit;
     this.#bindCancellation(options.signal);
@@ -406,6 +409,10 @@ export class JQuantsExecutionRuntimeV1 {
 
   get attempts(): readonly JQuantsAttemptAuditV1[] {
     return Object.freeze(this.#attempts.map(attempt => Object.freeze({ ...attempt })));
+  }
+
+  get cacheHitCount(): number {
+    return this.#cacheHitCount;
   }
 
   nowUtc(): AsOfCutoff {
@@ -440,7 +447,10 @@ export class JQuantsExecutionRuntimeV1 {
     const normalizedQuery = initialQuery(allowedEndpoint, query);
     const key = cacheKey(allowedEndpoint, normalizedQuery);
     const existing = this.#cache.get(key);
-    if (existing !== undefined) return existing;
+    if (existing !== undefined) {
+      this.#cacheHitCount += 1;
+      return existing;
+    }
     const request = this.#getAllUncached(allowedEndpoint, normalizedQuery, operationSignal).catch(error => {
       if (this.#cache.get(key) === request) this.#cache.delete(key);
       throw error;

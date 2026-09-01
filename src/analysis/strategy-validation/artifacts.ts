@@ -10,7 +10,7 @@ import {
   type CanonicalJsonValue,
   type SnapshotDigest,
 } from '../snapshot/canonical-json.js';
-import { SnapshotIdSchema } from '../snapshot/id.js';
+import { snapshotGeneratedAtFromId, SnapshotIdSchema } from '../snapshot/id.js';
 import { CanonicalTickerSchema } from '../snapshot/schema.js';
 import {
   isStrictGregorianDate,
@@ -462,7 +462,6 @@ const caseCommonShape = {
   versions: StrategyValidationVersionsV1Schema,
   candidateGenerationPolicy: z.literal(STRATEGY_VALIDATION_CAMPAIGN_POLICY).nullable(),
   startedAt: canonicalUtcInstant,
-  outcomeAsOfSession: strictDate,
   entryWaitSessions: z.literal(STRATEGY_ENTRY_WAIT_SESSIONS_V1),
   holdingSessions: z.literal(STRATEGY_HOLDING_SESSIONS_V1),
   sourceManifest: PointInTimeSourceManifestV1Schema,
@@ -470,12 +469,14 @@ const caseCommonShape = {
 
 const AnchorUnavailableCaseSchema = z.object({
   ...caseCommonShape,
+  outcomeAsOfSession: strictDate.nullable(),
   caseKind: z.literal('anchor_unavailable'),
   unavailableReason: z.enum(STRATEGY_VALIDATION_ANCHOR_UNAVAILABLE_REASONS_V1),
 }).strict();
 
 const CandidateCaseSchema = z.object({
   ...caseCommonShape,
+  outcomeAsOfSession: strictDate,
   caseKind: z.literal('candidate'),
   candidateIdentityVersion: z.enum([
     'snapshot_candidate_identity_v1',
@@ -497,7 +498,8 @@ export const StrategyValidationCaseV1Schema = z.discriminatedUnion('caseKind', [
   if (value.decisionDate < value.anchorDate) {
     context.addIssue({ code: 'custom', message: 'decisionDate precedes anchorDate.' });
   }
-  if (value.outcomeAsOfSession >= tokyoDateFromUtcInstantV1(value.startedAt)) {
+  if (value.outcomeAsOfSession !== null
+    && value.outcomeAsOfSession >= tokyoDateFromUtcInstantV1(value.startedAt)) {
     context.addIssue({
       code: 'custom', message: 'outcomeAsOfSession is not before the Tokyo start date.',
     });
@@ -509,6 +511,40 @@ export const StrategyValidationCaseV1Schema = z.discriminatedUnion('caseKind', [
     || (!snapshotMode && value.strategyDataDate !== null)) {
     context.addIssue({ code: 'custom', message: 'Case mode fields are inconsistent.' });
     return;
+  }
+  if (snapshotMode && value.selector.mode === 'snapshot') {
+    let generatedTokyoDate: string;
+    try {
+      generatedTokyoDate = tokyoDateFromUtcInstantV1(
+        snapshotGeneratedAtFromId(value.selector.snapshotId),
+      );
+    } catch {
+      context.addIssue({
+        code: 'custom', message: 'Snapshot selector does not encode a valid generation instant.',
+      });
+      return;
+    }
+    const expectedAnchorDate = value.strategyDataDate ?? generatedTokyoDate;
+    const expectedDecisionDate = value.strategyDataDate !== null
+      && value.strategyDataDate > generatedTokyoDate
+      ? value.strategyDataDate
+      : generatedTokyoDate;
+    if (value.anchorDate !== expectedAnchorDate || value.decisionDate !== expectedDecisionDate) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Snapshot anchor and decision dates do not match its generation identity.',
+      });
+    }
+    if (value.strategyDataDate !== null) {
+      const claimsFuture = value.caseKind === 'anchor_unavailable'
+        && value.unavailableReason === 'future_strategy_data';
+      if ((value.strategyDataDate > generatedTokyoDate) !== claimsFuture) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Snapshot Strategy date precedence does not match its generation date.',
+        });
+      }
+    }
   }
   if (!snapshotMode && value.decisionDate !== value.anchorDate) {
     context.addIssue({ code: 'custom', message: 'Campaign decisionDate must equal anchorDate.' });
@@ -524,6 +560,53 @@ export const StrategyValidationCaseV1Schema = z.discriminatedUnion('caseKind', [
     if (!allowed.includes(value.unavailableReason as never)) {
       context.addIssue({ code: 'custom', message: 'Anchor unavailable reason is invalid for its mode.' });
     }
+    const noSources = value.sourceManifest.sources.length === 0;
+    const candidateCalendarOnly = value.sourceManifest.sources.length === 1
+      && value.sourceManifest.sources[0]!.role === 'candidate_calendar';
+    const invalidStage = (): void => context.addIssue({
+      code: 'custom', message: 'Anchor unavailable reason does not match its source stage.',
+    });
+    if (value.unavailableReason === 'calendar_incomplete') {
+      if (!candidateCalendarOnly
+        || value.outcomeAsOfSession !== null
+        || (snapshotMode && value.strategyDataDate === null)) invalidStage();
+      return;
+    }
+    if (!snapshotMode) {
+      if (value.outcomeAsOfSession === null) invalidStage();
+      return;
+    }
+    if (value.unavailableReason === 'strategy_data_date_invalid') {
+      const local = noSources
+        && value.strategyDataDate === null
+        && value.outcomeAsOfSession === null
+        && value.anchorDate === value.decisionDate;
+      const calendarBacked = candidateCalendarOnly
+        && value.strategyDataDate !== null
+        && value.outcomeAsOfSession !== null;
+      if (!local && !calendarBacked) invalidStage();
+      return;
+    }
+    if (value.unavailableReason === 'future_strategy_data') {
+      if (!noSources
+        || value.strategyDataDate === null
+        || value.outcomeAsOfSession !== null
+        || value.anchorDate !== value.strategyDataDate
+        || value.decisionDate !== value.strategyDataDate) invalidStage();
+      return;
+    }
+    if (value.unavailableReason === 'invalid_candidate') {
+      const local = noSources
+        && value.strategyDataDate === null
+        && value.outcomeAsOfSession === null
+        && value.anchorDate === value.decisionDate;
+      const calendarBacked = candidateCalendarOnly
+        && value.strategyDataDate !== null
+        && value.outcomeAsOfSession !== null;
+      if (!local && !calendarBacked) invalidStage();
+      return;
+    }
+    if (value.outcomeAsOfSession === null) invalidStage();
     return;
   }
   if (snapshotMode && value.strategyDataDate === null) {

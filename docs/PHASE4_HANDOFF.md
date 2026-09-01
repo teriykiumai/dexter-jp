@@ -95,10 +95,15 @@ cumulative `AdjFactor`; current API AdjOHLC is not reused. Any action after t0 t
 evaluation end fails the case closed. Campaign artifacts/UI must expose the policy
 and warn that it does not validate the current full-history production path.
 
-Local preflight freezes `startedAt`; outcome uses only rows through the greatest
-official session strictly before its Tokyo date. The derived
+Local preflight freezes `startedAt`; source-backed outcome uses only rows through the
+greatest official session strictly before its Tokyo date. The derived
 `outcomeAsOfSession` is persisted, so crossing a same-day J-Quants publication time
-cannot add a bar to an already confirmed run.
+cannot add a bar to an already confirmed run. An exact local Snapshot failure that
+terminates before source access instead persists `outcomeAsOfSession: null` with zero
+source references; it never casts the preceding Gregorian date as an official
+session. An attempted calendar request with missing internal dates or incomplete
+coverage also persists a null boundary, but only with one causal unavailable
+`candidate_calendar/calendar_incomplete` envelope.
 
 Campaign resistance accepts only persisted `resistance_level` target prices from a
 digest-valid Snapshot whose Strategy date is not later than that Snapshot's own
@@ -179,11 +184,23 @@ duplicate candidates remain distinct.
 
 Legacy V1-V9 permits stored candidates with a null or non-calendar
 `strategy.dataDate`. Snapshot audit therefore parses and validates that field before
-candidate identity or outcome bars. Null, malformed, impossible, or non-session dates
-that are not later than generation produce one `anchor_unavailable` with
-`strategy_data_date_invalid`; any parsed date later than generation takes the earlier
-`future_strategy_data` precedence. Neither branch has a candidate ID, fill, R, or
-outcome-bar request.
+candidate identity or outcome bars. Null, malformed, or impossible dates produce a
+source-free `strategy_data_date_invalid`; any parsed date later than generation takes
+the earlier source-free `future_strategy_data` precedence. Every remaining Snapshot
+first obtains the official calendar, so a proven non-session date takes precedence
+over candidate normalization failure. Only after the session guard may a candidate
+that fails Phase 4's positive-price schema erase the anchor; a positive relationally
+invalid Entry/Stop/Target tuple remains a candidate case with
+`unavailable/invalid_candidate`. Artifact validation binds each local/calendar stage
+to the exact `strategyDataDate`, boundary, and calendar-reference shape; in
+particular, a source-free parsed non-future date, a source-backed future date, and a
+source-free post-calendar candidate failure are invalid publications. It derives the
+Snapshot generation Tokyo date from the exact `selector.snapshotId`, so only a
+strictly later source-free Strategy date may claim `future_strategy_data`; same-day,
+earlier, calendar-backed, and candidate forms fail independent artifact validation,
+and anchor/decision dates must match the same derived generation identity. An
+incomplete calendar publishes one anchor with a null boundary and one unavailable
+calendar envelope. None of these branches requests Master or outcome bars.
 
 Campaign aggregates are deliberately `campaign_global` across every ticker and
 anchor in the run. Version 1 persists no per-ticker aggregates and the Browser never

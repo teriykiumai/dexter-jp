@@ -81,9 +81,20 @@ export const PointInTimeSourceManifestV1Schema = z.object({
   schemaVersion: z.literal(POINT_IN_TIME_SOURCE_MANIFEST_VERSION),
   roleVersion: z.literal(STRATEGY_VALIDATION_SOURCE_ROLE_VERSION),
   startedAt: canonicalUtcInstant,
-  outcomeAsOfSession: strictDate,
+  outcomeAsOfSession: strictDate.nullable(),
   sources: z.array(PointInTimeSourceManifestReferenceV1Schema).max(250),
 }).strict().superRefine((value, context) => {
+  const hasCalendarIncompleteBoundaryShape = value.sources.length === 1
+    && value.sources[0]!.role === 'candidate_calendar';
+  if (value.outcomeAsOfSession === null
+    && value.sources.length !== 0
+    && !hasCalendarIncompleteBoundaryShape) {
+    context.addIssue({
+      code: 'custom',
+      message: 'A null outcome boundary permits only one candidate-calendar reference.',
+    });
+    return;
+  }
   const digests = new Set<string>();
   for (let index = 0; index < value.sources.length; index += 1) {
     const current = value.sources[index]!;
@@ -112,7 +123,7 @@ export type PointInTimeSourceManifestV1 = z.infer<typeof PointInTimeSourceManife
 
 export function createPointInTimeSourceManifestV1(input: Readonly<{
   startedAt: string;
-  outcomeAsOfSession: string;
+  outcomeAsOfSession: string | null;
   sources: readonly PointInTimeSourceManifestReferenceV1[];
 }>): PointInTimeSourceManifestV1 {
   return PointInTimeSourceManifestV1Schema.parse({
@@ -136,7 +147,7 @@ export type StrategyValidationSourceBindingContextV1 = Readonly<{
   strategyDataDate: string | null;
   initialTickDate: string | null;
   startedAt: string;
-  outcomeAsOfSession: string;
+  outcomeAsOfSession: string | null;
 }>;
 
 export type StrategyValidationInitialTickEvidenceContextV1 = Readonly<{
@@ -249,6 +260,7 @@ export function validateStrategyValidationSourceBindingV1(
         || envelope.request.dateTo !== context.anchorDate) failBinding();
       return;
     case 'outcome_calendar': {
+      if (context.outcomeAsOfSession === null) failBinding();
       const lastBoundary = context.decisionDate > context.outcomeAsOfSession
         ? context.decisionDate
         : context.outcomeAsOfSession;
@@ -256,12 +268,14 @@ export function validateStrategyValidationSourceBindingV1(
       return;
     }
     case 'outcome_master':
-      if (envelope.request.dateFrom !== envelope.request.dateTo
+      if (context.outcomeAsOfSession === null
+        || envelope.request.dateFrom !== envelope.request.dateTo
         || envelope.request.dateFrom <= context.decisionDate
         || envelope.request.dateTo > context.outcomeAsOfSession) failBinding();
       return;
     case 'outcome_daily_bars':
-      if (envelope.request.dateFrom <= context.decisionDate
+      if (context.outcomeAsOfSession === null
+        || envelope.request.dateFrom <= context.decisionDate
         || envelope.request.dateTo > context.outcomeAsOfSession) failBinding();
   }
 }
@@ -650,8 +664,7 @@ export function validateStrategyValidationSourceCompletenessV1(
         return;
       }
       case 'calendar_incomplete':
-        requireMatchingUnavailable(['candidate_calendar'], 'calendar_incomplete');
-        return;
+        return failCompleteness();
       case 'price_history_incomplete':
         if (context.mode !== 'campaign') failCompleteness();
         requireCampaignCandidateGeometry(false);
@@ -678,8 +691,26 @@ export function validateStrategyValidationSourceCompletenessV1(
         }
         return;
       case 'invalid_candidate':
-        if (context.mode === 'campaign') requireCampaignCandidateGeometry(true);
+        if (context.mode === 'campaign') {
+          requireCampaignCandidateGeometry(true);
+          return;
+        }
+        if (context.strategyDataDate === null) failCompleteness();
+        if (!completeCalendar('candidate_calendar').isSession(context.strategyDataDate)) {
+          failCompleteness();
+        }
         return;
+      case 'strategy_data_date_invalid': {
+        if (context.mode !== 'snapshot' || context.strategyDataDate === null) {
+          failCompleteness();
+        }
+        const calendar = completeCalendar('candidate_calendar');
+        if (!calendar.hasCalendarDate(context.strategyDataDate)
+          || calendar.isSession(context.strategyDataDate)) failCompleteness();
+        return;
+      }
+      case 'future_strategy_data':
+        return failCompleteness();
       default:
         return;
     }
