@@ -17,6 +17,7 @@ import {
 import { StrategyValidationCaseV1Schema } from './artifacts.js';
 import { StrategyValidationJobRepositoryV1, StrategyValidationJobV1Schema } from './job-artifact.js';
 import {
+  STRATEGY_VALIDATION_PREFLIGHT_MAX_ENTRIES,
   STRATEGY_VALIDATION_PREFLIGHT_TTL_MS,
   StrategyValidationJobServiceErrorV1,
   StrategyValidationJobServiceV1,
@@ -87,11 +88,14 @@ function persistedJob(
     updatedAt: terminal ? '2025-04-01T00:00:03.000Z' : '2025-04-01T00:00:02.000Z',
     finishedAt: terminal ? '2025-04-01T00:00:03.000Z' : null,
     cancellationRequestedAt: null,
-    outcomeAsOfSession: '2025-03-31',
+    outcomeAsOfSession: run.outcomeAsOfSession,
     expectedRunPayloadDigest: status === 'publishing' || status === 'completed'
       ? expectedRunPayloadDigest
       : null,
-    progress: { attemptCount: 1, caseCount: 1 },
+    progress: {
+      attemptCount: run.execution.attemptCount,
+      caseCount: run.caseReferences.length,
+    },
     failure: null,
   });
 }
@@ -211,6 +215,34 @@ describe('Strategy-validation Dashboard job service', () => {
     });
   });
 
+  test('never evicts a successful unexpired preflight at the bounded-capacity edge', async () => {
+    const store = await stores();
+    const clock = environment();
+    const saved = await localSnapshot(store.snapshots);
+    const service = new StrategyValidationJobServiceV1({
+      snapshotRepository: store.snapshots,
+      runRepository: store.runs,
+      jobRepository: store.jobs,
+      executionEnvironment: clock.value,
+    });
+    const preflights = [];
+    for (let index = 0; index < STRATEGY_VALIDATION_PREFLIGHT_MAX_ENTRIES; index += 1) {
+      preflights.push(await service.createPreflight({
+        mode: 'snapshot', ticker: '7203', snapshotId: saved.snapshotId,
+      }));
+    }
+    expect(new Set(preflights.map(value => value.preflightId)).size)
+      .toBe(STRATEGY_VALIDATION_PREFLIGHT_MAX_ENTRIES);
+    await expect(service.createPreflight({
+      mode: 'snapshot', ticker: '7203', snapshotId: saved.snapshotId,
+    })).rejects.toMatchObject({ kind: 'internal_failure' });
+
+    for (const preflight of preflights) {
+      const accepted = await service.acceptPreflight(preflight.preflightId, true);
+      expect((await waitForTerminal(service, accepted.job.jobId)).status).toBe('completed');
+    }
+  }, 30_000);
+
   test('reconciles pre-promotion crashes as interrupted and post-promotion crashes as completed', async () => {
     {
       const store = await stores();
@@ -266,5 +298,71 @@ describe('Strategy-validation Dashboard job service', () => {
     await expect(restarted.listRuns()).rejects.toMatchObject({
       kind: 'artifact_unavailable',
     });
+  });
+
+  test('rejects schema-valid publishing and completed metadata tampering', async () => {
+    {
+      const store = await stores();
+      const published = await publishFixture(store.runs);
+      const publishing = persistedJob('publishing', published.runPayloadDigest, published.run);
+      await store.jobs.create(StrategyValidationJobV1Schema.parse({
+        ...publishing,
+        progress: {
+          ...publishing.progress,
+          caseCount: publishing.progress.caseCount + 1,
+        },
+      }));
+      const service = new StrategyValidationJobServiceV1({
+        snapshotRepository: store.snapshots,
+        runRepository: store.runs,
+        jobRepository: store.jobs,
+      });
+      await expect(service.initialize()).rejects.toMatchObject({
+        kind: 'artifact_unavailable',
+      });
+      expect(await store.jobs.load(publishing.jobId)).toMatchObject({
+        status: 'failed',
+        failure: { code: 'artifact_unavailable' },
+      });
+    }
+
+    const store = await stores();
+    const published = await publishFixture(store.runs);
+    const completed = persistedJob('completed', published.runPayloadDigest, published.run);
+    await store.jobs.create(completed);
+    const service = new StrategyValidationJobServiceV1({
+      snapshotRepository: store.snapshots,
+      runRepository: store.runs,
+      jobRepository: store.jobs,
+    });
+    await service.initialize();
+
+    const variants = [
+      StrategyValidationJobV1Schema.parse({
+        ...completed,
+        outcomeAsOfSession: '2025-03-28',
+      }),
+      StrategyValidationJobV1Schema.parse({
+        ...completed,
+        progress: {
+          ...completed.progress,
+          attemptCount: completed.progress.attemptCount + 1,
+        },
+      }),
+      StrategyValidationJobV1Schema.parse({
+        ...completed,
+        progress: {
+          ...completed.progress,
+          caseCount: completed.progress.caseCount + 1,
+        },
+      }),
+    ];
+    for (const tampered of variants) {
+      await store.jobs.replace(tampered);
+      await expect(service.getJob(completed.jobId)).rejects.toMatchObject({
+        kind: 'artifact_unavailable',
+      });
+      await store.jobs.replace(completed);
+    }
   });
 });

@@ -476,7 +476,7 @@ export class StrategyValidationDashboardApiV1 {
         return jsonResponse(await this.service.loadCase(segments[3]!, segments[5]!));
       }
 
-      return errorResponse(404, 'route_not_found', 'The requested route was not found.');
+      return errorResponse(400, 'invalid_route_parameter', 'A route parameter is invalid.');
     } catch (error) {
       return mapServiceError(error);
     }

@@ -138,6 +138,7 @@ export type SnapshotAuditExecutionOptionsV1 = Readonly<{
   runRepository: StrategyValidationRunRepositoryV1;
   signal?: AbortSignal;
   runId?: string;
+  onOutcomeAsOfSession?: (outcomeAsOfSession: OutcomeAsOfSession) => void | Promise<void>;
   onValidating?: (progress: Readonly<{
     outcomeAsOfSession: OutcomeAsOfSession | null;
     caseCount: number;
@@ -554,6 +555,7 @@ export async function executeSnapshotAuditV1(
         candidateCalendar,
         preflight.startedAt,
       );
+      await options.onOutcomeAsOfSession?.(outcomeAsOfSession);
     }
   }
 

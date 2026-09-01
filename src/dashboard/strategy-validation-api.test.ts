@@ -539,6 +539,101 @@ describe('Phase 4 Strategy-validation local API', () => {
     expect(await validating.runs.hasRun(String(validatingJob.runId))).toBeFalse();
   });
 
+  test('persists the derived outcome boundary through a later failure and cancellation', async () => {
+    const failedBase = executionEnvironment();
+    let failedFetchCount = 0;
+    const failing = await context({
+      environment: Object.freeze({
+        ...failedBase,
+        fetch: async (input: string | URL, init?: RequestInit) => {
+          failedFetchCount += 1;
+          if (failedFetchCount === 1) return failedBase.fetch(input, init);
+          return new Response('{"message":"rejected"}', {
+            status: 400,
+            headers: { 'content-type': 'application/json' },
+          });
+        },
+      }),
+    });
+    const failedSaved = await failing.snapshots.save(comparisonSnapshot());
+    const failedPreflight = await json(await call(
+      failing,
+      request('/api/strategy-validation/preflights', {
+        method: 'POST',
+        body: JSON.stringify({
+          mode: 'snapshot', ticker: '7203', snapshotId: failedSaved.snapshotId,
+        }),
+      }),
+    ));
+    const failedAccepted = await json(await call(failing, request(
+      '/api/strategy-validation/jobs',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          preflightId: failedPreflight.preflightId, confirmExternalFetch: true,
+        }),
+      },
+    )));
+    const failedJob = failedAccepted.job as Record<string, unknown>;
+    const failedTerminal = await waitForCompleted(failing, String(failedJob.jobId));
+    expect(failedTerminal.body).toMatchObject({
+      status: 'failed',
+      outcomeAsOfSession: '2026-11-30',
+    });
+    expect(await failing.runs.hasRun(String(failedJob.runId))).toBeFalse();
+
+    let laterFetchStarted!: () => void;
+    const laterFetchSignal = new Promise<void>(resolve => { laterFetchStarted = resolve; });
+    const cancelledBase = executionEnvironment();
+    let cancelledFetchCount = 0;
+    const cancelled = await context({
+      environment: Object.freeze({
+        ...cancelledBase,
+        fetch: async (input: string | URL, init?: RequestInit) => {
+          cancelledFetchCount += 1;
+          if (cancelledFetchCount === 1) return cancelledBase.fetch(input, init);
+          laterFetchStarted();
+          return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), {
+              once: true,
+            });
+          });
+        },
+      }),
+    });
+    const cancelledSaved = await cancelled.snapshots.save(comparisonSnapshot());
+    const cancelledPreflight = await json(await call(
+      cancelled,
+      request('/api/strategy-validation/preflights', {
+        method: 'POST',
+        body: JSON.stringify({
+          mode: 'snapshot', ticker: '7203', snapshotId: cancelledSaved.snapshotId,
+        }),
+      }),
+    ));
+    const cancelledAccepted = await json(await call(cancelled, request(
+      '/api/strategy-validation/jobs',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          preflightId: cancelledPreflight.preflightId, confirmExternalFetch: true,
+        }),
+      },
+    )));
+    const cancelledJob = cancelledAccepted.job as Record<string, unknown>;
+    await laterFetchSignal;
+    expect((await call(cancelled, request(
+      `/api/strategy-validation/jobs/${cancelledJob.jobId}`,
+      { method: 'DELETE' },
+    ))).status).toBe(202);
+    const cancelledTerminal = await waitForCompleted(cancelled, String(cancelledJob.jobId));
+    expect(cancelledTerminal.body).toMatchObject({
+      status: 'cancelled',
+      outcomeAsOfSession: '2026-11-30',
+    });
+    expect(await cancelled.runs.hasRun(String(cancelledJob.runId))).toBeFalse();
+  });
+
   test('rejects a provably infeasible campaign before creating a preflight identity', async () => {
     const value = await context();
     const anchors = Array.from({ length: 250 }, (_, index) => {
@@ -565,6 +660,43 @@ describe('Phase 4 Strategy-validation local API', () => {
       },
     });
     expect(JSON.stringify(body)).not.toContain('preflightId');
+  });
+
+  test('rejects preflight capacity exhaustion without invalidating returned identities', async () => {
+    const value = await context();
+    const saved = await value.snapshots.save({ ...comparisonSnapshot(), strategy: null });
+    const preflights: Array<Record<string, unknown>> = [];
+    for (let index = 0; index < 64; index += 1) {
+      const response = await call(value, request('/api/strategy-validation/preflights', {
+        method: 'POST',
+        body: JSON.stringify({
+          mode: 'snapshot', ticker: '7203', snapshotId: saved.snapshotId,
+        }),
+      }));
+      expect(response.status).toBe(200);
+      preflights.push(await json(response));
+    }
+    const overflow = await call(value, request('/api/strategy-validation/preflights', {
+      method: 'POST',
+      body: JSON.stringify({ mode: 'snapshot', ticker: '7203', snapshotId: saved.snapshotId }),
+    }));
+    const overflowBody = await json(overflow);
+    expect(overflow.status).toBe(500);
+    expect(overflowBody).toEqual({
+      error: {
+        code: 'internal_failure',
+        message: 'The request could not be completed.',
+      },
+    });
+    expect(JSON.stringify(overflowBody)).not.toContain('preflightId');
+
+    const oldest = preflights[0]!;
+    const accepted = await json(await call(value, request('/api/strategy-validation/jobs', {
+      method: 'POST',
+      body: JSON.stringify({ preflightId: oldest.preflightId, confirmExternalFetch: true }),
+    })));
+    const job = accepted.job as Record<string, unknown>;
+    expect((await waitForCompleted(value, String(job.jobId))).body.status).toBe('completed');
   });
 
   test('fails closed on Host, Origin, CSRF, media type, strict JSON, body caps, and methods', async () => {
@@ -623,6 +755,13 @@ describe('Phase 4 Strategy-validation local API', () => {
     }));
     expect(missingSnapshot.status).toBe(404);
     expect(await json(missingSnapshot)).toMatchObject({ error: { code: 'snapshot_not_found' } });
+    const unknownRoute = await call(value, request('/api/strategy-validation/unknown', {
+      origin: null, csrf: null,
+    }));
+    expect(unknownRoute.status).toBe(400);
+    expect(await json(unknownRoute)).toMatchObject({
+      error: { code: 'invalid_route_parameter' },
+    });
     for (const [path, code] of [
       ['/api/strategy-validation/runs/11111111-1111-4111-8111-111111111111', 'run_not_found'],
       ['/api/strategy-validation/jobs/33333333-3333-4333-8333-333333333333', 'job_not_found'],
@@ -670,6 +809,19 @@ describe('Phase 4 Strategy-validation local API', () => {
     ));
     expect(cancel.status).toBe(409);
     expect(await json(cancel)).toMatchObject({ error: { code: 'invalid_job_transition' } });
+
+    const storedJob = await value.jobs.load(String(job.jobId));
+    await value.jobs.replace({
+      ...storedJob,
+      progress: { ...storedJob.progress, caseCount: storedJob.progress.caseCount + 1 },
+    });
+    const corruptJob = await call(value, request(
+      `/api/strategy-validation/jobs/${job.jobId}`,
+      { origin: null, csrf: null },
+    ));
+    expect(corruptJob.status).toBe(500);
+    expect(await json(corruptJob)).toMatchObject({ error: { code: 'artifact_unavailable' } });
+    await value.jobs.replace(storedJob);
 
     await writeFile(
       join(value.runs.runsDirectory, String(job.runId), 'run.json'),

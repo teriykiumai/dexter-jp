@@ -156,6 +156,7 @@ export type CampaignReconstructionExecutionOptionsV1 = Readonly<{
   runRepository: StrategyValidationRunRepositoryV1;
   signal?: AbortSignal;
   runId?: string;
+  onOutcomeAsOfSession?: (outcomeAsOfSession: OutcomeAsOfSession) => void | Promise<void>;
   onValidating?: (progress: Readonly<{
     outcomeAsOfSession: OutcomeAsOfSession;
     caseCount: number;
@@ -784,6 +785,7 @@ export async function executeCampaignReconstructionV1(
     globalCalendarResult.calendar,
     preflight.startedAt,
   );
+  await options.onOutcomeAsOfSession?.(outcomeAsOfSession);
   const outcomeCalendarReference = sourceReference(
     'outcome_calendar', globalCalendarResult.envelope,
   );

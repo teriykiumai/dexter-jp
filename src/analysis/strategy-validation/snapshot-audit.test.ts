@@ -227,16 +227,19 @@ describe('saved-Snapshot Strategy audit', () => {
       requestsPerMinute: 500,
     });
     const { runtime, accepted, paths } = runtimeFor(preflight);
+    const derivedOutcomeAsOfSessions: string[] = [];
     const result = await executeSnapshotAuditV1(preflight, {
       source: new JQuantsValidationAdapterV1(runtime),
       runtime,
       accepted,
       runRepository: runs,
+      onOutcomeAsOfSession: value => { derivedOutcomeAsOfSessions.push(value); },
     });
     const loaded = await runs.load(result.runId);
 
     expect(result.caseCount).toBe(3);
     expect(loaded.run.selector).toEqual(preflight.selector);
+    expect(derivedOutcomeAsOfSessions).toEqual(['2026-11-30']);
     expect(loaded.run.outcomeAsOfSession).toBe('2026-11-30');
     expect(loaded.cases.every(value => value.caseKind === 'candidate')).toBe(true);
     expect(loaded.cases.map(value => value.caseKind === 'candidate'

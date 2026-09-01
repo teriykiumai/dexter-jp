@@ -189,6 +189,11 @@ export class StrategyValidationJobServiceV1 {
         requestsPerMinute: this.#requestsPerMinute,
       });
     const controls = requireFeasibleJQuantsExecutionV1(prepared.executionPlan);
+    this.#prunePreflights();
+    // A returned expiry is a capability contract; never evict a live identity for capacity.
+    if (this.#preflights.size >= STRATEGY_VALIDATION_PREFLIGHT_MAX_ENTRIES) {
+      throw new StrategyValidationJobServiceErrorV1('internal_failure');
+    }
     const preflightId = randomUUID();
     const expiresAt = utcFromMilliseconds(Date.parse(startedAt) + STRATEGY_VALIDATION_PREFLIGHT_TTL_MS);
     const tickers = input.mode === 'snapshot'
@@ -222,11 +227,6 @@ export class StrategyValidationJobServiceV1 {
       executionBudgetMs: controls.executionBudgetMs,
       warnings,
     });
-    this.#prunePreflights();
-    if (this.#preflights.size >= STRATEGY_VALIDATION_PREFLIGHT_MAX_ENTRIES) {
-      const oldest = this.#preflights.keys().next().value as string | undefined;
-      if (oldest !== undefined) this.#preflights.delete(oldest);
-    }
     this.#preflights.set(preflightId, Object.freeze({
       view,
       input,
@@ -391,6 +391,26 @@ export class StrategyValidationJobServiceV1 {
         signal: controller.signal,
       });
       runtime = activeRuntime;
+      const onOutcomeAsOfSession = async (outcomeAsOfSession: string): Promise<void> => {
+        await this.#exclusive(async () => {
+          const current = await this.jobRepository.load(collecting.jobId);
+          if (current.status !== 'collecting' && current.status !== 'cancel_requested') {
+            controller.abort();
+            throw new JQuantsValidationErrorV1('cancelled', 'The job was cancelled.');
+          }
+          if (current.outcomeAsOfSession !== null
+            && current.outcomeAsOfSession !== outcomeAsOfSession) {
+            throw new StrategyValidationJobServiceErrorV1('artifact_unavailable');
+          }
+          if (current.outcomeAsOfSession !== outcomeAsOfSession) {
+            await this.#rewriteJob(current, { outcomeAsOfSession });
+          }
+          if (current.status === 'cancel_requested') {
+            controller.abort();
+            throw new JQuantsValidationErrorV1('cancelled', 'The job was cancelled.');
+          }
+        });
+      };
       const onValidating = async (progress: Readonly<{
         outcomeAsOfSession: string | null;
         caseCount: number;
@@ -434,6 +454,7 @@ export class StrategyValidationJobServiceV1 {
           runRepository: this.runRepository,
           signal: controller.signal,
           runId: initial.runId,
+          onOutcomeAsOfSession,
           onValidating,
           beforePromote,
         })
@@ -444,6 +465,7 @@ export class StrategyValidationJobServiceV1 {
           runRepository: this.runRepository,
           signal: controller.signal,
           runId: initial.runId,
+          onOutcomeAsOfSession,
           onValidating: progress => onValidating(progress),
           beforePromote,
         });
@@ -452,7 +474,8 @@ export class StrategyValidationJobServiceV1 {
         const loaded = await this.runRepository.load(initial.runId);
         if (current.status !== 'publishing'
           || current.expectedRunPayloadDigest !== result.runPayloadDigest
-          || loaded.runPayloadDigest !== result.runPayloadDigest) {
+          || loaded.runPayloadDigest !== result.runPayloadDigest
+          || !this.#runMatchesCompletedJob(loaded, current)) {
           throw new StrategyValidationJobServiceErrorV1('artifact_unavailable');
         }
         await this.#transition(current, 'completed', {
@@ -535,7 +558,7 @@ export class StrategyValidationJobServiceV1 {
         try {
           const loaded = await this.runRepository.load(current.runId);
           if (loaded.runPayloadDigest === current.expectedRunPayloadDigest
-            && this.#runMatchesJob(loaded.run, current)) {
+            && this.#runMatchesCompletedJob(loaded, current)) {
             await this.#transition(current, 'completed', {
               outcomeAsOfSession: loaded.run.outcomeAsOfSession,
               progress: Object.freeze({
@@ -603,7 +626,7 @@ export class StrategyValidationJobServiceV1 {
       try {
         const loaded = await this.runRepository.load(job.runId);
         if (loaded.runPayloadDigest !== job.expectedRunPayloadDigest
-          || !this.#runMatchesJob(loaded.run, job)) {
+          || !this.#runMatchesCompletedJob(loaded, job)) {
           throw new StrategyValidationJobServiceErrorV1('artifact_unavailable');
         }
         await this.#transition(job, 'completed', {
@@ -653,7 +676,7 @@ export class StrategyValidationJobServiceV1 {
     try {
       const loaded = await this.runRepository.load(job.runId);
       if (loaded.runPayloadDigest !== job.expectedRunPayloadDigest
-        || !this.#runMatchesJob(loaded.run, job)) {
+        || !this.#runMatchesCompletedJob(loaded, job)) {
         throw new StrategyValidationJobServiceErrorV1('artifact_unavailable');
       }
     } catch (error) {
@@ -678,6 +701,17 @@ export class StrategyValidationJobServiceV1 {
       && run.acceptedAt === job.acceptedAt
       && run.executionDeadline === job.executionDeadline
       && sameCanonicalValue(run.execution.controls, job.executionControls);
+  }
+
+  #runMatchesCompletedJob(
+    loaded: LoadedStrategyValidationRunV1,
+    job: StrategyValidationJobV1,
+  ): boolean {
+    return this.#runMatchesJob(loaded.run, job)
+      && job.outcomeAsOfSession === loaded.run.outcomeAsOfSession
+      && job.progress.attemptCount === loaded.run.execution.attemptCount
+      && job.progress.caseCount === loaded.cases.length
+      && job.progress.caseCount === loaded.run.caseReferences.length;
   }
 
   async #activeJobInternal(): Promise<StrategyValidationJobV1 | null> {
@@ -711,7 +745,7 @@ export class StrategyValidationJobServiceV1 {
     }
     const job = matching[0]!;
     if (loaded.runPayloadDigest !== job.expectedRunPayloadDigest
-      || !this.#runMatchesJob(loaded.run, job)) {
+      || !this.#runMatchesCompletedJob(loaded, job)) {
       throw new StrategyValidationJobServiceErrorV1('artifact_unavailable');
     }
   }
@@ -754,6 +788,18 @@ export class StrategyValidationJobServiceV1 {
       expectedRunPayloadDigest: status === 'publishing' || status === 'completed'
         ? patch.expectedRunPayloadDigest ?? current.expectedRunPayloadDigest
         : null,
+    });
+    return this.jobRepository.replace(next);
+  }
+
+  async #rewriteJob(
+    current: StrategyValidationJobV1,
+    patch: Pick<StrategyValidationJobV1, 'outcomeAsOfSession'>,
+  ): Promise<StrategyValidationJobV1> {
+    const next = StrategyValidationJobV1Schema.parse({
+      ...current,
+      ...patch,
+      updatedAt: utcFromMilliseconds(this.#environment.wallNowMs()),
     });
     return this.jobRepository.replace(next);
   }
