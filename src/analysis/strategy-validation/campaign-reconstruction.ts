@@ -96,6 +96,7 @@ type CampaignAnchorUnavailableReasonV1 =
   | 'source_plan_unavailable'
   | 'source_history_unavailable'
   | 'source_response_invalid'
+  | 'calendar_incomplete'
   | 'price_history_incomplete'
   | 'tick_rule_period_unsupported'
   | 'tick_category_unavailable'
@@ -778,16 +779,16 @@ export async function executeCampaignReconstructionV1(
 
   for (const anchor of preflight.anchors) {
     options.runtime.assertCanContinue(options.signal);
+    const sessions = selectCampaignCandidateSessionsV1(
+      globalCalendarResult.calendar,
+      anchor.anchorDate,
+    );
     if (anchor.resistanceEvidence.state === 'unavailable') {
       cases.push(anchorUnavailableCase(
         preflight, anchor, runId, outcomeAsOfSession, anchor.resistanceEvidence.reason, [],
       ));
       continue;
     }
-    const sessions = selectCampaignCandidateSessionsV1(
-      globalCalendarResult.calendar,
-      anchor.anchorDate,
-    );
     const candidateCalendarResult = await options.source.fetchCalendar({
       dateFrom: sessions[0]!,
       dateTo: anchor.anchorDate,
@@ -800,10 +801,15 @@ export async function executeCampaignReconstructionV1(
     );
     if (candidateCalendarResult.state === 'unavailable') {
       if (candidateCalendarResult.reason === 'calendar_incomplete') {
-        throw new PointInTimeErrorV1(
+        cases.push(anchorUnavailableCase(
+          preflight,
+          anchor,
+          runId,
+          outcomeAsOfSession,
           'calendar_incomplete',
-          'The exact campaign calendar window is incomplete.',
-        );
+          [candidateCalendarReference],
+        ));
+        continue;
       }
       cases.push(anchorUnavailableCase(
         preflight,

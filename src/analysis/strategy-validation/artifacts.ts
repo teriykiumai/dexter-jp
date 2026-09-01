@@ -567,9 +567,13 @@ export const StrategyValidationCaseV1Schema = z.discriminatedUnion('caseKind', [
       code: 'custom', message: 'Anchor unavailable reason does not match its source stage.',
     });
     if (value.unavailableReason === 'calendar_incomplete') {
+      const snapshotCalendarFailure = snapshotMode
+        && value.outcomeAsOfSession === null
+        && value.strategyDataDate !== null;
+      const campaignCalendarFailure = !snapshotMode
+        && value.outcomeAsOfSession !== null;
       if (!candidateCalendarOnly
-        || value.outcomeAsOfSession !== null
-        || (snapshotMode && value.strategyDataDate === null)) invalidStage();
+        || (!snapshotCalendarFailure && !campaignCalendarFailure)) invalidStage();
       return;
     }
     if (!snapshotMode) {

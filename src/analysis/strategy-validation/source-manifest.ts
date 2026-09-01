@@ -663,8 +663,17 @@ export function validateStrategyValidationSourceCompletenessV1(
         );
         return;
       }
-      case 'calendar_incomplete':
-        return failCompleteness();
+      case 'calendar_incomplete': {
+        const calendar = forRole('candidate_calendar');
+        if (calendar.length !== 1
+          || calendar[0]!.envelope.result.state !== 'unavailable'
+          || calendar[0]!.envelope.result.reason !== 'calendar_incomplete'
+          || (['candidate_master', 'candidate_daily_bars', 'outcome_calendar',
+            'outcome_master', 'outcome_daily_bars'] as const).some(role => (
+            forRole(role).length !== 0
+          ))) failCompleteness();
+        return;
+      }
       case 'price_history_incomplete':
         if (context.mode !== 'campaign') failCompleteness();
         requireCampaignCandidateGeometry(false);

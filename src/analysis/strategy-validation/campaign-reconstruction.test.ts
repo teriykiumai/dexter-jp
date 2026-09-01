@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AnalysisSnapshotRepository } from '../snapshot/repository.js';
 import { comparisonSnapshot } from '../comparison/test-fixtures.js';
+import { analyzeStrategy } from '../../tools/finance/strategy-engine.js';
 import { analyzeTechnical } from '../../tools/finance/technical-engine.js';
 import {
   CAMPAIGN_RECONSTRUCTION_WARNING_V1,
@@ -64,10 +65,13 @@ function calendar(from: string, to: string) {
   );
 }
 
-function technicalBars(sessions: readonly string[]): readonly TseDailyBarV1[] {
+function technicalBars(
+  sessions: readonly string[],
+  offset = 0,
+): readonly TseDailyBarV1[] {
   const wave = [0, 1, 3, 6, 3, 1, 0, -4, 0, 1];
   return sessions.map((date, index) => {
-    const close = 100 + index * 0.02 + wave[index % wave.length]!;
+    const close = offset + 100 + index * 0.02 + wave[index % wave.length]!;
     return Object.freeze({
       date: parseTseSessionDate(date),
       open: close,
@@ -115,6 +119,95 @@ function response(body: unknown): Response {
     status: 200,
     headers: { 'content-type': 'application/json' },
   });
+}
+
+async function repositories(prefix: string) {
+  const directory = await mkdtemp(join(tmpdir(), prefix));
+  directories.push(directory);
+  return {
+    directory,
+    snapshots: new AnalysisSnapshotRepository(join(directory, 'analysis')),
+    runs: new StrategyValidationRunRepositoryV1(join(directory, 'research'), {
+      promoteDirectory: rename,
+    }),
+  };
+}
+
+function validationEnvironment(options: Readonly<{
+  calendarRows?: (url: URL, rows: readonly string[]) => readonly string[];
+  dailyBars: (url: URL, sessions: readonly string[]) => readonly TseDailyBarV1[];
+}>) {
+  let wallMs = Date.parse('2026-08-01T00:00:01.000Z');
+  let monotonicMs = 0;
+  const requests: URL[] = [];
+  const environment: JQuantsExecutionEnvironmentV1 = {
+    fetch: async input => {
+      const url = new URL(String(input));
+      requests.push(url);
+      const from = url.searchParams.get('from')!;
+      const to = url.searchParams.get('to')!;
+      if (url.pathname === '/v2/markets/calendar') {
+        const rows = options.calendarRows?.(url, dates(from, to)) ?? dates(from, to);
+        return response({
+          data: rows.map(date => ({ Date: date, HolDiv: isWeekday(date) ? '1' : '0' })),
+        });
+      }
+      const sourceCode = url.searchParams.get('code')!;
+      if (url.pathname === '/v2/equities/master') {
+        return response({ data: [{
+          Date: url.searchParams.get('date'),
+          Code: sourceCode,
+          ScaleCat: 'その他',
+          Mkt: '0111',
+          ProdCat: '011',
+        }] });
+      }
+      const bars = options.dailyBars(url, dates(from, to).filter(isWeekday));
+      return response({ data: bars.map(bar => ({
+        Date: bar.date,
+        Code: sourceCode,
+        O: bar.open,
+        H: bar.high,
+        L: bar.low,
+        C: bar.close,
+        UL: bar.upperLimitFlag,
+        LL: bar.lowerLimitFlag,
+        AdjFactor: bar.adjustmentFactor,
+        ExRT: bar.exRightsType,
+      })) });
+    },
+    wallNowMs: () => wallMs,
+    monotonicNowMs: () => monotonicMs,
+    sleep: (durationMs, signal) => {
+      if (signal !== undefined && durationMs === 30_000) {
+        return new Promise((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+        });
+      }
+      wallMs += durationMs;
+      monotonicMs += durationMs;
+      return Promise.resolve();
+    },
+    apiKey: () => 'test-key',
+  };
+  return { environment, requests };
+}
+
+function flatBars(
+  sessions: readonly string[],
+  price: number,
+): readonly TseDailyBarV1[] {
+  return sessions.map(date => Object.freeze({
+    date: parseTseSessionDate(date),
+    open: price,
+    high: price + 1,
+    low: price - 1,
+    close: price,
+    upperLimitFlag: '0' as const,
+    lowerLimitFlag: '0' as const,
+    adjustmentFactor: 1,
+    exRightsType: null,
+  }));
 }
 
 describe('historical Strategy reconstruction', () => {
@@ -180,8 +273,13 @@ describe('historical Strategy reconstruction', () => {
       close: 100 + index,
       volume: null,
     }));
-    expect(analyzeTechnical(bars).latestSwingHigh).toBe(1_000);
-    expect(analyzeTechnical(bars.slice(-251)).latestSwingHigh).toBeNull();
+    const productionTechnical = analyzeTechnical(bars);
+    const reconstructedTechnical = analyzeTechnical(bars.slice(-251));
+    expect(productionTechnical.latestSwingHigh).toBe(1_000);
+    expect(reconstructedTechnical.latestSwingHigh).toBeNull();
+    expect(analyzeStrategy(productionTechnical, { tickSize: 1 }).candidates.length)
+      .toBeGreaterThan(0);
+    expect(analyzeStrategy(reconstructedTechnical, { tickSize: 1 }).candidates).toEqual([]);
   });
 
   test('maps normalized resistance collisions to the exact candidate digest union', () => {
@@ -300,6 +398,195 @@ describe('historical Strategy reconstruction', () => {
       state: 'unavailable', reason: 'resistance_evidence_invalid',
     });
     expect(invalid.executionPlan.estimatedMinimumAttempts).toBe(1);
+  });
+
+  test('gives the official-session guard precedence over invalid resistance evidence', async () => {
+    const { snapshots, runs } = await repositories('dexter-campaign-session-guard-');
+    const preflight = await createCampaignReconstructionPreflightV1({
+      schemaVersion: 'strategy_validation_campaign_v1',
+      name: 'non-session',
+      anchors: [{
+        ticker: '7203',
+        anchorDate: '2025-12-28',
+        resistanceEvidence: [{
+          kind: 'analysis_snapshot',
+          snapshotId: '2025-01-01T00-00-00-000Z',
+        }],
+      }],
+    }, {
+      snapshotRepository: snapshots,
+      startedAt: '2026-08-01T00:00:00.000Z',
+      requestsPerMinute: 500,
+    });
+    expect(preflight.anchors[0]!.resistanceEvidence.state).toBe('unavailable');
+    const { environment, requests } = validationEnvironment({
+      dailyBars: (_url, sessions) => flatBars(sessions, 50),
+    });
+    const accepted = acceptJQuantsExecutionV1(preflight.executionPlan, environment);
+    const runtime = new JQuantsExecutionRuntimeV1(accepted, { environment });
+    await expect(executeCampaignReconstructionV1(preflight, {
+      source: new JQuantsValidationAdapterV1(runtime),
+      runtime,
+      accepted,
+      runRepository: runs,
+    })).rejects.toMatchObject({ code: 'calendar_incomplete' });
+    expect(requests.map(url => url.pathname)).toEqual(['/v2/markets/calendar']);
+    expect(await runs.list()).toEqual([]);
+  });
+
+  test('keeps a campaign complete when one exact candidate calendar is incomplete', async () => {
+    const { snapshots, runs } = await repositories('dexter-campaign-calendar-gap-');
+    const campaign: StrategyValidationCampaignManifestV1 = {
+      schemaVersion: 'strategy_validation_campaign_v1',
+      name: 'calendar-gap',
+      anchors: [
+        { ticker: '7203', anchorDate: '2025-12-30', resistanceEvidence: [] },
+        { ticker: '7203', anchorDate: '2025-12-31', resistanceEvidence: [] },
+      ],
+    };
+    const preflight = await createCampaignReconstructionPreflightV1(campaign, {
+      snapshotRepository: snapshots,
+      startedAt: '2026-08-01T00:00:00.000Z',
+      requestsPerMinute: 500,
+    });
+    const { environment, requests } = validationEnvironment({
+      calendarRows: (url, rows) => url.searchParams.get('to') === '2025-12-30'
+        ? rows.filter((_date, index) => index !== 10)
+        : rows,
+      dailyBars: (url, sessions) => url.searchParams.get('to') === '2025-12-31'
+        ? technicalBars(sessions)
+        : flatBars(sessions, 50),
+    });
+    const accepted = acceptJQuantsExecutionV1(preflight.executionPlan, environment);
+    const runtime = new JQuantsExecutionRuntimeV1(accepted, { environment });
+    const result = await executeCampaignReconstructionV1(preflight, {
+      source: new JQuantsValidationAdapterV1(runtime),
+      runtime,
+      accepted,
+      runRepository: runs,
+    });
+    const loaded = await runs.load(result.runId);
+    const incomplete = loaded.cases.find(value => value.anchorDate === '2025-12-30');
+    expect(incomplete).toMatchObject({
+      caseKind: 'anchor_unavailable',
+      unavailableReason: 'calendar_incomplete',
+      outcomeAsOfSession: '2026-07-31',
+      sourceManifest: {
+        outcomeAsOfSession: '2026-07-31',
+        sources: [{ role: 'candidate_calendar' }],
+      },
+    });
+    expect(loaded.cases.some(value => value.anchorDate === '2025-12-31'
+      && value.caseKind === 'candidate')).toBe(true);
+    const incompleteReference = incomplete!.sourceManifest.sources[0]!;
+    expect(loaded.sources.find(source => source.digest === incompleteReference.digest)?.result)
+      .toEqual({ state: 'unavailable', reason: 'calendar_incomplete', rows: [] });
+    expect(requests.some(url => url.pathname === '/v2/equities/bars/daily'
+      && url.searchParams.get('to') === '2025-12-30')).toBe(false);
+  });
+
+  test('persists Engine entry-tick injection and cross-band per-level failure', async () => {
+    const { snapshots, runs } = await repositories('dexter-campaign-cross-band-');
+    const preflight = await createCampaignReconstructionPreflightV1(manifest(), {
+      snapshotRepository: snapshots,
+      startedAt: '2026-08-01T00:00:00.000Z',
+      requestsPerMinute: 500,
+    });
+    const { environment } = validationEnvironment({
+      dailyBars: (url, sessions) => url.searchParams.get('to') === '2025-12-31'
+        ? technicalBars(sessions, 2_886)
+        : flatBars(sessions, 50),
+    });
+    const accepted = acceptJQuantsExecutionV1(preflight.executionPlan, environment);
+    const runtime = new JQuantsExecutionRuntimeV1(accepted, { environment });
+    const result = await executeCampaignReconstructionV1(preflight, {
+      source: new JQuantsValidationAdapterV1(runtime),
+      runtime,
+      accepted,
+      runRepository: runs,
+    });
+    const loaded = await runs.load(result.runId);
+    const crossBand = loaded.cases.find(value => value.caseKind === 'candidate'
+      && value.tickEvidence.levels.target.executable === false);
+    expect(crossBand).toMatchObject({
+      caseKind: 'candidate',
+      candidate: { entry: { price: 2_999 } },
+      tickEvidence: {
+        levels: {
+          entry: { tick: 1, executable: true },
+          target: { tick: 5, executable: false },
+        },
+      },
+      outcome: { kind: 'unavailable', reason: 'non_executable_tick' },
+    });
+  });
+
+  test('observes an entry on t20 through holding day 60 at evaluation session 79', async () => {
+    const { snapshots, runs } = await repositories('dexter-campaign-t20-h60-');
+    const preflight = await createCampaignReconstructionPreflightV1(manifest(), {
+      snapshotRepository: snapshots,
+      startedAt: '2026-08-01T00:00:00.000Z',
+      requestsPerMinute: 500,
+    });
+    const candidateSessions = calendar('2024-12-01', '2025-12-31').sessions.slice(-251);
+    const reconstructed = reconstructCampaignCandidatesV1({
+      ticker: '7203',
+      anchorDate: parseTseSessionDate('2025-12-31'),
+      sessions: candidateSessions,
+      bars: technicalBars(candidateSessions),
+      master: master(),
+      resistanceEvidence: { state: 'available', levels: [] },
+    });
+    if (reconstructed.state !== 'available') throw new Error('Fixture candidate is unavailable.');
+    const entry = reconstructed.candidates[0]!.candidate.entry.price;
+    const outcomeSessions = calendar('2025-12-31', '2026-08-01').sessions
+      .filter(date => date > '2025-12-31')
+      .slice(0, 79);
+    const safePrice = entry + 1;
+    const { environment } = validationEnvironment({
+      dailyBars: (url, sessions) => {
+        if (url.searchParams.get('to') === '2025-12-31') return technicalBars(sessions);
+        return sessions.map((date, index) => {
+          const waiting = index < 19;
+          const open = waiting ? entry - 2 : safePrice;
+          return Object.freeze({
+            date: parseTseSessionDate(date),
+            open,
+            high: waiting ? entry - 1 : safePrice,
+            low: waiting ? entry - 3 : safePrice,
+            close: open,
+            upperLimitFlag: '0' as const,
+            lowerLimitFlag: '0' as const,
+            adjustmentFactor: 1,
+            exRightsType: null,
+          });
+        });
+      },
+    });
+    const accepted = acceptJQuantsExecutionV1(preflight.executionPlan, environment);
+    const runtime = new JQuantsExecutionRuntimeV1(accepted, { environment });
+    const result = await executeCampaignReconstructionV1(preflight, {
+      source: new JQuantsValidationAdapterV1(runtime),
+      runtime,
+      accepted,
+      runRepository: runs,
+    });
+    const loaded = await runs.load(result.runId);
+    const candidates = loaded.cases.filter(value => value.caseKind === 'candidate');
+    expect(candidates.length).toBeGreaterThan(0);
+    for (const value of candidates) {
+      if (value.caseKind !== 'candidate') continue;
+      expect(value.outcome).toMatchObject({
+        kind: 'horizon_expired',
+        evaluationEndDate: outcomeSessions[78],
+        entryFill: {
+          date: outcomeSessions[19],
+          evaluationSession: 20,
+          holdingDay: 1,
+        },
+        mark: { date: outcomeSessions[78] },
+      });
+    }
   });
 
   test('publishes and reloads an immutable campaign-global run', async () => {
