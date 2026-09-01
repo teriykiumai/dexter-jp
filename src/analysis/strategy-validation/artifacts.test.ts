@@ -290,6 +290,27 @@ describe('Strategy-validation V1 artifacts and identity', () => {
         outcomeAsOfSession: null,
       },
     }).success).toBe(false);
+    const sourceFreeFutureAnchor = {
+      ...sourceFreeSnapshotAnchor,
+      anchorDate: '2025-01-03',
+      decisionDate: '2025-01-03',
+      strategyDataDate: '2025-01-03',
+      unavailableReason: 'future_strategy_data',
+      outcomeAsOfSession: null,
+      sourceManifest: {
+        ...sourceFreeSnapshotAnchor.sourceManifest,
+        outcomeAsOfSession: null,
+      },
+    } as const;
+    expect(StrategyValidationCaseV1Schema.safeParse(sourceFreeFutureAnchor).success).toBe(true);
+    for (const strategyDataDate of ['2025-01-02', '2025-01-01'] as const) {
+      expect(StrategyValidationCaseV1Schema.safeParse({
+        ...sourceFreeFutureAnchor,
+        anchorDate: strategyDataDate,
+        decisionDate: strategyDataDate,
+        strategyDataDate,
+      }).success).toBe(false);
+    }
     const candidateCalendarManifest = {
       ...sourceFreeSnapshotAnchor.sourceManifest,
       sources: [{ role: 'candidate_calendar' as const, digest: source.digest }],
@@ -318,6 +339,34 @@ describe('Strategy-validation V1 artifacts and identity', () => {
       outcomeAsOfSession: null,
       sourceManifest: { ...candidateCalendarManifest, outcomeAsOfSession: null },
     }).success).toBe(true);
+    for (const unavailableReason of [
+      'strategy_data_date_invalid',
+      'invalid_candidate',
+      'calendar_incomplete',
+    ] as const) {
+      const nullBoundary = unavailableReason === 'calendar_incomplete';
+      expect(StrategyValidationCaseV1Schema.safeParse({
+        ...sourceFreeFutureAnchor,
+        unavailableReason,
+        outcomeAsOfSession: nullBoundary ? null : sourceFreeSnapshotAnchor.outcomeAsOfSession,
+        sourceManifest: {
+          ...candidateCalendarManifest,
+          outcomeAsOfSession: nullBoundary ? null : sourceFreeSnapshotAnchor.outcomeAsOfSession,
+        },
+      }).success).toBe(false);
+    }
+    expect(StrategyValidationCaseV1Schema.safeParse({
+      ...sourceFreeSnapshotAnchor,
+      selector: {
+        ...sourceFreeSnapshotAnchor.selector,
+        snapshotId: '2025-02-31T00-00-00-000Z',
+      },
+      outcomeAsOfSession: null,
+      sourceManifest: {
+        ...sourceFreeSnapshotAnchor.sourceManifest,
+        outcomeAsOfSession: null,
+      },
+    }).success).toBe(false);
     expect(StrategyValidationCaseV1Schema.safeParse({
       ...sourceFreeSnapshotAnchor,
       outcomeAsOfSession: null,
@@ -366,6 +415,10 @@ describe('Strategy-validation V1 artifacts and identity', () => {
     const laterDecision = {
       ...snapshot,
       decisionDate: '2025-01-03',
+      selector: {
+        ...snapshot.selector,
+        snapshotId: '2025-01-03T00-00-00-000Z',
+      },
       outcome: {
         ...snapshot.outcome,
         evaluationEndDate: '2025-01-06',

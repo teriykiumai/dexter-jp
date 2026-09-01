@@ -123,7 +123,7 @@ export function snapshotCandidateCase(
     decisionDate: anchorDate,
     strategyDataDate: anchorDate,
     selector: {
-      mode: 'snapshot', snapshotId: TEST_SNAPSHOT_ID,
+      mode: 'snapshot', snapshotId: `${anchorDate}T00-00-00-000Z`,
       snapshotSchemaVersion: 9, snapshotDigest: TEST_SNAPSHOT_DIGEST,
     },
     versions: STRATEGY_VALIDATION_VERSIONS_V1,
@@ -286,10 +286,12 @@ export function validationRun(
     outcomeAsOfSession,
     selector: campaign
       ? { mode: 'campaign', manifestDigest: TEST_MANIFEST_DIGEST }
-      : {
-        mode: 'snapshot', snapshotId: TEST_SNAPSHOT_ID,
-        snapshotSchemaVersion: 9, snapshotDigest: TEST_SNAPSHOT_DIGEST,
-      },
+      : sortedCases[0]?.selector.mode === 'snapshot'
+        ? sortedCases[0].selector
+        : {
+          mode: 'snapshot', snapshotId: TEST_SNAPSHOT_ID,
+          snapshotSchemaVersion: 9, snapshotDigest: TEST_SNAPSHOT_DIGEST,
+        },
     versions: STRATEGY_VALIDATION_VERSIONS_V1,
     candidateGenerationPolicy: campaign ? STRATEGY_VALIDATION_CAMPAIGN_POLICY : null,
     aggregationScope: scope,

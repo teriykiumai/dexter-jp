@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { buildAnalysisSnapshot } from './builder.js';
 import { canonicalAnalysisSnapshotJsonV1 } from './canonical-json.js';
 import { AnalysisSnapshotPersistenceError } from './errors.js';
+import { snapshotGeneratedAtFromId } from './id.js';
 import { ArtifactSafetyError } from './safety.js';
 import {
   AnalysisSnapshotRepository,
@@ -1151,6 +1152,11 @@ describe('AnalysisSnapshotRepository', () => {
   test('creates Windows-safe IDs for canonical timestamps', () => {
     expect(createSnapshotId('2026-08-23T01:02:03Z')).toBe('2026-08-23T01-02-03-000Z');
     expect(createSnapshotId('2026-08-23T01:02:03.456Z')).toBe('2026-08-23T01-02-03-456Z');
+    expect(snapshotGeneratedAtFromId('2026-08-23T01-02-03-456Z'))
+      .toBe('2026-08-23T01:02:03.456Z');
+    expect(() => snapshotGeneratedAtFromId('2026-02-30T01-02-03-456Z')).toThrow(
+      AnalysisSnapshotPersistenceError,
+    );
     expect(() => createSnapshotId('2026-08-23T01:02:03+09:00')).toThrow(
       AnalysisSnapshotPersistenceError,
     );

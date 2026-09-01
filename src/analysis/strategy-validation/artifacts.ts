@@ -10,7 +10,7 @@ import {
   type CanonicalJsonValue,
   type SnapshotDigest,
 } from '../snapshot/canonical-json.js';
-import { SnapshotIdSchema } from '../snapshot/id.js';
+import { snapshotGeneratedAtFromId, SnapshotIdSchema } from '../snapshot/id.js';
 import { CanonicalTickerSchema } from '../snapshot/schema.js';
 import {
   isStrictGregorianDate,
@@ -511,6 +511,40 @@ export const StrategyValidationCaseV1Schema = z.discriminatedUnion('caseKind', [
     || (!snapshotMode && value.strategyDataDate !== null)) {
     context.addIssue({ code: 'custom', message: 'Case mode fields are inconsistent.' });
     return;
+  }
+  if (snapshotMode && value.selector.mode === 'snapshot') {
+    let generatedTokyoDate: string;
+    try {
+      generatedTokyoDate = tokyoDateFromUtcInstantV1(
+        snapshotGeneratedAtFromId(value.selector.snapshotId),
+      );
+    } catch {
+      context.addIssue({
+        code: 'custom', message: 'Snapshot selector does not encode a valid generation instant.',
+      });
+      return;
+    }
+    const expectedAnchorDate = value.strategyDataDate ?? generatedTokyoDate;
+    const expectedDecisionDate = value.strategyDataDate !== null
+      && value.strategyDataDate > generatedTokyoDate
+      ? value.strategyDataDate
+      : generatedTokyoDate;
+    if (value.anchorDate !== expectedAnchorDate || value.decisionDate !== expectedDecisionDate) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Snapshot anchor and decision dates do not match its generation identity.',
+      });
+    }
+    if (value.strategyDataDate !== null) {
+      const claimsFuture = value.caseKind === 'anchor_unavailable'
+        && value.unavailableReason === 'future_strategy_data';
+      if ((value.strategyDataDate > generatedTokyoDate) !== claimsFuture) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Snapshot Strategy date precedence does not match its generation date.',
+        });
+      }
+    }
   }
   if (!snapshotMode && value.decisionDate !== value.anchorDate) {
     context.addIssue({ code: 'custom', message: 'Campaign decisionDate must equal anchorDate.' });

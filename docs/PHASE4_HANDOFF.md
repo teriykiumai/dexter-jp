@@ -194,9 +194,13 @@ invalid Entry/Stop/Target tuple remains a candidate case with
 `unavailable/invalid_candidate`. Artifact validation binds each local/calendar stage
 to the exact `strategyDataDate`, boundary, and calendar-reference shape; in
 particular, a source-free parsed non-future date, a source-backed future date, and a
-source-free post-calendar candidate failure are invalid publications. An incomplete
-calendar publishes one anchor with a null boundary and one unavailable calendar
-envelope. None of these branches requests Master or outcome bars.
+source-free post-calendar candidate failure are invalid publications. It derives the
+Snapshot generation Tokyo date from the exact `selector.snapshotId`, so only a
+strictly later source-free Strategy date may claim `future_strategy_data`; same-day,
+earlier, calendar-backed, and candidate forms fail independent artifact validation,
+and anchor/decision dates must match the same derived generation identity. An
+incomplete calendar publishes one anchor with a null boundary and one unavailable
+calendar envelope. None of these branches requests Master or outcome bars.
 
 Campaign aggregates are deliberately `campaign_global` across every ticker and
 anchor in the run. Version 1 persists no per-ticker aggregates and the Browser never

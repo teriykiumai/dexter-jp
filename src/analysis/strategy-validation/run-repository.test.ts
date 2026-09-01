@@ -470,6 +470,7 @@ describe('Strategy-validation immutable run repository V1', () => {
       const candidate = StrategyValidationCaseV1Schema.parse({
         ...base,
         decisionDate,
+        selector: { ...base.selector, snapshotId: `${decisionDate}T00-00-00-000Z` },
         outcome: {
           ...base.outcome,
           evaluationEndDate: evaluationDate,
@@ -518,6 +519,7 @@ describe('Strategy-validation immutable run repository V1', () => {
       const candidate = StrategyValidationCaseV1Schema.parse({
         ...base,
         decisionDate,
+        selector: { ...base.selector, snapshotId: `${decisionDate}T00-00-00-000Z` },
         tickEvidence: { ...base.tickEvidence, effectiveDate: decisionDate },
         outcome: {
           ...base.outcome,
