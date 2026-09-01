@@ -282,6 +282,7 @@ describe('J-Quants request runtime', () => {
     expect(requests[1]?.url.searchParams.get('pagination_key')).toBe('page-2');
     expect(requests.every(request => request.apiKey === 'test-jquants-key')).toBe(true);
     expect(actual.attempts).toHaveLength(2);
+    expect(actual.cacheHitCount).toBe(1);
   });
 
   test('rejects non-allowlisted endpoints before dispatch', async () => {

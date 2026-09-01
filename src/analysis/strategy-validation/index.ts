@@ -14,5 +14,6 @@ export * from './run-artifact.js';
 export * from './run-repository.js';
 export * from './source-envelope.js';
 export * from './source-manifest.js';
+export * from './snapshot-audit.js';
 export * from './strict-json.js';
 export * from './tick.js';

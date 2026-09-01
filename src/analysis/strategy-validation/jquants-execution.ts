@@ -347,6 +347,7 @@ export class JQuantsExecutionRuntimeV1 {
   readonly #cache = new Map<string, Promise<JQuantsFetchedRowsV1>>();
   readonly #operationController = new AbortController();
   #limiterTail: Promise<void> = Promise.resolve();
+  #cacheHitCount = 0;
 
   constructor(
     accepted: AcceptedJQuantsExecutionV1,
@@ -408,6 +409,10 @@ export class JQuantsExecutionRuntimeV1 {
     return Object.freeze(this.#attempts.map(attempt => Object.freeze({ ...attempt })));
   }
 
+  get cacheHitCount(): number {
+    return this.#cacheHitCount;
+  }
+
   nowUtc(): AsOfCutoff {
     return utcInstantFromMs(this.#environment.wallNowMs());
   }
@@ -440,7 +445,10 @@ export class JQuantsExecutionRuntimeV1 {
     const normalizedQuery = initialQuery(allowedEndpoint, query);
     const key = cacheKey(allowedEndpoint, normalizedQuery);
     const existing = this.#cache.get(key);
-    if (existing !== undefined) return existing;
+    if (existing !== undefined) {
+      this.#cacheHitCount += 1;
+      return existing;
+    }
     const request = this.#getAllUncached(allowedEndpoint, normalizedQuery, operationSignal).catch(error => {
       if (this.#cache.get(key) === request) this.#cache.delete(key);
       throw error;
