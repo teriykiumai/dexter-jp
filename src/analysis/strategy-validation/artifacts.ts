@@ -243,7 +243,6 @@ export const STRATEGY_VALIDATION_SNAPSHOT_ANCHOR_UNAVAILABLE_REASONS_V1 = Object
 export const STRATEGY_VALIDATION_CAMPAIGN_ANCHOR_UNAVAILABLE_REASONS_V1 = Object.freeze([
   'source_plan_unavailable',
   'source_history_unavailable',
-  'source_response_invalid',
   'calendar_incomplete',
   'price_history_incomplete',
   'tick_rule_period_unsupported',
@@ -563,13 +562,21 @@ export const StrategyValidationCaseV1Schema = z.discriminatedUnion('caseKind', [
     const noSources = value.sourceManifest.sources.length === 0;
     const candidateCalendarOnly = value.sourceManifest.sources.length === 1
       && value.sourceManifest.sources[0]!.role === 'candidate_calendar';
+    const campaignCalendarEvidence = value.sourceManifest.sources.length === 2
+      && value.sourceManifest.sources[0]!.role === 'candidate_calendar'
+      && value.sourceManifest.sources[1]!.role === 'outcome_calendar';
     const invalidStage = (): void => context.addIssue({
       code: 'custom', message: 'Anchor unavailable reason does not match its source stage.',
     });
     if (value.unavailableReason === 'calendar_incomplete') {
-      if (!candidateCalendarOnly
-        || value.outcomeAsOfSession !== null
-        || (snapshotMode && value.strategyDataDate === null)) invalidStage();
+      const snapshotCalendarFailure = snapshotMode
+        && value.outcomeAsOfSession === null
+        && value.strategyDataDate !== null
+        && candidateCalendarOnly;
+      const campaignCalendarFailure = !snapshotMode
+        && value.outcomeAsOfSession !== null
+        && campaignCalendarEvidence;
+      if (!snapshotCalendarFailure && !campaignCalendarFailure) invalidStage();
       return;
     }
     if (!snapshotMode) {

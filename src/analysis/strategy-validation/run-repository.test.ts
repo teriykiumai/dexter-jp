@@ -214,14 +214,14 @@ function roleSource(input: Readonly<{
     : input.role === 'candidate_master'
       ? initialTickDate
     : input.role === 'outcome_calendar'
-      ? decisionDate
+      ? (input.mode === 'campaign' ? campaignStart : decisionDate)
       : input.role === 'outcome_master'
         ? input.evaluationDate
         : input.role === 'outcome_daily_bars'
           ? (input.outcomeDailyDateFrom ?? shiftDate(decisionDate, 1))
           : initialTickDate;
   const dateTo = input.role === 'outcome_calendar'
-    ? TEST_OUTCOME_AS_OF
+    ? (input.mode === 'campaign' ? TEST_STARTED_AT.slice(0, 10) : TEST_OUTCOME_AS_OF)
     : input.role === 'outcome_daily_bars'
       ? (input.outcomeDailyDateFrom === undefined ? input.evaluationDate : TEST_OUTCOME_AS_OF)
       : input.role === 'outcome_master'
@@ -348,7 +348,17 @@ function replaceRoleSources(
 
 function twoTickerCampaignPublication(swapSources: boolean) {
   const firstEvidence = completeCandidateSources('campaign', '7203', '2025-01-02', '2025-01-03');
-  const secondEvidence = completeCandidateSources('campaign', '6758', '2025-01-03', '2025-01-04');
+  const unsharedSecondEvidence = completeCandidateSources(
+    'campaign', '6758', '2025-01-03', '2025-01-04',
+  );
+  const sharedPlanningCalendar = firstEvidence.references.find(
+    value => value.role === 'outcome_calendar',
+  )!;
+  const secondEvidence = replaceRoleSources(
+    unsharedSecondEvidence,
+    'outcome_calendar',
+    [firstEvidence.sources.find(source => source.digest === sharedPlanningCalendar.digest)!],
+  );
   const firstBase = campaignCandidateCase(firstEvidence.sources[0]!.digest, {
     caseId: '55555555-5555-4555-8555-555555555555',
     ticker: '7203',
@@ -674,6 +684,123 @@ describe('Strategy-validation immutable run repository V1', () => {
         cases: [invalidEvidence],
         sources: [wrongFailure],
       }), 'artifact_incomplete');
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('replays campaign planning evidence before accepting an early anchor failure', async () => {
+    const { temporaryRoot, repository } = await temporaryRepository();
+    try {
+      const anchorDate = '2025-01-02';
+      const planningCalendar = roleSource({
+        role: 'outcome_calendar', mode: 'campaign', ticker: '7203',
+        anchorDate, evaluationDate: '2025-01-03', nonSessionDates: [anchorDate],
+      });
+      const base = anchorUnavailableCase(planningCalendar.digest, {
+        caseId: '77777777-7777-4777-8777-777777777777',
+        ticker: '7203',
+        anchorDate,
+        reason: 'resistance_evidence_invalid',
+      });
+      const unavailable = StrategyValidationCaseV1Schema.parse({
+        ...base,
+        sourceManifest: createPointInTimeSourceManifestV1({
+          startedAt: TEST_STARTED_AT,
+          outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+          sources: [{ role: 'outcome_calendar', digest: planningCalendar.digest }],
+        }),
+      });
+      await expectRepositoryKind(repository.publish({
+        run: validationRun([unavailable]),
+        cases: [unavailable],
+        sources: [planningCalendar],
+      }), 'artifact_incomplete');
+
+      const boundaryCalendar = roleSource({
+        role: 'outcome_calendar', mode: 'campaign', ticker: '7203',
+        anchorDate, evaluationDate: '2025-01-03',
+      });
+      const wrongBoundary = '2025-03-30';
+      const boundaryBase = anchorUnavailableCase(boundaryCalendar.digest, {
+        caseId: '77777777-7777-4777-8777-777777777777',
+        ticker: '7203',
+        anchorDate,
+        reason: 'resistance_evidence_invalid',
+      });
+      const boundaryMismatch = StrategyValidationCaseV1Schema.parse({
+        ...boundaryBase,
+        outcomeAsOfSession: wrongBoundary,
+        sourceManifest: createPointInTimeSourceManifestV1({
+          startedAt: TEST_STARTED_AT,
+          outcomeAsOfSession: wrongBoundary,
+          sources: [{ role: 'outcome_calendar', digest: boundaryCalendar.digest }],
+        }),
+      });
+      await expectRepositoryKind(repository.publish({
+        run: validationRun([boundaryMismatch]),
+        cases: [boundaryMismatch],
+        sources: [boundaryCalendar],
+      }), 'artifact_incomplete');
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('requires an exact planned window for campaign calendar_incomplete', async () => {
+    const { temporaryRoot, repository } = await temporaryRepository();
+    try {
+      const anchorDate = '2025-01-02';
+      const planningCalendar = roleSource({
+        role: 'outcome_calendar', mode: 'campaign', ticker: '7203',
+        anchorDate, evaluationDate: '2025-01-03',
+      });
+      const candidateCalendar = (candidateDateFrom?: string) => roleSource({
+        role: 'candidate_calendar', mode: 'campaign', ticker: '7203',
+        anchorDate, evaluationDate: '2025-01-03', candidateDateFrom,
+        unavailableReason: 'calendar_incomplete',
+      });
+      const caseFor = (calendar: ReturnType<typeof candidateCalendar>) => {
+        const base = anchorUnavailableCase(calendar.digest, {
+          caseId: '77777777-7777-4777-8777-777777777777',
+          ticker: '7203',
+          anchorDate,
+        });
+        return StrategyValidationCaseV1Schema.parse({
+          ...base,
+          unavailableReason: 'calendar_incomplete',
+          sourceManifest: createPointInTimeSourceManifestV1({
+            startedAt: TEST_STARTED_AT,
+            outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+            sources: [
+              { role: 'candidate_calendar', digest: calendar.digest },
+              { role: 'outcome_calendar', digest: planningCalendar.digest },
+            ],
+          }),
+        });
+      };
+      const shortCalendar = candidateCalendar(anchorDate);
+      const short = caseFor(shortCalendar);
+      await expectRepositoryKind(repository.publish({
+        run: validationRun([short]),
+        cases: [short],
+        sources: [shortCalendar, planningCalendar].sort((left, right) => (
+          left.digest < right.digest ? -1 : left.digest > right.digest ? 1 : 0
+        )),
+      }), 'artifact_incomplete');
+
+      const exactCalendar = candidateCalendar();
+      const exact = caseFor(exactCalendar);
+      const exactSources = [exactCalendar, planningCalendar].sort((left, right) => (
+        left.digest < right.digest ? -1 : left.digest > right.digest ? 1 : 0
+      ));
+      await expect(repository.publish({
+        run: validationRun([exact]), cases: [exact], sources: exactSources,
+      })).resolves.toMatchObject({ state: 'created' });
+      await expect(repository.load(exact.runId)).resolves.toMatchObject({
+        cases: [exact],
+        sources: exactSources,
+      });
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
@@ -1843,6 +1970,10 @@ describe('Strategy-validation immutable run repository V1', () => {
           evaluationDate: '2025-01-03',
           unavailableReason: matching ? 'source_history_unavailable' : undefined,
         });
+        const planningCalendar = roleSource({
+          role: 'outcome_calendar', mode: 'campaign', ticker: '7203',
+          anchorDate: '2025-01-02', evaluationDate: '2025-01-03',
+        });
         const base = anchorUnavailableCase(source.digest, {
           caseId: '88888888-8888-4888-8888-888888888888',
           ticker: '7203',
@@ -1854,17 +1985,151 @@ describe('Strategy-validation immutable run repository V1', () => {
           sourceManifest: createPointInTimeSourceManifestV1({
             startedAt: TEST_STARTED_AT,
             outcomeAsOfSession: TEST_OUTCOME_AS_OF,
-            sources: [{ role: 'candidate_calendar', digest: source.digest }],
+            sources: [
+              { role: 'candidate_calendar', digest: source.digest },
+              { role: 'outcome_calendar', digest: planningCalendar.digest },
+            ],
           }),
         });
         const value = {
-          run: validationRun([unavailable]), cases: [unavailable], sources: [source],
+          run: validationRun([unavailable]),
+          cases: [unavailable],
+          sources: [source, planningCalendar].sort((left, right) => (
+            left.digest < right.digest ? -1 : left.digest > right.digest ? 1 : 0
+          )),
         };
         if (matching) {
           await expect(repository.publish(value)).resolves.toMatchObject({ state: 'created' });
         } else {
           await expectRepositoryKind(repository.publish(value), 'artifact_incomplete');
         }
+      } finally {
+        await rm(temporaryRoot, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('accepts exact campaign daily and Master source-failure stages', async () => {
+    for (const failedRole of ['candidate_daily_bars', 'candidate_master'] as const) {
+      const { temporaryRoot, repository } = await temporaryRepository();
+      try {
+        const anchorDate = '2025-01-02';
+        const roleSources = [
+          {
+            role: 'candidate_calendar' as const,
+            source: roleSource({
+              role: 'candidate_calendar', mode: 'campaign', ticker: '7203',
+              anchorDate, evaluationDate: '2025-01-03',
+            }),
+          },
+          {
+            role: 'candidate_daily_bars' as const,
+            source: roleSource({
+              role: 'candidate_daily_bars', mode: 'campaign', ticker: '7203',
+              anchorDate, evaluationDate: '2025-01-03',
+              unavailableReason: failedRole === 'candidate_daily_bars'
+                ? 'source_plan_unavailable'
+                : undefined,
+            }),
+          },
+          ...(failedRole === 'candidate_master' ? [{
+            role: 'candidate_master' as const,
+            source: roleSource({
+              role: 'candidate_master', mode: 'campaign', ticker: '7203',
+              anchorDate, evaluationDate: '2025-01-03',
+              unavailableReason: 'source_plan_unavailable',
+            }),
+          }] : []),
+          {
+            role: 'outcome_calendar' as const,
+            source: roleSource({
+              role: 'outcome_calendar', mode: 'campaign', ticker: '7203',
+              anchorDate, evaluationDate: '2025-01-03',
+            }),
+          },
+        ];
+        const base = anchorUnavailableCase(roleSources[0]!.source.digest, {
+          caseId: '88888888-8888-4888-8888-888888888888',
+          ticker: '7203', anchorDate, reason: 'source_history_unavailable',
+        });
+        const unavailable = StrategyValidationCaseV1Schema.parse({
+          ...base,
+          unavailableReason: 'source_plan_unavailable',
+          sourceManifest: createPointInTimeSourceManifestV1({
+            startedAt: TEST_STARTED_AT,
+            outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+            sources: roleSources.map(value => ({
+              role: value.role, digest: value.source.digest,
+            })),
+          }),
+        });
+        const sources = roleSources.map(value => value.source).sort((left, right) => (
+          left.digest < right.digest ? -1 : left.digest > right.digest ? 1 : 0
+        ));
+        await expect(repository.publish({
+          run: validationRun([unavailable]), cases: [unavailable], sources,
+        })).resolves.toMatchObject({ state: 'created' });
+      } finally {
+        await rm(temporaryRoot, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('rejects campaign source failures outside the exact producer stage', async () => {
+    const anchorDate = '2025-01-02';
+    const source = (
+      role: 'candidate_calendar' | 'candidate_daily_bars' | 'candidate_master',
+      unavailableReason: 'source_plan_unavailable' | 'source_history_unavailable',
+      candidateDateFrom?: string,
+    ) => ({
+      role,
+      source: roleSource({
+        role, mode: 'campaign', ticker: '7203', anchorDate,
+        evaluationDate: '2025-01-03', unavailableReason, candidateDateFrom,
+      }),
+    });
+    const planning = {
+      role: 'outcome_calendar' as const,
+      source: roleSource({
+        role: 'outcome_calendar', mode: 'campaign', ticker: '7203',
+        anchorDate, evaluationDate: '2025-01-03',
+      }),
+    };
+    const scenarios = [
+      [planning, source('candidate_calendar', 'source_plan_unavailable', anchorDate)],
+      [planning, source('candidate_master', 'source_plan_unavailable')],
+      [planning, source('candidate_daily_bars', 'source_plan_unavailable')],
+      [
+        planning,
+        source('candidate_calendar', 'source_plan_unavailable'),
+        source('candidate_daily_bars', 'source_history_unavailable'),
+      ],
+    ];
+    for (const roleSources of scenarios) {
+      const { temporaryRoot, repository } = await temporaryRepository();
+      try {
+        const base = anchorUnavailableCase(roleSources[0]!.source.digest, {
+          caseId: '88888888-8888-4888-8888-888888888888',
+          ticker: '7203', anchorDate, reason: 'source_history_unavailable',
+        });
+        const unavailable = StrategyValidationCaseV1Schema.parse({
+          ...base,
+          unavailableReason: 'source_plan_unavailable',
+          sourceManifest: createPointInTimeSourceManifestV1({
+            startedAt: TEST_STARTED_AT,
+            outcomeAsOfSession: TEST_OUTCOME_AS_OF,
+            sources: roleSources.map(value => ({
+              role: value.role, digest: value.source.digest,
+            })),
+          }),
+        });
+        await expectRepositoryKind(repository.publish({
+          run: validationRun([unavailable]),
+          cases: [unavailable],
+          sources: roleSources.map(value => value.source).sort((left, right) => (
+            left.digest < right.digest ? -1 : left.digest > right.digest ? 1 : 0
+          )),
+        }), 'artifact_incomplete');
       } finally {
         await rm(temporaryRoot, { recursive: true, force: true });
       }

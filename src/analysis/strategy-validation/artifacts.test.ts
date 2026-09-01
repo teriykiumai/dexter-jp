@@ -243,6 +243,10 @@ describe('Strategy-validation V1 artifacts and identity', () => {
       ...campaignAnchor,
       unavailableReason: 'strategy_data_date_invalid',
     }).success).toBe(false);
+    expect(StrategyValidationCaseV1Schema.safeParse({
+      ...campaignAnchor,
+      unavailableReason: 'source_response_invalid',
+    }).success).toBe(false);
 
     const sourceFreeSnapshotAnchor = {
       ...campaignAnchor,

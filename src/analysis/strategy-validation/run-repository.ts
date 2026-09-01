@@ -382,6 +382,17 @@ export class StrategyValidationRunRepositoryV1 {
         'artifact_incomplete', 'Run source envelopes do not exactly match case references.',
       );
     }
+    if (run.mode === 'campaign') {
+      const planningDigests = sortedCases.map(value => value.sourceManifest.sources.filter(
+        reference => reference.role === 'outcome_calendar',
+      ));
+      if (planningDigests.some(references => references.length !== 1)
+        || new Set(planningDigests.map(references => references[0]!.digest)).size !== 1) {
+        throw new StrategyValidationRunRepositoryErrorV1(
+          'artifact_incomplete', 'Campaign cases do not share one planning calendar.',
+        );
+      }
+    }
     if (run.outcomeAsOfSession === null) {
       const casesAreSourceFreeLocal = sortedCases.every(value => (
         value.sourceManifest.sources.length === 0
@@ -462,6 +473,7 @@ export class StrategyValidationRunRepositoryV1 {
           initialTickDate: value.caseKind === 'candidate'
             ? value.tickEvidence.effectiveDate
             : null,
+          startedAt: value.startedAt,
           outcomeAsOfSession: value.outcomeAsOfSession,
           entryWaitSessions: value.entryWaitSessions,
           holdingSessions: value.holdingSessions,
