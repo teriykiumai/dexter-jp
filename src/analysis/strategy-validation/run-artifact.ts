@@ -121,10 +121,15 @@ export const StrategyValidationRunV1Schema = z.object({
     && value.execution.controls.estimatedMinimumAttempts === 0
     && value.execution.attemptCount === 0
     && value.execution.cacheHitCount === 0;
-  if ((value.outcomeAsOfSession === null) !== sourceFreeLocalSnapshotFailure) {
+  const attemptedCalendarBoundaryFailure = value.execution.controls.estimatedMinimumAttempts > 0
+    && value.execution.attemptCount + value.execution.cacheHitCount > 0;
+  if ((value.outcomeAsOfSession === null
+      && !sourceFreeLocalSnapshotFailure
+      && !attemptedCalendarBoundaryFailure)
+    || (value.outcomeAsOfSession !== null && sourceFreeLocalSnapshotFailure)) {
     context.addIssue({
       code: 'custom',
-      message: 'Only a source-free local Snapshot run has a null outcome boundary.',
+      message: 'A null outcome boundary requires a local or attempted calendar-stage failure.',
     });
   }
   if (value.execution.attemptCount > value.execution.controls.hardMaximumAttempts) {

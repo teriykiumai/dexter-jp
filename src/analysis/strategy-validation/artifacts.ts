@@ -240,11 +240,6 @@ export const STRATEGY_VALIDATION_SNAPSHOT_ANCHOR_UNAVAILABLE_REASONS_V1 = Object
   'future_strategy_data',
   'invalid_candidate',
 ] as const);
-const STRATEGY_VALIDATION_LOCAL_SNAPSHOT_ANCHOR_REASONS_V1 = Object.freeze([
-  'strategy_data_date_invalid',
-  'future_strategy_data',
-  'invalid_candidate',
-] as const);
 export const STRATEGY_VALIDATION_CAMPAIGN_ANCHOR_UNAVAILABLE_REASONS_V1 = Object.freeze([
   'source_plan_unavailable',
   'source_history_unavailable',
@@ -531,17 +526,53 @@ export const StrategyValidationCaseV1Schema = z.discriminatedUnion('caseKind', [
     if (!allowed.includes(value.unavailableReason as never)) {
       context.addIssue({ code: 'custom', message: 'Anchor unavailable reason is invalid for its mode.' });
     }
-    const sourceFreeLocalSnapshotFailure = snapshotMode
-      && STRATEGY_VALIDATION_LOCAL_SNAPSHOT_ANCHOR_REASONS_V1.includes(
-        value.unavailableReason as never,
-      )
-      && value.sourceManifest.sources.length === 0;
-    if ((value.outcomeAsOfSession === null) !== sourceFreeLocalSnapshotFailure) {
-      context.addIssue({
-        code: 'custom',
-        message: 'Only a source-free local Snapshot anchor failure has a null outcome boundary.',
-      });
+    const noSources = value.sourceManifest.sources.length === 0;
+    const candidateCalendarOnly = value.sourceManifest.sources.length === 1
+      && value.sourceManifest.sources[0]!.role === 'candidate_calendar';
+    const invalidStage = (): void => context.addIssue({
+      code: 'custom', message: 'Anchor unavailable reason does not match its source stage.',
+    });
+    if (value.unavailableReason === 'calendar_incomplete') {
+      if (!candidateCalendarOnly
+        || value.outcomeAsOfSession !== null
+        || (snapshotMode && value.strategyDataDate === null)) invalidStage();
+      return;
     }
+    if (!snapshotMode) {
+      if (value.outcomeAsOfSession === null) invalidStage();
+      return;
+    }
+    if (value.unavailableReason === 'strategy_data_date_invalid') {
+      const local = noSources
+        && value.strategyDataDate === null
+        && value.outcomeAsOfSession === null
+        && value.anchorDate === value.decisionDate;
+      const calendarBacked = candidateCalendarOnly
+        && value.strategyDataDate !== null
+        && value.outcomeAsOfSession !== null;
+      if (!local && !calendarBacked) invalidStage();
+      return;
+    }
+    if (value.unavailableReason === 'future_strategy_data') {
+      if (!noSources
+        || value.strategyDataDate === null
+        || value.outcomeAsOfSession !== null
+        || value.anchorDate !== value.strategyDataDate
+        || value.decisionDate !== value.strategyDataDate) invalidStage();
+      return;
+    }
+    if (value.unavailableReason === 'invalid_candidate') {
+      const local = noSources
+        && value.strategyDataDate === null
+        && value.outcomeAsOfSession === null
+        && value.anchorDate === value.decisionDate;
+      const calendarBacked = candidateCalendarOnly
+        && value.strategyDataDate !== null
+        && value.outcomeAsOfSession !== null;
+      if (!local && !calendarBacked) invalidStage();
+      return;
+    }
+    if (value.outcomeAsOfSession === null) invalidStage();
     return;
   }
   if (snapshotMode && value.strategyDataDate === null) {

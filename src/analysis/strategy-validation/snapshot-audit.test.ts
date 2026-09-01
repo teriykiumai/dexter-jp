@@ -333,6 +333,45 @@ describe('saved-Snapshot Strategy audit', () => {
     expect(paths).toEqual(['/v2/markets/calendar']);
   });
 
+  test('publishes calendar_incomplete with causal evidence and no later request', async () => {
+    const { snapshots, runs } = await repositories();
+    const saved = await snapshots.save(comparisonSnapshot());
+    const preflight = await createSnapshotAuditPreflightV1({
+      ticker: saved.canonicalTicker,
+      snapshotId: saved.snapshotId,
+    }, {
+      snapshotRepository: snapshots,
+      startedAt: '2026-12-01T00:00:00.000Z',
+      requestsPerMinute: 500,
+    });
+    const { runtime, accepted, paths } = runtimeFor(preflight, async url => response({
+      data: dates(url.searchParams.get('from')!, url.searchParams.get('to')!)
+        .filter(date => date !== '2026-08-20')
+        .map(date => ({ Date: date, HolDiv: isWeekday(date) ? '1' : '0' })),
+    }));
+    const result = await executeSnapshotAuditV1(preflight, {
+      source: new JQuantsValidationAdapterV1(runtime), runtime, accepted, runRepository: runs,
+    });
+    const loaded = await runs.load(result.runId);
+    expect(paths).toEqual(['/v2/markets/calendar']);
+    expect(result.attemptCount).toBe(1);
+    expect(loaded.run.outcomeAsOfSession).toBeNull();
+    expect(loaded.cases).toHaveLength(1);
+    expect(loaded.cases[0]).toMatchObject({
+      caseKind: 'anchor_unavailable',
+      unavailableReason: 'calendar_incomplete',
+      outcomeAsOfSession: null,
+      sourceManifest: {
+        outcomeAsOfSession: null,
+        sources: [{ role: 'candidate_calendar' }],
+      },
+    });
+    expect(loaded.sources).toHaveLength(1);
+    expect(loaded.sources[0]!.result).toEqual({
+      state: 'unavailable', reason: 'calendar_incomplete', rows: [],
+    });
+  });
+
   test('checks the official session before publishing a relationally invalid candidate', async () => {
     const { snapshots, runs } = await repositories();
     const snapshot = comparisonSnapshot();

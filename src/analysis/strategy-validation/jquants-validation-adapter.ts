@@ -44,9 +44,13 @@ const CALENDAR_ENDPOINT = '/v2/markets/calendar' as const;
 const MASTER_ENDPOINT = '/v2/equities/master' as const;
 const DAILY_BAR_ENDPOINT = '/v2/equities/bars/daily' as const;
 
-type AdapterUnavailableV1 = Readonly<{
+type AdapterSourceUnavailableReasonV1 =
+  | 'source_plan_unavailable'
+  | 'source_history_unavailable';
+
+type AdapterUnavailableV1<Reason extends PointInTimeSourceUnavailableReasonV1> = Readonly<{
   state: 'unavailable';
-  reason: 'source_plan_unavailable' | 'source_history_unavailable';
+  reason: Reason;
   envelope: PointInTimeSourceEnvelopeV1;
 }>;
 
@@ -54,7 +58,7 @@ export type JQuantsCalendarResultV1 = Readonly<{
   state: 'available';
   calendar: TseSessionCalendarV1;
   envelope: PointInTimeSourceEnvelopeV1;
-}> | AdapterUnavailableV1;
+}> | AdapterUnavailableV1<AdapterSourceUnavailableReasonV1 | 'calendar_incomplete'>;
 
 export type JQuantsMasterObservationV1 = Readonly<{
   date: TseSessionDate;
@@ -70,13 +74,13 @@ export type JQuantsMasterResultV1 = Readonly<{
   state: 'available';
   observation: JQuantsMasterObservationV1;
   envelope: PointInTimeSourceEnvelopeV1;
-}> | AdapterUnavailableV1;
+}> | AdapterUnavailableV1<AdapterSourceUnavailableReasonV1>;
 
 export type JQuantsDailyBarsResultV1 = Readonly<{
   state: 'available';
   bars: readonly TseDailyBarV1[];
   envelope: PointInTimeSourceEnvelopeV1;
-}> | AdapterUnavailableV1;
+}> | AdapterUnavailableV1<AdapterSourceUnavailableReasonV1>;
 
 type SourceRequestV1 = Readonly<{
   ticker: string | null;
@@ -146,14 +150,14 @@ function unavailableEnvelope(
   });
 }
 
-function unavailable(
+function unavailable<Reason extends PointInTimeSourceUnavailableReasonV1>(
   endpoint: PointInTimeSourceEndpointV1,
   sourceMappingVersion: string,
   query: JQuantsQueryV1,
   request: SourceRequestV1,
   fetchedAt: AsOfCutoff,
-  reason: 'source_plan_unavailable' | 'source_history_unavailable',
-): AdapterUnavailableV1 {
+  reason: Reason,
+): AdapterUnavailableV1<Reason> {
   return Object.freeze({
     state: 'unavailable',
     reason,
@@ -221,7 +225,22 @@ export class JQuantsValidationAdapterV1 {
     });
     const selected = selectRowsAtOrBeforeV1(used, dateTo, row => row.Date);
     equalDateDuplicate(selected, row => row.Date, 'calendar');
-    const calendar = createTseSessionCalendarV1(selected, dateFrom, dateTo);
+    let calendar: TseSessionCalendarV1;
+    try {
+      calendar = createTseSessionCalendarV1(selected, dateFrom, dateTo);
+    } catch (error) {
+      if (error instanceof PointInTimeErrorV1 && error.code === 'calendar_incomplete') {
+        return unavailable(
+          CALENDAR_ENDPOINT,
+          JQUANTS_CALENDAR_SOURCE_MAPPING_VERSION_V1,
+          query,
+          request,
+          fetchedAt,
+          'calendar_incomplete',
+        );
+      }
+      throw error;
+    }
     this.runtime.assertCanContinue(input.signal);
     return Object.freeze({
       state: 'available',

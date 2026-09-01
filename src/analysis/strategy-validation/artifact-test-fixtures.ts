@@ -269,7 +269,9 @@ export function validationRun(
   const aggregation = aggregateStrategyValidationCasesV1(scope, anchors, cases);
   const sortedCases = [...cases].sort(compareStrategyValidationCasesV1);
   const outcomeAsOfSession = cases[0]?.outcomeAsOfSession ?? null;
-  const sourceFreeLocal = !campaign && outcomeAsOfSession === null;
+  const sourceFreeLocal = !campaign
+    && outcomeAsOfSession === null
+    && cases.every(value => value.sourceManifest.sources.length === 0);
   const controls = planJQuantsExecutionV1(sourceFreeLocal ? 0 : 1, 5);
   return StrategyValidationRunV1Schema.parse({
     schemaVersion: STRATEGY_VALIDATION_RUN_SCHEMA_VERSION,

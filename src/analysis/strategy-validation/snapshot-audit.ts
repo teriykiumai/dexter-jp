@@ -518,25 +518,39 @@ export async function executeSnapshotAuditV1(
       signal: options.signal,
     });
     addSource(sources, candidateCalendarResult.envelope);
-    if (candidateCalendarResult.state === 'unavailable') {
-      throw new JQuantsValidationErrorV1(
-        candidateCalendarResult.reason,
-        'The official calendar cannot derive the frozen outcome boundary.',
-      );
-    }
-    candidateCalendar = candidateCalendarResult.calendar;
-    outcomeAsOfSession = deriveOutcomeAsOfSessionV1(
-      candidateCalendar,
-      preflight.startedAt,
-    );
     candidateCalendarReference = sourceReference(
       'candidate_calendar',
       candidateCalendarResult.envelope,
     );
+    if (candidateCalendarResult.state === 'unavailable') {
+      if (candidateCalendarResult.reason === 'calendar_incomplete') {
+        outcomeAsOfSession = null;
+        cases = Object.freeze([anchorUnavailableCase(
+          preflight,
+          runId,
+          outcomeAsOfSession,
+          'calendar_incomplete',
+          [candidateCalendarReference],
+        )]);
+      } else {
+        throw new JQuantsValidationErrorV1(
+          candidateCalendarResult.reason,
+          'The official calendar cannot derive the frozen outcome boundary.',
+        );
+      }
+    } else {
+      candidateCalendar = candidateCalendarResult.calendar;
+      outcomeAsOfSession = deriveOutcomeAsOfSessionV1(
+        candidateCalendar,
+        preflight.startedAt,
+      );
+    }
   }
 
   if (preflight.localUnavailableReason !== null) {
     // The source-free anchor case was fully determined during local preflight.
+  } else if (candidateCalendar === null) {
+    // Incomplete official-calendar evidence produced the frozen anchor case above.
   } else if (!candidateCalendar!.isSession(preflight.strategyDataDate!)) {
     cases = Object.freeze([anchorUnavailableCase(
       preflight,

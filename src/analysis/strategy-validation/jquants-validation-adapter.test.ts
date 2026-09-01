@@ -232,6 +232,25 @@ describe('JQuantsValidationAdapterV1', () => {
     expect(JSON.stringify(result)).not.toContain('secret');
   });
 
+  test('maps an internally incomplete calendar to a causal unavailable envelope', async () => {
+    const { adapter, runtime } = createAdapter(async () => jsonResponse({ data: [
+      { Date: '2026-08-28', HolDiv: '1' },
+      { Date: '2026-08-30', HolDiv: '0' },
+    ] }));
+    const result = await adapter.fetchCalendar({
+      dateFrom: '2026-08-28', dateTo: '2026-08-30', asOfCutoff: CUTOFF,
+    });
+    expect(result).toMatchObject({
+      state: 'unavailable',
+      reason: 'calendar_incomplete',
+      envelope: {
+        request: { dateFrom: '2026-08-28', dateTo: '2026-08-30' },
+        result: { state: 'unavailable', reason: 'calendar_incomplete', rows: [] },
+      },
+    });
+    expect(runtime.attempts).toHaveLength(1);
+  });
+
   test('keeps an unrecognized 403 fatal and sanitizes invalid-key response content', async () => {
     let calls = 0;
     const secret = 'invalid-secret-api-key';

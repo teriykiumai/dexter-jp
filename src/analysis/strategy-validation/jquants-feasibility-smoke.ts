@@ -106,7 +106,15 @@ export async function proveJQuantsMaturedAnchorV1(
     asOfCutoff: input.startedAt,
     signal: input.signal,
   });
-  if (calendarResult.state === 'unavailable') unavailable(calendarResult.reason);
+  if (calendarResult.state === 'unavailable') {
+    if (calendarResult.reason === 'calendar_incomplete') {
+      throw new PointInTimeErrorV1(
+        'calendar_incomplete',
+        'The configured J-Quants calendar is incomplete for the feasibility gate.',
+      );
+    }
+    unavailable(calendarResult.reason);
+  }
   if (!calendarResult.calendar.isSession(anchor)) {
     throw new PointInTimeErrorV1('calendar_incomplete', 'The feasibility anchor is not a TSE session.');
   }

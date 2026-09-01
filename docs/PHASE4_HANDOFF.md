@@ -101,7 +101,9 @@ greatest official session strictly before its Tokyo date. The derived
 cannot add a bar to an already confirmed run. An exact local Snapshot failure that
 terminates before source access instead persists `outcomeAsOfSession: null` with zero
 source references; it never casts the preceding Gregorian date as an official
-session.
+session. An attempted calendar request with missing internal dates or incomplete
+coverage also persists a null boundary, but only with one causal unavailable
+`candidate_calendar/calendar_incomplete` envelope.
 
 Campaign resistance accepts only persisted `resistance_level` target prices from a
 digest-valid Snapshot whose Strategy date is not later than that Snapshot's own
@@ -189,7 +191,12 @@ first obtains the official calendar, so a proven non-session date takes preceden
 over candidate normalization failure. Only after the session guard may a candidate
 that fails Phase 4's positive-price schema erase the anchor; a positive relationally
 invalid Entry/Stop/Target tuple remains a candidate case with
-`unavailable/invalid_candidate`. None of these branches requests outcome bars.
+`unavailable/invalid_candidate`. Artifact validation binds each local/calendar stage
+to the exact `strategyDataDate`, boundary, and calendar-reference shape; in
+particular, a source-free parsed non-future date, a source-backed future date, and a
+source-free post-calendar candidate failure are invalid publications. An incomplete
+calendar publishes one anchor with a null boundary and one unavailable calendar
+envelope. None of these branches requests Master or outcome bars.
 
 Campaign aggregates are deliberately `campaign_global` across every ticker and
 anchor in the run. Version 1 persists no per-ticker aggregates and the Browser never

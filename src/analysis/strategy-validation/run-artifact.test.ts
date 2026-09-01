@@ -94,7 +94,7 @@ describe('Strategy-validation run artifact V1', () => {
     }).success).toBe(false);
   });
 
-  test('uses a null boundary only for a zero-source local Snapshot run', () => {
+  test('uses a null boundary only for a local or attempted calendar-stage failure', () => {
     const source = validationSource();
     const snapshot = validationRun([snapshotCandidateCase(source.digest)]);
     const local = {
@@ -115,6 +115,11 @@ describe('Strategy-validation run artifact V1', () => {
     expect(StrategyValidationRunV1Schema.safeParse({
       ...snapshot,
       outcomeAsOfSession: null,
+    }).success).toBe(true);
+    expect(StrategyValidationRunV1Schema.safeParse({
+      ...snapshot,
+      outcomeAsOfSession: null,
+      execution: { ...snapshot.execution, attemptCount: 0, cacheHitCount: 0 },
     }).success).toBe(false);
   });
 });

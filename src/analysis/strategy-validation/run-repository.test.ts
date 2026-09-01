@@ -622,10 +622,56 @@ describe('Strategy-validation immutable run repository V1', () => {
         cases: [unavailable],
         sources: [],
       };
+      const attemptedExecution = validationRun([
+        snapshotCandidateCase(seedSource.digest),
+      ]).execution;
+      await expectRepositoryKind(repository.publish({
+        ...value,
+        run: { ...value.run, execution: attemptedExecution },
+      }), 'artifact_incomplete');
       await expect(repository.publish(value)).resolves.toMatchObject({ state: 'created' });
       await expect(repository.load(value.run.runId)).resolves.toMatchObject({
         cases: [unavailable], sources: [],
       });
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects a null calendar-incomplete anchor without matching unavailable evidence', async () => {
+    const { temporaryRoot, repository } = await temporaryRepository();
+    try {
+      const wrongFailure = roleSource({
+        role: 'candidate_calendar', mode: 'snapshot', ticker: '7203',
+        anchorDate: '2025-01-02', evaluationDate: '2025-01-03',
+        unavailableReason: 'source_history_unavailable',
+      });
+      const seed = anchorUnavailableCase(wrongFailure.digest, {
+        caseId: '77777777-7777-4777-8777-777777777777',
+        ticker: '7203',
+        anchorDate: '2025-01-02',
+      });
+      const snapshot = snapshotCandidateCase(wrongFailure.digest);
+      const invalidEvidence = StrategyValidationCaseV1Schema.parse({
+        ...seed,
+        mode: 'snapshot',
+        confidence: 'precommitted',
+        strategyDataDate: '2025-01-02',
+        selector: snapshot.selector,
+        candidateGenerationPolicy: null,
+        unavailableReason: 'calendar_incomplete',
+        outcomeAsOfSession: null,
+        sourceManifest: createPointInTimeSourceManifestV1({
+          startedAt: TEST_STARTED_AT,
+          outcomeAsOfSession: null,
+          sources: [{ role: 'candidate_calendar', digest: wrongFailure.digest }],
+        }),
+      });
+      await expectRepositoryKind(repository.publish({
+        run: validationRun([invalidEvidence]),
+        cases: [invalidEvidence],
+        sources: [wrongFailure],
+      }), 'artifact_incomplete');
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }

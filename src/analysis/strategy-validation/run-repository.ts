@@ -382,6 +382,21 @@ export class StrategyValidationRunRepositoryV1 {
         'artifact_incomplete', 'Run source envelopes do not exactly match case references.',
       );
     }
+    if (run.outcomeAsOfSession === null) {
+      const casesAreSourceFreeLocal = sortedCases.every(value => (
+        value.sourceManifest.sources.length === 0
+      ));
+      const executionIsSourceFreeLocal = run.mode === 'snapshot'
+        && run.execution.controls.estimatedMinimumAttempts === 0
+        && run.execution.attemptCount === 0
+        && run.execution.cacheHitCount === 0;
+      if (casesAreSourceFreeLocal !== executionIsSourceFreeLocal) {
+        throw new StrategyValidationRunRepositoryErrorV1(
+          'artifact_incomplete',
+          'Null-boundary case evidence does not match the recorded execution stage.',
+        );
+      }
+    }
     for (const source of publication.sources) {
       const ticker = source.request.ticker;
       if (ticker !== null && !run.aggregationScope.tickers.includes(ticker)) {
@@ -391,14 +406,6 @@ export class StrategyValidationRunRepositoryV1 {
       }
     }
     for (const value of sortedCases) {
-      if (value.outcomeAsOfSession === null) {
-        if (value.sourceManifest.sources.length !== 0) {
-          throw new StrategyValidationRunRepositoryErrorV1(
-            'artifact_incomplete', 'A source-free local case cannot reference source envelopes.',
-          );
-        }
-        continue;
-      }
       const bindings: BoundStrategyValidationSourceV1[] = [];
       for (const reference of value.sourceManifest.sources) {
         const source = sourceByDigest.get(reference.digest);
@@ -427,6 +434,22 @@ export class StrategyValidationRunRepositoryV1 {
           );
         }
         bindings.push({ reference, envelope: source });
+      }
+      if (value.outcomeAsOfSession === null) {
+        if (value.sourceManifest.sources.length === 0) continue;
+        const calendarIncomplete = value.caseKind === 'anchor_unavailable'
+          && value.unavailableReason === 'calendar_incomplete'
+          && bindings.length === 1
+          && bindings[0]!.reference.role === 'candidate_calendar'
+          && bindings[0]!.envelope.result.state === 'unavailable'
+          && bindings[0]!.envelope.result.reason === 'calendar_incomplete';
+        if (!calendarIncomplete) {
+          throw new StrategyValidationRunRepositoryErrorV1(
+            'artifact_incomplete',
+            'A null outcome boundary lacks exact local or calendar-incomplete evidence.',
+          );
+        }
+        continue;
       }
       try {
         validateStrategyValidationSourceCompletenessV1(bindings, {

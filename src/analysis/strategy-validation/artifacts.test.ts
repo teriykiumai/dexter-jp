@@ -248,7 +248,7 @@ describe('Strategy-validation V1 artifacts and identity', () => {
       ...campaignAnchor,
       mode: 'snapshot',
       confidence: 'precommitted',
-      strategyDataDate: '2025-01-02',
+      strategyDataDate: null,
       selector: candidate.selector,
       candidateGenerationPolicy: null,
       unavailableReason: 'strategy_data_date_invalid',
@@ -261,6 +261,62 @@ describe('Strategy-validation V1 artifacts and identity', () => {
         ...sourceFreeSnapshotAnchor.sourceManifest,
         outcomeAsOfSession: null,
       },
+    }).success).toBe(true);
+    expect(StrategyValidationCaseV1Schema.safeParse({
+      ...sourceFreeSnapshotAnchor,
+      unavailableReason: 'invalid_candidate',
+      outcomeAsOfSession: null,
+      sourceManifest: {
+        ...sourceFreeSnapshotAnchor.sourceManifest,
+        outcomeAsOfSession: null,
+      },
+    }).success).toBe(true);
+    expect(StrategyValidationCaseV1Schema.safeParse({
+      ...sourceFreeSnapshotAnchor,
+      strategyDataDate: '2025-01-02',
+      outcomeAsOfSession: null,
+      sourceManifest: {
+        ...sourceFreeSnapshotAnchor.sourceManifest,
+        outcomeAsOfSession: null,
+      },
+    }).success).toBe(false);
+    expect(StrategyValidationCaseV1Schema.safeParse({
+      ...sourceFreeSnapshotAnchor,
+      strategyDataDate: '2025-01-02',
+      unavailableReason: 'invalid_candidate',
+      outcomeAsOfSession: null,
+      sourceManifest: {
+        ...sourceFreeSnapshotAnchor.sourceManifest,
+        outcomeAsOfSession: null,
+      },
+    }).success).toBe(false);
+    const candidateCalendarManifest = {
+      ...sourceFreeSnapshotAnchor.sourceManifest,
+      sources: [{ role: 'candidate_calendar' as const, digest: source.digest }],
+    };
+    expect(StrategyValidationCaseV1Schema.safeParse({
+      ...sourceFreeSnapshotAnchor,
+      strategyDataDate: '2025-01-02',
+      sourceManifest: candidateCalendarManifest,
+    }).success).toBe(true);
+    expect(StrategyValidationCaseV1Schema.safeParse({
+      ...sourceFreeSnapshotAnchor,
+      strategyDataDate: '2025-01-02',
+      unavailableReason: 'invalid_candidate',
+      sourceManifest: candidateCalendarManifest,
+    }).success).toBe(true);
+    expect(StrategyValidationCaseV1Schema.safeParse({
+      ...sourceFreeSnapshotAnchor,
+      strategyDataDate: '2025-01-02',
+      unavailableReason: 'future_strategy_data',
+      sourceManifest: candidateCalendarManifest,
+    }).success).toBe(false);
+    expect(StrategyValidationCaseV1Schema.safeParse({
+      ...sourceFreeSnapshotAnchor,
+      strategyDataDate: '2025-01-02',
+      unavailableReason: 'calendar_incomplete',
+      outcomeAsOfSession: null,
+      sourceManifest: { ...candidateCalendarManifest, outcomeAsOfSession: null },
     }).success).toBe(true);
     expect(StrategyValidationCaseV1Schema.safeParse({
       ...sourceFreeSnapshotAnchor,
