@@ -75,6 +75,7 @@ import {
   type WatchlistSortKey,
 } from './presentation.js';
 import { PeerRadarPresentation } from './peer-radar-view.js';
+import { StrategyValidationPanel } from './strategy-validation-panel.js';
 
 function Value({ value }: { value: DisplayValue }) {
   return <span className={value.available ? undefined : 'unavailable'}>{value.text}</span>;
@@ -1552,11 +1553,19 @@ function Dashboard({
             </>
           ) : null}
 
+          {tab.id === 'validation' ? (
+            <StrategyValidationPanel
+              history={history}
+              navigationRevision={navigationRevision}
+              ticker={snapshot.canonicalTicker}
+            />
+          ) : null}
+
         </DashboardTabPanel>
       ))}
 
       <footer className="footer">
-        <span>DEXTER JP / READ-ONLY LOCAL ANALYSIS</span>
+        <span>DEXTER JP / LOCAL ANALYSIS &amp; RESEARCH</span>
         <span>Snapshot値は再計算せず表示しています。</span>
       </footer>
       <GlossaryDialog

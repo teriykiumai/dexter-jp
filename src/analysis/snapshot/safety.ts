@@ -1,4 +1,3 @@
-import { posix, win32 } from 'node:path';
 import type { CanonicalJsonValue } from './canonical-json.js';
 
 export const SAFETY_POLICY_VERSION = 1 as const;
@@ -79,6 +78,16 @@ const PATH_TOKEN_SPLITTER = /[\s"'`<>()\[\]{}]+/u;
 const TRAILING_PATH_PUNCTUATION = /[.,;:!?。、，；：！？]+$/u;
 const ALLOWED_ENDPOINTS = new Set<string>(EVIDENCE_ENDPOINT_ALLOWLIST_V1);
 
+function utf8ByteLength(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
+}
+
+function isAbsolutePathToken(value: string): boolean {
+  return value.startsWith('/')
+    || value.startsWith('\\')
+    || /^[A-Za-z]:[\\/]/.test(value);
+}
+
 export class ArtifactSafetyError extends Error {
   readonly code: ArtifactSafetyErrorCode;
 
@@ -115,7 +124,7 @@ export function assertStoredReportSafe(
   reportMarkdown: string,
   env: NodeJS.ProcessEnv = process.env,
 ): void {
-  if (Buffer.byteLength(reportMarkdown, 'utf8') > STORED_REPORT_MAX_UTF8_BYTES) {
+  if (utf8ByteLength(reportMarkdown) > STORED_REPORT_MAX_UTF8_BYTES) {
     fail('report_utf8_too_large');
   }
   if (reportMarkdown.length > STORED_REPORT_MAX_UTF16_UNITS) {
@@ -139,7 +148,7 @@ function assertPathTokensSafe(content: string): void {
     const protocol = urlProtocol(token);
     if (protocol === 'file:') fail('absolute_path_detected');
     if (protocol === 'http:' || protocol === 'https:') continue;
-    if (win32.isAbsolute(token) || posix.isAbsolute(token)) {
+    if (isAbsolutePathToken(token)) {
       fail('absolute_path_detected');
     }
   }
