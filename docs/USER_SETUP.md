@@ -56,8 +56,9 @@ EDINETDB_API_KEY
 プラン方針:
 - 最初はFreeでもよい
 - MVPでは信用残を利用するため、実APIテスト段階で必要なプランへ変更する可能性がある
-- Strategy validationでは、基準日の前251 official sessionsと最大t79までの
-  calendar / historical master / raw daily barsを取得できる履歴範囲が必要
+- Strategy validationでは、基準日を含む連続251 official sessions
+  （t0 + 直前250 sessions）と最大t79までのcalendar / historical master /
+  raw daily barsを取得できる履歴範囲が必要
 - プラン変更は、実装時点の公式仕様を確認して判断する
 
 完了条件:
