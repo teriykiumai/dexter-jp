@@ -155,6 +155,16 @@ export type CampaignReconstructionExecutionOptionsV1 = Readonly<{
   accepted: AcceptedJQuantsExecutionV1;
   runRepository: StrategyValidationRunRepositoryV1;
   signal?: AbortSignal;
+  runId?: string;
+  onValidating?: (progress: Readonly<{
+    outcomeAsOfSession: OutcomeAsOfSession;
+    caseCount: number;
+    attemptCount: number;
+  }>) => void | Promise<void>;
+  beforePromote?: (prepared: Readonly<{
+    runId: string;
+    runPayloadDigest: SnapshotDigest;
+  }>) => void | Promise<void>;
 }>;
 
 function earlier(left: TseSessionDate, right: TseSessionDate): TseSessionDate {
@@ -749,7 +759,7 @@ export async function executeCampaignReconstructionV1(
     throw new TypeError('Accepted execution controls differ from the campaign preflight.');
   }
   options.runtime.assertCanContinue(options.signal);
-  const runId = createStrategyValidationRunIdV1();
+  const runId = options.runId ?? createStrategyValidationRunIdV1();
   const sources = new Map<SnapshotDigest, PointInTimeSourceEnvelopeV1>();
   const globalCalendarResult = await options.source.fetchCalendar({
     dateFrom: preflight.calendarDateFrom,
@@ -949,6 +959,11 @@ export async function executeCampaignReconstructionV1(
     ));
   }
 
+  await options.onValidating?.(Object.freeze({
+    outcomeAsOfSession,
+    caseCount: cases.length,
+    attemptCount: options.runtime.attempts.length,
+  }));
   options.runtime.assertCanContinue(options.signal);
   const anchorIdentities = preflight.anchors.map(anchor => ({
     ticker: anchor.ticker,
@@ -1002,6 +1017,7 @@ export async function executeCampaignReconstructionV1(
     sources: publicationSources,
   }, {
     assertCanPromote: () => options.runtime.assertCanContinue(options.signal),
+    beforePromote: options.beforePromote,
   });
   return Object.freeze({
     state: 'created',

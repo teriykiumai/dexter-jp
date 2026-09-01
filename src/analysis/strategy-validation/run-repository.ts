@@ -87,6 +87,10 @@ export type StrategyValidationRunPublicationV1 = Readonly<{
 
 export type StrategyValidationRunPublishOptionsV1 = Readonly<{
   assertCanPromote?: () => void;
+  beforePromote?: (prepared: Readonly<{
+    runId: string;
+    runPayloadDigest: SnapshotDigest;
+  }>) => void | Promise<void>;
 }>;
 
 export type LoadedStrategyValidationRunV1 = StrategyValidationRunPublicationV1 & Readonly<{
@@ -198,6 +202,10 @@ export class StrategyValidationRunRepositoryV1 {
       this.assertEqualPublication(publication, reread);
       try {
         options.assertCanPromote?.();
+        await options.beforePromote?.(Object.freeze({
+          runId,
+          runPayloadDigest: reread.runPayloadDigest,
+        }));
       } catch (error) {
         promotionGuardFailed = true;
         throw error;
@@ -282,6 +290,7 @@ export class StrategyValidationRunRepositoryV1 {
     }
     const runIds: string[] = [];
     for (const entry of entries) {
+      if (entry.isDirectory() && this.isTemporaryRunDirectory(entry.name)) continue;
       if (!entry.isDirectory() || !STRATEGY_VALIDATION_UUID_V4_PATTERN.test(entry.name)) {
         throw new StrategyValidationRunRepositoryErrorV1(
           'artifact_corrupt', 'The Strategy-validation runs directory contains an invalid entry.',
@@ -296,6 +305,37 @@ export class StrategyValidationRunRepositoryV1 {
         ? -1 : right.run.completedAt > left.run.completedAt ? 1 : 0)
       || (left.run.runId < right.run.runId ? -1 : left.run.runId > right.run.runId ? 1 : 0)
     )));
+  }
+
+  async hasRun(runIdValue: string): Promise<boolean> {
+    const runId = assertUuid(runIdValue, 'run');
+    try {
+      return await pathExists(this.runDirectory(runId));
+    } catch (error) {
+      throw new StrategyValidationRunRepositoryErrorV1(
+        'filesystem_error', 'Could not inspect the Strategy-validation run.', error,
+      );
+    }
+  }
+
+  async cleanupTemporaryRun(runIdValue: string): Promise<void> {
+    const runId = assertUuid(runIdValue, 'run');
+    await this.ensureRunsDirectory();
+    let entries;
+    try {
+      entries = await readdir(this.runsDirectory, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory() || !this.isTemporaryRunDirectory(entry.name, runId)) continue;
+        const target = resolve(this.runsDirectory, entry.name);
+        this.assertContained(target);
+        await rm(target, { recursive: true, force: true });
+      }
+    } catch (error) {
+      if (error instanceof StrategyValidationRunRepositoryErrorV1) throw error;
+      throw new StrategyValidationRunRepositoryErrorV1(
+        'cleanup_failed', 'Could not clean the temporary run directory.', error,
+      );
+    }
   }
 
   private validatePublication(
@@ -731,6 +771,11 @@ export class StrategyValidationRunRepositoryV1 {
     const directory = resolve(this.runsDirectory, runId);
     this.assertContained(directory);
     return directory;
+  }
+
+  private isTemporaryRunDirectory(name: string, runId?: string): boolean {
+    const match = /^\.run-([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})-([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.tmp$/.exec(name);
+    return match !== null && (runId === undefined || match[1] === runId);
   }
 
   private assertContained(target: string): void {

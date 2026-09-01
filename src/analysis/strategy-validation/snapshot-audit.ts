@@ -137,6 +137,16 @@ export type SnapshotAuditExecutionOptionsV1 = Readonly<{
   accepted: AcceptedJQuantsExecutionV1;
   runRepository: StrategyValidationRunRepositoryV1;
   signal?: AbortSignal;
+  runId?: string;
+  onValidating?: (progress: Readonly<{
+    outcomeAsOfSession: OutcomeAsOfSession | null;
+    caseCount: number;
+    attemptCount: number;
+  }>) => void | Promise<void>;
+  beforePromote?: (prepared: Readonly<{
+    runId: string;
+    runPayloadDigest: SnapshotDigest;
+  }>) => void | Promise<void>;
 }>;
 
 function earlier(left: TseSessionDate, right: TseSessionDate): TseSessionDate {
@@ -491,7 +501,7 @@ export async function executeSnapshotAuditV1(
     throw new TypeError('Accepted execution controls differ from the Snapshot preflight.');
   }
   options.runtime.assertCanContinue(options.signal);
-  const runId = createStrategyValidationRunIdV1();
+  const runId = options.runId ?? createStrategyValidationRunIdV1();
   const sources = new Map<SnapshotDigest, PointInTimeSourceEnvelopeV1>();
   let candidateCalendar: TseSessionCalendarV1 | null = null;
   let outcomeAsOfSession: OutcomeAsOfSession | null;
@@ -774,6 +784,11 @@ export async function executeSnapshotAuditV1(
     cases = Object.freeze(builtCases);
   }
 
+  await options.onValidating?.(Object.freeze({
+    outcomeAsOfSession,
+    caseCount: cases.length,
+    attemptCount: options.runtime.attempts.length,
+  }));
   options.runtime.assertCanContinue(options.signal);
   const anchors = [{ ticker: preflight.ticker, anchorDate: preflight.anchorDate }];
   const aggregationScope = buildStrategyValidationAggregationScopeV1('snapshot', anchors);
@@ -821,6 +836,7 @@ export async function executeSnapshotAuditV1(
     sources: publicationSources,
   }, {
     assertCanPromote: () => options.runtime.assertCanContinue(options.signal),
+    beforePromote: options.beforePromote,
   });
   return Object.freeze({
     state: 'created',

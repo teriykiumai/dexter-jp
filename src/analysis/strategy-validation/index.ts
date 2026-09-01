@@ -9,6 +9,8 @@ export * from './errors.js';
 export * from './jquants-execution.js';
 export * from './jquants-feasibility-smoke.js';
 export * from './jquants-validation-adapter.js';
+export * from './job-artifact.js';
+export * from './job-service.js';
 export * from './manifest.js';
 export * from './outcome-validator.js';
 export * from './run-artifact.js';
