@@ -18,7 +18,8 @@ Analysis Watchlist
         ↓
 Single Stock Dashboard
         ├─ 保存済み分析の比較
-        └─ 保存済みPeer percentileのRadar
+        ├─ 保存済みPeer percentileのRadar
+        └─ 明示的なStrategy validation runの実行・閲覧
 ```
 
 Phase 1.5ではSnapshot、JSON persistence、Read-only API、Single Stock Dashboard、
@@ -29,6 +30,11 @@ Phase 3では、同一銘柄のimmutableな保存済みSnapshot 2件を比較す
 7つのPeer percentileを表示するRadarを追加しました。どちらも保存済み値を読む
 Dashboard機能であり、外部sourceの再取得、再分析、Snapshot変更、売買判断は行いません。
 総合スコアは評価計画だけを定義し、runtime scoreは実装していません。
+
+Phase 4では、保存済みSnapshotに事前記録されたEntry / Stop / Targetの
+outcome監査と、過去基準日を指定した`technical_251_strategy_v1`
+再構成キャンペーンを追加しました。これらは独立したimmutable research runであり、
+Snapshotを変更せず、StrategyのPASS / FAIL、売買推奨、runtime scoreを生成しません。
 
 現在のSnapshot compatibilityは以下です。
 
@@ -110,6 +116,8 @@ Copy-Item env.example .env
 OPENAI_API_KEY=sk-...
 EDINETDB_API_KEY=edb_...
 JQUANTS_API_KEY=...
+# 任意。未設定時は5。1〜500の整数で、契約上限を超えない値にする。
+JQUANTS_REQUESTS_PER_MINUTE=5
 ```
 
 LLM providerはOpenAI以外でも構いません。
@@ -133,6 +141,11 @@ J-Quantsが利用できない場合、以下のようなsectionが取得でき�
 - Investor Type Flows
 - Sector Benchmark
 - Sector Short-selling Flow
+
+Strategy validationは過去のofficial calendar、historical master、raw daily barsを使用します。
+対象日の保持期間が契約プランの履歴範囲内か、J-Quantsの現行仕様とプランを
+実行前に確認してください。`JQUANTS_REQUESTS_PER_MINUTE`は実行時の上限であり、
+契約プランの制限を自動検出したり緩和したりはしません。
 
 ---
 
@@ -635,9 +648,9 @@ ROE
 Trend
 ```
 
-## 5つのタブとURL state
+## 6つのタブとURL state
 
-detail画面は次の5タブで構成されます。
+detail画面は次の6タブで構成されます。
 
 | tab ID | 表示label | 主な内容 |
 | --- | --- | --- |
@@ -646,6 +659,7 @@ detail画面は次の5タブで構成されます。
 | `fundamentals` | 比較・配当 | Peer Comparison / Radar、Advanced Dividend |
 | `supply-demand` | 需給・空売り | 信用需給、公開空売り残高報告 |
 | `market` | 市場・セクター | 投資部門別、市場相関、sector分析 |
+| `validation` | 戦略検証 | 明示選択したStrategy validation run / caseの実行・閲覧 |
 
 選択中のtickerとtabはURLへ保存されます。
 
@@ -654,7 +668,7 @@ http://127.0.0.1:3000/?ticker=7203&tab=fundamentals
 ```
 
 BrowserのBack / Forwardとreloadでも同じ画面を復元します。`tab`がない、または未知の
-値の場合は`report`へ戻ります。V1〜V9のどのSnapshotでも5タブは維持され、古いschemaに
+値の場合は`report`へ戻ります。V1〜V9のどのSnapshotでも6タブは維持され、古いschemaに
 存在しないsectionをvalid zeroとして扱いません。
 
 ## Price Structure
@@ -739,6 +753,111 @@ http://127.0.0.1:3000/?ticker=7203&tab=report&base=<snapshotId>&target=<snapshot
 この機能は明示registryで定義した保存済みscalar/categoryと同一性を定義できる観測だけを
 比較します。JSON全体の再帰diff、collection-level record diff、外部source取得、再分析、
 Snapshot変更は行いません。
+
+---
+
+## Phase 4 Strategy Validation
+
+`validation / 戦略検証`は、事前に固定したEntry / Stop / Targetの後に日足で
+観測できたoutcomeを、point-in-time / no-look-ahead契約で監査するresearch画面です。
+次の2モードを混同しません。
+
+| mode | confidence | 意味 |
+| --- | --- | --- |
+| 保存済みSnapshot | `precommitted` | immutable Snapshotに事前記録されたcandidateの監査 |
+| Campaign JSON | `reconstructed_251_as_of` | 過去基準日までの連続251 official sessionsを使った後日再構成 |
+
+Campaignは現在のproduction analysisの完全再現ではありません。
+`technical_251_strategy_v1`と現在の取得可能な過去dataを使う標準化された後日検証です。
+
+### CLIで保存済みSnapshotを監査する
+
+exact tickerとSnapshot IDを指定します。latest fallbackはありません。
+
+```bash
+bun run validate:strategy -- --ticker 7203 --snapshot-id <snapshotId>
+```
+
+### CLIでhistorical campaignを実行する
+
+UTF-8、BOMなし、1 MiB以下のstrict JSON manifestを使います。例:
+
+```json
+{
+  "schemaVersion": "strategy_validation_campaign_v1",
+  "name": "2025年1月検証",
+  "anchors": [
+    {
+      "ticker": "7203",
+      "anchorDate": "2025-01-06",
+      "resistanceEvidence": []
+    }
+  ]
+}
+```
+
+manifestは1〜500 anchors、canonical ticker、strict Gregorian dateを必須とし、
+同一ticker / anchor dateの重複、unknown field、duplicate JSON keyを拒否します。
+`resistanceEvidence`はanchorごと0〜8件です。
+
+`resistanceEvidence`で利用できるのは、同一tickerとanchorの条件を満たす保存済み
+Snapshotのexact referenceだけです。不要な場合は空配列にします。
+
+```json
+{
+  "ticker": "7203",
+  "anchorDate": "2025-01-06",
+  "resistanceEvidence": [
+    { "kind": "analysis_snapshot", "snapshotId": "<snapshotId>" }
+  ]
+}
+```
+
+```bash
+bun run validate:strategy -- --manifest ./campaign.json
+```
+
+外部requestが必要な場合、CLIは対象、最少request数、rate、30秒request timeout、
+90分実行予算、250 attempts上限、保存先を表示し、既定でNoの確認を求めます。
+非対話実行では、同じ警告を確認した後に限り、次の明示flagを付けます。
+
+```bash
+bun run validate:strategy -- --manifest ./campaign.json --confirm-external-fetch
+```
+
+### Dashboardから実行・閲覧する
+
+1. detail画面の`戦略検証`タブを開く。
+2. 保存済みSnapshot、またはCampaign JSONを選ぶ。
+3. `ローカルPreflightを実行`で最少request数、rate、期限とwarningを確認する。
+4. 外部送信とsubscription quota消費の可能性を明示的に確認してJobを開始する。
+5. 完了後は`結果を明示的に開く`、または保存済みrunを自分で選択する。
+
+同時に実行できるjobは全体で1件です。完了してもlatest runを自動選択したり、
+画面を自動遷移したりしません。Campaignの集計は常にcampaign-globalで、現在の
+tickerで絞り込まれるのはcase一覧だけです。
+
+run / case選択はURLに保存されます。
+
+```text
+/?ticker=7203&tab=validation&validationRun=<runId>&validationCase=<caseId>
+```
+
+### 保存先と完了性
+
+完了したrunだけが次のcreate-only directoryへ公開されます。
+
+```text
+.dexter/research/strategy-validation/runs/<runId>/
+```
+
+キャンセル、失敗、中断時にpartial runは公開されません。job stateは同じresearch
+rootの下で復旧用に管理されますが、完了runとは別物です。現在のdefault
+repositoryは、directoryのno-replace publishを保証できるWindowsのみでrunを公開し、
+それ以外のplatformでは`publish_unsupported`としてfail closedします。
+
+outcomeは観測結果です。Strategyの採用可否、PASS / FAIL、Buy / Sell / Hold、
+将来の収益性、scoreを意味しません。
 
 ---
 
@@ -996,9 +1115,11 @@ HTMLとして直接injectしません。
 
 ---
 
-# 24. Local Read-only API
+# 24. Local Dashboard API
 
-Dashboard serverはRead-only APIを提供します。
+Dashboard serverのAnalysis Snapshot APIは従来どおりRead-onlyです。Phase 4ではこれとは
+別に、Strategy validationの明示的なpreflight / jobだけを扱うlocal mutation APIを
+追加しています。
 
 ## Watchlist / latest metadata
 
@@ -1080,20 +1201,41 @@ mismatchは400、Snapshot missingは404、corrupt/schema/filesystem failureは50
 
 ---
 
-# 25. APIはRead-only
+## Strategy validation
 
-以下は存在しません。
+Dashboard UIが使用するrouteは次のとおりです。
 
-```text
-POST
-PUT
-PATCH
-DELETE
+```http
+GET    /api/session
+POST   /api/strategy-validation/preflights
+POST   /api/strategy-validation/jobs
+GET    /api/strategy-validation/jobs/active
+GET    /api/strategy-validation/jobs/:jobId
+DELETE /api/strategy-validation/jobs/:jobId
+GET    /api/strategy-validation/runs?ticker=<ticker>&limit=<limit>&cursor=<cursor>
+GET    /api/strategy-validation/runs/:runId
+GET    /api/strategy-validation/runs/:runId/cases?ticker=<ticker>&limit=<limit>&cursor=<cursor>
+GET    /api/strategy-validation/runs/:runId/cases/:caseId
 ```
 
-分析実行やSnapshot変更をBrowserから行うAPIもありません。
+`POST` / `DELETE`はprocess-local CSRF token、exact same-origin、Host、Content-Type、
+strict JSONとbody sizeの検査を通ったrequestだけを受け付けます。CSRF tokenは
+`GET /api/session`からBrowser sessionに渡され、API keyやfilesystem pathはBrowserへ返しません。
+通常はこれらを手動で呼び出さず、Dashboard UIを使用してください。
 
-分析はCLI側で行います。
+---
+
+# 25. Analysis APIはRead-only
+
+次のAnalysis Snapshot routeにmutation methodは存在しません。
+
+```text
+/api/analyses/* に対する POST / PUT / PATCH / DELETE
+```
+
+Standard Agent分析とSnapshot生成は引き続きCLI側で行います。Strategy validation jobは
+独立したresearch runを作る限定的な例外で、Analysis Snapshotを書き換えたり、
+LLMを呼び出したり、自動売買を実行したりしません。
 
 ```text
 CLI
@@ -1103,7 +1245,8 @@ Analysis
 Snapshot保存
 ```
 
-Dashboardは保存済みSnapshotを読むだけです。
+Analysis表示経路は保存済みSnapshotを読むだけです。Strategy validationの
+明示的な実行経路は、別のresearch runを作成し、Snapshotは変更しません。
 
 ---
 
@@ -1147,6 +1290,9 @@ localhost
 - raw promptをSnapshotへ保存しない
 - raw tool argsをSnapshotへ保存しない
 - environment variablesをBrowser bundleへ注入しない
+- Strategy validation mutationはexact same-originとprocess-local CSRF tokenを必須とする
+- J-Quantsへのticker / date selector送信は実行ごとの明示確認後に限る
+- credential、raw response body、request IDをresearch runへ保存しない
 
 という方針です。
 
@@ -1230,6 +1376,20 @@ Detail:
 
 ```text
 http://127.0.0.1:3000/?ticker=7203
+```
+
+任意のStrategy validation:
+
+```text
+戦略検証タブ
+ ↓
+保存済みSnapshotまたはCampaign JSONを選択
+ ↓
+ローカルPreflight
+ ↓
+外部送信とquotaを明示確認
+ ↓
+Job完了後にrunを明示選択
 ```
 
 ---
@@ -1405,6 +1565,24 @@ bun run dashboard
 
 ---
 
+## Strategy validationが開始または完了しない
+
+次を確認してください。
+
+1. `JQUANTS_API_KEY`が設定され、対象日が契約の履歴範囲内か。
+2. `JQUANTS_REQUESTS_PER_MINUTE`が1〜500の整数で、契約上限以下か。
+3. preflightの最小dispatch scheduleが90分の予算内か。入らない入力は
+   外部送信の確認前に`external_schedule_infeasible`で拒否されます。
+4. 別のStrategy validation jobが実行中でないか。同時実行は全体で1件です。
+5. runの公開先がWindowsか。非Windowsのdefault repositoryは
+   `publish_unsupported`でfail closedします。
+
+server再起動時に中断したjobは自動resumeしません。失敗、キャンセル、中断で
+partial runは公開されず、完了したrunも自動選択されません。保存済み一覧から
+明示的に選択してください。
+
+---
+
 ## JSON corruption / schema error
 
 Snapshot JSONが壊れている場合、APIは内部filesystem pathやstack traceをBrowserへ表示せずgeneric errorを返します。
@@ -1449,8 +1627,8 @@ Dashboardのinteraction、History API、focus、responsive表示を変更した�
 bun run test:dashboard-browser
 ```
 
-を実行します。すべて成功することを確認してからPRを作成します。通常CIは外部AI
-providerへ接続しません。
+を実行します。すべて成功することを確認してからPRを作成します。通常CIはJ-Quantsや
+外部AI providerへ接続しません。external sourceはtest doubleで検証します。
 
 ---
 
@@ -1473,7 +1651,7 @@ User login
 Multi-user SaaS
 Database server
 GraphQL
-Browserからのanalysis実行
+BrowserからのStandard Agent分析 / Snapshot生成
 ```
 
 また、以下も後続検討です。
@@ -1484,11 +1662,16 @@ Structured Risks capture
 Historical indicator series
 Full SMA series
 Dated Swing markers
-Backtest
+all-TSE universe / broad cross-sectional backtest
+portfolio P&L / fees / tax / slippage / order-book simulation
 PDF / print view / export storage / download API
 Evaluator runtime / CLI / API / Dashboard tab
 Runtime composite score / score field / Dashboard score
 Collection-level record diff / cross-ticker comparison
+Strategy PASS / FAIL、新しいBuy / Sell / Hold signal
+scheduled Strategy validation / WebSocket / concurrent job queue
+minute / tick dataによるintraday sequence確定、MFE / MAE
+2027年3月以降のSTR tick regime
 ```
 
 Phase 2のformula、source availability、no-look-ahead、Snapshot evolution、deferred/
@@ -1496,7 +1679,8 @@ rejected scopeの詳細は`docs/PHASE2_PLAN.md`を参照してください。
 Phase 3のComparison、Radar、Evaluator freeze、score evaluation boundaryは
 `docs/PHASE3_PLAN.md`、scoreの検証設計は`docs/PHASE3_SCORE_EVALUATION_PLAN.md`を参照して
 ください。EvaluatorのP3-E1 foundationは内部に保持されていますが、runtime producerや
-Dashboard consumerはありません。Score採用はPhase 4の検証後に別途判断します。
+Dashboard consumerはありません。Phase 4はoutcomeを観測するだけで、score採用を
+自動で承認しません。Scoreの採否は、この結果と別途の意思決定により後続計画で判断します。
 
 ---
 
@@ -1505,46 +1689,30 @@ Dashboard consumerはありません。Score採用はPhase 4の検証後に別�
 ```text
 EDINET DB / J-Quants
         ↓
-Typed Source Results
+Typed Source Results → Deterministic Engines → Standard Agent Snapshot Collector
+                                              ↓
+                                Canonical AnalysisSnapshot
+                                              ↓
+                                  JSON Repository → Read-only Analysis API
+                                              ↓
+                                          Dashboard
+                                              ├─ Watchlist / report
+                                              ├─ Comparison
+                                              └─ Radar
+
+Exact Snapshot or Campaign manifest
         ↓
-Deterministic Engines
+Explicit preflight / confirmation / job → bounded J-Quants fetch
         ↓
-Standard Agent Snapshot Collector
+Deterministic outcome validation → immutable research run
         ↓
-AnalysisSnapshotInput
-        ↓
-AnalysisSnapshotBuilder
-        ↓
-Canonical AnalysisSnapshot
-        ↓
-JSON Repository
-        ↓
-Read-only Local API
-        ↓
-React Dashboard
-        ├─ Analysis Watchlist
-        └─ Single Stock Dashboard
-             ├─ 2 Snapshots → deterministic Comparison → report tab
-             └─ stored Peer percentiles → Radar / exact table → fundamentals tab
+Strategy validation API → Dashboard validation tab
 ```
 
-重要なのは依存方向です。
-
-```text
-Dashboard
-   ↓ reads
-Snapshot
-```
-
-であり、
-
-```text
-Dashboard
-   ↓
-Financial Engine
-```
-
-ではありません。
+通常のAnalysis表示経路でDashboardが読むのは保存済みSnapshotであり、Financial
+EngineをBrowserで再実行しません。Strategy validationも、Browserはpreflightと
+実行確認を送るだけで、outcomeと集計はserver側のdeterministic処理が確定した
+research runから読みます。
 
 Presentation LayerはSnapshotの値を:
 
