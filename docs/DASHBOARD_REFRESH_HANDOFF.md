@@ -9,9 +9,9 @@ fast-forwarded
 ## 1. How to use this file
 
 This handoff restores context only. It does not approve work, override `AGENTS.md`,
-`docs/SPEC.md`, or `docs/DASHBOARD_REFRESH_PLAN.md`, replace merged code/tests, or
-prove a PR passed review. Resolve conflicts in favor of the applicable Source of
-Truth and exact merged implementation.
+`docs/SPEC.md`, root `DESIGN.md`, or `docs/DASHBOARD_REFRESH_PLAN.md`, replace merged
+code/tests, or prove a PR passed review. Resolve conflicts in favor of the applicable
+Source of Truth and exact merged implementation.
 
 Before acting, verify the current checkout, `origin/main`, candidate PR head, CI,
 independent review, and Merge Gate. Do not infer current Git, GitHub, source,
@@ -52,6 +52,8 @@ feat/dashboard-refresh-contract-step0
 
 Its intended diff is limited to:
 
+- `AGENTS.md` — require root `DESIGN.md` for every user-facing UI design task;
+- root `DESIGN.md` — sole visual Source of Truth for the Dashboard Refresh;
 - `docs/SPEC.md` — independent pre-Phase-5 roadmap and invariants;
 - `docs/MVP_IMPLEMENTATION_PLAN.md` — current Post-MVP roadmap alignment;
 - `docs/DASHBOARD_REFRESH_PLAN.md` — normative, decision-complete implementation
@@ -66,7 +68,7 @@ UX and Phase 2-4 plan/handoff files remain unchanged.
 
 Dashboard Refresh is independent from Phase 5 and must finish first. It adopts:
 
-- a fixed accessible light theme with cyan-blue accent;
+- the accessible visual system defined only by root `DESIGN.md`;
 - a seven-tab shell with `market-overview / 市場概況` before the existing `market`
   tab and `validation` last;
 - explicit EOD Technical and Market Overview refresh from J-Quants Standard or
@@ -119,10 +121,10 @@ The next step is **DR-V1 — visual tokens and primitives**. It may start only a
 4. local `main` is fast-forwarded to the merged `origin/main`; and
 5. the DR-V1 branch is created from that updated clean main.
 
-DR-V1 changes only visual tokens and shared primitives. It must preserve the current
-six-tab behavior. The seven-tab navigation change belongs to DR-V3; Technical source
-I/O belongs to DR-T2; Market source I/O belongs to DR-M1; and user instructions belong
-to DR-X.
+DR-V1 implements root `DESIGN.md` tokens and shared primitives only. It must preserve
+the current six-tab behavior. The seven-tab navigation change belongs to DR-V3;
+Technical source I/O belongs to DR-T2; Market source I/O belongs to DR-M1; and user
+instructions belong to DR-X.
 
 ## 7. Candidate validation
 

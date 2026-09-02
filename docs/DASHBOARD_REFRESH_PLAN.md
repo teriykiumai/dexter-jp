@@ -11,7 +11,8 @@
 This plan refreshes the local Dashboard before Phase 5 without reopening the
 completed MVP or Phase 1.5-4 contracts. It has three bounded goals:
 
-1. apply one coherent, accessible light visual system to the existing Dashboard;
+1. apply the coherent, accessible visual system defined by root `DESIGN.md` to the
+   existing Dashboard;
 2. add dated daily, weekly, and monthly technical chart series that the user may
    refresh explicitly from J-Quants; and
 3. add a ticker-independent Market Overview built from persisted, source-labelled
@@ -28,6 +29,8 @@ This plan inherits and does not weaken:
   review;
 - `docs/SPEC.md` for deterministic calculation, missing-data, freshness,
   no-look-ahead, AI responsibility, and local-use invariants;
+- root `DESIGN.md` as the sole authority for user-facing color, typography, spacing,
+  border radius, component styling, and visual hierarchy;
 - `docs/MVP_IMPLEMENTATION_PLAN.md` for the completed MVP baseline;
 - `docs/VISUALIZATION_MVP_PLAN.md` and `docs/DASHBOARD_UX_PLAN.md` for Snapshot,
   repository, History API, accessibility, and responsive contracts;
@@ -49,7 +52,8 @@ the corresponding step is reviewed and merged.
 
 Dashboard Refresh implements only:
 
-- a fixed light theme and shared visual primitives across the whole Dashboard;
+- the root `DESIGN.md` visual system and shared primitives across the whole
+  Dashboard;
 - a seven-tab detail shell and a global Market Overview entry from the Watchlist;
 - a pure TypeScript daily/weekly/monthly technical-series engine;
 - immutable Technical and Market Overview JSON artifacts outside AnalysisSnapshot;
@@ -316,46 +320,22 @@ dependent decisions, not discretion left to the DR-M1 implementer.
 
 ## 4. Visual and navigation contract
 
-### 4.1 Fixed visual tokens
+### 4.1 Authoritative design system
 
-DR-V1 defines one system-font light theme. Dark mode and automatic OS-theme switching
-are out of scope.
+Root `DESIGN.md` is the sole Source of Truth for all Dashboard Refresh color,
+typography, spacing, border radius, component styling, and visual hierarchy. This
+plan intentionally does not duplicate their exact values. External reference sites
+describe direction only and never override `DESIGN.md`.
 
-| Token | Value |
-| --- | --- |
-| canvas | `#F4F8FB` |
-| primary surface | `#FFFFFF` |
-| muted surface | `#F8FAFC` |
-| border | `#D6E1E8` |
-| strong text | `#0F172A` |
-| body text | `#334155` |
-| muted text | `#475569` |
-| accent | `#0369A1` |
-| accent hover/active | `#075985` |
-| focus ring | `#0369A1` with a 2 px outer offset |
-| positive | `#15803D` |
-| warning | `#B45309` |
-| danger | `#B91C1C` |
-| unavailable | `#475569` |
-| chart price | `#0F172A` |
-| chart up/down | `#0891B2` / `#E11D48` |
-| chart volume | `#64748B` |
-| chart RSI | `#7C3AED` |
-| chart MACD/signal | `#0284C7` / `#B45309` |
+DR-V1 implements the exact tokens and primitives in `DESIGN.md`. Later UI steps reuse
+those primitives rather than defining local variants. If measured contrast,
+accessibility, usability, or functional correctness requires a visual change, that
+step updates `DESIGN.md` in the same reviewed PR before using the changed value; it
+does not record an exception only in CSS or this plan.
 
-The font stack is the existing local system stack. Spacing uses a 4 px base with
-`4/8/12/16/24/32` px steps; surface radii are `8/12` px; border width is 1 px.
-Desktop data rows may be 32 px high. At widths below 680 px or for coarse pointers,
-interactive controls have at least a 44 by 44 px target and text rows retain enough
-line height to avoid dense tap targets. Color never carries status or direction
-alone. Text, icon/shape, and exact values remain available.
-
-Text tokens and white-on-accent controls must meet WCAG 2.2 AA for their actual size
-and background. Chart-only colors such as `#0284C7` may not be reused as text; chart
-lines, focus indicators, and meaningful non-text shapes must meet the 3:1 non-text
-contrast requirement against every adjacent surface. A token that fails measured
-contrast is adjusted in DR-V1 before merge and its revised exact value is recorded in
-this plan in the same PR.
+WCAG 2.2 AA text contrast, 3:1 meaningful non-text contrast, visible focus, safe
+coarse-pointer targets, non-color state communication, exact-value access, and no
+document-level overflow remain merge gates under `DESIGN.md` and this plan.
 
 ### 4.2 Stable tabs
 
@@ -1496,11 +1476,11 @@ PR is independently approved and merged and local `main` is fast-forwarded to
 
 1. **DR-0 — docs-only contract**
    - synchronize `docs/SPEC.md` and the Post-MVP roadmap;
-   - add this plan and `docs/DASHBOARD_REFRESH_HANDOFF.md`;
+   - add root `DESIGN.md`, connect it through `AGENTS.md`, and add this plan and
+     `docs/DASHBOARD_REFRESH_HANDOFF.md`;
    - do not change runtime code, dependencies, Usage, setup, or historical UX plans.
 2. **DR-V1 — visual tokens and primitives**
-   - implement exact canvas/surface/border/text/accent/status/chart/spacing/focus
-     tokens and shared primitives;
+   - implement the exact root `DESIGN.md` tokens and shared primitives;
    - preserve behavior and current six-tab information architecture.
 3. **DR-V2 — Watchlist and global navigation**
    - migrate Watchlist/loading/error/empty surfaces;
@@ -1547,7 +1527,7 @@ no new runtime behavior.
 
 | Step | Required tests and acceptance |
 | --- | --- |
-| DR-0 | Source-of-Truth consistency, no runtime/dependency diff, links and sequence reviewed |
+| DR-0 | `DESIGN.md` sole-visual-authority consistency, `AGENTS.md` startup/governance link, no runtime/dependency diff, links and sequence reviewed |
 | DR-V1 | exact tokens, measured contrast, focus-visible, status not color-only, existing behavior regression |
 | DR-V2 | Watchlist/loading/error/empty, global deep link/conflict, Back/Forward/reload, inherited unknown-tab canonicalization, dormant/new-key matrix, unknown-query preservation |
 | DR-V3 | exact seven IDs/labels/order, Home/End/arrows/roving focus, all existing complex surfaces, availability ownership, token contrast at every required surface |
@@ -1627,6 +1607,9 @@ with a lawful source, entitlement, normalization, security, and acceptance contr
 
 DR-0 changes only:
 
+- `AGENTS.md` — require `DESIGN.md` before user-facing UI design and enforce its
+  subject-specific authority;
+- root `DESIGN.md` — define the visual Source of Truth and migration reference;
 - `docs/SPEC.md` — add the independent Dashboard Refresh roadmap and invariants;
 - `docs/MVP_IMPLEMENTATION_PLAN.md` — align the Post-MVP roadmap without changing
   completed MVP Step 0-10 contracts;

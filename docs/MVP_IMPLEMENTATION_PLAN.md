@@ -737,7 +737,7 @@ gate ID.
 Before Phase 5, refresh the existing local Dashboard through the separately reviewed
 `docs/DASHBOARD_REFRESH_PLAN.md`:
 
-- fixed accessible light visual system and seven-tab navigation;
+- root `DESIGN.md` visual system and seven-tab navigation;
 - explicitly refreshed J-Quants EOD Technical data with day/week/month, OHLCV,
   RSI14, and MACD 12/26/9 series;
 - ticker-independent Market Overview with source/date/cadence-labelled supply-demand

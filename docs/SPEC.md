@@ -449,7 +449,7 @@ Phase 5へ進む前に、既存Dashboardの視覚・技術Chart・全市場共�
 `docs/DASHBOARD_REFRESH_PLAN.md` に従う独立した段階計画で刷新する。これは
 Phase 1.5〜4の完了条件を再度開くものではなく、Phase 5 Portfolio機能でもない。
 
-- Dashboard全体を固定Light themeと共通visual primitiveへ段階移行する
+- Dashboard全体をroot `DESIGN.md`のvisual systemと共通primitiveへ段階移行する
 - 既存tabへticker非依存の `market-overview / 市場概況` を追加し、全7tabとする
 - 最新取得可能なEOD Technical dataと公表済みmarket dataだけを、ユーザーが
   明示操作したlocal jobから取得する
