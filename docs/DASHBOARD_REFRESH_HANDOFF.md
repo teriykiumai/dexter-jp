@@ -415,6 +415,14 @@ cancel-request writes, and restart after a completed rename. HTTP tests preserve
 security/method/body precedence, session availability, safe native codes/messages,
 true-idle versus other-kind conflict, and manual preflight reuse without admission.
 
+PR #99 review correction: loss of the currently reserved job file now returns the
+sanitized recovery 500 on the first exact GET or DELETE, rather than latching the
+server but returning 404. Recovery retains the reserved identity for subsequent
+GETs even after worker cleanup; unrelated missing identities remain ordinary 404s.
+Regression fixtures remove an accepted job file before worker startup and during
+an in-flight fetch, verifying abort, no later dispatch/write/requeue, and no false
+idle response. Proved terminal release still removes the reservation.
+
 Browser coverage includes retained confirmation, manual retry and preflight expiry,
 cross-kind/initialization failures, last-known state, no automatic mutations, halted
 reads through visibility/tab/ticker changes, and explicit full-reload recovery.
@@ -422,8 +430,8 @@ All data and requests are local synthetic fixtures, not entitlement/source smoke
 
 | Validation | Result |
 | --- | --- |
-| coordinator, native job artifact, shared session and API focused tests | 63 passed, 0 failed |
-| `bun test` | 1058 passed, 0 failed, across 87 files |
+| coordinator, native job artifact, shared session and API focused tests | 68 passed, 0 failed |
+| `bun test` | 1063 passed, 0 failed, across 87 files |
 | `bun run typecheck` | same Windows Bun launcher failure before compiler execution |
 | `bun node_modules/typescript/bin/tsc --noEmit` | passed using the installed compiler |
 | `bun run test:dashboard-browser` | 80 passed, 0 failed (76 inherited + 4 DR-C1 journeys) |

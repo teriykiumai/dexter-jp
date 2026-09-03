@@ -107,6 +107,7 @@ async function context(options: Readonly<{
   coordinator?: DashboardJobCoordinatorV1;
   enqueue?: (work: () => void) => void;
   initialize?: boolean;
+  jobOptions?: ConstructorParameters<typeof StrategyValidationJobRepositoryV1>[1];
 }> = {}) {
   const root = await mkdtemp(join(tmpdir(), 'dexter-strategy-api-'));
   roots.push(root);
@@ -125,7 +126,7 @@ async function context(options: Readonly<{
   const runs = new RunRepository(join(root, 'research'), {
     promoteDirectory: options.promoteDirectory ?? rename,
   });
-  const jobs = new StrategyValidationJobRepositoryV1(join(root, 'research'));
+  const jobs = new StrategyValidationJobRepositoryV1(join(root, 'research'), options.jobOptions);
   const service = new StrategyValidationJobServiceV1({
     snapshotRepository: snapshots,
     runRepository: runs,
@@ -317,6 +318,72 @@ describe('Phase 4 Strategy-validation local API', () => {
     expect(await Bun.file(path).text()).toBe('{');
     expect((await call(value, request('/api/strategy-validation/jobs/active'))).status).toBe(500);
   });
+
+  for (const method of ['GET', 'DELETE'] as const) {
+    test.each(['queued', 'fetching'] as const)(`missing owned job ${method} returns recovery on the first request with a %s worker`, async stage => {
+      const queued: Array<() => void> = [];
+      let dispatches = 0; let writes = 0; let fetchSignal: AbortSignal | null = null;
+      let markFetchStarted!: () => void;
+      const fetchStarted = new Promise<void>(resolve => { markFetchStarted = resolve; });
+      const environment: JQuantsExecutionEnvironmentV1 = {
+        ...executionEnvironment(),
+        fetch: (_input, init) => {
+          dispatches++;
+          fetchSignal = init?.signal ?? null;
+          markFetchStarted();
+          return new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true });
+          });
+        },
+      };
+      const value = await context({ environment, enqueue: work => queued.push(work), jobOptions: { io: {
+        writeFile: async (...args) => { writes++; return writeFile(...args); },
+      } } });
+      try {
+        const saved = await value.snapshots.save(comparisonSnapshot());
+        const preflight = await value.service.createPreflight({ mode: 'snapshot', ticker: '7203', snapshotId: saved.snapshotId });
+        const accepted = await value.service.acceptPreflight(preflight.preflightId, true);
+        expect(queued).toHaveLength(1);
+        if (stage === 'fetching') { queued[0]!(); await fetchStarted; }
+        const ordinaryMissingPath = '/api/strategy-validation/jobs/12345678-1234-4234-8234-123456789012';
+        const ordinary = await call(value, request(ordinaryMissingPath, { method }));
+        expect(ordinary.status).toBe(404);
+        expect(await json(ordinary)).toMatchObject({ error: { code: 'job_not_found' } });
+        expect(() => value.service.coordinator.assertHealthy()).not.toThrow();
+        const writesBeforeFailure = writes;
+        const jobPath = `/api/strategy-validation/jobs/${accepted.job.jobId}`;
+        const filePath = join(value.jobs.jobsDirectory, `${accepted.job.jobId}.json`);
+        await rm(filePath);
+        const response = await call(value, request(jobPath, { method }));
+        expect(response.status).toBe(500);
+        expect(await json(response)).toEqual({ error: { code: 'artifact_unavailable', message: DASHBOARD_RECOVERY_MESSAGE_V1 } });
+        expect(response.headers.get('Retry-After')).toBeNull();
+        if (stage === 'fetching') expect((fetchSignal as AbortSignal | null)?.aborted).toBe(true);
+        else queued[0]!(); // A callback delivered after the latch must not resurrect the job.
+        await Bun.sleep(0);
+        const active = await call(value, request('/api/strategy-validation/jobs/active'));
+        expect(active.status).toBe(500);
+        expect(await json(active)).toEqual({ error: { code: 'artifact_unavailable', message: DASHBOARD_RECOVERY_MESSAGE_V1 } });
+        expect(active.headers.get('Retry-After')).toBeNull();
+        // The retained recovery reservation is still not an ordinary missing ID.
+        const repeated = await call(value, request(jobPath));
+        expect(repeated.status).toBe(500);
+        expect(await json(repeated)).toEqual({ error: { code: 'artifact_unavailable', message: DASHBOARD_RECOVERY_MESSAGE_V1 } });
+        expect((await call(value, request(ordinaryMissingPath))).status).toBe(404);
+        const retry = await call(value, request('/api/strategy-validation/jobs', { method: 'POST',
+          body: JSON.stringify({ preflightId: preflight.preflightId, confirmExternalFetch: true }) }));
+        expect(retry.status).toBe(500);
+        expect(queued).toHaveLength(1);
+        expect(dispatches).toBe(stage === 'fetching' ? 1 : 0);
+        expect(writes).toBe(writesBeforeFailure);
+        expect(await Bun.file(filePath).exists()).toBe(false);
+        expect(await value.runs.list()).toHaveLength(0);
+      } finally {
+        value.service.coordinator.latchRecovery();
+        await Bun.sleep(0);
+      }
+    });
+  }
 
   test('rotates a 32-byte process CSRF token and returns no capability or path detail', async () => {
     const first = await context();

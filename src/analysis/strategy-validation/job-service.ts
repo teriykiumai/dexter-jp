@@ -378,11 +378,9 @@ export class StrategyValidationJobServiceV1 {
         job = await this.jobRepository.load(jobId);
       } catch (error) {
         if (!(error instanceof StrategyValidationJobRepositoryErrorV1) || error.kind !== 'missing_job'
-          || this.coordinator.owns({ domain: 'strategy_validation', kind: 'strategy_validation', jobId, terminal: false })) {
+          || this.coordinator.reserves({ domain: 'strategy_validation', kind: 'strategy_validation', jobId, terminal: false })) {
           this.coordinator.latchRecovery();
-          if (!(error instanceof StrategyValidationJobRepositoryErrorV1) || error.kind !== 'missing_job') {
-            this.coordinator.assertHealthy();
-          }
+          this.coordinator.assertHealthy();
         }
         throw this.#mapJobRepositoryError(error);
       }
@@ -435,12 +433,10 @@ export class StrategyValidationJobServiceV1 {
       try {
         job = await this.jobRepository.load(jobId);
       } catch (error) {
-        if (!(error instanceof StrategyValidationJobRepositoryErrorV1) || error.kind !== 'missing_job') {
+        if (!(error instanceof StrategyValidationJobRepositoryErrorV1) || error.kind !== 'missing_job'
+          || this.coordinator.reserves({ domain: 'strategy_validation', kind: 'strategy_validation', jobId, terminal: false })) {
           this.coordinator.latchRecovery();
           this.coordinator.assertHealthy();
-        }
-        if (this.coordinator.owns({ domain: 'strategy_validation', kind: 'strategy_validation', jobId, terminal: false })) {
-          this.coordinator.latchRecovery();
         }
         throw this.#mapJobRepositoryError(error);
       }

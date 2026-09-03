@@ -68,6 +68,24 @@ function harness(rate = 5) {
 }
 
 describe('Dashboard shared admission and recovery', () => {
+  test('reservation identity survives recovery but not proved terminal release', async () => {
+    const h = harness(); await h.coordinator.initialize();
+    const completed = await h.begin('strategy_validation');
+    const completedRecord = h.strategy.records.get(completed.jobId)!;
+    expect(h.coordinator.reserves(completedRecord)).toBe(true);
+    await h.finish(completed);
+    expect(h.coordinator.reserves(completedRecord)).toBe(false);
+    const active = await h.begin('technical_refresh');
+    const activeRecord = h.market.records.get(active.jobId)!;
+    expect(h.coordinator.owns(activeRecord)).toBe(true);
+    h.coordinator.latchRecovery();
+    expect(h.coordinator.owns(activeRecord)).toBe(false);
+    expect(h.coordinator.reserves(activeRecord)).toBe(true);
+    expect(h.coordinator.reserves(completedRecord)).toBe(false);
+    expect(h.coordinator.reserves({ ...activeRecord, kind: 'overview_refresh' })).toBe(false);
+    expect(active.signal.aborted).toBe(true);
+  });
+
   for (const first of kinds) for (const next of kinds) {
     test(`${first} -> ${next}: single lease, retained actual-attempt cooldown, exact boundary`, async () => {
       const h = harness(); await h.coordinator.initialize();

@@ -122,7 +122,12 @@ export class DashboardJobCoordinatorV1 {
   }
 
   owns(job: DashboardJobProjectionV1): boolean {
-    return this.#state === 'active' && this.#lease?.value.jobId === job.jobId && this.#lease.value.kind === job.kind;
+    return this.#state === 'active' && this.reserves(job);
+  }
+
+  /** Recovery retains this identity; a reservation alone never permits execution. */
+  reserves(job: DashboardJobProjectionV1): boolean {
+    return this.#lease?.value.jobId === job.jobId && this.#lease.value.kind === job.kind;
   }
 
   async admit(options: {
