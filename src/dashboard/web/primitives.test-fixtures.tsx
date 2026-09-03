@@ -7,15 +7,18 @@ import {
   StatusBadge,
   StatusNotice,
   TableScroll,
+  Value,
+  type MetricGridItem,
   type StatusTone,
 } from './primitives.js';
-import type { DashboardMetric } from './presentation.js';
 
-export const PRIMITIVE_METRICS: DashboardMetric[] = [
-  { label: '出来高', value: { text: '0', available: true }, note: 'データ基準日 2026-08-21 / 合成fixture / 株' },
-  { label: 'PER', value: { text: '利用不可', available: false }, note: '保存された値が利用できません。' },
+export const PRIMITIVE_METRICS: MetricGridItem[] = [
+  { label: '出来高', value: { text: '0', available: true }, valueKind: 'data', note: 'データ基準日 2026-08-21 / 合成fixture / 株' },
+  { label: 'PER', value: { text: '利用不可', available: false }, valueKind: 'data', note: '保存された値が利用できません。' },
   { label: '未収集の指標', value: { text: '未収集', available: false } },
-  { label: '長い識別子', value: { text: 'snapshot_20260821T010203000Z_very_long_identity_for_wrapping', available: true } },
+  { label: '長い識別子', value: { text: 'snapshot_20260821T010203000Z_very_long_identity_for_wrapping', available: true }, valueKind: 'data' },
+  { label: 'データ基準日', value: { text: '2026-08-21', available: true }, valueKind: 'data' },
+  { label: '状態', value: { text: '保存済み', available: true } },
 ];
 
 export const PRIMITIVE_STATUSES: ReadonlyArray<{ tone: StatusTone; label: string }> = [
@@ -35,6 +38,9 @@ export function PrimitivesFixture() {
           <p className="eyebrow">デザイントークンと共通部品</p>
           <h1>保存済み分析の基本部品</h1>
           <p>合成データで表示を確認しています。外部通信や金融計算は行いません。</p>
+          <p className="design-metadata">
+            データ基準日 <time className="design-metadata" data-kind="data" dateTime="2026-08-21">2026-08-21</time>
+          </p>
         </header>
         <Card title="指標と利用状況" eyebrow="Snapshot" guidanceTerm="rsi" onOpenGuidance={() => {}}>
           <div className="design-stack">
@@ -71,12 +77,16 @@ export function PrimitivesFixture() {
             </div>
             <div className="design-field">
               <label htmlFor="fixture-invalid">選択対象</label>
-              <input id="fixture-invalid" aria-invalid="true" aria-describedby="fixture-invalid-error" />
+              <input id="fixture-invalid" type="text" aria-invalid="true" aria-describedby="fixture-invalid-error" />
               <p id="fixture-invalid-error" className="field-error">入力エラー: 対象が指定されていません。</p>
             </div>
             <div className="design-field">
               <label htmlFor="fixture-select">表示対象</label>
               <select id="fixture-select" defaultValue="saved"><option value="saved">保存済み</option></select>
+            </div>
+            <div className="design-field">
+              <label htmlFor="fixture-notes">注記</label>
+              <textarea id="fixture-notes" defaultValue="保存された説明文を表示します。" />
             </div>
           </div>
         </Card>
@@ -84,11 +94,19 @@ export function PrimitivesFixture() {
           <TableScroll label="保存値の表を横スクロール">
             <table id="exact-values">
               <caption>合成データ / 2026-08-21 / 数値・利用不可・未収集を区別</caption>
-              <thead><tr><th scope="col" className="identity-cell">識別子</th><th scope="col">値</th><th scope="col">状態</th></tr></thead>
+              <thead><tr><th scope="col" className="identity-cell">識別子</th><th scope="col" className="numeric-cell">値</th><th scope="col">状態</th></tr></thead>
               <tbody>
-                <tr><th scope="row">7203</th><td>0</td><td>保存済み</td></tr>
-                <tr><th scope="row">未取得項目</th><td>利用不可</td><td>未収集</td></tr>
-                <tr><th scope="row">長い正確値</th><td><code>12345678901234567890123456789012345678901234567890</code></td><td>保存済み</td></tr>
+                <tr>
+                  <th scope="row"><Value value={{ text: '7203', available: true }} kind="data" /></th>
+                  <td className="numeric-cell"><Value value={{ text: '0', available: true }} kind="data" /></td>
+                  <td>保存済み</td>
+                </tr>
+                <tr>
+                  <th scope="row">未取得項目</th>
+                  <td className="numeric-cell"><Value value={{ text: '利用不可', available: false }} kind="data" /></td>
+                  <td>未収集</td>
+                </tr>
+                <tr><th scope="row">長い正確値</th><td className="numeric-cell"><code>12345678901234567890123456789012345678901234567890</code></td><td>保存済み</td></tr>
               </tbody>
             </table>
           </TableScroll>

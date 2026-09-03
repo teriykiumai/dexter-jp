@@ -33,7 +33,10 @@
 .dashboard-design .design-display { font: var(--type-display); }
 .dashboard-design .design-data { font: var(--type-data); font-variant-numeric: tabular-nums; }
 .dashboard-design .design-kpi { color: var(--color-text-strong); font: var(--type-kpi); font-variant-numeric: tabular-nums; }
-.dashboard-design .design-metadata { color: var(--color-text-muted); font: var(--type-metadata); font-variant-numeric: tabular-nums; }
+.dashboard-design .design-value { font-family: var(--font-ui); font-variant-numeric: normal; }
+.dashboard-design .design-value[data-kind="data"] { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+.dashboard-design .design-metadata { color: var(--color-text-muted); font: var(--type-label); }
+.dashboard-design .design-metadata[data-kind="data"] { font: var(--type-metadata); font-variant-numeric: tabular-nums; }
 .dashboard-design .eyebrow { color: var(--color-text-muted); font: var(--type-label); letter-spacing: normal; text-transform: none; }
 .dashboard-design .eyebrow:lang(en) { letter-spacing: 0.06em; }
 .dashboard-design a { color: var(--color-accent); text-decoration: underline; }
@@ -69,7 +72,8 @@
 }
 .dashboard-design .metric-row:last-child { border-bottom: 0; }
 .dashboard-design .metric-row dt { display: flex; min-width: 0; align-items: center; gap: var(--space-2); color: var(--color-text); font: var(--type-body); }
-.dashboard-design .metric-row dd { min-width: 0; margin: 0; color: var(--color-text-strong); font: var(--type-data); font-variant-numeric: tabular-nums; text-align: right; }
+.dashboard-design .metric-row dd { min-width: 0; margin: 0; color: var(--color-text-strong); font: var(--type-small); text-align: right; }
+.dashboard-design .metric-row .design-value[data-kind="data"] { font: var(--type-data); font-variant-numeric: tabular-nums; }
 .dashboard-design .metric-row small { grid-column: 1 / -1; color: var(--color-text-muted); font: var(--type-small); }
 /* The unchanged legacy .unavailable rule is important; contain the override here. */
 .dashboard-design .unavailable { color: var(--color-unavailable) !important; font-style: normal; }
@@ -105,7 +109,13 @@
 .dashboard-design .guidance-button:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--focus-offset); }
 
 .dashboard-design .design-field { display: grid; min-width: 0; gap: var(--space-2); color: var(--color-text); font: var(--type-label); }
-.dashboard-design .design-field :is(input, select, textarea) {
+/* Only the documented text-like inputs receive rectangular-control styling. */
+.dashboard-design .design-field :is(
+  input:not([type]), input[type="text"], input[type="search"], input[type="email"],
+  input[type="url"], input[type="tel"], input[type="password"], input[type="number"],
+  input[type="date"], input[type="datetime-local"], input[type="month"],
+  input[type="week"], input[type="time"], select, textarea
+) {
   width: 100%;
   min-width: 0;
   min-height: var(--control-height);
@@ -118,8 +128,18 @@
   font: var(--type-body);
 }
 .dashboard-design .design-field textarea { resize: vertical; }
-.dashboard-design .design-field [aria-invalid="true"] { border-color: var(--color-danger); }
-.dashboard-design .design-field :disabled { background: var(--color-surface-muted); color: var(--color-text-muted); opacity: 1; }
+.dashboard-design .design-field :is(
+  input:not([type]), input[type="text"], input[type="search"], input[type="email"],
+  input[type="url"], input[type="tel"], input[type="password"], input[type="number"],
+  input[type="date"], input[type="datetime-local"], input[type="month"],
+  input[type="week"], input[type="time"], select, textarea
+)[aria-invalid="true"] { border-color: var(--color-danger); }
+.dashboard-design .design-field :is(
+  input:not([type]), input[type="text"], input[type="search"], input[type="email"],
+  input[type="url"], input[type="tel"], input[type="password"], input[type="number"],
+  input[type="date"], input[type="datetime-local"], input[type="month"],
+  input[type="week"], input[type="time"], select, textarea
+):disabled { background: var(--color-surface-muted); color: var(--color-text-muted); opacity: 1; }
 .dashboard-design .design-field :is(.field-help, .field-error) { color: var(--color-text-muted); font: var(--type-small); }
 
 .dashboard-design .availability-badges, .dashboard-design .availability-badges.compact { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
@@ -151,9 +171,11 @@
 .dashboard-design .table-scroll:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--focus-offset); }
 .dashboard-design table { width: 100%; border-collapse: collapse; background: var(--color-surface); }
 .dashboard-design caption { padding: var(--space-2) var(--space-3); color: var(--color-text); font: var(--type-small); text-align: left; }
-.dashboard-design th, .dashboard-design td { height: var(--control-height); padding: var(--space-2) var(--space-3); border-bottom: var(--border-width) solid var(--color-border); color: var(--color-text); font: var(--type-data); font-variant-numeric: tabular-nums; text-align: right; letter-spacing: normal; text-transform: none; }
+.dashboard-design th, .dashboard-design td { height: var(--control-height); padding: var(--space-2) var(--space-3); border-bottom: var(--border-width) solid var(--color-border); color: var(--color-text); font: var(--type-small); text-align: left; letter-spacing: normal; text-transform: none; }
 .dashboard-design thead th { background: var(--color-surface-muted); font: var(--type-label); }
 .dashboard-design tbody th, .dashboard-design .identity-cell { color: var(--color-text-strong); font-family: var(--font-ui); text-align: left; }
+.dashboard-design :is(th, td).numeric-cell { text-align: right; font-variant-numeric: tabular-nums; }
+.dashboard-design td.numeric-cell { font: var(--type-data); font-variant-numeric: tabular-nums; }
 .dashboard-design td code { font: inherit; white-space: nowrap; }
 
 @media (min-width: 680px) and (pointer: fine) {
@@ -169,7 +191,12 @@
 
 @media (width < 680px), (pointer: coarse) {
   .dashboard-design .design-button, .dashboard-design .guidance-button,
-  .dashboard-design .design-field :is(input, select, textarea) { min-width: var(--touch-target-size); min-height: var(--touch-target-size); }
+  .dashboard-design .design-field :is(
+    input:not([type]), input[type="text"], input[type="search"], input[type="email"],
+    input[type="url"], input[type="tel"], input[type="password"], input[type="number"],
+    input[type="date"], input[type="datetime-local"], input[type="month"],
+    input[type="week"], input[type="time"], select, textarea
+  ) { min-width: var(--touch-target-size); min-height: var(--touch-target-size); }
   .dashboard-design .guidance-button { width: var(--touch-target-size); height: var(--touch-target-size); }
   .dashboard-design a { display: inline-flex; align-items: center; min-width: var(--touch-target-size); min-height: var(--touch-target-size); }
   .dashboard-design th, .dashboard-design td { height: var(--touch-target-size); }

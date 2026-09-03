@@ -59,14 +59,14 @@ test.describe('DR-V1 shared visual primitives', () => {
     await expect(page.locator('.panel').first()).toHaveCSS('box-shadow', 'none');
     await expect(page.locator('.eyebrow').first()).toHaveCSS('text-transform', 'none');
     await expect(page.locator('.metric-row dd').first()).toHaveText('0');
-    await expect(page.locator('.metric-row dd').first()).toHaveCSS('font-variant-numeric', 'tabular-nums');
+    await expect(page.locator('.metric-row dd > span').first()).toHaveCSS('font-variant-numeric', 'tabular-nums');
     await expect(page.locator('.metric-row dd').first()).toHaveCSS('color', 'rgb(15, 23, 42)');
     await expect(page.locator('.metric-row dd .unavailable').first()).toHaveCSS('color', 'rgb(71, 85, 105)');
     await expect(page.locator('.availability-badges.compact .availability-badge').first()).toHaveCSS('font-size', '11px');
     await expect(page.getByRole('status')).toContainText('再読込に失敗しました');
     await expect(page.getByRole('status')).toContainText('前回の保存値を表示しています');
 
-    const pairs = await page.locator('h1, h2, h3, p, dt, dd, small, .eyebrow, .availability-badge, .design-badge, button, input, select, th, td, a')
+    const pairs = await page.locator('h1, h2, h3, p, dt, dd, small, .eyebrow, .design-value, .design-metadata, .availability-badge, .design-badge, button, input, select, textarea, th, td, a')
       .evaluateAll(elements => elements.map(element => {
         const style = getComputedStyle(element);
         let parent: Element | null = element;
@@ -82,6 +82,119 @@ test.describe('DR-V1 shared visual primitives', () => {
       expect(contrastRatio(pair.color, pair.background), pair.label).toBeGreaterThanOrEqual(4.5);
     }
   });
+
+  test('metric typography distinguishes data from Japanese state text', async ({ page }) => {
+    await openPrimitives(page);
+    const values = page.locator('.metric-row dd > span');
+    await expect(values.nth(0)).toHaveText('0');
+    await expect(values.nth(0)).toHaveCSS('font-family', /Consolas/);
+    await expect(values.nth(1)).toHaveText('利用不可');
+    await expect(values.nth(1)).toHaveCSS('font-family', /ui-sans-serif/);
+    await expect(values.nth(2)).toHaveText('未収集');
+    await expect(values.nth(2)).toHaveCSS('font-family', /ui-sans-serif/);
+    await expect(values.nth(3)).toHaveCSS('font-family', /Consolas/);
+    await expect(values.nth(4)).toHaveText('2026-08-21');
+    await expect(values.nth(4)).toHaveCSS('font-family', /Consolas/);
+    await expect(values.nth(5)).toHaveText('保存済み');
+    await expect(values.nth(5)).toHaveCSS('font-family', /ui-sans-serif/);
+    await expect(values.nth(0)).toHaveCSS('font-size', '12px');
+    await expect(values.nth(0)).toHaveCSS('font-weight', '500');
+    await expect(values.nth(1)).toHaveCSS('font-size', '12px');
+    await expect(values.nth(1)).toHaveCSS('font-weight', '400');
+    await expect(page.locator('p.design-metadata')).toHaveCSS('font-family', /ui-sans-serif/);
+    await expect(page.locator('time.design-metadata')).toHaveCSS('font-family', /Consolas/);
+    await expect(page.locator('p.design-metadata')).toHaveCSS('font-size', '11px');
+    await expect(page.locator('time.design-metadata')).toHaveCSS('font-size', '11px');
+  });
+
+  test('exact table aligns numeric columns right and identity and explanation columns left', async ({ page }) => {
+    await openPrimitives(page);
+    const table = page.locator('#exact-values');
+    for (const section of ['thead', 'tbody']) {
+      for (const row of await table.locator(`${section} tr`).all()) {
+        const cells = row.locator('th, td');
+        await expect(cells.nth(0)).toHaveCSS('text-align', 'left');
+        await expect(cells.nth(1)).toHaveCSS('text-align', 'right');
+        await expect(cells.nth(2)).toHaveCSS('text-align', 'left');
+        await expect(cells.nth(2)).toHaveCSS('font-family', /ui-sans-serif/);
+      }
+    }
+    await expect(table.locator('thead .numeric-cell')).toHaveCSS('font-family', /ui-sans-serif/);
+    await expect(table.locator('tbody th .design-value').first()).toHaveCSS('font-family', /Consolas/);
+    await expect(table.locator('tbody .numeric-cell .design-value').first()).toHaveCSS('font-family', /Consolas/);
+    await expect(table.locator('tbody .numeric-cell .unavailable')).toHaveCSS('font-family', /ui-sans-serif/);
+    await expect(table.locator('tbody .numeric-cell').first()).toHaveCSS('font-variant-numeric', 'tabular-nums');
+  });
+
+  for (const { width, touch } of [
+    { width: 1280, touch: false }, { width: 320, touch: false }, { width: 1280, touch: true },
+  ]) {
+    test(`rectangular fields exclude non-text controls at ${width}px with ${touch ? 'coarse' : 'fine'} pointer`, async ({ browser }) => {
+      const context = await browser.newContext({ viewport: { width, height: 900 }, hasTouch: touch });
+      try {
+        const page = await context.newPage();
+        await openPrimitives(page);
+        const results = await page.evaluate(() => {
+          // These probes test selector exclusion, not a new choice-control pattern.
+          const host = document.createElement('div');
+          document.querySelector('.dashboard-design')!.append(host);
+          const appearance = (input: HTMLInputElement) => {
+            const style = getComputedStyle(input);
+            return {
+              padding: style.padding, radius: style.borderRadius, border: style.border,
+              minWidth: style.minWidth, minHeight: style.minHeight,
+              color: style.color, background: style.backgroundColor, appearance: style.appearance,
+              choiceWidth: ['checkbox', 'radio'].includes(input.type) ? input.getBoundingClientRect().width : null,
+            };
+          };
+          const excluded = [];
+          for (const type of ['checkbox', 'radio', 'range', 'color', 'file', 'hidden', 'button', 'submit', 'reset', 'image']) {
+            for (const state of ['normal', 'invalid', 'disabled']) {
+              const label = document.createElement('label');
+              const input = document.createElement('input');
+              input.type = type;
+              input.disabled = state === 'disabled';
+              if (state === 'invalid') input.setAttribute('aria-invalid', 'true');
+              label.append(input);
+              host.append(label);
+              const before = appearance(input);
+              host.className = 'design-field';
+              excluded.push({ type, state, before, after: appearance(input) });
+              host.className = '';
+              label.remove();
+            }
+          }
+          host.className = 'design-field';
+          const included = [];
+          for (const type of ['', 'text', 'search', 'email', 'url', 'tel', 'password', 'number', 'date', 'datetime-local', 'month', 'week', 'time']) {
+            const input = document.createElement('input');
+            if (type) input.type = type;
+            host.append(input);
+            const normal = appearance(input);
+            input.setAttribute('aria-invalid', 'true');
+            const invalid = getComputedStyle(input).borderTopColor;
+            input.disabled = true;
+            included.push({ type, normal, invalid, disabled: getComputedStyle(input).backgroundColor });
+            input.remove();
+          }
+          host.remove();
+          return { excluded, included };
+        });
+        for (const item of results.excluded) {
+          expect(item.after, `${item.type} / ${item.state}`).toEqual(item.before);
+        }
+        for (const item of results.included) {
+          expect(item.normal.padding, item.type).toBe('8px 12px');
+          expect(item.normal.radius, item.type).toBe('8px');
+          expect(item.normal.minHeight, item.type).toBe(width < 680 || touch ? '44px' : '40px');
+          expect(item.invalid, item.type).toBe('rgb(185, 28, 28)');
+          expect(item.disabled, item.type).toBe('rgb(248, 250, 252)');
+        }
+      } finally {
+        await context.close();
+      }
+    });
+  }
 
   test('native keyboard targets, disabled actions, associated help/errors, and exact table remain usable', async ({ page }) => {
     await openPrimitives(page);
@@ -116,6 +229,8 @@ test.describe('DR-V1 shared visual primitives', () => {
     const table = page.getByRole('region', { name: '保存値の表を横スクロール' });
     await page.getByLabel('表示対象', { exact: true }).focus();
     await page.keyboard.press('Tab');
+    await expect(page.getByLabel('注記', { exact: true })).toBeFocused();
+    await page.keyboard.press('Tab');
     await expect(table).toBeFocused();
     await expect(table).toHaveCSS('outline-width', '2px');
     await expect(table.getByRole('table')).toHaveAccessibleName('合成データ / 2026-08-21 / 数値・利用不可・未収集を区別');
@@ -128,7 +243,7 @@ test.describe('DR-V1 shared visual primitives', () => {
       await openPrimitives(page);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
       await expect(page.locator('.panel').first()).toHaveCSS('padding', width < 680 ? '16px' : '24px');
-      const targets = await page.locator('button, input, select, a').evaluateAll(elements => (
+      const targets = await page.locator('button, input, select, textarea, a').evaluateAll(elements => (
         elements.map(element => ({
           tag: element.tagName,
           width: element.getBoundingClientRect().width,
@@ -162,7 +277,7 @@ test.describe('DR-V1 shared visual primitives', () => {
       const page = await context.newPage();
       await openPrimitives(page);
       expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
-      for (const box of await page.locator('button, input, select, a').evaluateAll(elements => (
+      for (const box of await page.locator('button, input, select, textarea, a').evaluateAll(elements => (
         elements.map(element => ({ width: element.getBoundingClientRect().width, height: element.getBoundingClientRect().height }))
       ))) {
         expect(box.width).toBeGreaterThanOrEqual(44);

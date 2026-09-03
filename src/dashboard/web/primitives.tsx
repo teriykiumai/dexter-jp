@@ -14,8 +14,18 @@ export function DashboardDesign({ children }: { children: ReactNode }) {
   return <div className="dashboard-design">{children}</div>;
 }
 
-export function Value({ value }: { value: DisplayValue }) {
-  return <span className={value.available ? undefined : 'unavailable'}>{value.text}</span>;
+export type ValueKind = 'text' | 'data';
+export type MetricGridItem = DashboardMetric & { valueKind?: ValueKind };
+
+export function Value({ value, kind = 'text' }: { value: DisplayValue; kind?: ValueKind }) {
+  return (
+    <span
+      className={value.available ? 'design-value' : 'design-value unavailable'}
+      data-kind={value.available ? kind : 'text'}
+    >
+      {value.text}
+    </span>
+  );
 }
 
 export type OpenGlossary = (
@@ -72,7 +82,7 @@ export function Card({
 }
 
 export function MetricGrid({ metrics, guidance = {}, onOpenGuidance }: {
-  metrics: DashboardMetric[];
+  metrics: MetricGridItem[];
   guidance?: Readonly<Record<string, DashboardGlossaryTermId>>;
   onOpenGuidance?: OpenGlossary;
 }) {
@@ -88,7 +98,7 @@ export function MetricGrid({ metrics, guidance = {}, onOpenGuidance }: {
                 ? <GuidanceButton term={term} onOpen={onOpenGuidance} />
                 : null}
             </dt>
-            <dd><Value value={metric.value} /></dd>
+            <dd><Value value={metric.value} kind={metric.valueKind} /></dd>
             {metric.note ? <small>{metric.note}</small> : null}
           </div>
         );

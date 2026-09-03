@@ -10,6 +10,8 @@ import {
   MetricGrid,
   StatusNotice,
   TableScroll,
+  Value,
+  type ValueKind,
 } from './primitives.js';
 import { contrastRatio, PRIMITIVE_METRICS } from './primitives.test-fixtures.js';
 
@@ -115,6 +117,37 @@ describe('shared Dashboard primitives', () => {
     expect(document.querySelectorAll('dd .unavailable').length).toBe(2);
     expect(document.querySelector('small')?.textContent).toBe(before[0]!.note!);
     expect(PRIMITIVE_METRICS).toEqual(before);
+  });
+
+  test('Value defaults to text, requires an explicit data role, and keeps missing states as text', () => {
+    const cases: Array<{ text: string; available: boolean; kind?: ValueKind; expected: ValueKind }> = [
+      { text: '0', available: true, expected: 'text' },
+      { text: '保存済み', available: true, expected: 'text' },
+      { text: '0', available: true, kind: 'data', expected: 'data' },
+      { text: '7203', available: true, kind: 'data', expected: 'data' },
+      { text: 'snapshot_20260821', available: true, kind: 'data', expected: 'data' },
+      { text: '2026-08-21', available: true, kind: 'data', expected: 'data' },
+      { text: '利用不可', available: false, kind: 'data', expected: 'text' },
+      { text: '未収集', available: false, kind: 'data', expected: 'text' },
+    ];
+    for (const { text, available, kind, expected } of cases) {
+      const value = { text, available };
+      const { document } = parseHTML(renderToStaticMarkup(createElement(Value, { value, kind })));
+      const span = document.querySelector('span')!;
+      expect(span.getAttribute('data-kind')).toBe(expected);
+      expect(span.classList.contains('unavailable')).toBe(!available);
+      expect(span.textContent).toBe(text);
+      expect(value).toEqual({ text, available });
+    }
+  });
+
+  test('MetricGrid forwards explicit content roles without guessing from labels or values', () => {
+    const { document } = parseHTML(renderToStaticMarkup(createElement(MetricGrid, { metrics: [
+      ...PRIMITIVE_METRICS,
+      { label: 'numeric-looking text', value: { text: '0', available: true } },
+    ] })));
+    expect([...document.querySelectorAll('dd > span')].map(item => item.getAttribute('data-kind')))
+      .toEqual(['data', 'text', 'text', 'data', 'data', 'text', 'text']);
   });
 
   test('availability stays two explicit counts and does not invent a zero-count warning', () => {

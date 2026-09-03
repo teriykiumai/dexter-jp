@@ -392,11 +392,41 @@ The boundary is a code-level migration tool, not a user theme option.
 
 Shared foundation additions are native `Button` variants, text-labelled
 `StatusBadge` / `StatusNotice`, and the named, keyboard-focusable `TableScroll`.
-The `design-field` pattern reuses native input/select/textarea controls with a
-visible label and associated help/error text. `design-content`, `design-stack`,
-and `design-actions` apply the sizing and spacing above; `--type-*` and named
-control/focus/dialog aliases encode only the existing roles and geometry. These
-are implementation names, not another visual authority or a second design scale.
+`Value` defaults to the UI family. Callers explicitly select `kind="data"` for
+numbers, tickers, IDs, or dates; `MetricGridItem.valueKind` passes the same content
+role through `MetricGrid`. Unavailable/uncollected values always use UI text even
+when the available value's role is data. Never infer a role from a formatted string,
+its label, or whether it resembles a number. `Value` retains its containing type
+size; `MetricGrid` uses small-body text for state/category values and exact-data
+typography for explicitly selected data values. Availability semantics are unchanged.
+
+`design-metadata` is UI label/metadata typography by default, including Japanese
+metadata. Its explicit `data-kind="data"` variant is only for compact data such as
+an ID or date, not Japanese explanations. Split mixed metadata into labelled text
+and a data span rather than applying monospace to a whole sentence.
+
+Table cells default to left-aligned small-body UI text. Apply `numeric-cell` to both
+the header and body cells of a numeric column: the header retains UI label typography,
+while available body numbers use right-aligned exact-data typography with tabular
+numerals. Use `Value` for unavailable/uncollected placeholders in numeric cells so
+their text keeps the UI family. Identity and explanatory columns remain left-aligned;
+an explicitly data-typed `Value` can render a ticker/ID without changing alignment.
+`identity-cell` is an optional identity-emphasis alias, not an escape hatch required
+for explanatory text.
+
+The `design-field` rectangular-control pattern covers only native select/textarea
+and text-like inputs: omitted type, `text`, `search`, `email`, `url`, `tel`,
+`password`, `number`, `date`, `datetime-local`, `month`, `week`, and `time`.
+It requires a visible label and associated help/error text. Checkbox, radio, range,
+color, file, hidden, and button-like inputs are outside this pattern; none of its
+control geometry, invalid, disabled, or touch-sizing rules apply to them. Their
+complete accessible patterns remain part of the owning surface's migration, not an
+implicit rectangular-input fallback.
+
+`design-content`, `design-stack`, and `design-actions` apply the sizing and spacing
+above; `--type-*` and named control/focus/dialog aliases encode only the existing
+roles and geometry. These are implementation names, not another visual authority
+or a second design scale.
 
 DR-V1 tests the light primitives in a test-only composition while production routes
 continue to use their legacy appearance and the same shared semantic components.

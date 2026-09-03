@@ -1,6 +1,6 @@
 # Dexter JP Dashboard Refresh Handoff
 
-**Status:** DR-0 merged; DR-V1 candidate implementation awaiting independent review
+**Status:** DR-0 merged; DR-V1 candidate implementation awaiting independent re-review
 and merge. DR-V2 and later steps have not started.
 
 **Last Updated:** 2026-09-03
@@ -75,11 +75,20 @@ feat/dashboard-visual-primitives-step1
 
 DR-V1 implements `DESIGN.md` tokens and scoped light primitives. The existing
 `Card`, `MetricGrid`, `AvailabilityBadges`, `Value`, and `GuidanceButton` move to
-`primitives.tsx` without changing their semantic output or interaction ownership.
+`primitives.tsx` while preserving semantic content and interaction ownership.
 Native Button variants, labelled statuses, and a keyboard table region provide
 reusable foundations. Exact tokens, native field styling, safe targets, focus,
 reduced-motion handling, and the migration boundary are covered by unit/browser
 tests and a test-only visual composition.
+
+PR #95 review corrections make value content roles explicit: text/state remains UI
+typography, numeric/ID/date values opt in through `Value.kind` or
+`MetricGridItem.valueKind`, and unavailable values never inherit the data family.
+Japanese metadata and compact data metadata are distinct. Tables default to
+left-aligned UI text with an explicit numeric-column class on headers and body
+cells. Native rectangular-field rules have a text-like input allowlist and do not
+restyle checkbox/radio or other non-text controls. `DESIGN.md` records these shared
+usage contracts; the corrections do not activate a production surface migration.
 
 The production Watchlist and six-tab detail retain their legacy appearance. The
 new light boundary is not activated around a partially migrated page, and no
@@ -190,11 +199,11 @@ modules belong to DR-M1a-c/DR-E1, and user instructions belong to DR-X.
 
 | Validation | Result |
 | --- | --- |
-| focused `bun test src/dashboard/web/primitives.test.ts` | 9 passed, 0 failed |
-| `bun test` | 934 passed, 0 failed |
+| focused `bun test src/dashboard/web/primitives.test.ts` | 11 passed, 0 failed |
+| `bun test` | 936 passed, 0 failed |
 | `bun run typecheck` | local Bun launcher stopped before TypeScript execution; see below |
 | `bun node_modules/typescript/bin/tsc --noEmit` | passed using the same installed compiler |
-| `bun run test:dashboard-browser` | all 50 passed (38 inherited + 12 primitive tests) |
+| `bun run test:dashboard-browser` | all 55 passed (38 inherited + 17 primitive tests) |
 | `git diff --check` | passed; Git emitted only the checkout's LF-to-CRLF conversion warning |
 | primitive visual QA | 320, 390, 680, 768, 980, 1024, 1280px; no document overflow or overlapping controls |
 
@@ -208,7 +217,12 @@ treated as a canonical-command pass.
 DR-V1 exercises actual React-rendered primitives in a local test-only composition,
 including computed color contrast, native disabled behavior, keyboard focus,
 associated field help/errors, touch targets on wide coarse-pointer devices, exact
-table scrolling, and reduced motion. The full configured suite separately verifies
+table scrolling, and reduced motion. Review regressions cover computed families
+for zero, Japanese states, IDs, dates, and mixed metadata; numeric versus explanatory
+header/body alignment; and text-like input inclusion/non-text exclusion in normal,
+invalid, disabled, narrow, and coarse-pointer states. The original two MAJOR
+findings were reproduced by failing browser tests before their fixes. The full
+configured suite separately verifies
 the existing six-tab journeys, glossary, Snapshot V1-V9, Comparison, Radar, reload
 races, and Strategy Validation behavior. No external provider request is part of
 these tests. New-route visual migration is not claimed complete by these results.
