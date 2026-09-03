@@ -26,7 +26,7 @@ describe('Dashboard Refresh page ownership', () => {
       for (const tab of ['', '&tab=unknown', '&tab=market-overview', '&tab=report']) {
         const search = `?ticker=${ticker}${tab}`;
         expect(parseDashboardPageRoute(search)).toEqual({ kind: 'detail', ticker });
-        expect(parseDetailTab(search)).toBe('report');
+        expect(parseDetailTab(search)).toBe(tab === '&tab=market-overview' ? 'market-overview' : 'report');
       }
     }
     expect(parseDashboardPageRoute('?ticker=7203&ticker=6758'))

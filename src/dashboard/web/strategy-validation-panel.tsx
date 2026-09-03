@@ -1,3 +1,4 @@
+import { Button, Value } from './primitives.js';
 import {
   useCallback,
   useEffect,
@@ -114,16 +115,21 @@ function limitQueueOrderRole(orderSide: 'buy' | 'sell'): 'エントリー側' | 
   return orderSide === 'buy' ? 'エントリー側' : 'ストップ側';
 }
 
+// The caller owns the content role, never a formatted label or numeric-looking string.
+function Data({ value }: { value: string | number | null | undefined }) {
+  return <Value kind="data" value={{ text: text(value), available: value !== null && value !== undefined }} />;
+}
+
 function KeyValueTable({ rows, label }: {
-  rows: readonly Readonly<[string, ReactNode]>[];
+  rows: readonly Readonly<[string, ReactNode, ('number' | 'data')?]>[];
   label: string;
 }) {
   return (
-    <div className="validation-table-scroll" tabIndex={0}>
+    <div className="validation-table-scroll table-scroll" aria-label={label} role="region" tabIndex={0}>
       <table className="validation-table key-value-table" aria-label={label}>
         <tbody>
-          {rows.map(([name, value]) => (
-            <tr key={name}><th scope="row">{name}</th><td>{value}</td></tr>
+          {rows.map(([name, value, kind]) => (
+            <tr key={name}><th scope="row">{name}</th><td className={kind === 'number' ? 'numeric-cell' : undefined}>{kind && (typeof value === 'number' || typeof value === 'string' || value == null) ? <Data value={value} /> : value}</td></tr>
           ))}
         </tbody>
       </table>
@@ -143,12 +149,12 @@ function FillTable({ fill, label }: {
   label: string;
 }) {
   return <KeyValueTable label={label} rows={[
-    ['日付', fill.date],
-    ['評価session', fill.evaluationSession],
-    ['保有日', fill.holdingDay],
+    ['日付', fill.date, 'data'],
+    ['評価session', fill.evaluationSession, 'number'],
+    ['保有日', fill.holdingDay, 'number'],
     ['注文', fill.order],
     ['方法', fill.method],
-    ['価格', fill.price],
+    ['価格', fill.price, 'number'],
   ]} />;
 }
 
@@ -179,7 +185,7 @@ function AmbiguityBound({
   return (
     <section className="validation-bound">
       <h5>{title}: {bound.kind}</h5>
-      <p>実現R {bound.realizedR}</p>
+      <p>実現R <Data value={bound.realizedR} /></p>
       <FillTable fill={bound.exitFill} label={`${title}のexit fill`} />
     </section>
   );
@@ -193,16 +199,16 @@ function OutcomeView({ value }: {
       <h4 id="validation-outcome-title">観測結果: {value.kind}</h4>
       <KeyValueTable label="観測結果の共通情報" rows={[
         ['Entry成立', text(value.entryProven)],
-        ['計画リスク', text(value.plannedRisk)],
-        ['実リスク', text(value.actualRisk)],
-        ['評価終了日', text(value.evaluationEndDate)],
+        ['計画リスク', value.plannedRisk, 'number'],
+        ['実リスク', value.actualRisk, 'number'],
+        ['評価終了日', <Data value={value.evaluationEndDate} />],
         ['Outcome algorithm', value.algorithmVersion],
         ['Limit queue', value.limitQueueVersion],
       ]} />
       {value.entryFill ? <FillTable fill={value.entryFill} label="Entry fill" /> : null}
       {value.kind === 'stop_hit' || value.kind === 'target_hit' ? (
         <>
-          <p className="validation-exact-value">実現R {value.realizedR}</p>
+          <p className="validation-exact-value">実現R <Data value={value.realizedR} /></p>
           <FillTable fill={value.exitFill} label="Exit fill" />
         </>
       ) : null}
@@ -215,7 +221,7 @@ function OutcomeView({ value }: {
       ) : null}
       {value.kind === 'ambiguous_intraday' ? (
         <div className="validation-ambiguity">
-          <p>同日内順序が確定できません。曖昧日: {value.ambiguityDate}</p>
+          <p>同日内順序が確定できません。曖昧日: <Data value={value.ambiguityDate} /></p>
           <AmbiguityBound title="悲観境界" bound={value.pessimistic} />
           <AmbiguityBound title="楽観境界" bound={value.optimistic} />
         </div>
@@ -225,10 +231,10 @@ function OutcomeView({ value }: {
           <p className="validation-unavailable">利用不可 ({value.reason})</p>
           {value.reason === 'limit_queue_ambiguous' && value.limitQueueEvidence ? (
             <KeyValueTable label="Limit queue evidence" rows={[
-              ['日付', value.limitQueueEvidence.date],
+              ['日付', value.limitQueueEvidence.date, 'data'],
               ['注文役割', limitQueueOrderRole(value.limitQueueEvidence.orderSide)],
               ['fill kind', value.limitQueueEvidence.fillKind],
-              ['選択価格', value.limitQueueEvidence.selectedFillPrice],
+              ['選択価格', value.limitQueueEvidence.selectedFillPrice, 'number'],
               ['境界', `${value.limitQueueEvidence.boundaryKind} / ${value.limitQueueEvidence.boundaryPrice}`],
               ['source flag', value.limitQueueEvidence.sourceFlag],
             ]} />
@@ -253,31 +259,31 @@ function RunView({ run, ticker }: { run: StrategyValidationRunV1; ticker: string
         </p>
       ) : null}
       <KeyValueTable label="Run metadata" rows={[
-        ['Run ID', run.runId],
+        ['Run ID', run.runId, 'data'],
         ['Mode', run.mode],
         ['Confidence', run.confidence],
         ['Campaign', text(run.campaignName)],
-        ['開始', run.startedAt],
-        ['受付', run.acceptedAt],
-        ['完了', run.completedAt],
-        ['Outcome基準session', text(run.outcomeAsOfSession)],
+        ['開始', run.startedAt, 'data'],
+        ['受付', run.acceptedAt, 'data'],
+        ['完了', run.completedAt, 'data'],
+        ['Outcome基準session', <Data value={run.outcomeAsOfSession} />],
         ['候補生成policy', text(run.candidateGenerationPolicy)],
         ['終了状態', run.terminationState],
-        ['試行回数', run.execution.attemptCount],
-        ['Cache hit', run.execution.cacheHitCount],
+        ['試行回数', run.execution.attemptCount, 'number'],
+        ['Cache hit', run.execution.cacheHitCount, 'number'],
         ['Duration', formatDuration(run.execution.durationMs)],
       ]} />
       <h4>Track coverage</h4>
       <KeyValueTable label="Track coverage" rows={[
-        ['Requested anchors', run.aggregation.track.requestedAnchorCount],
-        ['Anchor unavailable', run.aggregation.track.anchorUnavailableCount],
-        ['Candidate-bearing anchors', run.aggregation.track.candidateBearingAnchorCount],
-        ['Entered anchors', run.aggregation.track.enteredAnchorCount],
+        ['Requested anchors', run.aggregation.track.requestedAnchorCount, 'number'],
+        ['Anchor unavailable', run.aggregation.track.anchorUnavailableCount, 'number'],
+        ['Candidate-bearing anchors', run.aggregation.track.candidateBearingAnchorCount, 'number'],
+        ['Entered anchors', run.aggregation.track.enteredAnchorCount, 'number'],
         ['Anchor coverage', rateText(run.aggregation.track.anchorCoverage)],
         ['Eligible-anchor entry rate', rateText(run.aggregation.track.eligibleAnchorEntryRate)],
         ['Requested-anchor entry rate', rateText(run.aggregation.track.requestedAnchorEntryRate)],
       ]} />
-      <div className="validation-table-scroll" tabIndex={0}>
+      <div className="validation-table-scroll table-scroll" aria-label="Candidate strata（保存済み集計）" role="region" tabIndex={0}>
         <table className="validation-table validation-strata-table">
           <caption>Candidate strata（保存済み集計）</caption>
           <thead><tr>
@@ -321,15 +327,15 @@ function CaseView({ value }: { value: StrategyValidationCaseV1 }) {
     <section className="validation-case-detail" aria-labelledby="validation-case-heading">
       <h3 id="validation-case-heading" tabIndex={-1}>ケース詳細</h3>
       <KeyValueTable label="Case metadata" rows={[
-        ['Case ID', value.caseId],
-        ['Run ID', value.runId],
-        ['Ticker', value.ticker],
+        ['Case ID', value.caseId, 'data'],
+        ['Run ID', value.runId, 'data'],
+        ['Ticker', value.ticker, 'data'],
         ['Case kind', value.caseKind],
         ['Confidence', value.confidence],
-        ['Anchor date', value.anchorDate],
-        ['Decision date', value.decisionDate],
-        ['Strategy data date', text(value.strategyDataDate)],
-        ['Outcome基準session', text(value.outcomeAsOfSession)],
+        ['Anchor date', value.anchorDate, 'data'],
+        ['Decision date', value.decisionDate, 'data'],
+        ['Strategy data date', <Data value={value.strategyDataDate} />],
+        ['Outcome基準session', <Data value={value.outcomeAsOfSession} />],
         ['候補生成policy', text(value.candidateGenerationPolicy)],
       ]} />
       {value.caseKind === 'anchor_unavailable' ? (
@@ -337,20 +343,20 @@ function CaseView({ value }: { value: StrategyValidationCaseV1 }) {
       ) : (
         <>
           <KeyValueTable label="Candidate" rows={[
-            ['Candidate ID', value.candidateId],
+            ['Candidate ID', value.candidateId, 'data'],
             ['Identity version', value.candidateIdentityVersion],
-            ['Duplicate ordinal', value.duplicateOrdinal],
-            ['Entry', `${value.candidate.entry.price} / ${value.candidate.entry.reason}`],
-            ['Stop', `${value.candidate.stop.price} / ${value.candidate.stop.reason}`],
-            ['Target', `${value.candidate.target.price} / ${value.candidate.target.reason}`],
+            ['Duplicate ordinal', value.duplicateOrdinal, 'number'],
+            ['Entry', <><Data value={value.candidate.entry.price} /> / {value.candidate.entry.reason}</>],
+            ['Stop', <><Data value={value.candidate.stop.price} /> / {value.candidate.stop.reason}</>],
+            ['Target', <><Data value={value.candidate.target.price} /> / {value.candidate.target.reason}</>],
             ['Resistance tier', value.resistanceEvidenceTier],
             ['Resistance digests', value.resistanceEvidenceSnapshotDigests.length
-              ? value.resistanceEvidenceSnapshotDigests.join(' / ')
+              ? <Data value={value.resistanceEvidenceSnapshotDigests.join(' / ')} />
               : 'なし'],
           ]} />
           <h4>Tick evidence</h4>
           <KeyValueTable label="Tick evidence" rows={[
-            ['Effective date', value.tickEvidence.effectiveDate],
+            ['Effective date', value.tickEvidence.effectiveDate, 'data'],
             ['Category', text(value.tickEvidence.category)],
             ['利用不可理由', text(value.tickEvidence.unavailableReason)],
             ...Object.entries(value.tickEvidence.levels).map(([level, evidence]) => [
@@ -363,17 +369,17 @@ function CaseView({ value }: { value: StrategyValidationCaseV1 }) {
       )}
       <h4>Evidence manifest</h4>
       <KeyValueTable label="Evidence manifest metadata" rows={[
-        ['Schema', value.sourceManifest.schemaVersion],
+        ['Schema', value.sourceManifest.schemaVersion, 'number'],
         ['Role version', value.sourceManifest.roleVersion],
-        ['Started at', value.sourceManifest.startedAt],
-        ['Outcome基準session', text(value.sourceManifest.outcomeAsOfSession)],
+        ['Started at', value.sourceManifest.startedAt, 'data'],
+        ['Outcome基準session', <Data value={value.sourceManifest.outcomeAsOfSession} />],
       ]} />
-      <div className="validation-table-scroll" tabIndex={0}>
+      <div className="validation-table-scroll table-scroll" aria-label="Source references" role="region" tabIndex={0}>
         <table className="validation-table">
           <caption>Source references</caption>
           <thead><tr><th>Role</th><th>Digest</th></tr></thead>
           <tbody>{value.sourceManifest.sources.length ? value.sourceManifest.sources.map(source => (
-            <tr key={source.digest}><td>{source.role}</td><td>{source.digest}</td></tr>
+            <tr key={source.digest}><td>{source.role}</td><td><Data value={source.digest} /></td></tr>
           )) : <tr><td colSpan={2}>参照sourceなし</td></tr>}</tbody>
         </table>
       </div>
@@ -400,17 +406,17 @@ function JobView({
         状態 {job.status} / request {job.progress.attemptCount} / case {job.progress.caseCount}
       </div>
       <KeyValueTable label="Job details" rows={[
-        ['Job ID', job.jobId],
-        ['Run ID', job.runId],
-        ['受付', job.acceptedAt],
-        ['Deadline', job.executionDeadline],
-        ['Outcome基準session', text(job.outcomeAsOfSession)],
+        ['Job ID', job.jobId, 'data'],
+        ['Run ID', job.runId, 'data'],
+        ['受付', job.acceptedAt, 'data'],
+        ['Deadline', job.executionDeadline, 'data'],
+        ['Outcome基準session', <Data value={job.outcomeAsOfSession} />],
         ['Failure', job.failure ? `${job.failure.code}: ${job.failure.message}` : 'なし'],
       ]} />
       <div className="validation-actions">
-        {cancellable ? <button disabled={busy} type="button" onClick={onCancel}>実行をキャンセル</button> : null}
+        {cancellable ? <Button disabled={busy} type="button" onClick={onCancel}>実行をキャンセル</Button> : null}
         {job.status === 'completed' ? (
-          <button disabled={busy} type="button" onClick={onOpenResults}>結果を明示的に開く</button>
+          <Button disabled={busy} type="button" onClick={onOpenResults}>結果を明示的に開く</Button>
         ) : null}
       </div>
     </section>
@@ -831,7 +837,7 @@ export function StrategyValidationPanel({
           ))}
         </fieldset>
         {mode === 'snapshot' ? (
-          <label className="validation-field">
+          <label className="validation-field design-field">
             保存済みSnapshot
             <select value={snapshotId} onChange={event => {
               setSnapshotId(event.currentTarget.value);
@@ -846,30 +852,30 @@ export function StrategyValidationPanel({
             </select>
           </label>
         ) : (
-          <label className="validation-field">
+          <label className="validation-field design-field">
             Campaign JSON（最大1 MiB）
-            <input accept="application/json,.json" onChange={event => void readManifest(event)} type="file" />
-            {manifestMessage ? <small>{manifestMessage}</small> : null}
+            <input aria-describedby={manifestMessage ? 'validation-manifest-message' : undefined} accept="application/json,.json" onChange={event => void readManifest(event)} type="file" />
+            {manifestMessage ? <small id="validation-manifest-message">{manifestMessage}</small> : null}
           </label>
         )}
-        <button disabled={operationBusy || session === null} onClick={() => void createPreflight()} type="button">
+        <Button disabled={operationBusy || session === null} onClick={() => void createPreflight()} type="button">
           ローカルPreflightを実行
-        </button>
+        </Button>
         {preflight ? (
           <section className="validation-confirmation" aria-labelledby="validation-confirmation-heading">
             <h3 id="validation-confirmation-heading">外部送信・利用枠の確認</h3>
             <p>このjobはticker/date selectorを設定済みJ-Quants accountへ送信し、subscription quotaを消費する可能性があります。</p>
             <KeyValueTable label="Preflight estimate" rows={[
-              ['入力digest', preflight.inputDigest],
-              ['Ticker数', preflight.tickerCount],
-              ['基準日数', preflight.anchorCount],
-              ['最小request数', preflight.estimatedMinimumAttempts],
+              ['入力digest', preflight.inputDigest, 'data'],
+              ['Ticker数', preflight.tickerCount, 'number'],
+              ['基準日数', preflight.anchorCount, 'number'],
+              ['最小request数', preflight.estimatedMinimumAttempts, 'number'],
               ['最小dispatch時間', formatDuration(preflight.minimumDispatchDurationMs)],
               ['Rate', `${preflight.requestsPerMinute} requests/min (${preflight.rateLimitVersion})`],
               ['Request timeout', formatDuration(preflight.requestTimeoutMs)],
               ['Execution budget', formatDuration(preflight.executionBudgetMs)],
-              ['Hard maximum attempts', preflight.hardMaximumAttempts],
-              ['有効期限', preflight.expiresAt],
+              ['Hard maximum attempts', preflight.hardMaximumAttempts, 'number'],
+              ['有効期限', preflight.expiresAt, 'data'],
             ]} />
             <p>最小値にはpagination、retry、response latency、追加で必要になる証拠取得を含みません。1回ごとの金額は推定しません。</p>
             {preflight.warnings.length ? <ul>{preflight.warnings.map(
@@ -879,7 +885,7 @@ export function StrategyValidationPanel({
               <input checked={confirmed} onChange={event => setConfirmed(event.currentTarget.checked)} type="checkbox" />
               上記の外部送信と利用枠消費の可能性を確認しました
             </label>
-            <button disabled={!confirmed || operationBusy} onClick={() => void startJob()} type="button">Jobを開始</button>
+            <Button disabled={!confirmed || operationBusy} onClick={() => void startJob()} type="button">Jobを開始</Button>
           </section>
         ) : null}
         {operationIssue ? <p className="validation-error" role="alert">{operationIssue}</p> : null}
@@ -900,18 +906,18 @@ export function StrategyValidationPanel({
         {listIssue ? <p className="validation-error" role="alert">{listIssue}</p> : null}
         <div className="validation-run-list">
           {runs.length ? runs.map(item => (
-            <button
+            <Button
               aria-pressed={selection.kind === 'valid' && selection.runId === item.runId}
               key={item.runId}
               onClick={() => navigate({ kind: 'valid', runId: item.runId, caseId: null }, 'run')}
               type="button"
             >
               {strategyValidationRunLabel(item)}
-            </button>
+            </Button>
           )) : <p>この銘柄を含む保存済みrunはありません。</p>}
-          {runsCursor ? <button disabled={loadingMoreRuns} onClick={() => void loadMoreRuns()} type="button">Runをさらに読み込む</button> : null}
+          {runsCursor ? <Button disabled={loadingMoreRuns} onClick={() => void loadMoreRuns()} type="button">Runをさらに読み込む</Button> : null}
           {selection.kind !== 'none' ? (
-            <button onClick={() => navigate({ kind: 'none' })} type="button">Run選択を解除</button>
+            <Button onClick={() => navigate({ kind: 'none' })} type="button">Run選択を解除</Button>
           ) : null}
         </div>
         {selectionIssue ? (
@@ -926,25 +932,25 @@ export function StrategyValidationPanel({
         {run ? (
           <section className="validation-case-list" aria-labelledby="validation-case-list-heading">
             <h3 id="validation-case-list-heading">{ticker}のケース一覧</h3>
-            <div className="validation-table-scroll" tabIndex={0}>
+            <div className="validation-table-scroll table-scroll" aria-label="現在銘柄のケース一覧" role="region" tabIndex={0}>
               <table className="validation-table">
                 <thead><tr><th>Case ID</th><th>基準日</th><th>種別</th><th>Confidence</th><th>概要</th><th>操作</th></tr></thead>
                 <tbody>{cases.map(item => (
                   <tr key={item.caseId}>
-                    <td>{item.caseId}</td><td>{item.anchorDate}</td><td>{item.caseKind}</td><td>{item.confidence}</td>
+                    <td><Data value={item.caseId} /></td><td><Data value={item.anchorDate} /></td><td>{item.caseKind}</td><td>{item.confidence}</td>
                     <td>{strategyValidationCaseLabel(item)}</td>
-                    <td><button
+                    <td><Button
                       aria-label={`${strategyValidationCaseLabel(item)} / ${item.caseId} を開く`}
                       onClick={() => navigate({
                         kind: 'valid', runId: run.runId, caseId: item.caseId,
                       }, 'case')}
                       type="button"
-                    >ケースを開く</button></td>
+                    >ケースを開く</Button></td>
                   </tr>
                 ))}</tbody>
               </table>
             </div>
-            {casesCursor ? <button disabled={loadingMoreCases} onClick={() => void loadMoreCases()} type="button">Caseをさらに読み込む</button> : null}
+            {casesCursor ? <Button disabled={loadingMoreCases} onClick={() => void loadMoreCases()} type="button">Caseをさらに読み込む</Button> : null}
           </section>
         ) : null}
         {selectedCase ? <CaseView value={selectedCase} /> : null}
