@@ -4,7 +4,7 @@
 
 **Status:** Candidate — requires independent review and merge before runtime work
 
-**Last Updated:** 2026-09-02
+**Last Updated:** 2026-09-03
 
 ## 1. Purpose and authority
 
@@ -110,9 +110,10 @@ UI until the named gate replaces the unknown contract with verified facts.
 
 | Source ID | Module / role | Primary endpoint / definition | Registry status | Product gate |
 | --- | --- | --- | --- | --- |
-| `jquants_v2_equities_bars_daily` | Technical and 1321/2633 EOD bars | J-Quants `/v2/equities/bars/daily` | approved, reverified in DR-T2/DR-E1 | configured Standard-or-higher account |
-| `jquants_v2_markets_calendar` | Technical session envelope | J-Quants `/v2/markets/calendar` | approved inherited source, reverified in DR-T2 | configured Standard-or-higher account |
-| `jquants_v2_equities_master` | ticker/security identity and instrument basis | the existing J-Quants security-master contract | approved inherited source, reverified in DR-T2/DR-E1 | configured Standard-or-higher account |
+| `jquants_v2_equities_bars_daily` | Technical and 1321/2633 EOD bars | J-Quants `/v2/equities/bars/daily` | approved, reverified in DR-T0/DR-E1 | configured Standard-or-higher account |
+| `jquants_v2_markets_calendar` | Technical session envelope | J-Quants `/v2/markets/calendar` | approved inherited source, reverified in DR-T0 | configured Standard-or-higher account |
+| `jquants_v2_equities_master` | current ticker/security identity and instrument basis | J-Quants `/v2/equities/master` at the eligible end date | approved inherited source, reverified in DR-T0/DR-E1 | configured Standard-or-higher account |
+| `jquants_v2_instrument_lifetime_candidate` | effective-dated current-instrument listing segment for Technical and 1321/2633 | individual J-Quants listed-issue history; exact bounded continuity proof is frozen by DR-T0 | **candidate; DR-T0 gate only** | individual Standard coverage and request shape are unverified until DR-T0 |
 | `jquants_v2_margin_tse_aggregate_candidate` | TSE aggregate and 1570 margin quantities | post-migration individual J-Quants margin-outstanding contract | **candidate; DR-M0 only** | individual Standard entitlement is unverified until DR-M0 |
 | `jquants_v2_market_short_ratio` | TSE short-selling turnover ratio | J-Quants `/v2/markets/short-ratio` | approved inherited source, exact coverage frozen in DR-M0 | configured Standard-or-higher account |
 | `jquants_v2_tokyo_nagoya_foreign_flow` | foreign-investor flow | J-Quants `/v2/equities/investor-types`, `TokyoNagoya` | approved inherited source | configured Standard-or-higher account |
@@ -154,19 +155,46 @@ RegistrySourceInputV1 = {
 SourceInputV1 = ProviderSourceInputV1 | RegistrySourceInputV1
 ```
 
-`inputDigest` is `sha256:<64 lowercase hex>` over `CanonicalJsonV1` of that input's
-strict sanitized observations plus source/mapping/revision/query/unit identities. It
-excludes `fetchedAt`, credentials, headers, cursors, request IDs, absolute paths, and
-raw envelopes. `sourceInputs` is sorted by `role`, `sourceId`, then provider
+`inputDigest` is `sha256:<64 lowercase hex>` over `CanonicalJsonV1` of this one
+strict, writer-side preimage:
+
+```text
+SourceInputDigestPayloadV1 = {
+  kind: "dexter_market_source_input", version: 1,
+  identity:
+    { kind: "provider", role, sourceId, sourceContractVersion,
+      sourceMappingVersion, sourceRevisionIds, endpoint,
+      normalizedQueryIdentity, dataDateOrEffectiveRange,
+      publishedDate, publishedAt, cadence, unitAndCoverageBasis }
+  | { kind: "registry", role, sourceId, sourceContractVersion,
+      registryVersion, sourceRevisionIds, registryId,
+      effectiveRange, unitAndCoverageBasis },
+  observations // exact sanitized, ordered rows of the pinned source mapping
+}
+```
+
+The source mapping owns the closed row type and canonical row order; this is not a
+raw-response object or a recursive selection of arbitrary fields. Revision ID arrays
+are unique and lexically sorted. The input preimage excludes
+`inputDigest`, `asOfCutoff`, fetch/verification instants, entitlement class, page
+boundaries/counts, credentials, headers, cursors, request IDs, and paths. Eligibility
+is applied before hashing the normalized rows. A schedule input also hashes its
+resolved expected-observation identities, including any intraday publication
+boundary; calculations must not consult a cutoff-dependent input absent from the
+envelope. Read-time validation recomputes the
+root envelope and artifact digest from the stored manifest; it does not claim to
+recompute an input's observation digest without those source rows or refetch them.
+`sourceInputs` is sorted by `role`, `sourceId`, then provider
 `normalizedQueryIdentity` or registry `registryId`. Duplicate roles or inputs are
 invalid. A date-only source publication is stored in `publishedDate`; it is never
 converted to midnight and stored as `publishedAt`. `publishedAt` is non-null only
 when the source directly proves an instant.
 
-Technical has exactly the roles `security_master`, `trading_calendar`, and
-`daily_bars`. The 1321 EOD module has exactly `security_master_1321`,
-`daily_bars_1321`, and `corporate_action_registry_1321`. The relative ETF module has
-exactly those three roles plus `security_master_2633`, `daily_bars_2633`, and
+Technical has exactly the roles `security_master`, `instrument_lifetime`,
+`trading_calendar`, and `daily_bars`. The 1321 EOD module has exactly
+`security_master_1321`, `instrument_lifetime_1321`, `daily_bars_1321`, and
+`corporate_action_registry_1321`. The relative ETF module has exactly those four
+roles plus `security_master_2633`, `instrument_lifetime_2633`, `daily_bars_2633`, and
 `corporate_action_registry_2633`. A correction to any input therefore changes the
 root source digest even if the bar or margin rows are unchanged.
 
@@ -179,22 +207,67 @@ After DR-M0 replaces the candidate mapping, the TSE aggregate uses
 foreign flow uses `trading_calendar`, `investor_type_schedule_registry`, and
 `investor_type_rows`. These role sets are closed for V1.
 
-The artifact-level `sourcePayloadDigest` hashes `CanonicalJsonV1` of the artifact
-identity, calculation version, and the complete ordered `{ role, inputDigest }`
-manifest. `sourceRevisionIds` refer to an allowlisted code registry whose entries pin
-the official URL/title/revision/retrieval date in code; artifacts do not accept or
+Every artifact persists exactly one calculation version from this closed union:
+
+```text
+MarketDataCalculationVersionV1 =
+  technical_chart_calculation_v1 |
+  tse_margin_quantities_calculation_v1 |
+  market_short_ratio_calculation_v1 |
+  margin_1570_calculation_v1 |
+  tokyo_nagoya_foreign_flow_calculation_v1 |
+  etf_1321_eod_calculation_v1 |
+  etf_1321_2633_relative_calculation_v1
+```
+
+The sole preimage of `sourcePayloadDigest` is this strict object; digest helpers do
+not accept positional arguments or a `MarketDataArtifactIdentityV1`:
+
+```text
+MarketDataSourcePayloadEnvelopeV1 = {
+  kind: "dexter_market_data_source_payload", version: 1,
+  target:
+    { kind: "technical", ticker, jquantsCode }
+  | { kind: "overview", moduleId, sourceId },
+  dataDate, calculationDate,
+  calculationVersion: MarketDataCalculationVersionV1,
+  sourceInputs: { role, inputDigest }[]
+}
+```
+
+`target`, `calculationVersion`, and the closed ordered role set must agree exactly.
+The envelope's `sourceInputs` uses the ordering already fixed above and includes
+every role exactly once. `calculationDate` is the Tokyo calendar date of the frozen
+`asOfCutoff`, persisted in both artifact kinds. It is semantic input to elapsed
+week/month and expected-observation selection, not a fetch instant. Identical source
+rows on a new calculation date therefore produce a new revision; an equal complete
+envelope on the same date remains idempotent. This prevents reusing an in-progress
+Friday candle as an elapsed candle on Monday without a content revision.
+The envelope contains no `sourcePayloadDigest`, `artifactDigest`,
+path/root-relative identity, job/receipt identity, `acceptedAt`, `checkedAt`,
+`fetchedAt`, `entitlementVerifiedAt`, credential, header, cursor, request ID, raw
+envelope, or derived display value. `sourcePayloadDigest` is SHA-256 over the UTF-8
+bytes of its `CanonicalJsonV1` representation and is formatted as `sha256:<64
+lowercase hex>`.
+
+`sourceRevisionIds` refer to an allowlisted code registry whose entries pin the
+official URL/title/revision/retrieval date in code; artifacts do not accept or
 persist arbitrary URLs. Provider `fetchedAt` is the actual fetch instant and is never
 backdated. Pagination can only be stored with `complete: true`; an incomplete result
 cannot be an input to a canonical artifact.
 
 ### 3.2 Primary references
 
-DR-T2 and DR-M0 reverify, rather than merely quote, these official references:
+DR-T0, DR-E1, and DR-M0 reverify, rather than merely quote, the applicable official
+references:
 
 - J-Quants daily adjusted bars and availability:
   <https://jpx-jquants.com/ja/spec/eq-bars-daily> and
   <https://jpx-jquants.com/ja/spec/data-spec>, plus the official update-time guide
   <https://jpx-jquants.com/ja/spec/data-update>;
+- J-Quants listed-issue master, including its current documented ability to retrieve
+  past/current/next-business-day issue information but not an assumed continuous-
+  lifetime proof: <https://jpx-jquants.com/ja/spec/eq-master>;
 - J-Quants margin-outstanding migration specification:
   <https://jpx-jquants.com/ja/spec/mkt-margin-int-daily>;
 - TSE's conditional effective date for the new margin publication:
@@ -217,7 +290,7 @@ DR-T2 and DR-M0 reverify, rather than merely quote, these official references:
 - the issuer's 2633 1:10 beneficial-interest split, effective 2023-12-08:
   <https://nextfunds.jp/en/data/2023/td_en_231031a.pdf>.
 
-### 3.3 DR-T2 Technical source gate
+### 3.3 DR-T0 Technical source and lifetime gate
 
 Before Technical refresh is exposed, a manual bounded smoke must prove with the
 configured credential that:
@@ -225,19 +298,43 @@ configured credential that:
 1. `/v2/equities/bars/daily` accepts the intended ten-year range on the actual plan;
 2. the inherited `/v2/markets/calendar` mapper supplies the exact calendar envelope
    needed to distinguish an elapsed from an in-progress week/month;
-3. the security-master mapper proves the ticker/code/instrument identity;
-4. pagination for all three inputs is complete and bounded;
-5. the strict mapper recognizes the current V2 fields and adjustment semantics;
-6. the documented update-time/source revision still supports the exact
+3. the end-date security-master mapper proves the current ticker/code/instrument
+   identity;
+4. the individual Standard listed-issue history can prove one effective-dated,
+   continuous listing segment for that current instrument across the calculation
+   envelope, including its exact listing boundary and any delisting, relisting, or
+   code-reuse boundary, using a bounded request shape;
+5. pagination for all four inputs is complete and bounded;
+6. the strict mapper recognizes the current V2 fields and adjustment semantics;
+7. the documented update-time/source revision still supports the exact
    `jquants_daily_bars_eligibility_v1` cutoff;
-7. data dates are EOD dates and no future row is accepted; and
-8. logs, errors, fixtures, artifacts, and PR text contain no credential, request
+8. data dates are EOD dates and no future row is accepted; and
+9. logs, errors, fixtures, artifacts, and PR text contain no credential, request
    header, request ID, or raw response body.
 
-The smoke is manual, default-No, does not write a canonical artifact unless the user
-explicitly chose the real refresh path, and is not a substitute for fixture tests.
-It allows at most ten actual HTTP attempts and 180 seconds, with one 30-second
-attempt per page and no retry.
+As rechecked on 2026-09-03, the official listed-issue specification explicitly does
+not provide listing/delisting dates or code-change history/correspondence tables.
+It describes dated master snapshots, not a bounded lifetime endpoint. DR-T0 must
+first establish a documented, bounded continuity-proof method before requesting a
+credentialed smoke; the current candidate is not a claim that such a method exists.
+If that cannot be established, the gate fails without spending quota on a guessed
+query and a reviewed source/scope amendment is required.
+
+DR-T0 freezes the exact lifetime endpoint/query, response fields, effective-date
+semantics, coverage proof, and measured request/page/row/byte bounds in the plan and
+source registry, replacing the candidate ID with
+`jquants_v2_instrument_lifetime_v1`. A latest master row, returned price bars, or
+absence of rows alone is not continuity proof. If the configured individual Standard
+source cannot prove the current instrument's continuous segment inside the
+production caps, DR-T0 stops and returns to design review; it does not publish a
+shortened or identity-ambiguous chart.
+
+The smoke is manual, default-No, writes no canonical artifact, observation receipt,
+or job record, and is not a substitute for fixture tests. Its durable output is only
+the secret-safe reviewed gate evidence required by DR-T0.
+It allows at most 20 actual HTTP attempts and 180 seconds, with one 30-second attempt
+per page and no retry. DR-T0 may freeze a lower production bound after measurement;
+it may not silently raise the 20-attempt gate to make continuity proof fit.
 
 ### 3.4 DR-M0 margin migration gate
 
@@ -259,7 +356,7 @@ Until all six pass, the live adapters and public Market Overview cards for modul
 and 3 stay disabled. Failure of the gate does not permit an unofficial scraper,
 J-Quants Pro assumption, synthetic production value, or silent reduction to the old
 weekly endpoint. DR-M0 returns the unresolved contract to review and reschedules
-DR-M1/DR-M2.
+DR-M1a-c/DR-M2 without blocking the Technical or ETF path.
 
 The API's money fields remain out of scope even if a JPX publication includes them.
 They may be enabled only after the individual J-Quants response and entitlement are
@@ -315,8 +412,8 @@ resolvers including short-week exceptions and the 2026-09-24/25 boundary; comple
 pagination proof; and measured production
 request/page/row/byte/attempt/deadline caps. That amendment must also prove whether
 the source convention permits the stock/ETP/REIT quantity aggregation described in
-section 7.2. DR-M1 cannot start until the exact amendment is merged. These are source-
-dependent decisions, not discretion left to the DR-M1 implementer.
+section 7.2. DR-M1a-c cannot start until the exact amendment is merged. These are
+source-dependent decisions, not discretion left to the DR-M1a-c implementers.
 
 ## 4. Visual and navigation contract
 
@@ -438,6 +535,8 @@ Dashboard Refresh persists normalized data separately from AnalysisSnapshot:
   technical/<ticker>/latest.json
   overview/<sourceId>/<dataDate>/<sourcePayloadDigestHex>.json
   overview/<sourceId>/latest.json
+  observations/technical/<ticker>/<acceptedAtEpochMs>_<jobId>.json
+  observations/overview/<sourceId>/<acceptedAtEpochMs>_<jobId>.json
 ```
 
 `sourcePayloadDigestHex` is only the 64-character lowercase hexadecimal portion of
@@ -446,6 +545,11 @@ filename. Ticker, date, source ID, and digest hex are parsed through exact
 allowlists/patterns before path construction. Every resolved path must remain under
 the configured market-data root. Symlink/reparse-point escapes and absolute/user-
 supplied paths fail closed.
+
+`acceptedAtEpochMs` is the canonical non-negative base-10 integer parsed from the
+receipt's validated UTC `acceptedAt`; it is not ordered lexically. `jobId` is UUIDv4.
+An observation filename and body must agree exactly. Receipt paths are create-only
+and use the same containment and no-replace requirements as canonical artifacts.
 
 The six storage `sourceId` values, in display order, are exactly
 `tse_margin_quantities_v1`, `market_short_ratio_v1`, `margin_1570_v1`,
@@ -456,8 +560,14 @@ remain separately identified in `sourceInputs`.
 ### 5.2 Canonical identity and digest
 
 All canonical files are strict UTF-8 JSON, create-only, and atomically published by
-write-to-private-temp, flush/close, and no-replace promotion. A partial temp file is
-never a valid revision and is cleaned on failure or startup reconciliation.
+write-to-private-temp, flush/close, and the exact inherited P3-I0
+`link(privateTemp, finalPath)` no-replace promotion. `rename`, `copyFile`, or an
+existence-check-then-replace fallback is prohibited. `EEXIST` reopens and fully
+validates the winner before idempotent reuse or collision is decided. A partial temp
+file is never a valid revision. Failure cleanup removes only private temps owned by
+that publication invocation; startup ignores unowned crash remnants and must not
+delete a temp that another process could still be using.
+Observation receipts use the same protocol.
 
 `sourcePayloadDigest` is:
 
@@ -465,41 +575,109 @@ never a valid revision and is cleaned on failure or startup reconciliation.
 sha256:<64 lowercase hexadecimal characters>
 ```
 
-It is SHA-256 over the complete ordered input manifest defined in section 3.1. It
-therefore changes when any bars, calendar, master, corporate-action registry,
-mapping/source revision, query identity, unit basis, or calculation version changes.
-It excludes `fetchedAt`, credentials, headers, pagination tokens, request IDs,
-absolute paths, raw envelopes, and derived display values. The canonical artifact
-also carries its own `artifactDigest`, calculated with the inherited canonical-
-digest convention over the complete artifact payload excluding only that digest
-field.
+It is SHA-256 over only `MarketDataSourcePayloadEnvelopeV1` from section 3.1. The
+derivation order is fixed:
 
-An equal source payload maps to the same path and is idempotent. `fetchedAt` and
-`entitlementVerifiedAt` in the canonical artifact are the instants of its first
-successful publication/verification. Before constructing a replacement, a later
-equal fetch reopens and fully validates the existing path, confirms its input/root
-digests and calculation version, and reuses its original volatile timestamps. The
-job view alone reports the new `checkedAt` and `idempotentReuse: true`. A path whose
-existing canonical identity/digest/bytes fail those invariants is a typed collision
-or corruption; it is never overwritten. A corrected input on the same `dataDate`
-receives a different source digest and therefore a new immutable revision. V1
-transformation changes that would alter output for an equal source payload require a
-separately reviewed storage version; they must not overwrite a V1 path.
+1. strictly validate and freeze every `SourceInputV1`, the output `dataDate`, target,
+   `calculationDate`, and `calculationVersion`;
+2. construct and validate the one source-payload envelope;
+3. compute `sourcePayloadDigest` from its `CanonicalJsonV1` bytes;
+4. derive the contained canonical path from scope, ticker/source ID, `dataDate`, and
+   the digest hex;
+5. construct the strict artifact with that exact digest and persisted
+   `calculationVersion`; and
+6. compute `artifactDigest` over the complete canonical artifact payload excluding
+   only `artifactDigest`, then publish and reopen/validate it.
 
-### 5.3 Latest pointer
+The input/root source preimages never hash `MarketDataArtifactIdentityV1`, a path,
+another digest derived later in this sequence, or a volatile timestamp. The final
+`artifactDigest`, in contrast, protects the complete first-published artifact,
+including its retained provenance timestamps. The root artifact `fetchedAt` is
+the maximum validated `fetchedAt` among its provider `sourceInputs`; every V1
+artifact requires at least one provider input. Registry inputs do not manufacture a
+fetch instant.
 
-`latest.json` is a mutable atomic pointer, never a canonical artifact. It contains
-only schema version, ticker or source ID, dataDate, sourcePayloadDigest,
-artifactDigest, fetchedAt, and the root-relative canonical identity. It contains no
-absolute path.
+An equal complete source-payload envelope maps to the same path and is idempotent.
+A later equal fetch reopens and fully validates the existing path, confirms its
+root envelope and calculation result, and returns the entire first-published
+artifact unchanged. This retains all original admission/cutoff/fetch/verification
+instants and pagination metadata, not only root `fetchedAt`. For the calculation
+result comparison, remove only root `acceptedAt` (where present), `asOfCutoff`,
+`fetchedAt`, and `artifactDigest`, and replace `sourceInputs` with the ordered
+`{ role, inputDigest }` projection. All remaining fields must be canonically equal
+to the newly calculated candidate; a mismatch is `artifact_collision`, not reuse.
+This comparison also applies to a concurrent `EEXIST` winner. It then
+publishes a new immutable observation receipt with the new `checkedAt`; the job/API
+result reports `idempotent_reuse`. A path whose existing canonical identity/digest/
+bytes fail those invariants is a typed collision or corruption; it is never
+overwritten. A corrected input on the same `dataDate` receives a different source
+digest and therefore a new immutable revision. V1 transformation changes that would
+alter output for an equal source payload require a separately reviewed storage
+version; they must not overwrite a V1 path.
 
-The pointer advances only after the target canonical file has been reopened and
-validated. Selection order is `dataDate desc`, then `fetchedAt desc`, then
-`sourcePayloadDigest asc` as a deterministic final tie-break. An older refresh never
-rolls the pointer backward. Rewriting an equal pointer is idempotent.
+### 5.3 Observation receipts and latest cache
+
+Canonical content and the act of confirming that content as the current provider
+state are separate. Every successful Technical publication/reuse and every
+successful Overview module publication/reuse writes exactly one strict create-only
+receipt:
+
+```text
+MarketDataObservationReceiptV1 = {
+  schemaVersion: "market_data_observation_receipt_v1",
+  jobId,
+  target:
+    { kind: "technical", ticker }
+  | { kind: "overview", moduleId, sourceId },
+  acceptedAt, checkedAt,
+  artifactIdentity: MarketDataArtifactIdentityV1,
+  receiptDigest
+}
+```
+
+`checkedAt` is frozen after all strict source inputs for the publication unit have
+been normalized and validated and its expected content identity is fixed, before
+receipt publication. A concurrent content `EEXIST` may change the result from
+`published` to `idempotent_reuse` without changing that check instant. For an
+Overview job, one job-level `checkedAt` is frozen after all source attempts and
+module validations settle; every successful module receipt from that job uses that
+same instant. A failed/retained module has no new receipt. `receiptDigest` is the
+SHA-256 `CanonicalJsonV1` digest of the complete receipt excluding only that field.
+The receipt contains no source body, credential, header, request ID, absolute path,
+or arbitrary provider error.
+
+Latest selection is authoritative only from validated immutable receipts, never
+from artifact `dataDate`, artifact `fetchedAt`, file modification time, job
+completion order, or mutable `latest.json`. `LatestMarketObservationOrderV1` parses
+`acceptedAtEpochMs` numerically and chooses the greatest admission instant. This
+means A at t1, corrected B at t2, and re-observed A at t3 resolves to the t3 receipt
+even though A reuses the t1 content artifact. It also means an older-admitted job
+that finishes after a newer-admitted job cannot roll latest backward.
+
+At the greatest admission millisecond, all valid receipts for one target must point
+to the same artifact identity. If they do, the lexicographically smallest `jobId`
+is the deterministic equivalent-receipt choice. If they point to different
+artifacts, current order is unprovable and resolution fails closed with
+`latest_resolution_failed`; digest order must not guess a provider vintage.
+
+`latest.json` is only a replaceable atomic cache of the selected receipt identity
+and artifact identity. It contains no absolute path and is never sufficient evidence
+of latest. Every read enumerates the validated contained receipt identities needed
+to prove that no newer admission exists; it may use a matching valid cache entry
+only after that proof. A stale, absent, or corrupt cache is rebuilt from receipts
+and cannot change the selected artifact. Concurrent cache writers are harmless
+because either result is revalidated against receipts on read.
+
+Publication order is canonical artifact create/reuse, reopen/validation, observation
+receipt no-replace creation, and only then best-effort cache refresh. A canonical
+artifact without a valid receipt is an orphan and is never latest. A receipt is the
+publication commit point; failure before it publishes no new current observation.
+Once a receipt exists, cache-write or later job-record failure cannot erase or hide
+that committed observation.
 
 There is no automatic retention deletion, compaction, or backfill. The initial UI
-selects only the latest valid revision; historical revision browsing is deferred.
+selects only the authoritative latest observed revision; historical content or
+receipt browsing is deferred.
 
 ### 5.4 Strict artifacts and fallback
 
@@ -513,28 +691,38 @@ canonical identities.
 
 Repository reads never silently skip corruption:
 
-1. if neither a pointer nor any contained canonical candidate exists, return 404;
-2. validate the pointer and pointed artifact when present;
-3. if the pointer is absent/invalid while candidates exist, scan only contained
-   canonical candidates in deterministic recency
-   order and select the first fully valid prior revision, reading at most the newest
-   32 date directories, eight revisions per date, 256 MiB total, and two seconds;
-4. return that revision with a typed `artifact_corrupt_fallback` warning that names
-   only the sanitized artifact identity; or
-5. return a typed 500 if candidates/pointer exist but no valid canonical revision
-   remains, or the repository itself
-   cannot be read safely. Exhausting a scan limit before proving a valid candidate is
-   `artifact_recovery_bound_exceeded`; it never returns an unvalidated older file.
+1. validate path containment, then enumerate receipt filenames for the target and
+   parse their numeric admission identities without trusting file timestamps;
+2. if no observation receipt exists, return 404, including when safely contained
+   orphan content exists; an unreadable/unsafe directory is a repository error,
+   not evidence of absence;
+3. resolve the greatest admission group under section 5.3, validate each receipt and
+   its exact pointed artifact, and verify receipt/path/body/digest/target identity;
+4. if the newest receipt or target artifact is corrupt, scan prior receipts in
+   deterministic admission order and select the first fully valid prior observed
+   revision, reading at most 256 receipts, 256 MiB total, and two seconds;
+5. return that prior revision with a typed `artifact_corrupt_fallback` warning that
+   names only the sanitized artifact identity; or
+6. return a typed 500 if receipts exist but no valid observed revision
+   remains, same-instant latest receipts disagree, or the repository itself cannot be
+   read safely. Exhausting a scan limit before proving a valid receipt/artifact pair
+   is `artifact_recovery_bound_exceeded`; it never returns an unvalidated older file.
+
+An orphan artifact without a valid receipt never participates in latest selection.
+An absent, stale, corrupt, or backwards-written `latest.json` cache is reconstructed
+after authoritative resolution and is not itself an artifact-fallback condition.
+Startup reconciliation ignores unowned private temps; it never deletes an immutable
+artifact or receipt merely because a job record is interrupted.
 
 For Technical data, explicit `latest` remains an error, while `auto` must display a
 valid Snapshot with the same visible warning when no artifact survives; if Snapshot
 is also invalid, `auto` is an error. For Market Overview, each unaffected source module
 remains available while the failed module retains its prior valid revision and
-warning. Fallback is never labelled latest without its actual `dataDate` and
-`fetchedAt`.
+warning. Fallback is never labelled latest without its actual `dataDate`, original
+artifact `fetchedAt`, and receipt `checkedAt`.
 
-The Overview endpoint applies that read independently per module. With no canonical
-candidate for any implemented module it returns 404. With at least one valid/fallback
+The Overview endpoint applies that read independently per module. With no receipt
+for any implemented module it returns 404. With at least one valid/fallback
 module it returns 200: a never-collected sibling is `unavailable/not_collected`, and a
 corrupt sibling with no fallback is `unavailable/artifact_corrupt`; neither has an
 artifact identity. If every existing implemented module is corrupt and none validates,
@@ -578,12 +766,23 @@ TechnicalUnavailablePeriodV1 = {
   identity, periodStart, periodEnd, reason: "source_gap"
 }
 
+InstrumentLifetimeV1 = {
+  sourceId: "jquants_v2_instrument_lifetime_v1",
+  jquantsCode, instrumentIdentity,
+  segmentStart, segmentEnd: date | null,
+  proofFrom, proofThrough,
+  continuity: "continuous"
+}
+
 TechnicalChartDatasetV1 = {
   schemaVersion: "technical_chart_dataset_v1",
+  calculationVersion: "technical_chart_calculation_v1",
   ticker, jquantsCode, instrumentName, priceUnit: "JPY", volumeUnit,
-  acceptedAt, asOfCutoff, queryFrom, queryTo, eligibleThrough,
+  acceptedAt, asOfCutoff, calculationDate, queryFrom, queryTo,
+  calculationFrom, calculationTo, eligibleThrough,
+  instrumentLifetime: InstrumentLifetimeV1,
   dataDate, fetchedAt, adjustmentBasis,
-  sourceInputs: SourceInputV1[3], sourcePayloadDigest, artifactDigest,
+  sourceInputs: SourceInputV1[4], sourcePayloadDigest, artifactDigest,
   indicatorMethods: {
     rsi: "rsi_wilder_14_v1", macd: "macd_ema_12_26_9_v1"
   },
@@ -598,6 +797,18 @@ Every omitted ellipsis above means the same closed `TechnicalCandleV1[]` type, n
 open object. Dates are strict ISO calendar dates; instants are UTC ISO instants;
 numbers are finite; ticker/code/source/digest/unit values use closed validators.
 Warning and unavailable-reason enums are closed and versioned.
+
+The `instrumentLifetime` is the one continuous listing segment for the exact
+instrument proved active by the end-date security master at `eligibleThrough`.
+`segmentStart` and nullable `segmentEnd` are effective dates from the frozen DR-T0
+lifetime contract; `proofFrom <= calculationFrom`, `proofThrough >= eligibleThrough`,
+and the segment must contain `eligibleThrough`. A current-master row, a matching
+five-digit code, or returned OHLCV does not prove this continuity. Missing,
+conflicting, or incomplete lifetime evidence fails the job with
+`instrument_identity_unverified`; it never joins two listing segments. The proof
+covers the calculation envelope; it need not request daily master snapshots back
+to the original listing date of an instrument already listed before `queryFrom`.
+The exact `segmentStart` still requires the DR-T0-pinned authoritative evidence.
 
 The mapper accepts strictly positive adjusted open/high/low/close values with
 `low <= open/close <= high`, finite non-negative adjusted volume, a valid official-
@@ -615,27 +826,44 @@ eligibility rule is `jquants_daily_bars_eligibility_v1`: when the Tokyo calendar
 is an official TSE session and admission is at or after 16:30:00 JST,
 `eligibleThrough` is that date; otherwise it is the latest official session strictly
 before the Tokyo calendar date. This boundary is based on the documented target
-update time, not a guarantee of completion, and is reverified in DR-T2. If the latest
+update time, not a guarantee of completion, and is reverified in DR-T0. If the latest
 eligible session is neither a proved gap under the pinned contract nor a valid bar,
-the job fails `source_not_yet_updated` and retains the previous pointer.
+the job fails `source_not_yet_updated` and retains the previous authoritative
+observation.
 
 `queryTo = eligibleThrough`. `queryFrom` is the same calendar date ten Gregorian
 years earlier, inclusive, with February 29 clamped to February 28. The daily-bars
 query remains exactly the inclusive range `[queryFrom, queryTo]`.
+`calculationFrom = max(queryFrom, instrumentLifetime.segmentStart)` and
+`calculationTo = min(queryTo, instrumentLifetime.segmentEnd ?? queryTo)`. The
+current segment must overlap the requested range. Within that query range, official
+sessions outside the selected segment are outside the instrument's lifetime: they
+are neither `missing_in_complete_envelope` nor `source_gap`, are not
+persisted as daily observations, and do not enter aggregation or indicators. If
+`calculationFrom > queryFrom`, the artifact carries the
+`instrument_lifetime_clipped` warning with the exact start date.
 `calendarCoverageFrom` is the earlier of the Gregorian Monday containing
-`queryFrom` and the first day of `queryFrom`'s Gregorian month;
+`calculationFrom` and the first day of `calculationFrom`'s Gregorian month;
 `calendarCoverageTo` is the later of the Gregorian Sunday containing `queryTo` and
 the last day of `queryTo`'s Gregorian month. The calendar input covers that exact
 inclusive range so both leading and trailing partial status can be proved.
 
-`dataDate` is the last actual renderable bar date, never the request end, fetch date,
+`dataDate` is the last actual renderable bar date inside
+`[calculationFrom, calculationTo]`, never the request end, fetch date,
 or a gap date. Publication requires at least one renderable bar in
-`[queryFrom, queryTo]`. A proved-complete response containing only gaps fails the
-Technical job with `source_no_observation`, publishes no artifact, and leaves an
-existing pointer unchanged; when no prior artifact exists, the latest GET remains
-404. A gap-only subperiod remains valid when at least one renderable bar exists
+that calculation envelope. A proved-complete response containing only gaps fails the
+Technical job with `source_no_observation`, publishes no artifact or receipt, and
+leaves an existing authoritative observation unchanged; when no prior observation
+exists, the latest GET remains 404. A gap-only subperiod remains valid when at least
+one renderable bar exists
 elsewhere in the dataset. If the provider cannot satisfy the exact requested ranges
-within the DR-T2 bounds, the job fails rather than shortening them.
+within the DR-T0-frozen bounds, the job fails rather than shortening them.
+
+For the chart engine, fewer than 251 valid bars after an IPO/current-segment start
+remain legitimate input and indicator-specific warm-up rules apply. This preserves
+Phase 2 section 7.0's existing listing-history behavior for
+`AdvancedTechnicalResult`; Dashboard Refresh neither relabels pre-listing sessions
+as missing data nor changes the production 251-bar selector.
 
 J-Quants adjusted OHLCV is described as corporate-action-adjusted market price data,
 not total return. Source eligibility and the adjustment basis are stored explicitly.
@@ -673,15 +901,18 @@ produces no candle and instead adds one exact `unavailablePeriods` row with
 `source_gap`. This keeps a suspension/no-trade interval visible in the exact table
 without fabricating a chart point.
 
-A week/month is complete only when its Gregorian period has ended before the Tokyo
-calendar date of `asOfCutoff`, the calendar envelope contains every official session
+A week/month is complete only when its Gregorian period has ended before
+`calculationDate`, the calendar envelope contains every official session
 in the period, and its final session is no later than `eligibleThrough`. If the
-calendar proves that the first weekly/monthly period contains an official session
-before `queryFrom`, the candle formed only from in-range bars is deliberately
+calendar proves that the first weekly/monthly period contains a session inside the
+current listing segment but before `queryFrom`, the candle formed only from
+in-range bars is deliberately
 `partial: true`; every indicator and cross field is `unavailable/partial_period`, and
 that candle is excluded from indicator inputs. This leading-range truncation is not
 a source/calendar coverage failure. If no earlier official session exists, the
-normal completeness rules apply. A trailing in-progress candle is likewise
+normal completeness rules apply. Pre-listing sessions in an IPO's first week/month
+do not make it a leading-range partial or a gap; once that period has elapsed, its
+in-lifetime bars form a complete candle. A trailing in-progress candle is likewise
 `partial: true`, displayed, and excluded from every RSI, MACD, signal, histogram,
 and cross calculation. A proved instrument-level gap does not by itself invalidate
 a period with another valid bar. Source-envelope or calendar coverage incompleteness
@@ -775,17 +1006,21 @@ The canonical parameters are:
   fallback, that valid revision participates with its real date and warning. If the
   read fails 500 and Snapshot is valid, the UI must display Snapshot with the
   corruption warning; it must not call that result latest.
-- Every selected source displays its actual `dataDate`, `fetchedAt` where applicable,
-  source label, and fallback state.
+- Every selected source displays its actual `dataDate`, original artifact `fetchedAt`
+  where applicable, authoritative receipt `checkedAt` for refreshed data, source
+  label, and fallback state.
 
 Source precedence is evaluated before interval availability. If a newer Snapshot wins
 `auto` while week/month is requested, the scoped unavailable state offers an explicit
 switch to `latest`; it does not silently choose the older artifact or calculate a
 series from Snapshot rows.
 
-After a successful Technical job, only the still-current ticker/request may replace
-the chart and set `chartSource=latest` through History API. A completed stale job
-cannot change another ticker, tab, interval, URL, focus, or chart.
+After a successful Technical job, the still-current ticker/request performs one
+latest GET through the authoritative receipt resolver. Only a successful read may
+replace the chart and set `chartSource=latest` through History API; the job's exact
+result is not assumed to be authoritative latest if a newer admission has committed.
+A failed read retains the prior displayed chart with a warning. A completed stale
+job cannot change another ticker, tab, interval, URL, focus, or chart.
 
 Tab changes retain valid Technical parameters so returning restores the chart.
 Changing ticker retains `interval` but resets `chartSource` to `auto`; returning to
@@ -811,13 +1046,15 @@ The ticker-independent page is delivered in this fixed order:
 5. 1321 latest EOD;
 6. 1321/2633 relative ETF market-price proxy.
 
-Modules 1-4 ship in DR-M1/M2; modules 5-6 ship in DR-E1/E2. An unimplemented module
+Modules 1-4 ship in DR-M1a-c/M2; modules 5-6 ship in DR-E1/E2. An unimplemented module
 is not rendered as if unavailable source data.
 
 Every available or fallback module always displays source, endpoint/schema revision,
-`dataDate`, `fetchedAt`, cadence, unit, availability/fallback state, and calendar days
-elapsed from `dataDate` to the Browser's local current date. Elapsed days are a
-presentation-only date difference, not a market calculation or freshness claim.
+`dataDate`, original artifact `fetchedAt`, authoritative receipt `checkedAt`, cadence,
+unit, availability/fallback state, and calendar days elapsed from `dataDate` to the
+Browser's local current date. `checkedAt` says when this exact payload was most
+recently confirmed; it is not rewritten into the content artifact. Elapsed days are
+a presentation-only date difference, not a market calculation or freshness claim.
 Dates never use traffic-light color alone.
 
 Every module persists this closed common envelope:
@@ -825,9 +1062,12 @@ Every module persists this closed common envelope:
 ```text
 MarketOverviewModuleArtifactV1 = {
   schemaVersion: "market_overview_module_v1",
+  calculationVersion: MarketDataCalculationVersionV1,
   state: "available" | "unavailable",
   reason: PersistedModuleUnavailableReasonV1 | null,
-  moduleId, sourceId, asOfCutoff, dataDate, fetchedAt, cadence, displayUnit,
+  moduleId, sourceId, asOfCutoff, calculationDate,
+  dataDate, fetchedAt, cadence, displayUnit,
+  instrumentLifetimes: InstrumentLifetimeV1[],
   sourceInputs, sourcePayloadDigest, artifactDigest,
   observations, warnings
 }
@@ -842,6 +1082,11 @@ PersistedObservationStateV1 =
     reason: "source_no_observation" | "missing_expected_row" |
             "duplicate_identity" | "ambiguous_vintage" }
 ```
+
+`instrumentLifetimes` is exactly empty for modules 1-4, exactly the current `13210`
+segment for module 5, and exactly the current `13210`, `26330` segments in that order
+for module 6. Each agrees with its corresponding lifetime source input and the
+DR-T0-frozen calculation-envelope checks; arbitrary extra lifetimes are invalid.
 
 `observations` is exactly one of the following module-owned arrays; every numeric
 field uses the field-level `MarketDataValueV1<number>` union in section 8.1:
@@ -925,7 +1170,7 @@ quantity ratio = long quantity / short quantity
 
 All pagination must finish under the preflight cap. The exact source row primary key,
 issue-type allowlist, population, and unit mapping are whatever DR-M0 verifies and
-merges; DR-M1 must not assume `(dataDate, issueCode, issueType)` or any unpublished
+merges; DR-M1a must not assume `(dataDate, issueCode, issueType)` or any unpublished
 field. In a proved-complete response, a missing expected row or duplicate verified
 primary key produces a canonical unavailable observation with the corresponding
 typed reason. An unrecognized issue type, negative/non-finite quantity, malformed
@@ -1039,9 +1284,11 @@ An identity absent from a proved expected set occupies its chronological positio
 or schedule that cannot prove whether the date/period was expected fails the module
 refresh as unproved coverage; it cannot manufacture an unavailable point. The
 selector never skips an unavailable identity to collect 26 apparently valid points.
-Weekly and daily cadence are not normalized. For margin data, a refetch stores the
-current provider vintage with its fetch instant and digest; the UI does not claim that
-an overwritten historical provider vintage can be reconstructed.
+Weekly and daily cadence are not normalized. A refetch records the confirmed provider
+vintage through a new receipt. New content stores its original fetch instant and
+digest; equal content reuses that immutable artifact and advances only receipt
+`checkedAt`. The UI does not claim that a provider vintage overwritten before local
+observation can be reconstructed.
 
 ### 7.7 1321 latest EOD
 
@@ -1056,6 +1303,11 @@ change rate  = change / previous adjusted close * 100
 
 Fewer than two valid rows or a zero previous close makes change fields unavailable.
 The values exclude distribution reinvestment and must not be called total return.
+The 1321 payload also persists the DR-T0-frozen `InstrumentLifetimeV1` for the
+current 1321 segment. Bars and official sessions before that segment are outside the
+instrument lifetime, not missing observations. If continuity over the requested
+range cannot be proved, DR-E1 fails `instrument_identity_unverified` and publishes
+no module revision or receipt.
 
 ### 7.8 1321/2633 relative ETF price proxy
 
@@ -1065,7 +1317,11 @@ includes USD/JPY, Tokyo/US trading-hour, tracking, fee, and market-price effects
 Although the issuers define their target indices using total-return index concepts,
 this module compares only distribution-excluding, adjusted TSE market prices and is
 not ETF/index total return. The adapter verifies both security-master identities and
-their corporate-action-registry inputs before accepting bars.
+their effective-dated `InstrumentLifetimeV1` and corporate-action-registry inputs
+before accepting bars. Each series begins at the later of the ten-year query start
+and its proved current listing-segment start. Pre-segment sessions are excluded as
+outside lifetime, and a discontinuous/unproved identity fails the module rather than
+joining an earlier instrument that used the same code.
 
 For `3M | 6M | 1Y | 3Y | Max`, with `1Y` default:
 
@@ -1123,9 +1379,9 @@ GET    /api/market-data/jobs/:jobId
 DELETE /api/market-data/jobs/:jobId
 ```
 
-GET routes read only already published, validated local artifacts and never contact
-J-Quants. Technical with no canonical artifact is 404. Overview with no canonical
-module artifact is 404; a partially populated overview is 200 with strict per-module
+GET routes read only already published, validated local observations and never contact
+J-Quants. Technical with no committed receipt is 404. Overview with no committed
+module receipt is 404; a partially populated overview is 200 with strict per-module
 `available` / `fallback` / `unavailable` / `not_implemented` unions. External
 communication occurs only after an accepted POST job.
 
@@ -1152,7 +1408,8 @@ Success and read envelopes are closed and versioned:
 ```text
 MarketDataWarningCodeV1 =
   artifact_corrupt_fallback | artifact_corrupt_no_fallback | cadence_changed |
-  basis_break | source_gap | source_refresh_failed
+  basis_break | source_gap | source_refresh_failed | instrument_lifetime_clipped |
+  job_record_write_failed
 
 MarketDataWarningV1 = {
   code: MarketDataWarningCodeV1, message,
@@ -1173,19 +1430,24 @@ MarketDataValueV1<T> =
             "ambiguous_vintage" }
 
 MarketDataModuleViewV1 =
-  { moduleId, state: "available", artifactIdentity, payload, warnings }
-| { moduleId, state: "fallback", artifactIdentity, payload, warnings }
-| { moduleId, state: "unavailable", artifactIdentity, payload,
+  { moduleId, state: "available", artifactIdentity,
+    observationReceiptIdentity, checkedAt, payload, warnings }
+  | { moduleId, state: "fallback", artifactIdentity,
+    observationReceiptIdentity, checkedAt, payload, warnings }
+  | { moduleId, state: "unavailable", artifactIdentity,
+    observationReceiptIdentity, checkedAt, payload,
     reason: PersistedModuleUnavailableReasonV1,
     warnings }
-| { moduleId, state: "unavailable", artifactIdentity: null, payload: null,
+  | { moduleId, state: "unavailable", artifactIdentity: null,
+    observationReceiptIdentity: null, checkedAt: null, payload: null,
     reason: "not_collected" | "artifact_corrupt",
     warnings }
-| { moduleId, state: "not_implemented" }
+  | { moduleId, state: "not_implemented" }
 
 TechnicalLatestResponseV1 = {
   schemaVersion: "technical_latest_response_v1",
-  state: "available" | "fallback", artifact: TechnicalChartDatasetV1, warnings
+  state: "available" | "fallback", artifact: TechnicalChartDatasetV1,
+  observationReceiptIdentity, checkedAt, warnings
 }
 
 MarketOverviewResponseV1 = {
@@ -1208,17 +1470,31 @@ MarketDataArtifactIdentityV1 = {
   sourcePayloadDigest, artifactDigest, rootRelativeIdentity
 }
 
+MarketDataObservationReceiptIdentityV1 = {
+  scope: "technical" | "overview", tickerOrSourceId,
+  acceptedAtEpochMs, jobId, receiptDigest, rootRelativeIdentity
+}
+
 MarketDataModuleResultV1 =
   { moduleId, state: "published" | "idempotent_reuse",
-    artifactIdentity, warningCodes }
-| { moduleId, state: "retained_previous", artifactIdentity,
+    checkedAt, artifactIdentity, observationReceiptIdentity, warningCodes }
+  | { moduleId, state: "retained_previous", checkedAt,
+    artifactIdentity, observationReceiptIdentity,
     failureCode, warningCodes }
-| { moduleId, state: "failed", artifactIdentity: null,
+  | { moduleId, state: "failed", checkedAt,
+    artifactIdentity: null, observationReceiptIdentity: null,
     failureCode, warningCodes }
+
+MarketDataJobResultV1 =
+  { kind: "technical", state: "published" | "idempotent_reuse",
+    checkedAt, artifactIdentity, observationReceiptIdentity, warningCodes }
+  | { kind: "overview", checkedAt,
+    moduleResults: MarketDataModuleResultV1[] }
 
 MarketDataJobFailureCodeV1 =
   source_unauthorized | source_entitlement_required | source_rate_limited |
   source_timeout | source_not_yet_updated | source_no_observation |
+  instrument_identity_unverified |
   source_invalid_response | source_pagination_incomplete |
   source_response_too_large | external_schedule_infeasible |
   artifact_collision | artifact_write_failed | all_modules_failed |
@@ -1234,25 +1510,39 @@ MarketDataJobViewV1 = {
   progress: { attempts, pages, acceptedRows, responseBytes,
               completedModules, totalModules },
   failure: { code: MarketDataJobFailureCodeV1, message } | null,
-  artifactIdentity: MarketDataArtifactIdentityV1 | null,
-  moduleResults: MarketDataModuleResultV1[]
+  result: MarketDataJobResultV1 | null
 }
 ```
 
 Variant `payload` objects are closed discriminated objects owned by their module ID;
-they never accept arbitrary properties. Technical jobs use one terminal
-`artifactIdentity` and an empty `moduleResults`; Overview jobs use null root
-`artifactIdentity` and exactly one ordered result per implemented module.
+they never accept arbitrary properties. Persisted artifact warnings use only
+`cadence_changed`, `basis_break`, `source_gap`, or `instrument_lifetime_clipped`,
+with deterministic allowlisted messages and `artifactIdentity: null`; an artifact
+must not contain a reference to its own future digest. Corruption/refresh-failure
+warnings are view/job metadata, not stored content. A completed Technical job has the
+`technical` result and can therefore distinguish a new publication from
+`idempotent_reuse` while carrying its new `checkedAt` and receipt identity. A
+normally completed or failed Overview job has the `overview` result and
+exactly one ordered module result per implemented module. Its root `checkedAt` is the
+single instant frozen under section 5.3; every module result carries that same value,
+but only `published`/`idempotent_reuse` creates a new receipt. `retained_previous`
+identifies the prior authoritative receipt/artifact while reporting the current
+attempt's failure; `failed` has neither identity. A job-wide failure before a module
+is attempted is explicitly assigned to that module during adjudication; it does not
+omit the module result or manufacture a source observation.
+
 Root `failure` is non-null exactly for status `failed`. A failed Technical job uses
 its direct failure code. A failed Overview job always uses `all_modules_failed`; its
-ordered `moduleResults` retain each module's actual failure code. For `completed`
-(including completed with warnings), `cancelled`, `interrupted`, and every
-nonterminal state, root `failure` is null; completed-with-warning causes exist only
-in `moduleResults`. `all_modules_failed` is root-only and is never a module result.
-`artifactIdentity` contains only root-relative identity fields and digests. Nullable
-timestamps/terminal fields are present as explicit nulls when inapplicable. HTTP GET
-returns 200 for a validated envelope, including a terminal failed job view; errors
-use the section 8.5 union.
+overview result retains each module's actual failure code. `result` is non-null for
+a completed job and for every normally failed Overview job;
+it is null for failed Technical, cancelled, interrupted, and every nonterminal state.
+For `completed` (including completed with warnings), `cancelled`, `interrupted`, and
+every nonterminal state, root `failure` is null; completed-with-warning causes exist
+only in the result. `all_modules_failed` is root-only and is never a module result.
+Artifact and receipt identities contain only root-relative identity fields and
+digests. Nullable timestamps/terminal fields are present as explicit nulls when
+inapplicable. HTTP GET returns 200 for a validated envelope, including a terminal
+failed job view; errors use the section 8.5 union.
 
 `source_no_observation` in the job-failure union is used by Technical refresh only
 when a proved-complete requested range contains no renderable bar. It never publishes
@@ -1265,7 +1555,8 @@ may encode `source_no_observation`, a source-row duplicate/missing expected row,
 ambiguous eligible vintage, a zero denominator field, or a calculation-insufficient
 range through the closed unavailable unions. Authentication/entitlement/network/
 timeout/429, schema, unproved coverage, pagination, or size failure publishes no
-artifact and retains the previous pointer. Such failures appear only in the job view
+artifact or receipt and retains the previous authoritative observation. Such
+failures appear only in the job view
 and, where a prior value is retained, as `source_refresh_failed` UI warning.
 
 The boundary is closed:
@@ -1277,9 +1568,9 @@ The boundary is closed:
 | valid observed denominator is zero | yes | observed numerator/denominator stay available; only derived field is `zero_denominator` |
 | ambiguous eligible correction vintage | yes | observation `ambiguous_vintage` |
 | valid ETF rows but fewer than two common dates or invalid base | yes | affected range field `insufficient_common_dates` / `invalid_base` |
-| unknown enum/code/field, partial null, non-finite/negative/impossible value, identity mismatch, or future row | no | job module `source_invalid_response`; retain previous pointer |
-| incomplete pagination or coverage cannot be proved | no | `source_pagination_incomplete`; retain previous pointer |
-| auth, entitlement, network, timeout, 429, response-size, or deadline failure | no | corresponding async job failure; retain previous pointer |
+| unknown enum/code/field, partial null, non-finite/negative/impossible value, identity mismatch, or future row | no | job module `source_invalid_response`; retain previous authoritative receipt |
+| incomplete pagination or coverage cannot be proved | no | `source_pagination_incomplete`; retain previous authoritative receipt |
+| auth, entitlement, network, timeout, 429, response-size, or deadline failure | no | corresponding async job failure; retain previous authoritative receipt |
 
 An unknown extra source identity is schema failure; it is not treated as the inverse
 of a missing expected identity. Negative/non-finite and unknown-type reasons are
@@ -1293,7 +1584,14 @@ Market-data mutations reuse the one process-local Dashboard session returned by
 Host/Origin rules, no-CORS rule, no-store/nosniff headers, JSON media-type policy,
 body accounting, and sanitized error union from Phase 4.
 
-DR-T2 extracts or composes that security owner so Strategy Validation and Market Data
+The inherited job contract is limited to that session/security owner, admission
+conflict, bounded lifecycle, polling, cancellation checkpoints, recovery, and safe
+error behavior. Market Data does not inherit Phase 4's preflight resource, unchecked
+confirmation checkbox, or `confirmExternalFetch` request field. Section 8.1's
+labelled refresh button is the one explicit external-fetch intent for this separately
+approved workflow.
+
+DR-C1 extracts or composes that security owner so Strategy Validation and Market Data
 cannot mint independent CSRF tokens. Market routes are dispatched before the generic
 non-GET 405 guard while `/api/analyses/*` remains GET-only. Unsupported methods return
 405 with exact `Allow` and never fall through to a different domain.
@@ -1301,13 +1599,14 @@ non-GET 405 guard while `/api/analyses/*` remains GET-only. Unsupported methods 
 POST body cap is 4,096 UTF-8 bytes. DELETE has zero body bytes. Content-Length alone
 is not trusted; chunked bodies are counted and stopped at the same cap.
 
-### 8.3 Process-wide J-Quants coordinator
+### 8.3 Dashboard-process J-Quants coordinator
 
-One process-wide coordinator owns admission and request rate for every J-Quants job:
-Strategy Validation, Technical refresh, and Overview refresh. There is exactly one
-nonterminal external job across all three kinds. A second job receives 409
-`active_job_conflict`; its safe message may name only the active job kind and does not
-expose provider or source inputs.
+One coordinator owned by one running Dashboard server process owns admission and
+request rate for every Dashboard J-Quants job: Strategy Validation, Technical
+refresh, and Overview refresh. There is exactly one nonterminal external job across
+all three kinds inside that process. A second job receives 409
+`active_job_conflict`; its safe message may name only the active job kind and does
+not expose provider or source inputs.
 
 The coordinator's closed admission discriminator is
 `strategy_validation | technical_refresh | overview_refresh`. It shares only the
@@ -1315,9 +1614,24 @@ lease, cancellation-checkpoint interface, and rate limiter. Market Data does not
 change, parse, persist, or return Phase 4 Strategy Validation job schemas, routes, or
 lifecycle; Strategy Validation likewise does not own Market Data job records.
 
-All J-Quants requests from these jobs also share one account-global rate limiter and
-the existing configured requests-per-minute ceiling. A job may make requests only
-through that coordinator. Operation-local limiters are not sufficient.
+All J-Quants requests from these Dashboard jobs share that process-local rate limiter
+and the existing configured requests-per-minute ceiling. A Dashboard job may make
+requests only through that coordinator. Operation-local limiters inside individual
+Dashboard job runtimes are not sufficient.
+
+This is not an account-global or cross-process guarantee. The standalone Phase 4 CLI
+constructs its own `JQuantsExecutionRuntimeV1`, and another Dashboard process would
+have another coordinator. Running a Strategy Validation CLI invocation, another
+Dashboard server, or another J-Quants client concurrently with this Dashboard is an
+unsupported operating mode and can exceed the account's effective limit. DR-X must
+document that the user runs only one external J-Quants process at a time. No
+credential, shared cross-process rolling-attempt log, filesystem lease, daemon, or
+database is added by Dashboard Refresh.
+
+The immutable receipt resolver in section 5.3 remains safe if two processes are
+accidentally run: completion order cannot overwrite canonical content or define
+latest. That storage safety does not turn concurrent external dispatch into a
+supported or rate-coordinated mode.
 
 Technical and Overview production jobs reuse Phase 4's
 `rolling_attempt_log_v1`: a 30-second per-attempt timeout, at most two retries after
@@ -1325,29 +1639,35 @@ the first attempt only for network errors, HTTP 429, or HTTP 5xx, exact `Retry-A
 handling, deterministic 1/2-second fallback delays, and cancellation/deadline
 precedence. HTTP 4xx other than 429, strict schema failures, and body/pagination
 failures are not retried. Every initial, pagination, and retry attempt consumes the
-shared account rate and job cap.
+shared Dashboard-process rate budget and its job cap.
 
 Technical refresh is exactly one logical ticker/range bars query, one calendar-
-envelope query, and one security-master identity query, at most 20 actual HTTP
-attempts including cursors/retries, 8,000 accepted rows, 32 MiB response bytes, and a
-600-second job deadline.
+envelope query, one end-date security-master identity query, and the bounded
+effective-dated lifetime request set frozen by the DR-T0 gate. The whole job allows
+at most 20 actual HTTP attempts including lifetime requests, cursors, and retries,
+8,000 accepted rows, 32 MiB response bytes, and a 600-second deadline.
 If ten years cannot fit those bounds, it fails pre-dispatch or on the first exceeded
 bound with `external_schedule_infeasible` / `source_response_too_large`; it never
 silently shortens history.
 
 DR-M0 fixes the Overview production caps from the measured post-migration Standard
-contract in the reviewed plan amendment required by section 3.4. DR-M1 implements
-those exact merged caps and has no authority to choose larger ones. Entitlement
+contract in the reviewed plan amendment required by section 3.4. DR-M1a-c register
+their work under those exact merged DR-O1 caps and have no authority to choose larger
+ones. Entitlement
 failures are never retried; an HTTP 429 that remains after the inherited bounded
 retry policy terminates with a typed rate-limit failure.
 
 When DR-E1 adds modules 5-6, their shared source work is exactly two ten-year bars
-queries and two security-master queries; the local corporate-action registries make
-no HTTP request. The ETF increment is capped at 40 actual attempts, 16,000 accepted
-rows, 64 MiB, and 600 seconds. The final Overview ceilings are the DR-M0 merged
-attempt/row/byte limits plus those increments, while the whole-job deadline is at
-most the DR-M0 deadline plus 600 seconds. DR-E1 must prove the increment with fixtures
-and the bounded Standard source gate; failure never shortens `Max` or drops a module.
+queries, two end-date security-master queries, and two bounded lifetime request sets
+under the DR-T0-frozen contract; the local corporate-action registries make no HTTP
+request. The ETF increment is capped at 40 actual attempts, 16,000 accepted rows,
+64 MiB, and 600 seconds. Before any DR-M1 module is registered, that increment is the
+whole Overview-job ceiling and DR-E1 has no DR-M0 dependency. After one or more
+DR-M1 modules are registered, the Overview ceilings are the merged limits for exactly
+the registered DR-M1 modules plus those ETF increments; the whole-job deadline is at
+most the corresponding DR-M0-frozen deadline plus 600 seconds. DR-E1 must prove the
+increment with fixtures and the bounded Standard source gate; failure never shortens
+`Max` or drops a module.
 
 ### 8.4 Market Data job lifecycle, recovery, and publication
 
@@ -1355,7 +1675,7 @@ The following strict lifecycle applies only to `MarketDataJobViewV1`:
 
 ```text
 accepted -> running -> publishing -> completed
-                    \-> failed
+accepted/running/publishing -> failed (no receipt committed by this job)
 accepted/running -> cancel_requested -> cancelled
 accepted/running/cancel_requested/publishing -> interrupted (startup recovery only)
 ```
@@ -1386,31 +1706,49 @@ through a Market Data route. This status polling is not market-data auto-refresh
 
 Cancellation is cooperative between source requests and before publication. DELETE
 returns 202 while cancellation is being accepted, 200 for already cancelled, 404 for
-missing, and 409 for `publishing`, `completed`, `failed`, or `interrupted`. Once canonical promotion
-begins, it is not cancelled. A failed/cancelled/timed-out Technical job publishes no
-canonical artifact and does not advance a pointer.
+missing, and 409 for `publishing`, `completed`, `failed`, or `interrupted`. Once
+canonical promotion begins, it is not cancelled. A pre-publication source failure,
+cancellation, or timeout writes neither content nor a receipt. A storage failure
+before receipt commit may leave orphan content but no new current observation.
+A committed receipt counts as successful publication even if the later cache or
+job-record write fails; it must not be represented as an uncommitted failed fetch.
 
 An Overview job first finishes all source attempts and module validation, then enters
 `publishing`; DELETE is rejected from that point. Each module is an independent atomic
-publication unit. A failed module retains its prior pointer and a successful module
-may advance, exactly as recorded in the terminal `moduleResults` union. There is never
-a partially written module artifact. The Overview job is `completed` with warnings
-when at least one implemented module publishes or idempotently reuses a current
-canonical artifact and another has a typed source, collision, or storage failure; it
-is `failed` when no implemented module publishes/reuses. A canonical typed
+publication unit. A failed module retains its prior authoritative receipt and a
+successful module may create a new one, exactly as recorded in the terminal
+`MarketDataJobResultV1` union. There is never a partially written module artifact or
+receipt. The Overview job is `completed` with warnings
+when at least one implemented module commits a receipt for published or reused
+content and another has a typed source, collision, or storage failure; it
+is `failed` when no implemented module commits a receipt. A canonical typed
 unavailable result from a proved-complete response counts as a successful
 publication, not a provider failure. Already published sibling modules are never
 rolled back after a later module fails. Startup reconciliation validates every
-recorded module identity and reports any interrupted pointer update rather than
-pretending the set was atomic.
+recorded receipt/artifact identity and reports an interrupted job without pretending
+the set was atomic. A receipt committed before interruption remains authoritative
+for that module; an orphan artifact committed before its receipt is ignored.
 
 Mutable job recovery state is stored separately from canonical market artifacts.
 Process startup marks abandoned nonterminal jobs `interrupted`; it never resumes an
 external request automatically. A save failure after a successful external response
-reports that quota may have been consumed and leaves the previous pointer intact.
+reports that quota may have been consumed. If failure occurred before receipt commit,
+the previous authoritative observation remains. If it occurred after receipt commit,
+the immutable receipt remains visible even when cache or job-record update failed.
 
-After completion, only the matching current Browser request explicitly adopts the
-new artifact. There is no polling outside the active job view, no scheduled refresh,
+If only the terminal job-record rewrite fails after receipt commit, the running
+process keeps serving its validated in-memory `completed` view. Technical adds
+`job_record_write_failed` to result warning codes; Overview adds it to the successful
+module results. Cache-write failure alone does not change publication success. On
+restart, an unreconciled nonterminal job record becomes `interrupted` with
+`result: null`; its committed receipts remain independently readable. Recovery
+never invents a result or repeats the external requests to repair a job record.
+
+After completion, only the matching current Browser request issues one corresponding
+latest/overview GET and adopts its authoritative receipt-resolved result. A
+completed job cannot bypass latest resolution by installing its own older result;
+read failure retains the prior displayed values with a warning. This one read is
+not polling. There is no polling outside the active job view, no scheduled refresh,
 and no automatic background freshness loop.
 
 ### 8.5 HTTP statuses and failure union
@@ -1419,21 +1757,22 @@ and no automatic background freshness loop.
 | ---: | --- |
 | 200 | successful read or already-cancelled response |
 | 202 | job or cancellation accepted |
-| 400 | malformed route/query/body/schema/source request |
+| 400 | malformed route/query/body/schema/source request, including an Overview POST with no registered source module |
 | 403 | Host, Origin, or CSRF failure before admission |
-| 404 | exact artifact/job not found |
+| 404 | no committed observation receipt for the requested scope, or exact job not found |
 | 405 | unsupported method with exact `Allow` |
 | 409 | active-job conflict or invalid cancellation/lifecycle action |
 | 413 | request body exceeds the route cap |
 | 415 | unsupported media type |
-| 500 | Technical corruption without a valid fallback; Overview corruption when no implemented module validates; repository-wide filesystem or invariant failure |
+| 500 | Technical corruption without a valid fallback; Overview corruption when no implemented module validates; ambiguous latest-receipt order; repository-wide filesystem or invariant failure |
 
 Every response is a strict success or `{ "error": { "code", "message" } }` union.
 The closed HTTP error codes are `invalid_request`, `invalid_query`, `invalid_ticker`,
 `source_configuration_missing`, `request_forbidden`, `artifact_not_found`,
 `job_not_found`, `active_job_conflict`, `invalid_job_state`, `method_not_allowed`,
 `request_body_too_large`, `unsupported_media_type`, `artifact_corrupt`,
-`artifact_recovery_bound_exceeded`, `repository_failure`, and `invariant_failure`.
+`artifact_recovery_bound_exceeded`, `latest_resolution_failed`,
+`repository_failure`, and `invariant_failure`.
 Async provider/runtime failures use only `MarketDataJobFailureCodeV1`; they never
 include raw provider text. A provider response that exceeds its bound terminates the
 accepted job with `source_response_too_large`; it does not retroactively change the
@@ -1445,6 +1784,11 @@ A canonical path collision discovered after POST is an asynchronous terminal
 `artifact_collision` job failure. The job GET remains HTTP 200 with that sanitized
 failure; it is not retroactively converted to HTTP 409.
 
+An Overview POST with zero registered source modules returns 400
+`source_configuration_missing` before admission. It creates no job record, acquires no
+coordinator lease, and dispatches no external request. An empty successful Overview
+job is invalid.
+
 ## 9. Dashboard state and interaction contract
 
 - Watchlist, empty, loading, partial, fallback, retained-previous, and error surfaces use the same
@@ -1452,9 +1796,10 @@ failure; it is not retroactively converted to HTTP 409.
 - Technical and Overview have separate refresh buttons and active-job status.
 - The Overview button attempts all currently implemented Overview sources in one
   bounded job. Each source module publishes independently: a successful module may
-  advance while a failed module retains its previous pointer and shows a typed
-  warning. A source-level unavailable observation is a valid typed payload; malformed
-  schema, incomplete pagination, or provider failure never advances that module.
+  create a new authoritative receipt while a failed module retains its previous
+  observed revision and shows a typed warning. A source-level unavailable observation
+  is a valid typed payload; malformed schema, incomplete pagination, or provider
+  failure never creates a receipt for that module.
 - Consecutive clicks, ticker changes, source/interval changes, History navigation,
   tab changes, and aborts use latest-request-wins guards. Stale responses cannot
   overwrite content, URL, announcements, or focus.
@@ -1470,9 +1815,10 @@ failure; it is not retroactively converted to HTTP 409.
 
 ## 10. Implementation sequence and PR boundaries
 
-Each step is one independently reviewable PR. A step begins only after the previous
-PR is independently approved and merged and local `main` is fast-forwarded to
-`origin/main`.
+Each identifier below is one independently reviewable PR. A step begins only after
+its listed direct predecessors are independently approved and merged and local
+`main` is fast-forwarded to `origin/main`. The dependency graph, rather than the
+visual list order alone, controls admission; Phase 5 still waits for DR-X.
 
 1. **DR-0 — docs-only contract**
    - synchronize `docs/SPEC.md` and the Post-MVP roadmap;
@@ -1489,39 +1835,86 @@ PR is independently approved and merged and local `main` is fast-forwarded to
 4. **DR-V3 — detail shell and complex surfaces**
    - migrate Card/Table/Dialog/Comparison/Radar/Validation/chart theme;
    - enact the exact seven-tab shell without moving existing Snapshot sections.
-5. **DR-T1 — pure Technical chart series**
+5. **DR-T0 — Technical source and lifetime gate**
+   - verify the exact individual-Standard bars/calendar/master/lifetime contracts,
+     entitlement, identity continuity proof, and production bounds with strict
+     fixtures plus the default-No bounded live smoke;
+   - replace the lifetime candidate in this plan/source registry before merge; add no
+     canonical artifact, public mutation/read route, or UI.
+6. **DR-T1 — pure Technical chart series**
    - implement strict daily input, interval aggregation, partial-period rules,
      RSI/MACD series, cross state, and pure tests only.
-6. **DR-T2 — Technical artifact, source, and job API**
-   - implement strict J-Quants mapper, repository, digest/pointer, Standard smoke,
-     shared session/coordinator, manual refresh, and GET/job routes.
-7. **DR-T3 — Technical UI**
+7. **DR-C1 — shared Dashboard session and coordinator refactor**
+   - extract the existing Dashboard session/security owner and one Dashboard-process
+     J-Quants admission/rate coordinator without changing Phase 4 routes, schemas,
+     CLI behavior, or Browser output.
+8. **DR-A1 — market-data artifact and observation repository**
+   - implement `MarketDataSourcePayloadEnvelopeV1`, calculation versions, canonical
+     artifact create/reuse, immutable observation receipts, authoritative latest
+     resolution, rebuildable cache, collision/recovery, and pure repository tests;
+   - add no source request, mutation route, or UI.
+9. **DR-O1 — generic Overview job and read API foundation**
+   - implement the strict module registry, per-module atomic artifact/receipt
+     orchestration, root result semantics, and read/job routes over DR-C1/DR-A1;
+   - with zero registered source modules, GET remains 404 and POST returns 400
+     `source_configuration_missing` without a job, lease, or external request.
+10. **DR-T2 — Technical source and job API**
+   - implement the DR-T0-frozen strict J-Quants mappers, manual Technical refresh,
+     and GET/job routes over DR-C1/DR-A1.
+11. **DR-T3 — Technical UI**
    - implement source precedence, day/week/month, four panes, crosshair OHLCV,
      exact table, URL/race/focus, and Comparison separation.
-8. **DR-M0 — margin-source migration gate**
+12. **DR-M0 — margin-source migration gate**
    - verify the official migration, individual Standard entitlement, exact schema,
      cadence boundary, primary key/coverage/unit contract, one-date reconciliation,
      and bounded exact-26-observation production-shape smoke;
    - add no public value when the gate is unresolved.
-9. **DR-M1 — four supply/demand sources, artifacts, and API**
-   - implement modules 1-4 in one bounded Overview job with per-module atomic
-     publication; the four-module set is deliberately not atomic.
-10. **DR-M2 — four supply/demand UI modules**
-    - implement cards, latest 26-observation charts/tables, cadence/basis breaks,
-      metadata, fallback, and warnings.
-11. **DR-E1 — 1321/2633 sources and relative-performance engine**
-    - implement strict EOD input, 1321 change, common-date normalization, range,
-      direction, proxy caveats, and immutable module artifacts.
-12. **DR-E2 — two ETF UI modules**
-    - add the 1321 EOD and 1321/2633 proxy cards/chart/table and range URL/UI state.
-13. **DR-X — usage, setup, handoff, and closeout**
-    - update `Usage.md`, `docs/USER_SETUP.md`, and environment guidance only for
-      merged behavior;
-    - run complete validation and update the handoff from candidate to closeout.
+13. **DR-M1a — shared margin source plus aggregate/1570 modules**
+   - implement the one verified complete margin input and the pure module 1/3
+     mappers/engines/artifact builders, then register both modules with DR-O1; add no
+     UI.
+14. **DR-M1b — market short-ratio module**
+   - implement the verified source mapper, schedule resolver, engine, and artifact
+     builder for module 2, then register it with DR-O1; add no UI.
+15. **DR-M1c — foreign-flow module**
+   - implement the series correction-vintage selector, mapper, engine, and artifact
+     builder for module 4, then register it with DR-O1; add no UI. The implemented
+     module set remains per-module atomic rather than one transaction.
+16. **DR-M2 — four supply/demand UI modules**
+   - implement cards, latest 26-observation charts/tables, cadence/basis breaks,
+     metadata, fallback, and warnings.
+17. **DR-E1 — 1321/2633 sources and relative-performance engine**
+   - implement strict EOD input, 1321 change, common-date normalization, range,
+     direction, lifetime continuity, proxy caveats, and immutable module artifacts/
+     receipts.
+18. **DR-E2 — two ETF UI modules**
+   - add the 1321 EOD and 1321/2633 proxy cards/chart/table and range URL/UI state.
+19. **DR-X — usage, setup, handoff, and closeout**
+   - update `Usage.md`, `docs/USER_SETUP.md`, and environment guidance only for
+     merged behavior;
+   - run complete validation and update the handoff from candidate to closeout.
 
-No step opportunistically implements a later step. DR-V1-V3 do not fetch market data;
-DR-T1 has no I/O; DR-M0 is a gate rather than a UI/source implementation; DR-X adds
-no new runtime behavior.
+The exact direct dependencies are:
+
+```text
+DR-0 -> DR-V1 -> DR-V2 -> DR-V3
+DR-V3 -> { DR-T0, DR-T1 }
+DR-T1 -> DR-C1 -> DR-A1
+DR-A1 -> DR-O1
+{ DR-A1, DR-T0 } -> DR-T2
+DR-T2 -> DR-T3
+{ DR-O1, DR-T2 } -> DR-E1 -> DR-E2
+DR-O1 -> DR-M0 -> { DR-M1a, DR-M1b, DR-M1c } -> DR-M2
+{ DR-T3, DR-E2, DR-M2 } -> DR-X -> Phase 5
+```
+
+DR-M1a, DR-M1b, and DR-M1c are independent after DR-M0 and may merge in any order;
+DR-M2 waits for all three. A delayed DR-M0 does not block DR-T3 or the independent
+ETF path. No step opportunistically implements a later step. DR-V1-V3 do not fetch
+market data; DR-T0 exposes no public route and persists no market-data artifact;
+DR-T1 and DR-A1 expose no new route; DR-O1 cannot dispatch without a registered
+module; DR-C1 is behavior-preserving; DR-M0 is a gate rather than a UI/source
+implementation; DR-X adds no new runtime behavior.
 
 ## 11. Test and acceptance matrix
 
@@ -1531,15 +1924,45 @@ no new runtime behavior.
 | DR-V1 | exact tokens, measured contrast, focus-visible, status not color-only, existing behavior regression |
 | DR-V2 | Watchlist/loading/error/empty, global deep link/conflict, Back/Forward/reload, inherited unknown-tab canonicalization, dormant/new-key matrix, unknown-query preservation |
 | DR-V3 | exact seven IDs/labels/order, Home/End/arrows/roving focus, all existing complex surfaces, availability ownership, token contrast at every required surface |
-| DR-T1 | strict bar/gap union, positive OHLC/non-negative volume and valid zero, daily `partial:false`, gap-only period, OHLCV aggregation, week/month/calendar/holiday boundaries, week-mid/month-mid `queryFrom` leading partials, partial current week/month, all-null/partial-null, RSI index 14, MACD bundle index 33, first cross index 34/equality, 34-month boundary, same-window Engine parity, input immutability |
-| DR-T2 | strict V2 mapper, acceptedAt/16:30/query-range gate, ten-year entitlement, three-input manifest/root digest, all-gap `source_no_observation` with previous-pointer retention and initial GET 404, idempotency, same-date correction, async collision, atomic publish/pointer, bounded corruption/fallback, containment, GET 404/500/no-fetch, shared CSRF/coordinator/active-job recovery, timeout/cancel/startup |
+| DR-T0 | exact official endpoint/query/field/effective-date/entitlement registry; bounded four-input source proof; no-publication smoke; current identity and continuous segment fixtures; IPO/later listing, current-master absence, delisting/relisting, code reuse, conflicting/incomplete continuity; request/page/row/byte/deadline ceilings; secret non-exposure |
+| DR-T1 | strict bar/gap union, positive OHLC/non-negative volume and valid zero, lifetime-clipped calculation envelope without pre-listing gaps, fewer-than-251 current-segment bars, daily `partial:false`, gap-only period, OHLCV aggregation, week/month/calendar/holiday boundaries, week-mid/month-mid `queryFrom` leading partials, partial current week/month, all-null/partial-null, RSI index 14, MACD bundle index 33, first cross index 34/equality, 34-month boundary, same-window Engine parity, input immutability |
+| DR-C1 | one Dashboard session token and one three-kind process coordinator, unchanged Phase 4 route/schema/CLI behavior, within-process admission/rate serialization, cancellation ownership, explicit proof that two runtime instances cannot bypass the shared Dashboard limiter |
+| DR-A1 | literal `MarketDataSourcePayloadEnvelopeV1` golden vectors; target/role/calculation-version mismatch; volatile/derived-field exclusion; exact digest-to-path-to-artifactDigest derivation; persisted calculation version and maximum-provider `fetchedAt`; create/reuse/collision; receipt no-replace and digest/identity; A(t1)->B(t2)->A(t3); delayed older-admission completion; two-process inverse completion; equal-millisecond equal-artifact equivalence and conflicting-artifact `latest_resolution_failed`; stale/backwards/corrupt/missing cache reconstruction; orphan artifact exclusion; interrupted after-receipt visibility; bounded corrupt-receipt/artifact fallback; containment |
+| DR-O1 | zero-module GET 404 and POST 400 `source_configuration_missing` with no job/lease/dispatch, strict module registration/order, one root Overview `checkedAt` copied to every module result, success receipt versus retained-previous/failed identity rules, per-module artifact/receipt atomicity, partial success/all-modules-failed root, interrupted publication, active-job recovery, GET persisted-vs-uncollected/corrupt identity |
+| DR-T2 | strict frozen-source mappers, acceptedAt/16:30/query-range gate, exact four-input manifest, current identity/lifetime agreement, all-gap `source_no_observation` with prior-receipt retention and initial GET 404; Technical `published` versus `idempotent_reuse` result/`checkedAt`/receipt schema; GET 404/500/no-fetch; shared CSRF/coordinator/active-job recovery, timeout/cancel/startup |
 | DR-T3 | auto/snapshot/latest precedence, absent latest, refresh adoption, URL/Back/Forward/reload, latest-request-wins, collapse, keyboard crosshair, exact table, Comparison isolation |
 | DR-M0 | old/new fixtures, official migration evidence, individual-Standard entitlement, exact source primary key/fields/issue and sector allowlists/units/vintages, schedule/calendar and short-week/boundary resolver, one-date reconciliation smoke, exact 26-window bootstrap caps, secret-safe record |
-| DR-M1 | complete issue aggregation, field-level valid zero/ratio denominator, verified primary key and unit, canonical expected-date unavailable artifact/path, persisted-vs-uncollected/corrupt identity, proved-missing/duplicate unavailable versus malformed/incomplete no-publish matrix, short-ratio allowlist/formula, correction eligibility, per-module atomic publication/partial success/all-modules-failed root, 1570 identity/unit/old-transition-new official basis break |
+| DR-M1a | complete issue aggregation, shared margin-input reuse, field-level valid zero/ratio denominator, verified primary key/unit, canonical expected-date unavailable artifact, proved-missing/duplicate versus malformed/incomplete no-publish, 1570 identity/unit/old-transition-new official basis break, two registered module results |
+| DR-M1b | short-ratio exact coverage allowlist/formula, valid zero/zero denominator, schedule identity, proved-missing/duplicate versus malformed/incomplete no-publish |
+| DR-M1c | 26-point correction-vintage/eligibility resolver, ambiguous/missing identity, date-only publication, valid zero, no repeated latest-only selection, no future use |
 | DR-M2 | latest 26 expected identities including unavailable rows, weekly/daily boundary, no interpolation, fallback warnings, source/date/cadence/elapsed metadata, keyboard/mobile tables |
-| DR-E1 | exact three-input 1321 EOD and six-input relative-ETF manifests, EOD insufficient-history fields, common-date inner join, no forward fill, positive base, base 100, range boundaries, unavailable range without direction, return/difference/direction, exact tie, distribution exclusion, 1321/2633 announced-split adjusted-price regressions, corporate-action price basis |
+| DR-E1 | exact four-input 1321 EOD and eight-input relative-ETF manifests, current 1321/2633 lifetime continuity and code-reuse rejection, pre-lifetime exclusion, EOD insufficient-history fields, common-date inner join, no forward fill, positive base, base 100, range boundaries, unavailable range without direction, return/difference/direction, exact tie, distribution exclusion, 1321/2633 announced-split adjusted-price regressions, corporate-action price basis |
 | DR-E2 | 3M/6M/1Y/3Y/Max, 1Y default, exact proxy labels/caveats, URL/race/focus, table/chart agreement |
-| DR-X | full unit/integration/Playwright/visual QA, source gates, usage/setup accuracy, no-score/no-signal/Snapshot regression |
+| DR-X | full unit/integration/Playwright/visual QA, source gates, one-external-J-Quants-process operating restriction, Usage/setup accuracy, no-score/no-signal/Snapshot regression |
+
+The review regressions also require these exact boundary cases:
+
+- DR-A1: literal input/root-envelope golden vectors; equal `calculationDate` with
+  changed admission/cutoff/fetch/page metadata reuses the original bytes, while
+  date rollover with identical source rows produces a new revision. Compare the
+  full deterministic calculation projection, including a concurrent `EEXIST`
+  winner. Test same-context A(t1)-B(t2)-A(t3), orphan-only initial 404, retention of
+  a prior receipt after pre-receipt failure, and no deletion of another process's
+  private temp.
+- DR-T0/T1: prove lifetime only over the calculation envelope, without extending
+  ten-year history back to an old instrument's inception. A completed IPO week/month
+  is not a pre-listing gap or leading partial; true in-lifetime `queryFrom`
+  truncation is partial. A code-reuse/relisting boundary never joins instruments.
+- DR-O1/T2: enumerate result/failure nullability for every status; copy the one
+  Overview `checkedAt` to every result, including failed/unattempted modules. A
+  receipt failure differs from a successful receipt followed by a terminal-job
+  rewrite failure; test `job_record_write_failed`, in-memory completed status, and
+  restarted interrupted/null-result status with the committed receipt still visible.
+- DR-T3/M2/E2: one authoritative GET after job completion precedes adoption; an
+  older completed job cannot install its result over a newer admitted receipt. A
+  failed adoption read preserves the previous display with a warning.
+- DR-E1: the strict module schema persists exactly zero, one, or two lifetime
+  entries according to module ID, with exact 13210/26330 ordering and source agreement.
 
 Responsive visual QA covers 320, 390, 680, 768, 980, 1024, and 1280 px with no
 document-level horizontal overflow. It covers Watchlist, all seven tabs, dialogs,
@@ -1568,7 +1991,8 @@ smokes are recorded separately and never replace deterministic tests.
 
 Dashboard Refresh is Done only when:
 
-1. DR-0 through DR-X were separate, independently reviewed PRs merged in order;
+1. every node from DR-0 through DR-X was a separate, independently reviewed PR merged
+   only after its section 10 predecessors;
 2. local `main` is fast-forwarded to the exact green `origin/main`;
 3. all automated validation and required responsive/visual QA pass;
 4. the J-Quants Standard Technical smoke passed without secret exposure;
@@ -1580,8 +2004,8 @@ Dashboard Refresh is Done only when:
 8. Usage, setup, and handoff describe only the exact merged behavior.
 
 Phase 5 begins only after all eight conditions are satisfied. A delayed or failed
-margin migration gate delays DR-M1 onward and Phase 5; it does not authorize a weaker
-source.
+margin migration gate delays DR-M1a-c, DR-M2, DR-X, and Phase 5; it does not
+authorize a weaker source or block the independent Technical/ETF path.
 
 ## 13. Explicitly deferred scope
 

@@ -4,7 +4,7 @@
 exact contract passes independent review, is merged, and local `main` is
 fast-forwarded
 
-**Last Updated:** 2026-09-02
+**Last Updated:** 2026-09-03
 
 ## 1. How to use this file
 
@@ -56,8 +56,8 @@ Its intended diff is limited to:
 - root `DESIGN.md` — sole visual Source of Truth for the Dashboard Refresh;
 - `docs/SPEC.md` — independent pre-Phase-5 roadmap and invariants;
 - `docs/MVP_IMPLEMENTATION_PLAN.md` — current Post-MVP roadmap alignment;
-- `docs/DASHBOARD_REFRESH_PLAN.md` — normative, decision-complete implementation
-  contract; and
+- `docs/DASHBOARD_REFRESH_PLAN.md` — normative implementation contract with explicit
+  source-feasibility gates; and
 - this handoff — non-normative recovery context.
 
 DR-0 adds no code, CSS, test fixture, dependency, environment setting, API route,
@@ -73,11 +73,17 @@ Dashboard Refresh is independent from Phase 5 and must finish first. It adopts:
   tab and `validation` last;
 - explicit EOD Technical and Market Overview refresh from J-Quants Standard or
   higher;
-- separate immutable create-only JSON artifacts under `.dexter/market-data/`;
+- separate immutable create-only JSON content artifacts and observation receipts
+  under `.dexter/market-data/`, with `latest.json` only a rebuildable cache;
 - server-side pure TypeScript calculation and Browser presentation only; and
 - separate Technical/Overview buttons using one shared Dashboard session and one
-  process-wide J-Quants coordinator across existing Strategy Validation and both new
-  job kinds.
+  coordinator inside the running Dashboard server process across existing Strategy
+  Validation and both new job kinds.
+
+The coordinator does not claim account-global control over the standalone Phase 4
+CLI or another Dashboard process. External J-Quants processes must not be run
+concurrently. Immutable receipt ordering protects latest-artifact selection if two
+processes are accidentally run, but it does not coordinate their request rates.
 
 It does not adopt Python, a Dashboard DB, realtime data, automatic market-data
 refresh/polling (active-job status polling is allowed), Snapshot V10, total-return
@@ -108,8 +114,15 @@ lower-coverage substitute. The gate requires:
    observation window for all four initial modules fits frozen request/page/row/byte/
    attempt/deadline limits.
 
-Technical refresh has a separate DR-T2 Standard ten-year-history smoke. Normal CI
-and Playwright use fixtures only and must not contact J-Quants.
+Technical refresh has a separate DR-T0 Standard ten-year-history and effective-dated
+instrument-lifetime gate. The official listed-issue specification rechecked on
+2026-09-03 provides dated master snapshots but explicitly does not provide listing/
+delisting dates or code-change correspondence tables. The exact bounded proof of
+one continuous current listing segment remains unverified. DR-T0 must establish a
+documented proof method before a credentialed smoke and freeze that
+contract and fail closed for IPO, delist/relist, or code-reuse ambiguity before a
+production adapter or UI is exposed. Normal CI and Playwright use fixtures only and
+must not contact J-Quants.
 
 ## 6. Next step after merge
 
@@ -123,8 +136,11 @@ The next step is **DR-V1 — visual tokens and primitives**. It may start only a
 
 DR-V1 implements root `DESIGN.md` tokens and shared primitives only. It must preserve
 the current six-tab behavior. The seven-tab navigation change belongs to DR-V3;
-Technical source I/O belongs to DR-T2; Market source I/O belongs to DR-M1; and user
-instructions belong to DR-X.
+the Technical source/lifetime gate belongs to DR-T0; shared session/coordinator
+extraction belongs to DR-C1; the content/receipt repository belongs to DR-A1;
+Technical source I/O belongs to DR-T2; generic Overview job/API ownership belongs to
+DR-O1; Market source modules belong to DR-M1a-c/DR-E1; and user instructions belong
+to DR-X.
 
 ## 7. Candidate validation
 
@@ -151,13 +167,20 @@ configured suite, and DR-X must run the full suite and responsive visual QA.
 - The 2026-09 margin migration or individual Standard availability can be delayed,
   changed, or fail the bounded smoke.
 - J-Quants corrected historical rows do not prove the exact originally delivered
-  vintage; every artifact stores actual `fetchedAt`, source revision, and digest.
+  vintage; every content artifact stores its original `fetchedAt`, source revision,
+  and digest, while a separate receipt stores each later successful `checkedAt`.
+  Latest is ordered by receipt admission, not content creation or completion time;
+  `calculationDate` is hashed semantic context, so a date rollover is a new revision.
 - Adjusted ETF price is not distribution-reinvested total return.
 - Unadjusted margin quantities can have a unit-basis break at a split and must not be
   drawn as one continuous comparable series.
 - The existing session token and request limiter are currently owned by narrower
-  Strategy Validation components; DR-T2 must extract shared ownership without
-  weakening current security or quota behavior.
+  Strategy Validation components; DR-C1 must extract shared Dashboard-process
+  ownership without weakening current security or quota behavior. CLI/second-process
+  account-level coordination remains explicitly unsupported.
+- The exact individual-Standard request shape needed to prove a continuous current
+  instrument lifetime is unresolved until DR-T0; bars or a latest master row alone
+  are insufficient.
 - A whole-Dashboard visual migration can regress focus, overflow, or semantic states;
   the staged V1-V3 split and required width matrix are merge gates.
 

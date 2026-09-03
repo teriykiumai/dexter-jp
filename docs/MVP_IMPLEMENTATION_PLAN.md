@@ -742,9 +742,11 @@ Before Phase 5, refresh the existing local Dashboard through the separately revi
   RSI14, and MACD 12/26/9 series;
 - ticker-independent Market Overview with source/date/cadence-labelled supply-demand
   context and bounded ETF market-price proxies;
-- create-only Technical/Market JSON artifacts outside AnalysisSnapshot; and
-- dedicated same-origin jobs sharing the Phase 4 Dashboard session and a
-  process-wide J-Quants coordinator.
+- create-only Technical/Market JSON content artifacts plus immutable latest-
+  observation receipts outside AnalysisSnapshot; and
+- dedicated same-origin jobs sharing the Phase 4 Dashboard session and one
+  coordinator inside a single Dashboard server process. Account-global CLI/other-
+  process rate coordination is not claimed.
 
 This work does not change completed MVP Step 0-10 or Snapshot V1-V9. It introduces no
 realtime feed, automatic market-data refresh/polling (active-job status polling is

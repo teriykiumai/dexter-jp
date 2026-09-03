@@ -4,7 +4,7 @@
 **Status:** Draft  
 **Base Project:** `edinetdb/dexter-jp`  
 **Use:** Personal / Local only  
-**Last Updated:** 2026-09-02
+**Last Updated:** 2026-09-03
 
 ## 1. 目的
 
@@ -454,14 +454,25 @@ Phase 1.5〜4の完了条件を再度開くものではなく、Phase 5 Portfoli
 - 最新取得可能なEOD Technical dataと公表済みmarket dataだけを、ユーザーが
   明示操作したlocal jobから取得する
 - J-Quants Standard以上を運用要件とし、通常CIやPlaywrightから外部通信しない
-- Technical/Market dataはAnalysisSnapshotとは別のversioned create-only JSON
-  artifactへ保存し、Snapshot V9 writerとV1-V9 readerを変更しない
+- Technical/Market dataはAnalysisSnapshotとは別のversioned create-only content
+  artifactとimmutable observation receiptへ保存し、latestはreceiptから解決する。
+  mutable `latest.json`は再構築可能なcacheに限り、Snapshot V9 writerとV1-V9
+  readerを変更しない
 - 日足から週足/月足、RSI/MACD series、market集計、ETF相対価格を、Browserでは
   なく決定論的なBun/TypeScript layerで計算する
 - `/api/analyses/*`はGET-onlyを維持し、refresh mutationはPhase 4のHost、Origin、
-  CSRF、job、cancel規約を継承した専用routeへ分離する
+  CSRF、admission、job lifecycle、polling、cancel、recovery規約を継承した専用
+  routeへ分離する。Phase 4固有のpreflight、確認checkbox、
+  `confirmExternalFetch` fieldは継承せず、明示label付きrefresh buttonを外部取得の
+  intentとする
 - Strategy Validation、Technical refresh、Market Overview refreshは、同一
-  process-wide J-Quants coordinatorを共有し、同時実行とrate超過を防ぐ
+  Dashboard server process内のJ-Quants coordinatorを共有し、そのprocess内の
+  同時実行とrate超過を防ぐ。Phase 4 CLIや別Dashboard processとのaccount-global
+  調停は保証せず、外部取得を行うprocessの同時利用を運用上禁止する
+- exact 10-year Technical/ETF dataは、eligible end dateでactiveなinstrumentの
+  effective-dated continuous listing segmentを一次sourceで証明できる範囲だけを
+  calculation/display envelopeとする。上場前を欠損扱いせず、delist/relistや
+  code reuseを跨がず、continuityを証明できなければfail closedする
 - raw response、credential、request header、request ID、絶対pathをartifactや
   Browserへ保存・返却しない
 - realtime、automatic market-data refresh/polling（active jobのstatus確認を除く）、
