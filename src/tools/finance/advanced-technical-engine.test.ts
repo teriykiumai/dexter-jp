@@ -3,7 +3,9 @@ import {
   analyzeAdvancedTechnical,
   calculateBollingerBands,
   calculateMacd,
+  calculateMacdSeries,
   calculateRsi,
+  calculateRsiSeries,
 } from './advanced-technical-engine.js';
 import type { TechnicalBar } from './technical-engine.js';
 
@@ -11,6 +13,44 @@ const deterministicCloses = [
   100, 102, 101, 104, 103, 105, 106, 104,
   107, 109, 108, 110, 111, 109, 112, 113,
 ] as const;
+
+describe('shared indicator series', () => {
+  test('returns aligned warm-up slots and preserves every exact-prefix legacy value', () => {
+    const closes = Array.from({ length: 80 }, (_, index) => 100 + Math.sin(index) * 10 + index);
+    const rsi = calculateRsiSeries(closes);
+    const macd = calculateMacdSeries(closes);
+    expect(rsi).toHaveLength(closes.length);
+    expect(macd).toHaveLength(closes.length);
+    for (let index = 0; index < closes.length; index += 1) {
+      expect(rsi[index]).toEqual(calculateRsi(closes.slice(0, index + 1)).rsi14);
+      expect(macd[index]).toEqual(calculateMacd(closes.slice(0, index + 1)).macd);
+    }
+    expect(calculateRsiSeries([])).toEqual([]);
+    expect(calculateMacdSeries([])).toEqual([]);
+  });
+
+  test('strict helpers reject invalid closes, while legacy helpers preserve guard precedence', () => {
+    for (const value of [0, -1, NaN, Infinity]) {
+      expect(() => calculateRsiSeries([value])).toThrow(RangeError);
+      expect(() => calculateMacdSeries([value])).toThrow(RangeError);
+      expect(calculateRsi([value]).unavailable[0].reason).toBe('insufficient_history');
+      expect(calculateMacd([value]).unavailable[0].reason).toBe('insufficient_history');
+    }
+    expect(calculateRsi([null, ...Array(14).fill(-1)]).unavailable[0].reason).toBe('missing_data');
+    expect(calculateMacd([null, ...Array(33).fill(-1)]).unavailable[0].reason).toBe('missing_data');
+    expect(() => calculateRsiSeries(Array(5))).toThrow(RangeError);
+    expect(() => calculateMacdSeries(Array(5))).toThrow(RangeError);
+  });
+
+  test('arithmetic overflow cannot be returned as an available indicator', () => {
+    const alternating = Array.from({ length: 15 }, (_, index) => index % 2 ? 1e308 : 1);
+    expect(() => calculateRsiSeries(alternating)).toThrow(RangeError);
+    expect(calculateRsi(alternating)).toEqual({ rsi14: null, unavailable: [{ metric: 'rsi14', reason: 'invalid_data' }] });
+    const large = Array(34).fill(1e308);
+    expect(() => calculateMacdSeries(large)).toThrow(RangeError);
+    expect(calculateMacd(large)).toEqual({ macd: null, unavailable: [{ metric: 'macd', reason: 'invalid_data' }] });
+  });
+});
 
 describe('calculateRsi', () => {
   test('calculates a hand-verifiable RSI from the initial 14 changes', () => {
