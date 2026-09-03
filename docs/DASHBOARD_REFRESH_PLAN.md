@@ -42,9 +42,11 @@ This plan inherits and does not weaken:
 - `docs/REVIEW_POLICY.md` for independent review and the Merge Gate.
 
 This file is the normative plan for Dashboard Refresh. Historical plans are not
-rewritten. Where this plan deliberately changes the current six-tab shell or adds a
-guarded market-data mutation surface, the change is explicit and applies only after
-the corresponding step is reviewed and merged.
+rewritten. Where this plan deliberately changes the current six-tab shell, adds a
+guarded market-data mutation surface, or introduces the versioned Dashboard-only
+pre-admission gate in section 8.3, the change is explicit and applies only after the
+corresponding step is reviewed and merged. The admission gate preserves Phase 4's
+empty-start execution controls; it does not redefine `rolling_attempt_log_v1`.
 
 ## 2. Scope and preserved baseline
 
@@ -679,6 +681,13 @@ There is no automatic retention deletion, compaction, or backfill. The initial U
 selects only the authoritative latest observed revision; historical content or
 receipt browsing is deferred.
 
+V1 deliberately has O(total receipt filenames for the target) normal-read
+enumeration. `latest.json` is not a bounded index and does not reduce that proof
+cost. DR-A1 must exercise representative receipt counts and report the enumeration
+cost; it must not describe this cache as a constant-time latest lookup. Directory
+sharding, an authoritative bounded index, and receipt-group skipping are deferred
+to a separately reviewed storage/order contract rather than improvised in DR-A1.
+
 ### 5.4 Strict artifacts and fallback
 
 `TechnicalChartDatasetV1` and every Market Overview module are closed strict schemas.
@@ -707,6 +716,14 @@ Repository reads never silently skip corruption:
    remains, same-instant latest receipts disagree, or the repository itself cannot be
    read safely. Exhausting a scan limit before proving a valid receipt/artifact pair
    is `artifact_recovery_bound_exceeded`; it never returns an unvalidated older file.
+
+The 256-receipt recovery limit counts every inspected receipt, including the newest
+group and repeated references to the same artifact, not 256 distinct artifacts.
+Consequently, 256 newer receipts pointing to one corrupt artifact can prevent
+reaching an older valid artifact. V1 returns the typed bound error in that case;
+fallback is bounded best effort, not a guarantee that all surviving history can be
+reached. A cache hit or shared artifact digest must not bypass receipt validation,
+tie-conflict checks, or the recovery budget.
 
 An orphan artifact without a valid receipt never participates in latest selection.
 An absent, stale, corrupt, or backwards-written `latest.json` cache is reconstructed
@@ -1582,7 +1599,13 @@ them.
 Market-data mutations reuse the one process-local Dashboard session returned by
 `GET /api/session`, including its exact `X-Dexter-CSRF` token, constant-time check,
 Host/Origin rules, no-CORS rule, no-store/nosniff headers, JSON media-type policy,
-body accounting, and sanitized error union from Phase 4.
+body accounting, and the `{ error: { code, message } }` envelope/message-sanitization
+mechanism from Phase 4. The public code vocabulary is domain-owned, not shared:
+Phase 4 keeps `forbidden_host`, `forbidden_origin`, `csrf_failed`, and
+`payload_too_large`; Market Data maps those security failures to `request_forbidden`
+and its body-limit failure to `request_body_too_large` under section 8.5. Shared
+guards return internal reasons that each route adapter maps to its own closed
+codes; Market Data must not replace a Phase 4 public code or vice versa.
 
 The inherited job contract is limited to that session/security owner, admission
 conflict, bounded lifecycle, polling, cancellation checkpoints, recovery, and safe
@@ -1604,7 +1627,7 @@ is not trusted; chunked bodies are counted and stopped at the same cap.
 One coordinator owned by one running Dashboard server process owns admission and
 request rate for every Dashboard J-Quants job: Strategy Validation, Technical
 refresh, and Overview refresh. There is exactly one nonterminal external job across
-all three kinds inside that process. A second job receives 409
+all three kinds inside that process. While a lease is active, another POST receives 409
 `active_job_conflict`; its safe message may name only the active job kind and does
 not expose provider or source inputs.
 
@@ -1616,8 +1639,99 @@ lifecycle; Strategy Validation likewise does not own Market Data job records.
 
 All J-Quants requests from these Dashboard jobs share that process-local rate limiter
 and the existing configured requests-per-minute ceiling. A Dashboard job may make
-requests only through that coordinator. Operation-local limiters inside individual
-Dashboard job runtimes are not sufficient.
+requests only through its current coordinator lease. Operation-local limiters inside
+individual Dashboard job runtimes are not sufficient, and constructing a new runtime
+or completing/failing/cancelling a job must not erase retained process attempt times.
+
+#### Empty-start admission: `dashboard_empty_start_admission_v1`
+
+Choose empty-start admission, not carry-over debt inside an accepted job and not a
+second post-admission limiter with a different feasibility model. The coordinator
+uses one process monotonic clock for admission and actual dispatch. It retains
+timestamps of all actual original/pagination/retry attempts, including failed or
+cancelled fetches, until their age is at least 60,000 ms. Merely finishing the job
+does not clear this log. An active lease is released normally at terminal state;
+cooldown is a coordinator condition, not a nonterminal job or a held job lease.
+
+Every job-creation POST for the three Dashboard kinds, including a zero-attempt
+Strategy Validation plan, follows this order after Host/Origin/CSRF/media/body and
+local request/preflight/registered-module validation:
+
+1. Under the one admission critical section, reject an existing active lease with
+   the existing HTTP 409 `active_job_conflict`. This busy response has no
+   `Retry-After`, because active-job completion time is unknown.
+2. With no active lease, expire timestamps with age >= 60,000 ms. If any remain,
+   return HTTP 409 `active_job_conflict` immediately, now meaning temporarily
+   unavailable coordinator admission. Add a seconds-only `Retry-After` header:
+
+   ```text
+   retryAfterSeconds = ceil((latestRetainedDispatchMs + 60_000 - nowMs) / 1_000)
+   ```
+
+   It is an integer from 1 through 60, based on the newest retained attempt, not
+   the first free rate slot or the prior job's completion time. The safe message is
+   `J-Quantsの通信間隔を確保するため、あと {retryAfterSeconds} 秒待って再度実行してください。ジョブは未受付です。`
+   Only that validated integer is interpolated; no prior target, input, or
+   credential is disclosed. Do not claim that a completed job is still running.
+3. This cooldown response creates no job/run/receipt, freezes no `acceptedAt` or
+   execution-budget origin, consumes no Phase 4 preflight, reserves no lease, and
+   dispatches no request. The server does not hold the HTTP request until expiry,
+   enqueue a job, or start a timer that will accept it later. With cooldown alone,
+   active-job GETs return their normal no-active-job envelopes. There is no pending
+   server job to cancel; DELETE for a prior job keeps its existing lifecycle rules.
+4. Only a later explicit user retry can start work. Revalidate session, preflight
+   expiry/consumption/digest and local feasibility on that request. A still-valid
+   Phase 4 preflight and confirmation remain usable; expiry returns the existing
+   `preflight_expired` and requires a new local preflight, not an automatic one.
+5. Only when the process log is empty and no lease is active, atomically reserve the
+   new lease and freeze `acceptedAt` and its monotonic budget origin. Recheck
+   preflight expiry/consumption/digest inside this same critical section before
+   reservation; validation only outside the section is insufficient. Create the
+   normal job and consume the Phase 4 preflight through the inherited admission
+   transaction. Another simultaneous POST cannot pass the same empty-start check.
+   A job-creation failure uses the existing domain persistence/recovery rules;
+   release an uncommitted provisional lease, invent no attempt, and do not consume
+   the preflight before successful creation. Do not delete a durable job to pretend
+   that a crash or ambiguous storage failure never occurred.
+
+Neither an HTTP disconnect after a cooldown refusal nor passage of `Retry-After`
+can start an external request. Non-finite/backwards process-clock state fails closed
+before admission (`internal_failure` for Phase 4, `invariant_failure` for Market
+Data), with no preflight consumption. Wall-clock changes never clear the attempt log
+or drive cooldown arithmetic. A process restart has a new in-memory log and does
+not create a cross-process/account-level guarantee.
+
+This establishes the same empty initial log used by Phase 4 sections 9.1-9.2 for
+every accepted job. Keep `rateLimitVersion: rolling_attempt_log_v1`, frozen rate,
+attempt/deadline caps, and the existing formula unchanged:
+
+```text
+minimumDispatchDurationMs = N === 0 ? 0 : floor((N - 1) / R) * 60_000
+```
+
+The duration is relative to successful `acceptedAt`, not the first button click or
+a rejected POST. The Phase 4 5,400,000-ms deadline and each Market Data job's own
+budget begin only at that acceptance. Prior-job cooldown consumes neither budget.
+For R=1/N=90, a prior attempt requires a refused admission until expiry; after a new
+acceptance, the last minimum dispatch remains at +5,340,000 ms. R=1/N=91 remains
+infeasible at local preflight, regardless of cooldown. Do not merely wait for some
+capacity after acceptance while retaining the old empty-log estimate.
+
+DR-C1 appends this fixed notice to the existing Dashboard Phase 4 preflight
+`warnings` array, preserving its schema and the current warning/error surfaces:
+`最小dispatch時間とExecution budgetは受付成立後の時間です。直前の通信から最大60秒は受付できず、手動再試行が必要です。`
+DR-T3/DR-M2/DR-E2 include the same admission limitation next to their refresh/quota
+explanation. No UI automatically retries a refused POST, polls cooldown, clears a
+valid confirmation, or adds a queued-job status. The existing latency/pagination/
+retry caveats still apply after acceptance.
+
+This is an explicit versioned addition to Dashboard admission and its warning/error
+copy, not a behavior-preserving refactor claim. Phase 4 routes, public code enums,
+preflight/job/run/control schemas, accepted-job calculation semantics, and standalone
+CLI behavior stay unchanged. The new admission version is a Dashboard coordinator
+policy, not a replacement value in persisted Phase 4 `rateLimitVersion`.
+
+#### Rate scope and accepted-job execution
 
 This is not an account-global or cross-process guarantee. The standalone Phase 4 CLI
 constructs its own `JQuantsExecutionRuntimeV1`, and another Dashboard process would
@@ -1761,7 +1875,7 @@ and no automatic background freshness loop.
 | 403 | Host, Origin, or CSRF failure before admission |
 | 404 | no committed observation receipt for the requested scope, or exact job not found |
 | 405 | unsupported method with exact `Allow` |
-| 409 | active-job conflict or invalid cancellation/lifecycle action |
+| 409 | coordinator admission conflict (active job or empty-start cooldown), or invalid cancellation/lifecycle action |
 | 413 | request body exceeds the route cap |
 | 415 | unsupported media type |
 | 500 | Technical corruption without a valid fallback; Overview corruption when no implemented module validates; ambiguous latest-receipt order; repository-wide filesystem or invariant failure |
@@ -1844,10 +1958,15 @@ visual list order alone, controls admission; Phase 5 still waits for DR-X.
 6. **DR-T1 — pure Technical chart series**
    - implement strict daily input, interval aggregation, partial-period rules,
      RSI/MACD series, cross state, and pure tests only.
-7. **DR-C1 — shared Dashboard session and coordinator refactor**
+7. **DR-C1 — shared Dashboard session and empty-start coordinator**
    - extract the existing Dashboard session/security owner and one Dashboard-process
-     J-Quants admission/rate coordinator without changing Phase 4 routes, schemas,
-     CLI behavior, or Browser output.
+     J-Quants admission/rate coordinator;
+   - implement `dashboard_empty_start_admission_v1`, including immediate cooldown
+     refusal, manual-retry warning/error copy, preflight preservation, and atomic
+     empty-start acceptance;
+   - preserve Phase 4 routes, public code enums, schemas, accepted-job timing/
+     financial semantics, and CLI behavior. Reuse existing Browser surfaces; add no
+     layout, styling, or job-status variant.
 8. **DR-A1 — market-data artifact and observation repository**
    - implement `MarketDataSourcePayloadEnvelopeV1`, calculation versions, canonical
      artifact create/reuse, immutable observation receipts, authoritative latest
@@ -1913,8 +2032,9 @@ DR-M2 waits for all three. A delayed DR-M0 does not block DR-T3 or the independe
 ETF path. No step opportunistically implements a later step. DR-V1-V3 do not fetch
 market data; DR-T0 exposes no public route and persists no market-data artifact;
 DR-T1 and DR-A1 expose no new route; DR-O1 cannot dispatch without a registered
-module; DR-C1 is behavior-preserving; DR-M0 is a gate rather than a UI/source
-implementation; DR-X adds no new runtime behavior.
+module; DR-C1 changes only shared ownership plus the explicit pre-admission/copy
+contract while preserving accepted-job semantics; DR-M0 is a gate rather than a
+UI/source implementation; DR-X adds no new runtime behavior.
 
 ## 11. Test and acceptance matrix
 
@@ -1926,7 +2046,7 @@ implementation; DR-X adds no new runtime behavior.
 | DR-V3 | exact seven IDs/labels/order, Home/End/arrows/roving focus, all existing complex surfaces, availability ownership, token contrast at every required surface |
 | DR-T0 | exact official endpoint/query/field/effective-date/entitlement registry; bounded four-input source proof; no-publication smoke; current identity and continuous segment fixtures; IPO/later listing, current-master absence, delisting/relisting, code reuse, conflicting/incomplete continuity; request/page/row/byte/deadline ceilings; secret non-exposure |
 | DR-T1 | strict bar/gap union, positive OHLC/non-negative volume and valid zero, lifetime-clipped calculation envelope without pre-listing gaps, fewer-than-251 current-segment bars, daily `partial:false`, gap-only period, OHLCV aggregation, week/month/calendar/holiday boundaries, week-mid/month-mid `queryFrom` leading partials, partial current week/month, all-null/partial-null, RSI index 14, MACD bundle index 33, first cross index 34/equality, 34-month boundary, same-window Engine parity, input immutability |
-| DR-C1 | one Dashboard session token and one three-kind process coordinator, unchanged Phase 4 route/schema/CLI behavior, within-process admission/rate serialization, cancellation ownership, explicit proof that two runtime instances cannot bypass the shared Dashboard limiter |
+| DR-C1 | one Dashboard session token and one three-kind process coordinator; unchanged Phase 4 routes/public code enums/schemas/accepted-job controls/CLI; empty-start admission and exact cooldown 409/Retry-After; retained attempt log across job completion/failure/cancel/runtime construction; preflight preservation and atomic admission; manual-retry warning/error Browser flow; two runtime instances cannot bypass the shared Dashboard limiter |
 | DR-A1 | literal `MarketDataSourcePayloadEnvelopeV1` golden vectors; target/role/calculation-version mismatch; volatile/derived-field exclusion; exact digest-to-path-to-artifactDigest derivation; persisted calculation version and maximum-provider `fetchedAt`; create/reuse/collision; receipt no-replace and digest/identity; A(t1)->B(t2)->A(t3); delayed older-admission completion; two-process inverse completion; equal-millisecond equal-artifact equivalence and conflicting-artifact `latest_resolution_failed`; stale/backwards/corrupt/missing cache reconstruction; orphan artifact exclusion; interrupted after-receipt visibility; bounded corrupt-receipt/artifact fallback; containment |
 | DR-O1 | zero-module GET 404 and POST 400 `source_configuration_missing` with no job/lease/dispatch, strict module registration/order, one root Overview `checkedAt` copied to every module result, success receipt versus retained-previous/failed identity rules, per-module artifact/receipt atomicity, partial success/all-modules-failed root, interrupted publication, active-job recovery, GET persisted-vs-uncollected/corrupt identity |
 | DR-T2 | strict frozen-source mappers, acceptedAt/16:30/query-range gate, exact four-input manifest, current identity/lifetime agreement, all-gap `source_no_observation` with prior-receipt retention and initial GET 404; Technical `published` versus `idempotent_reuse` result/`checkedAt`/receipt schema; GET 404/500/no-fetch; shared CSRF/coordinator/active-job recovery, timeout/cancel/startup |
@@ -1942,6 +2062,21 @@ implementation; DR-X adds no new runtime behavior.
 
 The review regressions also require these exact boundary cases:
 
+- DR-C1: fake-clock prior-job bursts at R=1/2/5; empty versus partly occupied logs;
+  rejection at latest attempt +59,999 ms and acceptance at +60,000 ms; newest rather
+  than oldest expiry controls admission. Verify N=R, N=0, and the 90/91 and 180/181
+  feasibility boundaries without changing existing execution controls. Cover every
+  pair of the three job kinds, simultaneous retries, zero-dispatch failure, retained
+  failed/cancelled attempts, stale lease rejection, and wall-clock/monotonic-clock
+  changes. A cooldown response must not create/consume/dispatch anything, active GET
+  stays idle, and expiry/disconnect/DELETE cannot auto-start work. Playwright covers
+  the existing preflight warning and confirmation surviving a refused start, manual
+  retry success, expired-preflight handling, no cooldown polling, and no active-job
+  mislabel. Header seconds and safe message agree exactly.
+- DR-C1/O1/T2: shared envelope/sanitization with domain-specific codes; Phase 4 keeps
+  its separate Host/Origin/CSRF and payload codes while Market Data uses
+  `request_forbidden` / `request_body_too_large`. Cooldown alone maps to 409 with
+  `Retry-After`; actual active-job conflict has no fabricated retry time.
 - DR-A1: literal input/root-envelope golden vectors; equal `calculationDate` with
   changed admission/cutoff/fetch/page metadata reuses the original bytes, while
   date rollover with identical source rows produces a new revision. Compare the
@@ -1949,6 +2084,12 @@ The review regressions also require these exact boundary cases:
   winner. Test same-context A(t1)-B(t2)-A(t3), orphan-only initial 404, retention of
   a prior receipt after pre-receipt failure, and no deletion of another process's
   private temp.
+- DR-A1: synthetic directories with 1/256/10,000 receipt filenames expose full
+  enumeration rather than a claimed bounded cache lookup. With other recovery
+  budgets available, 255 newer references to corrupt content plus one older valid
+  receipt can fall back within 256; 256 such references plus an older valid receipt
+  return `artifact_recovery_bound_exceeded`. Duplicate artifact identity does not
+  excuse validation of a malformed receipt or a same-instant conflict.
 - DR-T0/T1: prove lifetime only over the calculation envelope, without extending
   ten-year history back to an old instrument's inception. A completed IPO week/month
   is not a pre-listing gap or leading partial; true in-lifetime `queryFrom`
@@ -2020,7 +2161,8 @@ authorize a weaker source or block the independent Technical/ETF path.
 - direct index or ETF total-return comparison and distribution reinvestment;
 - automatic refresh, polling outside an active job, scheduler, SSE, or WebSocket;
 - Python, a Dashboard database, Snapshot V10, or artifact backfill;
-- artifact revision browser or automatic retention deletion;
+- artifact revision browser, automatic retention deletion, receipt sharding/bounded
+  indexing, or receipt-group skipping without a separate storage/order review;
 - Buy/Sell/Hold, score, signal, prediction, or investment advice; and
 - Phase 5 Portfolio, cross-stock correlation, VaR, monitoring, or notification work.
 

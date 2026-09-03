@@ -469,6 +469,13 @@ Phase 1.5〜4の完了条件を再度開くものではなく、Phase 5 Portfoli
   Dashboard server process内のJ-Quants coordinatorを共有し、そのprocess内の
   同時実行とrate超過を防ぐ。Phase 4 CLIや別Dashboard processとのaccount-global
   調停は保証せず、外部取得を行うprocessの同時利用を運用上禁止する
+- `dashboard_empty_start_admission_v1`により、同一processの直前のattemptが
+  60秒windowに残る間はjob POSTを409と`Retry-After`で未受付として返す。
+  job作成・preflight消費・自動待機・自動再実行はせず、手動再試行時に再検証する。
+  logが空になった後の受付成立時にのみ`acceptedAt`とexecution budgetを開始し、
+  Phase 4の`rolling_attempt_log_v1`、empty-start最小dispatch時間、保存済み
+  execution controlsの意味を維持する。追加する挙動はDashboardの受付制約と
+  warning/error説明に限り、CLIとaccepted jobの仕様を変更しない
 - exact 10-year Technical/ETF dataは、eligible end dateでactiveなinstrumentの
   effective-dated continuous listing segmentを一次sourceで証明できる範囲だけを
   calculation/display envelopeとする。上場前を欠損扱いせず、delist/relistや

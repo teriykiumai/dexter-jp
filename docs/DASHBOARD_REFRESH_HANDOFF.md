@@ -85,6 +85,13 @@ CLI or another Dashboard process. External J-Quants processes must not be run
 concurrently. Immutable receipt ordering protects latest-artifact selection if two
 processes are accidentally run, but it does not coordinate their request rates.
 
+Dashboard admission uses `dashboard_empty_start_admission_v1`: after an earlier job,
+the process attempt log must become empty before a new job can be accepted. Cooldown
+returns immediate 409 plus `Retry-After`, without a job, preflight consumption,
+`acceptedAt`, or automatic retry. A manual retry revalidates before acceptance. This
+keeps Phase 4's empty-start `rolling_attempt_log_v1` estimate and execution deadline
+unchanged; DR-C1 explicitly adds this admission behavior and warning/error copy.
+
 It does not adopt Python, a Dashboard DB, realtime data, automatic market-data
 refresh/polling (active-job status polling is allowed), Snapshot V10, total-return
 claims, score, signal, Buy/Sell advice, or Phase 5 Portfolio work.
@@ -137,7 +144,8 @@ The next step is **DR-V1 — visual tokens and primitives**. It may start only a
 DR-V1 implements root `DESIGN.md` tokens and shared primitives only. It must preserve
 the current six-tab behavior. The seven-tab navigation change belongs to DR-V3;
 the Technical source/lifetime gate belongs to DR-T0; shared session/coordinator
-extraction belongs to DR-C1; the content/receipt repository belongs to DR-A1;
+ownership and empty-start admission belong to DR-C1; the content/receipt repository
+belongs to DR-A1;
 Technical source I/O belongs to DR-T2; generic Overview job/API ownership belongs to
 DR-O1; Market source modules belong to DR-M1a-c/DR-E1; and user instructions belong
 to DR-X.
@@ -176,8 +184,15 @@ configured suite, and DR-X must run the full suite and responsive visual QA.
   drawn as one continuous comparable series.
 - The existing session token and request limiter are currently owned by narrower
   Strategy Validation components; DR-C1 must extract shared Dashboard-process
-  ownership without weakening current security or quota behavior. CLI/second-process
-  account-level coordination remains explicitly unsupported.
+  ownership while preserving empty-start accepted-job timing and security. A recent
+  dispatch can refuse new admission for up to 60 seconds even after job completion;
+  the client must retry explicitly. CLI/second-process account-level coordination
+  remains explicitly unsupported.
+- Every successful refresh adds a receipt. V1 latest reads enumerate all receipt
+  filenames, and the 256-receipt fallback limit can prevent reaching an older valid
+  artifact after repeated references to corrupt content. These are explicit local-
+  use limitations, not solved by `latest.json`; sharding/indexing/group skipping
+  require a separate reviewed storage/order contract.
 - The exact individual-Standard request shape needed to prove a continuous current
   instrument lifetime is unresolved until DR-T0; bars or a latest master row alone
   are insufficient.
