@@ -1,12 +1,13 @@
 # Dexter JP Dashboard Refresh Handoff
 
-**Status:** DR-0, DR-V1-V3, DR-T1, and DR-C1 merged. DR-T0 remains on hold after
-read-only source investigation; DR-A1 content/observation repository candidate
-awaits independent review and merge.
-No production Technical/source-module codec, source adapter, refresh API, or new
-chart controls exist yet. DR-A1 is an internal storage foundation only.
+**Status:** DR-0, DR-V1-V3, DR-T1, DR-C1, and DR-A1 merged. DR-T0 remains on hold
+after read-only source investigation. DR-O1 generic Overview job/read foundation is
+the current candidate.
+No production Technical/source-module codec, source adapter, external Market Data
+request, or new chart controls exist yet. With zero registered Overview modules,
+the read remains 404 and refresh admission is refused before creating a job.
 
-**Last Updated:** 2026-09-03
+**Last Updated:** 2026-09-04
 
 ## 1. How to use this file
 
@@ -44,7 +45,7 @@ The implemented baseline includes:
 No Dashboard Refresh Technical artifact, Market Overview artifact, refresh route,
 new visual token system, or seventh tab exists at this baseline.
 
-## 3. Merged predecessor steps and current DR-A1 boundary
+## 3. Merged predecessor steps and current DR-O1 boundary
 
 The DR-0 branch was:
 
@@ -265,8 +266,33 @@ receipts that name different artifacts fail closed even if one artifact is corru
 An unreadable member of an admission group requires prior-group fallback rather
 than guessing its missing identity. Exact observation reads never use fallback.
 
-There is no Market Data job repository, source request, route, UI, dependency,
-Snapshot change, retention deletion, or source-gate waiver in this candidate.
+PR #100 received an independent `Mergeable` review for exact head
+`cba378b97833ab3f29d741a335abedc0b6512b8c`, with zero BLOCKING/MAJOR findings
+and canonical test/typecheck CI green (run `33767226929`). Following user
+authorization, it merged on 2026-09-03 as
+`268b08660118f50033068d6ba608ebf5792c60ca`. Local `main` was fast-forwarded to
+that exact commit before creating:
+
+```text
+feat/dashboard-overview-foundation-step1
+```
+
+DR-O1 adds the one native Market Data job repository/recovery adapter shared by
+future Technical and Overview refreshes, the strict Overview module registry,
+per-module publication orchestration, receipt-resolved Overview composition, and
+the local read/job API. Production server composition registers both durable job
+domains before starting the shared recovery barrier and gives both route adapters
+the same Dashboard session. The job repository persists only the closed native job
+view and uses the same contained, strict UTF-8/duplicate-key, symlink-resistant
+read boundary as Market Data artifacts.
+
+No production source module is registered in DR-O1. Therefore the default
+`GET /api/market-data/overview` returns 404 and a valid
+`POST /api/market-data/overview/jobs` returns 400
+`source_configuration_missing` before lease acquisition, job publication, or
+external dispatch. Tests use only closed synthetic codecs and collectors. DR-O1
+adds no UI/CSS, credential read, external request, dependency, Snapshot change,
+retention deletion, or source-gate waiver.
 
 ## 4. Adopted product boundary
 
@@ -345,7 +371,7 @@ contract and fail closed for IPO, delist/relist, or code-reuse ambiguity before 
 production adapter or UI is exposed. Normal CI and Playwright use fixtures only and
 must not contact J-Quants.
 
-## 6. DR-T0 hold and next step after DR-A1 merge
+## 6. DR-T0 hold and current DR-O1 review boundary
 
 Read-only investigation of the official J-Quants master specification did not
 establish a continuous listing-segment proof within the planned attempt/time bounds.
@@ -354,20 +380,17 @@ no source contract was approved, and no lifetime source ID was frozen. The user
 explicitly accepted keeping DR-T0 on hold and proceeding with the independent DR-T1
 pure step allowed by the approved dependency graph.
 
-The next dependency step is **DR-O1 — generic Overview job and read API foundation**.
-It may start only after:
-
-1. the exact DR-A1 head has no BLOCKING or MAJOR independent-review finding;
-2. required CI is green;
-3. the user authorizes and completes merge;
-4. local `main` is fast-forwarded to the merged `origin/main`; and
-5. the next step branch is created from that updated clean main.
+The DR-A1 prerequisites were satisfied and DR-O1 started from its merged main. DR-O1
+must remain one independently reviewed foundation PR. A production module, source
+request, Technical route, Overview card, automatic refresh, or source-gate decision
+does not belong in this candidate.
 
 DR-T0 must still resolve the documented source/lifetime proof before any explicitly
 authorized credentialed smoke. Failure to prove continuity within the frozen bounds
 returns to design review, not a guessed adapter. DR-C1/DR-A1/DR-O1 can proceed by the
-dependency graph; production Technical I/O in DR-T2 remains blocked on both DR-O1
-and the independently reviewed DR-T0 gate. Pure test success does not lift that gate.
+dependency graph; production Technical I/O in DR-T2 remains blocked on both merged
+DR-O1 and the independently reviewed DR-T0 gate. Pure test success does not lift
+that gate.
 
 Market Overview remains a placeholder until the corresponding data steps merge.
 The Technical source/lifetime gate belongs to DR-T0; shared session/coordinator
@@ -482,7 +505,7 @@ All data and requests are local synthetic fixtures, not entitlement/source smoke
 PR #99 subsequently passed independent re-review and canonical test/typecheck CI.
 Local direct-compiler success does not replace the canonical CI command.
 
-### 7.4 Current DR-A1 candidate
+### 7.4 Merged DR-A1 predecessor evidence
 
 The repository suite exercises literal root/input golden preimages and digests,
 closed target/calculation/role sets, forbidden volatile fields, date rollover,
@@ -503,14 +526,43 @@ before the valid receipt fail with `artifact_recovery_bound_exceeded`. Separate
 tests enforce the 256 MiB and two-second bounds. Repeated content references do not
 skip receipt validation or conflict checks.
 
-Full-suite/browser validation and canonical CI must be rechecked on the exact
-candidate head before independent review; DR-T0 remains unresolved regardless of
-these synthetic storage results.
+PR #100 subsequently passed independent review and canonical test/typecheck CI for
+exact head `cba378b97833ab3f29d741a335abedc0b6512b8c`, then merged as
+`268b08660118f50033068d6ba608ebf5792c60ca`. DR-T0 remains unresolved regardless
+of these synthetic storage results.
 
 | Validation | Result |
 | --- | --- |
 | new source-contract/repository tests | 42 passed, 0 failed |
 | `bun test` | 1105 passed, 0 failed, across 89 files |
+| `bun run typecheck` | same Windows Bun launcher failure before compiler execution |
+| `bun node_modules/typescript/bin/tsc --noEmit` | passed using the installed compiler |
+| `bun run test:dashboard-browser` | 80 passed, 0 failed; unchanged Dashboard journeys |
+| `git diff --check` | passed; only the checkout's LF-to-CRLF conversion warning |
+
+### 7.5 Current DR-O1 candidate
+
+The DR-O1 tests exercise the closed job schema and transitions, 65,536-byte native
+record boundary, create/replace proof outcomes, strict inventory/temp cleanup,
+single and partial module completion, one root `checkedAt`, prior-observation
+retention, valid zero, both ETF persisted-unavailable reasons, job-wide deadline
+without publication, cancellation before publication, and single/multiple startup
+recovery boundaries without source replay. An ambiguous terminal
+record write after a committed receipt retains a validated in-memory completion,
+adds `job_record_write_failed`, and keeps the process-wide admission barrier latched.
+
+Read/API coverage verifies the fixed six-module ordering, `not_implemented` and
+`not_collected` distinction, configured-secret rejection, empty-registry GET 404 and
+POST 400, shared Host/Origin/CSRF enforcement, strict/size-bounded JSON, exact
+methods, active/exact/cancel routes, and unchanged Analysis-domain public error
+codes. Default server composition shares one session and registers both native job
+adapters before initialization. All module/source behavior is synthetic; no test or
+runtime path in this candidate contacts J-Quants.
+
+| Validation | Result |
+| --- | --- |
+| new/extended DR-O1 tests | 27 passed, 0 failed |
+| `bun test` | 1132 passed, 0 failed, across 94 files |
 | `bun run typecheck` | same Windows Bun launcher failure before compiler execution |
 | `bun node_modules/typescript/bin/tsc --noEmit` | passed using the installed compiler |
 | `bun run test:dashboard-browser` | 80 passed, 0 failed; unchanged Dashboard journeys |

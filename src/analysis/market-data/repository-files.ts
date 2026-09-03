@@ -69,8 +69,11 @@ export class MarketDataFilesV1 {
     }
   }
 
-  async read(path: string, budget?: MarketDataRecoveryBudgetV1): Promise<unknown> {
+  async read(path: string, budget?: MarketDataRecoveryBudgetV1,
+    maximumBytes = MARKET_DATA_RECOVERY_LIMITS_V1.bytes): Promise<unknown> {
     this.contained(path);
+    if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1
+      || maximumBytes > MARKET_DATA_RECOVERY_LIMITS_V1.bytes) return failMarketData('repository_unsafe');
     if (!await this.directory(dirname(path))) return failMarketData('artifact_not_found');
     try {
       const before = await lstat(path);
@@ -79,7 +82,7 @@ export class MarketDataFilesV1 {
       try {
         const info = await handle.stat();
         if (!info.isFile() || info.ino !== before.ino || info.dev !== before.dev) return failMarketData('repository_unsafe');
-        if (info.size > MARKET_DATA_RECOVERY_LIMITS_V1.bytes) {
+        if (info.size > maximumBytes) {
           if (budget) budget.consume(info.size);
           return failMarketData('artifact_corrupt');
         }
@@ -97,7 +100,7 @@ export class MarketDataFilesV1 {
         const after = await lstat(path);
         if (after.isSymbolicLink() || after.ino !== info.ino || after.dev !== info.dev) return failMarketData('repository_unsafe');
         budget?.check();
-        try { return parseStrictJsonBytesV1(bytes.subarray(0, offset), MARKET_DATA_RECOVERY_LIMITS_V1.bytes); }
+        try { return parseStrictJsonBytesV1(bytes.subarray(0, offset), maximumBytes); }
         catch { return failMarketData('artifact_corrupt'); }
       } finally { await handle.close(); }
     } catch (error) {

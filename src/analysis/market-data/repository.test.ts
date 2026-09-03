@@ -206,6 +206,17 @@ describe('Market Data immutable repository', () => {
     await rm(join(root, first.artifactIdentity.rootRelativeIdentity));
     await expectCode(repository.loadObservation(first.observationReceiptIdentity), 'artifact_corrupt');
   });
+  test('job/acceptance lookup proves exact receipt absence and never substitutes latest', async () => {
+    const { repository } = await context();
+    const artifact = fixtureArtifact(); const jobId = randomUUID();
+    const published = await repository.publish(artifact, observationFor(artifact, jobId));
+    expect(await repository.findObservation(jobId, artifact.asOfCutoff)).toEqual({
+      artifact: published.artifact, artifactIdentity: published.artifactIdentity,
+      receipt: published.receipt, observationReceiptIdentity: published.observationReceiptIdentity,
+      checkedAt: published.checkedAt,
+    });
+    expect(await repository.findObservation(randomUUID(), artifact.asOfCutoff)).toBeNull();
+  });
   for (const count of [255, 256]) test(`${count} repeated corrupt references count individually`, async () => {
     const { root, repository } = await context({ monotonicNow: () => 0 });
     const a = fixtureArtifact(), b = fixtureArtifact(at(1), 1);

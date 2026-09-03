@@ -86,6 +86,30 @@ export class MarketDataRepositoryV1<T extends MarketDataArtifactFieldsV1> {
     } catch (error) { if (recoverable(error)) return failMarketData('artifact_corrupt'); throw error; }
   }
 
+  /** Resolves the one receipt identity derived from an admitted job. A null result
+   * is returned only when the final receipt path is proved absent; corrupt or
+   * unreadable content remains a fail-closed repository error.
+   */
+  async findObservation(jobId: string, acceptedAt: string): Promise<ObservedMarketDataV1<T> | null> {
+    const job = StrategyValidationUuidV4Schema.safeParse(jobId);
+    const accepted = MarketDataInstantV1Schema.safeParse(acceptedAt);
+    if (!job.success || !accepted.success) return failMarketData('artifact_corrupt');
+    const acceptedAtEpochMs = Date.parse(accepted.data);
+    const relative = `observations/${this.prefix}/${acceptedAtEpochMs}_${job.data}.json`;
+    try {
+      const receipt = validateReceiptV1(await this.files.read(this.files.path(relative)));
+      const identity = receiptIdentityV1(receipt);
+      if (identity.rootRelativeIdentity !== relative || receipt.jobId !== job.data
+        || receipt.acceptedAt !== accepted.data || !same(receipt.target, this.codec.target)) {
+        return failMarketData('artifact_corrupt');
+      }
+      return await this.loadObservation(identity);
+    } catch (error) {
+      if (error instanceof MarketDataRepositoryErrorV1 && error.code === 'artifact_not_found') return null;
+      throw error;
+    }
+  }
+
   private async create(path: string, payload: unknown, validate: (raw: unknown) => void,
     existing: (raw: unknown) => void): Promise<'created' | 'existing'> {
     const canonicalPayload = canonicalJsonV1(json(payload));
