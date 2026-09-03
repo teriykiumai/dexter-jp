@@ -4,7 +4,7 @@
 **Status:** Draft  
 **Base Project:** `edinetdb/dexter-jp`  
 **Use:** Personal / Local only  
-**Last Updated:** 2026-08-31
+**Last Updated:** 2026-09-03
 
 ## 1. 目的
 
@@ -442,6 +442,64 @@ Independent Evaluatorのruntime、CLI、API、Dashboard表示、gold-set gateは
 Phase 3の対象としない。保存済み分析に対する具体的なレビュー需要、許容する
 誤検出率、継続評価予算が定義された場合に、使用済みholdoutを再利用せず、
 新しいversioned gold setとgate IDを含む独立した計画で再評価する。
+
+### Dashboard Refresh & Market Context（Phase 5前の独立計画）
+
+Phase 5へ進む前に、既存Dashboardの視覚・技術Chart・全市場共通contextを、
+`docs/DASHBOARD_REFRESH_PLAN.md` に従う独立した段階計画で刷新する。これは
+Phase 1.5〜4の完了条件を再度開くものではなく、Phase 5 Portfolio機能でもない。
+
+- Dashboard全体をroot `DESIGN.md`のvisual systemと共通primitiveへ段階移行する
+- 既存tabへticker非依存の `market-overview / 市場概況` を追加し、全7tabとする
+- 最新取得可能なEOD Technical dataと公表済みmarket dataだけを、ユーザーが
+  明示操作したlocal jobから取得する
+- J-Quants Standard以上を運用要件とし、通常CIやPlaywrightから外部通信しない
+- Technical/Market dataはAnalysisSnapshotとは別のversioned create-only content
+  artifactとimmutable observation receiptへ保存し、latestはreceiptから解決する。
+  mutable `latest.json`は再構築可能なcacheに限り、Snapshot V9 writerとV1-V9
+  readerを変更しない
+- 日足から週足/月足、RSI/MACD series、market集計、ETF相対価格を、Browserでは
+  なく決定論的なBun/TypeScript layerで計算する
+- `/api/analyses/*`はGET-onlyを維持し、refresh mutationはPhase 4のHost、Origin、
+  CSRF、admission、job lifecycle、polling、cancel、recovery規約を継承した専用
+  routeへ分離する。Phase 4固有のpreflight、確認checkbox、
+  `confirmExternalFetch` fieldは継承せず、明示label付きrefresh buttonを外部取得の
+  intentとする
+- Strategy Validation、Technical refresh、Market Overview refreshは、同一
+  Dashboard server process内のJ-Quants coordinatorを共有し、そのprocess内の
+  同時実行とrate超過を防ぐ。Phase 4 CLIや別Dashboard processとのaccount-global
+  調停は保証せず、外部取得を行うprocessの同時利用を運用上禁止する
+- `dashboard_empty_start_admission_v1`により、同一processの直前のattemptが
+  60秒windowに残る間はjob POSTを409と`Retry-After`で未受付として返す。
+  job作成・preflight消費・自動待機・自動再実行はせず、手動再試行時に再検証する。
+  logが空になった後の受付成立時にのみ`acceptedAt`とexecution budgetを開始し、
+  Phase 4の`rolling_attempt_log_v1`、empty-start最小dispatch時間、保存済み
+  execution controlsの意味を維持する。CLIと受付後の計算・時間上限は変更しない
+- `dashboard_job_recovery_v1`により、job保存の例外を「未保存」と扱わない。
+  保存結果を`definitely_not_published | published | ambiguous`で区別し、
+  両domainの永続jobを照合して安全を証明できない間は共通の受付を停止する。
+  in-memoryの完了表示だけでは実行枠を解放しない。曖昧な保存後はprocess内の
+  復旧待ち状態を維持し、ユーザーによる再起動時に両保存先を一括照合する。
+  複数nonterminal・破損記録を自動修復・削除せず、Phase 4のstatus別run復旧と
+  Market Dataの確定済みreceiptを維持する。追加する受付・復旧・error表示の
+  契約はDashboardに限定し、既存Phase 4のjob/run schemaとpublic error code集合は維持する
+- exact 10-year Technical/ETF dataは、eligible end dateでactiveなinstrumentの
+  effective-dated continuous listing segmentを一次sourceで証明できる範囲だけを
+  calculation/display envelopeとする。上場前を欠損扱いせず、delist/relistや
+  code reuseを跨がず、continuityを証明できなければfail closedする
+- raw response、credential、request header、request ID、絶対pathをartifactや
+  Browserへ保存・返却しない
+- realtime、automatic market-data refresh/polling（active jobのstatus確認を除く）、
+  Python、Dashboard DB、Snapshot V10、total-return表現、score、Buy/Sell signal、
+  投資助言を追加しない
+
+「最新」はsource/entitlementから取得できる最新EODまたは公表観測を意味し、
+realtimeや取引所現在値を意味しない。1321/2633はJPY建てETF市場価格proxyであり、
+日経平均現物、直接の指数total return、または日米投資優位性として表示しない。
+
+2026年9月の信用残日次化は予定どおりの移行成功、個人向けJ-Quants Standardの
+公式schema/entitlement更新、実credentialによるbounded smokeのすべてを公開gateと
+する。未確認のfield、J-Quants Pro契約、非公式scrapingから実装を推測しない。
 
 ### Phase 5
 - Portfolio分析

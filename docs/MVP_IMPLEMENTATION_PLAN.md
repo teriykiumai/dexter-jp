@@ -713,10 +713,14 @@ Phase 1.5は、Step 10で完成したMVPの完成条件を変更または再度�
 
 ## Phase 4
 
-- backtest
-- strategy validation
-- score validation and runtime adoption decision
-- look-ahead validation
+- saved-Snapshot Entry / Stop / Target outcome audit
+- manifest-driven 251-session historical reconstruction and outcome validation
+- point-in-time / no-look-ahead source, calendar, adjustment, and tick-size foundation
+- explicit local Dashboard inspection of persisted validation runs
+
+Phase 4 is research-only. It does not implement portfolio backtesting, a runtime
+score, Strategy PASS/FAIL, or a Buy/Sell signal. The detailed completed contract is
+`docs/PHASE4_PLAN.md`.
 
 PDF export is deferred without assigning it to a numbered phase. Reconsider it only
 after a concrete sharing, audit, offline-printing, or PDF-accessibility need is
@@ -727,6 +731,28 @@ gate are also deferred without a numbered target phase. Reconsider them only aft
 a concrete review workflow, acceptable error rates, and an ongoing evaluation
 budget are defined in a separate reviewed plan with a new versioned holdout and
 gate ID.
+
+## Dashboard Refresh & Market Context — independent pre-Phase-5 plan
+
+Before Phase 5, refresh the existing local Dashboard through the separately reviewed
+`docs/DASHBOARD_REFRESH_PLAN.md`:
+
+- root `DESIGN.md` visual system and seven-tab navigation;
+- explicitly refreshed J-Quants EOD Technical data with day/week/month, OHLCV,
+  RSI14, and MACD 12/26/9 series;
+- ticker-independent Market Overview with source/date/cadence-labelled supply-demand
+  context and bounded ETF market-price proxies;
+- create-only Technical/Market JSON content artifacts plus immutable latest-
+  observation receipts outside AnalysisSnapshot; and
+- dedicated same-origin jobs sharing the Phase 4 Dashboard session and one
+  coordinator inside a single Dashboard server process. Account-global CLI/other-
+  process rate coordination is not claimed.
+
+This work does not change completed MVP Step 0-10 or Snapshot V1-V9. It introduces no
+realtime feed, automatic market-data refresh/polling (active-job status polling is
+allowed), Python, Dashboard database, total-return claim, score, signal, investment
+advice, or Phase 5 Portfolio behavior. Phase 5 starts only after the independent
+Dashboard Refresh closeout and its source gates are complete.
 
 ## Phase 5
 

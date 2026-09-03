@@ -18,6 +18,8 @@
 - `AGENTS.md` — repository operating, safety, validation, and Git/PR rules.
 - `docs/SPEC.md` — product scope and invariants, including deterministic calculation,
   missing-data, no-look-ahead, AI responsibility, and local-use constraints.
+- `DESIGN.md` — the sole visual authority for user-facing UI color, typography,
+  spacing, border radius, component styling, and visual hierarchy.
 - `docs/MVP_IMPLEMENTATION_PLAN.md` — completed MVP step contracts and baseline.
 - `docs/VISUALIZATION_MVP_PLAN.md` — inherited Phase 1.5 Snapshot, persistence,
   local API, and Dashboard contracts.
@@ -34,24 +36,34 @@ Use repository documents by authority and subject, not merely by recency:
 
 1. `AGENTS.md` controls repository operations and safety.
 2. `docs/SPEC.md` controls product scope and invariant behavior.
-3. The applicable plan controls only its requested phase/step and must preserve
+3. `DESIGN.md` controls the visual domains listed above for user-facing UI work.
+4. The applicable plan controls only its requested phase/step and must preserve
    inherited contracts unless it explicitly defines an approved versioned change.
-4. Merged code and tests define the current implemented baseline.
-5. Handoff documents summarize context and are never normative.
+5. Merged code and tests define the current implemented baseline.
+6. Handoff documents summarize context and are never normative.
 
-If an applicable plan appears to conflict with `AGENTS.md`, `docs/SPEC.md`, or an
-inherited merged/tested contract without an explicit migration, do not silently pick
-one. Stop, identify the conflict with evidence, and request direction.
+`DESIGN.md` does not override product requirements, accessibility, usability,
+security, semantic or financial accuracy, or functional correctness. If one of those
+constraints requires a visual-token or component-style change, update `DESIGN.md` in
+the same reviewed change before implementation. Do not introduce an ad hoc exception
+in CSS or component code.
+
+If an applicable plan appears to conflict with `AGENTS.md`, `docs/SPEC.md`,
+`DESIGN.md` within its visual domain, or an inherited merged/tested contract without
+an explicit migration, do not silently pick one. Stop, identify the conflict with
+evidence, and request direction.
 
 At the start of a task:
 
 1. Read `AGENTS.md` and `docs/SPEC.md`.
-2. Read the requested scope in the applicable plan and any predecessor plan whose
+2. Before any design decision for a task that creates or changes user-facing UI,
+   read the repository-root `DESIGN.md`.
+3. Read the requested scope in the applicable plan and any predecessor plan whose
    contract it inherits.
-3. Use the relevant handoff only to recover context.
-4. Read `docs/REVIEW_POLICY.md` for PR work.
-5. Inspect the current implementation and relevant tests before proposing changes.
-6. Before major edits, state the minimal approach and affected scope.
+4. Use the relevant handoff only to recover context.
+5. Read `docs/REVIEW_POLICY.md` for PR work.
+6. Inspect the current implementation and relevant tests before proposing changes.
+7. Before major edits, state the minimal approach and affected scope.
 
 ## Commands
 
@@ -72,6 +84,11 @@ otherwise.
   opportunistically implement a later step or future phase.
 - Reuse the existing implementation before adding code. Inspect utilities, engines,
   clients, registries, types, and tests before creating an abstraction.
+- For user-facing UI, reuse the tokens and components in `DESIGN.md`. Do not add an
+  independent or conflicting color, typography, spacing, radius, component style, or
+  visual hierarchy. External reference sites are direction only, not a requirement
+  for pixel-perfect reproduction; accessibility, usability, and functional accuracy
+  take priority.
 - Keep diffs minimal and reviewable. Do not mix unrelated refactors, cleanup,
   formatting, documentation, or behavioral changes into the task.
 - Preserve existing behavior unless the requested contract explicitly changes it.
@@ -83,8 +100,8 @@ otherwise.
 
 Product calculation, data-integrity, historical-analysis, AI-output, Entry/Stop/
 Target, and deployment invariants are defined in `docs/SPEC.md`. Formula-, source-,
-Snapshot-, and presentation-specific rules belong to the applicable plan; do not
-duplicate or weaken them in implementation.
+Snapshot-, and product-presentation semantics belong to the applicable plan; visual
+styling belongs to `DESIGN.md`. Do not duplicate or weaken them in implementation.
 
 ## TypeScript and error handling
 
