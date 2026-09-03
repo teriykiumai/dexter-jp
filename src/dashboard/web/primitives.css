@@ -1,0 +1,180 @@
+/* Scoped until DR-V2/V3 migrate each complete surface; legacy routes stay unchanged. */
+.dashboard-design {
+  color-scheme: light;
+  min-width: 0;
+  min-height: 100vh;
+  color: var(--color-text);
+  background: var(--color-canvas);
+  font: var(--type-body);
+  font-synthesis: none;
+  letter-spacing: normal;
+  overflow-wrap: anywhere;
+}
+
+.dashboard-design .design-content {
+  width: 100%;
+  max-width: var(--content-max-width);
+  margin: 0 auto;
+  padding: var(--space-6);
+}
+
+.dashboard-design .design-stack { display: grid; min-width: 0; gap: var(--space-6); }
+.dashboard-design .design-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.dashboard-design h1 { font: var(--type-page-heading); }
+.dashboard-design h2 { font: var(--type-section-heading); }
+.dashboard-design h3 { font: var(--type-subsection-heading); }
+.dashboard-design h1, .dashboard-design h2, .dashboard-design h3 {
+  margin: 0;
+  color: var(--color-text-strong);
+  letter-spacing: normal;
+}
+.dashboard-design p { margin: 0; }
+.dashboard-design small { font: var(--type-small); }
+.dashboard-design .design-display { font: var(--type-display); }
+.dashboard-design .design-data { font: var(--type-data); font-variant-numeric: tabular-nums; }
+.dashboard-design .design-kpi { color: var(--color-text-strong); font: var(--type-kpi); font-variant-numeric: tabular-nums; }
+.dashboard-design .design-metadata { color: var(--color-text-muted); font: var(--type-metadata); font-variant-numeric: tabular-nums; }
+.dashboard-design .eyebrow { color: var(--color-text-muted); font: var(--type-label); letter-spacing: normal; text-transform: none; }
+.dashboard-design .eyebrow:lang(en) { letter-spacing: 0.06em; }
+.dashboard-design a { color: var(--color-accent); text-decoration: underline; }
+.dashboard-design a:hover { color: var(--color-accent-active); }
+.dashboard-design :focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--focus-offset); }
+
+.dashboard-design .panel {
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-6);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-surface);
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: none;
+}
+.dashboard-design .panel-header {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-4);
+}
+.dashboard-design .panel-title-line { min-width: 0; display: flex; align-items: center; gap: var(--space-2); }
+.dashboard-design .metric-grid { margin: 0; display: grid; gap: 0; }
+.dashboard-design .metric-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: baseline;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-3) 0;
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+.dashboard-design .metric-row:last-child { border-bottom: 0; }
+.dashboard-design .metric-row dt { display: flex; min-width: 0; align-items: center; gap: var(--space-2); color: var(--color-text); font: var(--type-body); }
+.dashboard-design .metric-row dd { min-width: 0; margin: 0; color: var(--color-text-strong); font: var(--type-data); font-variant-numeric: tabular-nums; text-align: right; }
+.dashboard-design .metric-row small { grid-column: 1 / -1; color: var(--color-text-muted); font: var(--type-small); }
+/* The unchanged legacy .unavailable rule is important; contain the override here. */
+.dashboard-design .unavailable { color: var(--color-unavailable) !important; font-style: normal; }
+
+.dashboard-design .design-button, .dashboard-design .guidance-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-width: var(--control-height);
+  min-height: var(--control-height);
+  max-width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-width) solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+  font: var(--type-body);
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  transition: color var(--feedback-duration), background-color var(--feedback-duration), border-color var(--feedback-duration);
+}
+.dashboard-design .guidance-button { flex: 0 0 auto; width: var(--control-height); height: var(--control-height); padding: 0; font: var(--type-label); }
+.dashboard-design .design-button[data-variant="primary"] { border-color: var(--color-accent); background: var(--color-accent); color: var(--color-surface); }
+.dashboard-design .design-button[data-variant="quiet"] { border-color: transparent; background: transparent; color: var(--color-accent); }
+.dashboard-design .design-button[data-variant="destructive"] { border-color: var(--color-danger); background: var(--color-danger); color: var(--color-surface); }
+.dashboard-design .design-button:hover:not(:disabled), .dashboard-design .guidance-button:hover { border-color: var(--color-accent-active); background: var(--color-surface-muted); color: var(--color-accent-active); }
+.dashboard-design .design-button[data-variant="primary"]:is(:hover, :active):not(:disabled) { border-color: var(--color-accent-active); background: var(--color-accent-active); color: var(--color-surface); }
+.dashboard-design .design-button[data-variant="destructive"]:is(:hover, :active):not(:disabled) { border-color: var(--color-danger); background: var(--color-danger); color: var(--color-surface); }
+.dashboard-design .design-button:disabled { border-color: var(--color-border-control); background: var(--color-surface-muted); color: var(--color-text-muted); cursor: not-allowed; opacity: 1; }
+.dashboard-design .guidance-button:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--focus-offset); }
+
+.dashboard-design .design-field { display: grid; min-width: 0; gap: var(--space-2); color: var(--color-text); font: var(--type-label); }
+.dashboard-design .design-field :is(input, select, textarea) {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--control-height);
+  max-width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-width) solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: var(--type-body);
+}
+.dashboard-design .design-field textarea { resize: vertical; }
+.dashboard-design .design-field [aria-invalid="true"] { border-color: var(--color-danger); }
+.dashboard-design .design-field :disabled { background: var(--color-surface-muted); color: var(--color-text-muted); opacity: 1; }
+.dashboard-design .design-field :is(.field-help, .field-error) { color: var(--color-text-muted); font: var(--type-small); }
+
+.dashboard-design .availability-badges, .dashboard-design .availability-badges.compact { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.dashboard-design .availability-badge, .dashboard-design .availability-badges.compact .availability-badge, .dashboard-design .design-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 0;
+  max-width: 100%;
+  padding: var(--space-1) var(--space-2);
+  border: var(--border-width) solid var(--color-unavailable);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-muted);
+  color: var(--color-text);
+  font: var(--type-label);
+  white-space: normal;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.dashboard-design [data-tone="neutral"] { --status-border: var(--color-border); }
+.dashboard-design [data-tone="success"] { --status-border: var(--color-positive); }
+.dashboard-design [data-tone="warning"] { --status-border: var(--color-warning); }
+.dashboard-design [data-tone="error"] { --status-border: var(--color-danger); }
+.dashboard-design [data-tone="unavailable"] { --status-border: var(--color-unavailable); }
+.dashboard-design .design-badge { border-color: var(--status-border); }
+.dashboard-design .design-notice { display: grid; gap: var(--space-2); padding: var(--space-4); border-inline-start: var(--border-width) solid var(--status-border); border-radius: var(--radius-surface); background: var(--color-surface-muted); color: var(--color-text); }
+.dashboard-design .design-notice h3 { color: var(--color-text-strong); }
+
+.dashboard-design .table-scroll { width: 100%; max-width: 100%; min-width: 0; overflow-x: auto; }
+.dashboard-design .table-scroll:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--focus-offset); }
+.dashboard-design table { width: 100%; border-collapse: collapse; background: var(--color-surface); }
+.dashboard-design caption { padding: var(--space-2) var(--space-3); color: var(--color-text); font: var(--type-small); text-align: left; }
+.dashboard-design th, .dashboard-design td { height: var(--control-height); padding: var(--space-2) var(--space-3); border-bottom: var(--border-width) solid var(--color-border); color: var(--color-text); font: var(--type-data); font-variant-numeric: tabular-nums; text-align: right; letter-spacing: normal; text-transform: none; }
+.dashboard-design thead th { background: var(--color-surface-muted); font: var(--type-label); }
+.dashboard-design tbody th, .dashboard-design .identity-cell { color: var(--color-text-strong); font-family: var(--font-ui); text-align: left; }
+.dashboard-design td code { font: inherit; white-space: nowrap; }
+
+@media (min-width: 680px) and (pointer: fine) {
+  .dashboard-design .design-button[data-compact="true"] { min-height: var(--control-compact-height); padding-block: var(--space-1); }
+  .dashboard-design th, .dashboard-design td { height: var(--control-compact-height); padding-block: var(--space-1); }
+}
+
+@media (width < 680px) {
+  .dashboard-design .design-content { padding: var(--space-4) var(--space-3); }
+  .dashboard-design .panel { padding: var(--space-4); }
+  .dashboard-design .design-display { font: var(--type-display-mobile); }
+}
+
+@media (width < 680px), (pointer: coarse) {
+  .dashboard-design .design-button, .dashboard-design .guidance-button,
+  .dashboard-design .design-field :is(input, select, textarea) { min-width: var(--touch-target-size); min-height: var(--touch-target-size); }
+  .dashboard-design .guidance-button { width: var(--touch-target-size); height: var(--touch-target-size); }
+  .dashboard-design a { display: inline-flex; align-items: center; min-width: var(--touch-target-size); min-height: var(--touch-target-size); }
+  .dashboard-design th, .dashboard-design td { height: var(--touch-target-size); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-design *, .dashboard-design *::before, .dashboard-design *::after { animation: none !important; transition: none !important; }
+}

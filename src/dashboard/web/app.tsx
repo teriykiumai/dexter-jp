@@ -65,10 +65,8 @@ import {
   parseDetailTab,
   parseDetailTicker,
   sortWatchlistItems,
-  type DashboardMetric,
   type DashboardAvailabilityCount,
   type DashboardTabId,
-  type DisplayValue,
   type InvestorTypeCategoryView,
   type VolumeProfileView,
   type WatchlistItemView,
@@ -76,89 +74,14 @@ import {
 } from './presentation.js';
 import { PeerRadarPresentation } from './peer-radar-view.js';
 import { StrategyValidationPanel } from './strategy-validation-panel.js';
-
-function Value({ value }: { value: DisplayValue }) {
-  return <span className={value.available ? undefined : 'unavailable'}>{value.text}</span>;
-}
-
-type OpenGlossary = (
-  term: DashboardGlossaryTermId,
-  invoker: HTMLButtonElement,
-) => void;
-
-function GuidanceButton({ term, onOpen }: {
-  term: DashboardGlossaryTermId;
-  onOpen: OpenGlossary;
-}) {
-  const entry = DASHBOARD_GLOSSARY[term];
-  return (
-    <button
-      aria-label={`${entry.label}の説明を開く`}
-      className="guidance-button"
-      onClick={event => onOpen(term, event.currentTarget)}
-      type="button"
-    >
-      ?
-    </button>
-  );
-}
-
-function Card({
-  title,
-  eyebrow,
-  children,
-  className = '',
-  guidanceTerm,
-  onOpenGuidance,
-}: {
-  title: string;
-  eyebrow?: string;
-  children: ReactNode;
-  className?: string;
-  guidanceTerm?: DashboardGlossaryTermId;
-  onOpenGuidance?: OpenGlossary;
-}) {
-  return (
-    <section className={`panel ${className}`}>
-      <header className="panel-header">
-        {eyebrow ? <span className="eyebrow">{eyebrow}</span> : null}
-        <div className="panel-title-line">
-          <h2>{title}</h2>
-          {guidanceTerm && onOpenGuidance
-            ? <GuidanceButton term={guidanceTerm} onOpen={onOpenGuidance} />
-            : null}
-        </div>
-      </header>
-      {children}
-    </section>
-  );
-}
-
-function MetricGrid({ metrics, guidance = {}, onOpenGuidance }: {
-  metrics: DashboardMetric[];
-  guidance?: Readonly<Record<string, DashboardGlossaryTermId>>;
-  onOpenGuidance?: OpenGlossary;
-}) {
-  return (
-    <dl className="metric-grid">
-      {metrics.map(metric => {
-        const term = guidance[metric.label];
-        return (
-          <div className="metric-row" key={metric.label}>
-            <dt>
-              <span>{metric.label}</span>
-              {term && onOpenGuidance
-                ? <GuidanceButton term={term} onOpen={onOpenGuidance} />
-                : null}
-            </dt>
-            <dd><Value value={metric.value} /></dd>
-            {metric.note ? <small>{metric.note}</small> : null}
-          </div>
-        );
-      })}
-    </dl>
-  );
-}
+import {
+  AvailabilityBadges,
+  Card,
+  GuidanceButton,
+  MetricGrid,
+  Value,
+  type OpenGlossary,
+} from './primitives.js';
 
 type GlossarySelection = 'index' | DashboardGlossaryTermId | null;
 type GlossaryFocusDestination = 'active-tab' | 'main-heading';
@@ -289,27 +212,6 @@ function focusGlossaryDestination(): void {
   });
   observer.observe(root, { childList: true, subtree: true });
   if (focusTarget()) observer.disconnect();
-}
-
-function AvailabilityBadges({ counts, compact = false }: {
-  counts: DashboardAvailabilityCount;
-  compact?: boolean;
-}) {
-  if (counts.unavailable === 0 && counts.uncollected === 0) return null;
-  return (
-    <span className={compact ? 'availability-badges compact' : 'availability-badges'}>
-      {counts.unavailable > 0 ? (
-        <span className="availability-badge unavailable-count">
-          利用不可 {counts.unavailable}
-        </span>
-      ) : null}
-      {counts.uncollected > 0 ? (
-        <span className="availability-badge uncollected-count">
-          未収集 {counts.uncollected}
-        </span>
-      ) : null}
-    </span>
-  );
 }
 
 const DEFAULT_DISCLOSURE_STATE = {
