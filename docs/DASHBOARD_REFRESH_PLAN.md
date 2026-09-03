@@ -2,7 +2,7 @@
 
 **Plan version:** `dashboard_refresh_plan_v1`
 
-**Status:** Candidate — requires independent review and merge before runtime work
+**Status:** Approved DR-0 contract — PR #94 merged; each runtime step still requires independent review and merge
 
 **Last Updated:** 2026-09-03
 

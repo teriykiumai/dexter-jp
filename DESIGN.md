@@ -2,9 +2,9 @@
 
 **Design version:** `dexter_design_v1`
 
-**Status:** Visual Source of Truth — candidate until the DR-0 pull request is merged
+**Status:** Visual Source of Truth — approved DR-0 contract (PR #94 merged)
 
-**Last Updated:** 2026-09-02
+**Last Updated:** 2026-09-03
 
 ## 1. Authority and priority
 
@@ -365,8 +365,9 @@ Required visual QA widths remain 320, 390, 680, 768, 980, 1024, and 1280px.
 Reuse the current semantic and interaction structures before creating another
 component:
 
-- `Card`, `MetricGrid`, `AvailabilityBadges`, `DashboardTabs`, and
-  `DashboardTabPanel` in `src/dashboard/web/app.tsx`;
+- `Card`, `MetricGrid`, `AvailabilityBadges`, `Value`, and `GuidanceButton`, shared
+  by `src/dashboard/web/app.tsx` through `src/dashboard/web/primitives.tsx`;
+- `DashboardTabs` and `DashboardTabPanel` in `src/dashboard/web/app.tsx`;
 - the existing table-scroll region, native glossary dialog, and loading/empty/error
   patterns;
 - `lightweight-charts`, Peer Radar, Volume Profile, and their exact tables; and
@@ -382,6 +383,57 @@ its prior CSS until its planned step, but a new or migrated component uses only 
 system. Do not mix legacy and new hard-coded visual values inside a migrated
 component. DR-V1 establishes tokens and primitives; DR-V2 and DR-V3 migrate the
 Watchlist and detail surfaces.
+
+The DR-V1 implementation keeps the exact base tokens and their type/geometry/chart
+aliases in `src/dashboard/web/design-tokens.css`. `primitives.css` implements the
+light system inside the explicit `DashboardDesign` / `.dashboard-design` boundary.
+It does not redefine the legacy variables or globally recolor unmigrated routes.
+The boundary is a code-level migration tool, not a user theme option.
+
+Shared foundation additions are native `Button` variants, text-labelled
+`StatusBadge` / `StatusNotice`, and the named, keyboard-focusable `TableScroll`.
+`Value` defaults to the UI family. Callers explicitly select `kind="data"` for
+numbers, tickers, IDs, or dates; `MetricGridItem.valueKind` passes the same content
+role through `MetricGrid`. Unavailable/uncollected values always use UI text even
+when the available value's role is data. Never infer a role from a formatted string,
+its label, or whether it resembles a number. `Value` retains its containing type
+size; `MetricGrid` uses small-body text for state/category values and exact-data
+typography for explicitly selected data values. Availability semantics are unchanged.
+
+`design-metadata` is UI label/metadata typography by default, including Japanese
+metadata. Its explicit `data-kind="data"` variant is only for compact data such as
+an ID or date, not Japanese explanations. Split mixed metadata into labelled text
+and a data span rather than applying monospace to a whole sentence.
+
+Table cells default to left-aligned small-body UI text. Apply `numeric-cell` to both
+the header and body cells of a numeric column: the header retains UI label typography,
+while available body numbers use right-aligned exact-data typography with tabular
+numerals. Use `Value` for unavailable/uncollected placeholders in numeric cells so
+their text keeps the UI family. Identity and explanatory columns remain left-aligned;
+an explicitly data-typed `Value` can render a ticker/ID without changing alignment.
+`identity-cell` is an optional identity-emphasis alias, not an escape hatch required
+for explanatory text.
+
+The `design-field` rectangular-control pattern covers only native select/textarea
+and text-like inputs: omitted type, `text`, `search`, `email`, `url`, `tel`,
+`password`, `number`, `date`, `datetime-local`, `month`, `week`, and `time`.
+It requires a visible label and associated help/error text. Checkbox, radio, range,
+color, file, hidden, and button-like inputs are outside this pattern; none of its
+control geometry, invalid, disabled, or touch-sizing rules apply to them. Their
+complete accessible patterns remain part of the owning surface's migration, not an
+implicit rectangular-input fallback.
+
+`design-content`, `design-stack`, and `design-actions` apply the sizing and spacing
+above; `--type-*` and named control/focus/dialog aliases encode only the existing
+roles and geometry. These are implementation names, not another visual authority
+or a second design scale.
+
+DR-V1 tests the light primitives in a test-only composition while production routes
+continue to use their legacy appearance and the same shared semantic components.
+DR-V2 opts in the complete Watchlist surface; DR-V3 opts in the complete detail
+surface, including its charts, tables, dialog, and tabs. Do not put an unmigrated
+complex surface inside the light boundary. Chart palette aliases are available in
+DR-V1, but applying them to the existing chart runtimes remains DR-V3 work.
 
 ## 9. Change checklist
 

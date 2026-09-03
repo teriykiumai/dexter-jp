@@ -5,7 +5,7 @@ export default defineConfig({
   outputDir: '../../../.dexter/dashboard-browser-test-results',
   reporter: 'line',
   testDir: '.',
-  testMatch: 'app.browser.playwright.ts',
+  testMatch: ['app.browser.playwright.ts', 'primitives.browser.playwright.ts'],
   timeout: 30_000,
   use: {
     headless: true,

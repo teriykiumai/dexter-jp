@@ -1,8 +1,7 @@
 # Dexter JP Dashboard Refresh Handoff
 
-**Status:** DR-0 candidate; no Dashboard Refresh runtime work is approved until this
-exact contract passes independent review, is merged, and local `main` is
-fast-forwarded
+**Status:** DR-0 merged; DR-V1 candidate implementation awaiting independent re-review
+and merge. DR-V2 and later steps have not started.
 
 **Last Updated:** 2026-09-03
 
@@ -42,15 +41,15 @@ The implemented baseline includes:
 No Dashboard Refresh Technical artifact, Market Overview artifact, refresh route,
 new visual token system, or seventh tab exists at this baseline.
 
-## 3. DR-0 candidate boundary
+## 3. DR-0 merge and current DR-V1 boundary
 
-The candidate branch is:
+The DR-0 branch was:
 
 ```text
 feat/dashboard-refresh-contract-step0
 ```
 
-Its intended diff is limited to:
+Its merged diff was limited to:
 
 - `AGENTS.md` — require root `DESIGN.md` for every user-facing UI design task;
 - root `DESIGN.md` — sole visual Source of Truth for the Dashboard Refresh;
@@ -63,6 +62,40 @@ Its intended diff is limited to:
 DR-0 adds no code, CSS, test fixture, dependency, environment setting, API route,
 external request, local artifact, Usage instruction, or setup instruction. Historical
 UX and Phase 2-4 plan/handoff files remain unchanged.
+
+PR #94 received a `Mergeable` independent review for exact head
+`01a5b3de0e5a755908ff45cddb399bbaaf2d28c2`, with zero unresolved BLOCKING/MAJOR
+findings and both canonical CI checks green. Following user authorization it was
+merged on 2026-09-03 as `8e80a02dec04d0b1686623f1e724ba6cc1307c88`. Local `main` was
+fast-forwarded to that exact commit before creating:
+
+```text
+feat/dashboard-visual-primitives-step1
+```
+
+DR-V1 implements `DESIGN.md` tokens and scoped light primitives. The existing
+`Card`, `MetricGrid`, `AvailabilityBadges`, `Value`, and `GuidanceButton` move to
+`primitives.tsx` while preserving semantic content and interaction ownership.
+Native Button variants, labelled statuses, and a keyboard table region provide
+reusable foundations. Exact tokens, native field styling, safe targets, focus,
+reduced-motion handling, and the migration boundary are covered by unit/browser
+tests and a test-only visual composition.
+
+PR #95 review corrections make value content roles explicit: text/state remains UI
+typography, numeric/ID/date values opt in through `Value.kind` or
+`MetricGridItem.valueKind`, and unavailable values never inherit the data family.
+Japanese metadata and compact data metadata are distinct. Tables default to
+left-aligned UI text with an explicit numeric-column class on headers and body
+cells. Native rectangular-field rules have a text-like input allowlist and do not
+restyle checkbox/radio or other non-text controls. `DESIGN.md` records these shared
+usage contracts; the corrections do not activate a production surface migration.
+
+The production Watchlist and six-tab detail retain their legacy appearance. The
+new light boundary is not activated around a partially migrated page, and no
+public design-preview route is added. Watchlist/global navigation belongs to
+DR-V2; complex detail/Table/Dialog/Radar/Validation/chart migration and the seven-tab
+shell belong to DR-V3. No source, API, Snapshot, dependency, or operation changes
+are part of this candidate.
 
 ## 4. Adopted product boundary
 
@@ -141,18 +174,20 @@ contract and fail closed for IPO, delist/relist, or code-reuse ambiguity before 
 production adapter or UI is exposed. Normal CI and Playwright use fixtures only and
 must not contact J-Quants.
 
-## 6. Next step after merge
+## 6. Next step after DR-V1 merge
 
-The next step is **DR-V1 — visual tokens and primitives**. It may start only after:
+The next step is **DR-V2 — Watchlist and global navigation**. It may start only after:
 
-1. the exact DR-0 head has no BLOCKING or MAJOR independent-review finding;
+1. the exact DR-V1 head has no BLOCKING or MAJOR independent-review finding;
 2. required CI is green;
 3. the user authorizes and completes merge;
 4. local `main` is fast-forwarded to the merged `origin/main`; and
-5. the DR-V1 branch is created from that updated clean main.
+5. the DR-V2 branch is created from that updated clean main.
 
-DR-V1 implements root `DESIGN.md` tokens and shared primitives only. It must preserve
-the current six-tab behavior. The seven-tab navigation change belongs to DR-V3;
+DR-V2 migrates the Watchlist/loading/error/empty surfaces to the shared visual
+system and adds the global Market Overview entry with an explicit not-yet-available
+state. It must preserve the current six-tab detail behavior and inherited URL/focus
+contracts. The seven-tab navigation change belongs to DR-V3;
 the Technical source/lifetime gate belongs to DR-T0; shared session/coordinator
 ownership, empty-start admission, and the cross-domain recovery guard belong to
 DR-C1; the content/receipt repository belongs to DR-A1. DR-O1 supplies the common
@@ -164,21 +199,33 @@ modules belong to DR-M1a-c/DR-E1, and user instructions belong to DR-X.
 
 | Validation | Result |
 | --- | --- |
-| `bun test` | 925 passed, 0 failed |
+| focused `bun test src/dashboard/web/primitives.test.ts` | 11 passed, 0 failed |
+| `bun test` | 936 passed, 0 failed |
 | `bun run typecheck` | local Bun launcher stopped before TypeScript execution; see below |
 | `bun node_modules/typescript/bin/tsc --noEmit` | passed using the same installed compiler |
+| `bun run test:dashboard-browser` | all 55 passed (38 inherited + 17 primitive tests) |
 | `git diff --check` | passed; Git emitted only the checkout's LF-to-CRLF conversion warning |
+| primitive visual QA | 320, 390, 680, 768, 980, 1024, 1280px; no document overflow or overlapping controls |
 
 On this Windows checkout, `bun run typecheck` returned Bun's existing
 `could not create process` / local-bin-remap failure. It did not report a TypeScript
 diagnostic. The direct command above ran the installed TypeScript compiler to
-completion without changing dependencies. The exact DR-0 PR must still pass the
+completion without changing dependencies. The exact DR-V1 PR must still pass the
 canonical `bun run typecheck` CI job; the local launcher failure is disclosed, not
 treated as a canonical-command pass.
 
-DR-0 has no Browser-output change, so it does not rerun Playwright merely to restate
-the merged Phase 4 baseline. Browser-affecting DR-V1 onward must run the applicable
-configured suite, and DR-X must run the full suite and responsive visual QA.
+DR-V1 exercises actual React-rendered primitives in a local test-only composition,
+including computed color contrast, native disabled behavior, keyboard focus,
+associated field help/errors, touch targets on wide coarse-pointer devices, exact
+table scrolling, and reduced motion. Review regressions cover computed families
+for zero, Japanese states, IDs, dates, and mixed metadata; numeric versus explanatory
+header/body alignment; and text-like input inclusion/non-text exclusion in normal,
+invalid, disabled, narrow, and coarse-pointer states. The original two MAJOR
+findings were reproduced by failing browser tests before their fixes. The full
+configured suite separately verifies
+the existing six-tab journeys, glossary, Snapshot V1-V9, Comparison, Radar, reload
+races, and Strategy Validation behavior. No external provider request is part of
+these tests. New-route visual migration is not claimed complete by these results.
 
 ## 8. Remaining risks
 
