@@ -435,6 +435,23 @@ surface, including its charts, tables, dialog, and tabs. Do not put an unmigrate
 complex surface inside the light boundary. Chart palette aliases are available in
 DR-V1, but applying them to the existing chart runtimes remains DR-V3 work.
 
+DR-V2 uses the same light boundary for the complete Watchlist, its loading/empty/
+error states, and the global Market Overview placeholder. Their common header has
+text navigation links for `保存済み分析` and `市場概況`; the current page has an
+explicit `aria-current` state and the existing 2px underline geometry. Header
+content uses the approved page gutters and 12px vertical padding. Page headings
+use the page-heading role, summaries use label/KPI roles, and loading/error/empty
+content reuses Card and text-labelled statuses. No loading animation is required.
+
+The Watchlist retains every stored-value column in one labelled, keyboard-scrollable
+table. Company controls wrap long Japanese names within 160-256px (5-8 times the
+32px spacing unit); other exact values stay intact in the local scroll region.
+Company names, trend/category, status, and column labels use UI text; ticker, date,
+timestamp, and available financial values opt in to data typography. Only financial
+numeric columns align right. Sort controls reuse native Button with `aria-pressed`;
+they never derive a quality ranking. Detail pages, including their loading/error
+surfaces, remain outside this migration until DR-V3.
+
 ## 9. Change checklist
 
 For every user-facing UI task:

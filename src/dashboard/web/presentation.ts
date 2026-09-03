@@ -473,6 +473,48 @@ export interface WatchlistItemView {
 
 export type WatchlistSortKey = 'latestDataDate' | 'generatedAt';
 
+export type DashboardPageRoute =
+  | { kind: 'watchlist' }
+  | { kind: 'market-overview' }
+  | { kind: 'detail'; ticker: string }
+  | { kind: 'invalid'; reason: 'invalid_parameter' | 'conflicting_owner' | 'missing_owner' };
+
+const REFRESH_QUERY_VALUES = {
+  view: ['market-overview'],
+  chartSource: ['auto', 'snapshot', 'latest'],
+  interval: ['day', 'week', 'month'],
+  marketRange: ['3m', '6m', '1y', '3y', 'max'],
+} as const;
+
+const DETAIL_QUERY_KEYS = [
+  'ticker', 'tab', 'base', 'target', 'validationRun', 'validationCase',
+  'chartSource', 'interval',
+] as const;
+
+/** Validate new owned keys even while their data controls are still dormant. */
+export function parseDashboardPageRoute(search: string): DashboardPageRoute {
+  const parameters = new URLSearchParams(search);
+  for (const [key, allowed] of Object.entries(REFRESH_QUERY_VALUES)) {
+    const values = parameters.getAll(key);
+    if (values.length > 0 && (values.length !== 1 || !allowed.some(value => value === values[0]))) {
+      return { kind: 'invalid', reason: 'invalid_parameter' };
+    }
+  }
+  if (parameters.has('view')) {
+    return DETAIL_QUERY_KEYS.some(key => parameters.has(key))
+      ? { kind: 'invalid', reason: 'conflicting_owner' }
+      : { kind: 'market-overview' };
+  }
+  const ticker = parseDetailTicker(search);
+  if (ticker) return { kind: 'detail', ticker };
+  if ([...DETAIL_QUERY_KEYS.filter(key => key !== 'ticker'), 'marketRange']
+    .some(key => parameters.has(key))) {
+    return { kind: 'invalid', reason: 'missing_owner' };
+  }
+  // Preserve the inherited ticker parser: an invalid ticker alone is not a detail.
+  return { kind: 'watchlist' };
+}
+
 interface FormatOptions {
   ratioAsPercent?: boolean;
   maximumFractionDigits?: number;
@@ -696,6 +738,9 @@ export function buildDetailPath(
   parameters.delete('base');
   parameters.delete('target');
   clearStrategyValidationQuery(parameters);
+  parameters.delete('view');
+  parameters.delete('chartSource');
+  parameters.delete('marketRange');
   return `/?${parameters.toString()}`;
 }
 
@@ -712,13 +757,23 @@ export function buildDashboardTabPath(
 
 export function buildWatchlistPath(currentSearch = ''): string {
   const parameters = new URLSearchParams(currentSearch);
-  parameters.delete('ticker');
-  parameters.delete('tab');
-  parameters.delete('base');
-  parameters.delete('target');
-  clearStrategyValidationQuery(parameters);
+  for (const key of DETAIL_QUERY_KEYS) parameters.delete(key);
+  parameters.delete('view');
+  parameters.delete('marketRange');
   const search = parameters.toString();
   return search ? `/?${search}` : '/';
+}
+
+export function buildMarketOverviewPath(currentSearch = ''): string {
+  const parameters = new URLSearchParams(currentSearch);
+  for (const key of DETAIL_QUERY_KEYS) parameters.delete(key);
+  parameters.set('view', 'market-overview');
+  const ranges = parameters.getAll('marketRange');
+  if (ranges.length !== 1 || !REFRESH_QUERY_VALUES.marketRange.some(value => value === ranges[0])) {
+    // An explicit entry/recovery action may discard invalid owned state; parsing never repairs it.
+    parameters.delete('marketRange');
+  }
+  return `/?${parameters.toString()}`;
 }
 
 export function parseDetailTicker(search: string): string | null {
