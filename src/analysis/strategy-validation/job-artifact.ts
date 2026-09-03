@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { access, link, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { link, lstat, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import { dexterPath } from '../../utils/paths.js';
@@ -12,6 +12,7 @@ import {
   StrategyValidationUuidV4Schema,
 } from './artifacts.js';
 import { parseStrictJsonBytesV1 } from './strict-json.js';
+import type { JobWriteOutcomeV1 } from '../dashboard-jobs/coordinator.js';
 
 export const STRATEGY_VALIDATION_JOB_SCHEMA_VERSION = 'strategy_validation_job_v1' as const;
 export const STRATEGY_VALIDATION_JOB_VIEW_SCHEMA_VERSION =
@@ -227,13 +228,6 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && 'code' in error;
 }
 
-async function pathExists(path: string): Promise<boolean> {
-  return access(path).then(() => true, error => {
-    if (isNodeError(error) && error.code === 'ENOENT') return false;
-    throw error;
-  });
-}
-
 function canonicalJobId(value: string): string {
   const parsed = StrategyValidationUuidV4Schema.safeParse(value);
   if (!parsed.success) {
@@ -251,79 +245,76 @@ export function createStrategyValidationJobIdV1(): string {
 export class StrategyValidationJobRepositoryV1 {
   readonly rootDirectory: string;
   readonly jobsDirectory: string;
+  readonly #io: Pick<typeof import('node:fs/promises'), 'writeFile' | 'readFile' | 'link' | 'rename' | 'rm'>;
 
-  constructor(rootDirectory: string = dexterPath('research', 'strategy-validation')) {
+  constructor(rootDirectory: string = dexterPath('research', 'strategy-validation'), options: {
+    io?: Partial<Pick<typeof import('node:fs/promises'), 'writeFile' | 'readFile' | 'link' | 'rename' | 'rm'>>;
+  } = {}) {
     this.rootDirectory = resolve(rootDirectory);
     this.jobsDirectory = resolve(this.rootDirectory, 'jobs');
     this.assertContained(this.jobsDirectory);
+    this.#io = { writeFile, readFile, link, rename, rm, ...options.io };
   }
 
   async create(value: StrategyValidationJobV1): Promise<StrategyValidationJobV1> {
-    const job = StrategyValidationJobV1Schema.parse(value);
-    const path = this.jobPath(job.jobId);
-    await this.ensureJobsDirectory();
-    const temporaryPath = resolve(
-      this.jobsDirectory,
-      `.job-${job.jobId}-${randomUUID()}.tmp`,
-    );
-    this.assertContained(temporaryPath);
-    let failure: unknown;
-    try {
-      await writeFile(temporaryPath, canonicalJsonV1(job), { encoding: 'utf8', flag: 'wx' });
-      await this.loadFromPath(temporaryPath, job.jobId);
-      await link(temporaryPath, path);
-    } catch (error) {
-      if (isNodeError(error) && error.code === 'EEXIST') {
-        failure = new StrategyValidationJobRepositoryErrorV1(
-          'job_id_collision', 'The Strategy-validation job ID already exists.', error,
-        );
-      } else if (error instanceof StrategyValidationJobRepositoryErrorV1) {
-        failure = error;
-      } else {
-        failure = new StrategyValidationJobRepositoryErrorV1(
-          'filesystem_error', 'Could not create the Strategy-validation job.', error,
-        );
-      }
-    }
-    try {
-      await rm(temporaryPath, { force: true });
-    } catch (error) {
-      throw new StrategyValidationJobRepositoryErrorV1(
-        'filesystem_error', 'Could not clean the temporary Strategy-validation job.', {
-          cleanupError: error,
-          publicationError: failure,
-        },
-      );
-    }
-    if (failure !== undefined) throw failure;
-    return this.load(job.jobId);
+    const result = await this.#write(value, 'create');
+    if (result.outcome.state !== 'published') throw result.error;
+    return result.outcome.record;
   }
 
   async replace(value: StrategyValidationJobV1): Promise<StrategyValidationJobV1> {
-    const job = StrategyValidationJobV1Schema.parse(value);
-    const path = this.jobPath(job.jobId);
-    await this.ensureJobsDirectory();
-    if (!await pathExists(path)) {
-      throw new StrategyValidationJobRepositoryErrorV1(
-        'missing_job', 'The Strategy-validation job was not found.',
-      );
-    }
-    const temporaryPath = resolve(
-      this.jobsDirectory,
-      `.job-${job.jobId}-${randomUUID()}.tmp`,
-    );
-    this.assertContained(temporaryPath);
+    const result = await this.#write(value, 'replace');
+    if (result.outcome.state !== 'published') throw result.error;
+    return result.outcome.record;
+  }
+
+  async createWithOutcome(value: StrategyValidationJobV1): Promise<JobWriteOutcomeV1<StrategyValidationJobV1>> {
+    return (await this.#write(value, 'create')).outcome;
+  }
+
+  async replaceWithOutcome(value: StrategyValidationJobV1): Promise<JobWriteOutcomeV1<StrategyValidationJobV1>> {
+    return (await this.#write(value, 'replace')).outcome;
+  }
+
+  async #write(value: StrategyValidationJobV1, mode: 'create' | 'replace'): Promise<{
+    outcome: JobWriteOutcomeV1<StrategyValidationJobV1>; error?: unknown;
+  }> {
+    let attemptedPromotion = false;
+    let temporaryPath: string | null = null;
+    let ownedTemporary = false;
     try {
-      await writeFile(temporaryPath, canonicalJsonV1(job), { encoding: 'utf8', flag: 'wx' });
+      const job = StrategyValidationJobV1Schema.parse(value);
+      const payload = canonicalJsonV1(job);
+      if (Buffer.byteLength(payload, 'utf8') > STRATEGY_VALIDATION_JOB_MAX_BYTES) {
+        throw new StrategyValidationJobRepositoryErrorV1('schema_validation_failed', 'The job is too large.');
+      }
+      const path = this.jobPath(job.jobId);
+      await this.ensureJobsDirectory();
+      if (mode === 'replace') await this.load(job.jobId);
+      temporaryPath = resolve(this.jobsDirectory, `.job-${job.jobId}-${randomUUID()}.tmp`);
+      this.assertContained(temporaryPath);
+      await this.#io.writeFile(temporaryPath, payload, { encoding: 'utf8', flag: 'wx' });
+      ownedTemporary = true;
       await this.loadFromPath(temporaryPath, job.jobId);
-      await rename(temporaryPath, path);
-      return await this.load(job.jobId);
+      attemptedPromotion = true;
+      if (mode === 'create') await this.#io.link(temporaryPath, path);
+      else await this.#io.rename(temporaryPath, path);
+      await this.#io.rm(temporaryPath, { force: true });
+      ownedTemporary = false;
+      const saved = await this.load(job.jobId);
+      if (canonicalJsonV1(saved) !== payload) {
+        throw new StrategyValidationJobRepositoryErrorV1('artifact_corrupt', 'The published job differs from its proposed payload.');
+      }
+      return { outcome: { state: 'published', record: saved } };
     } catch (error) {
-      await rm(temporaryPath, { force: true }).catch(() => undefined);
-      if (error instanceof StrategyValidationJobRepositoryErrorV1) throw error;
-      throw new StrategyValidationJobRepositoryErrorV1(
-        'filesystem_error', 'Could not rewrite the Strategy-validation job.', error,
-      );
+      // Cleanup cannot convert an attempted promotion to a proof of no publication.
+      if (temporaryPath && ownedTemporary && !attemptedPromotion) await this.#io.rm(temporaryPath, { force: true }).catch(() => undefined);
+      const failure = error instanceof StrategyValidationJobRepositoryErrorV1 ? error
+        : new StrategyValidationJobRepositoryErrorV1(
+          mode === 'create' && isNodeError(error) && error.code === 'EEXIST' ? 'job_id_collision' : 'filesystem_error',
+          'Could not publish the Strategy-validation job.', error,
+        );
+      return { outcome: { state: attemptedPromotion ? 'ambiguous' : 'definitely_not_published' }, error: failure };
     }
   }
 
@@ -333,11 +324,12 @@ export class StrategyValidationJobRepositoryV1 {
   }
 
   async list(): Promise<readonly StrategyValidationJobV1[]> {
-    await this.ensureJobsDirectory();
     let entries;
     try {
+      await this.#checkDirectories();
       entries = await readdir(this.jobsDirectory, { withFileTypes: true });
     } catch (error) {
+      if (isNodeError(error) && error.code === 'ENOENT') return [];
       throw new StrategyValidationJobRepositoryErrorV1(
         'filesystem_error', 'Could not list Strategy-validation jobs.', error,
       );
@@ -380,7 +372,12 @@ export class StrategyValidationJobRepositoryV1 {
   private async loadFromPath(path: string, expectedJobId: string): Promise<StrategyValidationJobV1> {
     let bytes: Uint8Array;
     try {
-      bytes = await readFile(path);
+      await this.#checkDirectories();
+      const stat = await lstat(path);
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.size > STRATEGY_VALIDATION_JOB_MAX_BYTES) {
+        throw new StrategyValidationJobRepositoryErrorV1('artifact_corrupt', 'The job file is invalid.');
+      }
+      bytes = await this.#io.readFile(path);
     } catch (error) {
       if (isNodeError(error) && error.code === 'ENOENT') {
         throw new StrategyValidationJobRepositoryErrorV1(
@@ -434,11 +431,24 @@ export class StrategyValidationJobRepositoryV1 {
 
   private async ensureJobsDirectory(): Promise<void> {
     try {
+      await this.#checkDirectories();
       await mkdir(this.jobsDirectory, { recursive: true });
     } catch (error) {
       throw new StrategyValidationJobRepositoryErrorV1(
         'filesystem_error', 'Could not create the Strategy-validation jobs directory.', error,
       );
+    }
+  }
+
+  async #checkDirectories(): Promise<void> {
+    for (const path of [this.rootDirectory, this.jobsDirectory]) {
+      const stat = await lstat(path).catch(error => {
+        if (isNodeError(error) && error.code === 'ENOENT') return null;
+        throw error;
+      });
+      if (stat && (!stat.isDirectory() || stat.isSymbolicLink())) {
+        throw new StrategyValidationJobRepositoryErrorV1('artifact_corrupt', 'The job directory is invalid.');
+      }
     }
   }
 }

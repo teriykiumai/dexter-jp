@@ -7,6 +7,7 @@ import {
   type AnalysisSnapshotReader,
 } from './api.js';
 import { StrategyValidationDashboardApiV1 } from './strategy-validation-api.js';
+import { DashboardSessionV1 } from './session.js';
 
 export const DASHBOARD_HOSTNAME = '127.0.0.1' as const;
 export const DASHBOARD_DEFAULT_PORT = 3000;
@@ -14,7 +15,7 @@ export const DASHBOARD_DEFAULT_PORT = 3000;
 export function createDefaultStrategyValidationDashboardApiV1(): StrategyValidationDashboardApiV1 {
   return new StrategyValidationDashboardApiV1(new StrategyValidationJobServiceV1({
     snapshotRepository: new AnalysisSnapshotRepository(),
-  }));
+  }), new DashboardSessionV1());
 }
 
 export function createDashboardServerOptions(

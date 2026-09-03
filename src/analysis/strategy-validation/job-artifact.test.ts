@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { link, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -66,6 +66,65 @@ afterEach(async () => {
 });
 
 describe('Strategy-validation mutable job artifact', () => {
+  test.each(['before-promotion', 'after-link', 'cleanup', 'final-read', 'payload-mismatch', 'invalid-json', 'wrong-id'] as const)('create outcome proves the promotion boundary: %s', async fault => {
+    const healthy = await repository();
+    let promoted = false;
+    const failing = new StrategyValidationJobRepositoryV1(healthy.rootDirectory, { io: {
+      writeFile: async (...args) => { if (fault === 'before-promotion') throw new Error('private failure'); return writeFile(...args); },
+      link: async (from, to) => {
+        await link(from, to); promoted = true;
+        if (fault === 'after-link') throw new Error('after actual promotion');
+        if (fault === 'payload-mismatch') await writeFile(to, JSON.stringify({ ...job(), progress: { attemptCount: 0, caseCount: 2 } }));
+        if (fault === 'invalid-json') await writeFile(to, '{');
+        if (fault === 'wrong-id') await writeFile(to, JSON.stringify({ ...job(), jobId: RUN_ID }));
+      },
+      rm: async (...args) => { if (fault === 'cleanup' && promoted) throw new Error('private cleanup'); return rm(...args); },
+      readFile: ((...args: Parameters<typeof readFile>) => {
+        if (fault === 'final-read' && promoted) throw new Error('private read');
+        return readFile(...args);
+      }) as typeof readFile,
+    } });
+    expect(await failing.createWithOutcome(job())).toEqual({ state: fault === 'before-promotion' ? 'definitely_not_published' : 'ambiguous' });
+    const names = await readdir(healthy.jobsDirectory);
+    expect(names.includes(`${JOB_ID}.json`)).toBe(fault !== 'before-promotion');
+    if (fault === 'cleanup') expect(names.some(name => name.endsWith('.tmp'))).toBe(true);
+    if (fault === 'after-link' || fault === 'cleanup' || fault === 'final-read') expect(await healthy.load(JOB_ID)).toEqual(job());
+  });
+
+  test.each(['collecting', 'cancel_requested', 'completed'] as const)('replace %s after rename/read failure is ambiguous and retains actual final payload', async status => {
+    const healthy = await repository(); await healthy.create(job());
+    let promoted = false;
+    const failing = new StrategyValidationJobRepositoryV1(healthy.rootDirectory, { io: {
+      rename: async (from, to) => { await rename(from, to); promoted = true; },
+      readFile: ((...args: Parameters<typeof readFile>) => {
+        if (promoted) throw new Error('post-rename read failure');
+        return readFile(...args);
+      }) as typeof readFile,
+    } });
+    expect(await failing.replaceWithOutcome(job(status))).toEqual({ state: 'ambiguous' });
+    expect(await healthy.load(JOB_ID)).toEqual(job(status));
+  });
+
+  test('definitely-unpublished replacement leaves the previous full payload; collision never adopts existing', async () => {
+    const healthy = await repository(); await healthy.create(job());
+    const failing = new StrategyValidationJobRepositoryV1(healthy.rootDirectory, { io: {
+      writeFile: async () => { throw new Error('before promotion'); },
+    } });
+    expect(await failing.replaceWithOutcome(job('collecting'))).toEqual({ state: 'definitely_not_published' });
+    expect(await healthy.load(JOB_ID)).toEqual(job());
+    expect(await healthy.createWithOutcome(job())).toEqual({ state: 'ambiguous' });
+    expect(await healthy.load(JOB_ID)).toEqual(job());
+  });
+
+  test('read-only inventory does not create absent storage and byte/identity corruption is not skipped', async () => {
+    const healthy = await repository();
+    expect(await healthy.list()).toEqual([]);
+    expect(await readdir(healthy.rootDirectory)).toEqual([]);
+    await healthy.create(job());
+    await writeFile(join(healthy.jobsDirectory, `${JOB_ID}.json`), ' '.repeat(65_537));
+    await expect(healthy.list()).rejects.toBeInstanceOf(StrategyValidationJobRepositoryErrorV1);
+  });
+
   test('creates, strictly rereads, atomically replaces, and exposes only the safe view', async () => {
     const store = await repository();
     const created = await store.create(job());

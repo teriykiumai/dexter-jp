@@ -38,6 +38,10 @@ type ValidationMode = 'snapshot' | 'campaign';
 
 class StrategyValidationDashboardError extends Error {}
 
+// Page-lifetime latch: tab/ticker remounts must not resume failed job reads.
+// Only an explicit full page reload creates a fresh module instance.
+let pageJobReadFailure: string | null = null;
+
 async function responseJson<T>(response: Response): Promise<T> {
   let payload: unknown;
   try {
@@ -389,11 +393,13 @@ function CaseView({ value }: { value: StrategyValidationCaseV1 }) {
 
 function JobView({
   busy,
+  lastKnown,
   job,
   onCancel,
   onOpenResults,
 }: {
   busy: boolean;
+  lastKnown: boolean;
   job: StrategyValidationJobViewV1;
   onCancel: () => void;
   onOpenResults: () => void;
@@ -401,8 +407,9 @@ function JobView({
   const cancellable = !isStrategyValidationJobTerminal(job.status) && job.status !== 'publishing';
   return (
     <section className="validation-job" aria-labelledby="validation-job-heading">
-      <h3 id="validation-job-heading">実行job</h3>
+      <h3 id="validation-job-heading">{lastKnown ? '最後に確認したjob' : '実行job'}</h3>
       <div aria-atomic="true" aria-live="polite" role="status">
+        {lastKnown ? '最終確認時点（現在の実行状態は未確認）: ' : ''}
         状態 {job.status} / request {job.progress.attemptCount} / case {job.progress.caseCount}
       </div>
       <KeyValueTable label="Job details" rows={[
@@ -414,7 +421,7 @@ function JobView({
         ['Failure', job.failure ? `${job.failure.code}: ${job.failure.message}` : 'なし'],
       ]} />
       <div className="validation-actions">
-        {cancellable ? <Button disabled={busy} type="button" onClick={onCancel}>実行をキャンセル</Button> : null}
+        {cancellable ? <Button disabled={busy || lastKnown} type="button" onClick={onCancel}>実行をキャンセル</Button> : null}
         {job.status === 'completed' ? (
           <Button disabled={busy} type="button" onClick={onOpenResults}>結果を明示的に開く</Button>
         ) : null}
@@ -455,6 +462,7 @@ export function StrategyValidationPanel({
   const [preflight, setPreflight] = useState<StrategyValidationPreflightViewV1 | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [operationIssue, setOperationIssue] = useState<string | null>(null);
+  const [jobReadIssue, setJobReadIssue] = useState<string | null>(() => pageJobReadFailure);
   const [operationBusy, setOperationBusy] = useState(false);
   const [runsRevision, setRunsRevision] = useState(0);
   const selectionErrorRef = useRef<HTMLDivElement>(null);
@@ -549,6 +557,7 @@ export function StrategyValidationPanel({
   }, [runsRevision, ticker]);
 
   useEffect(() => {
+    if (pageJobReadFailure !== null) { setJobReadIssue(pageJobReadFailure); return; }
     const { controller, generation } = beginJobRequest();
     void getJson<StrategyValidationActiveJobV1>(
       '/api/strategy-validation/jobs/active',
@@ -557,8 +566,8 @@ export function StrategyValidationPanel({
       if (isCurrentJobRequest(controller, generation)) setJob(active.job);
     }).catch((cause: unknown) => {
       if (isCurrentJobRequest(controller, generation)) {
-        setOperationIssue(cause instanceof Error
-          ? cause.message : 'Active jobを読み込めませんでした。');
+        pageJobReadFailure = cause instanceof Error ? cause.message : 'Active jobを読み込めませんでした。';
+        setJobReadIssue(pageJobReadFailure);
       }
     }).finally(() => finishJobRequest(controller));
     return () => invalidateJobRequest(controller);
@@ -621,7 +630,7 @@ export function StrategyValidationPanel({
   }, [selectionKey, ticker]);
 
   useEffect(() => {
-    if (operationBusy || job === null || isStrategyValidationJobTerminal(job.status)) return;
+    if (jobReadIssue || pageJobReadFailure || operationBusy || job === null || isStrategyValidationJobTerminal(job.status)) return;
     let request: ReturnType<typeof beginJobRequest> | null = null;
     const timeout = window.setTimeout(() => {
       request = beginJobRequest();
@@ -635,7 +644,8 @@ export function StrategyValidationPanel({
         if (next.status === 'completed') setRunsRevision(current => current + 1);
       }).catch((cause: unknown) => {
         if (isCurrentJobRequest(controller, generation)) {
-          setOperationIssue(cause instanceof Error ? cause.message : 'Job状態を確認できませんでした。');
+          pageJobReadFailure = cause instanceof Error ? cause.message : 'Job状態を確認できませんでした。';
+          setJobReadIssue(pageJobReadFailure);
         }
       }).finally(() => finishJobRequest(controller));
     }, 2_000);
@@ -649,6 +659,7 @@ export function StrategyValidationPanel({
     invalidateJobRequest,
     isCurrentJobRequest,
     job,
+    jobReadIssue,
     operationBusy,
   ]);
 
@@ -889,10 +900,12 @@ export function StrategyValidationPanel({
           </section>
         ) : null}
         {operationIssue ? <p className="validation-error" role="alert">{operationIssue}</p> : null}
+        {jobReadIssue ? <p className="validation-error" role="alert">{jobReadIssue} 状態の自動確認を停止しました。再確認するにはページを再読み込みしてください。</p> : null}
       </section>
 
       {job ? <JobView
         busy={operationBusy}
+        lastKnown={jobReadIssue !== null && !isStrategyValidationJobTerminal(job.status)}
         job={job}
         onCancel={() => void cancelJob()}
         onOpenResults={() => navigate({ kind: 'valid', runId: job.runId, caseId: null }, 'run')}
