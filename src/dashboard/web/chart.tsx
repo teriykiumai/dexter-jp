@@ -46,41 +46,45 @@ export function PriceChart({ bars, priceLines, describedBy }: PriceChartProps) {
     const container = containerRef.current;
     if (!container || bars.length === 0) return;
 
+    const style = getComputedStyle(container);
+    const color = (token: string) => style.getPropertyValue(token).trim();
     const chart = createChart(container, {
       width: container.clientWidth,
       height: container.clientHeight || 480,
       layout: {
-        background: { type: ColorType.Solid, color: '#10151c' },
-        textColor: '#8e9baa',
+        background: { type: ColorType.Solid, color: color('--color-chart-background') },
+        textColor: color('--color-chart-axis'),
         attributionLogo: true,
+        fontFamily: color('--font-data'),
+        fontSize: 12,
         panes: {
           enableResize: false,
-          separatorColor: '#2b3a49',
-          separatorHoverColor: '#2b3a49',
+          separatorColor: color('--color-chart-grid'),
+          separatorHoverColor: color('--color-chart-grid'),
         },
       },
       grid: {
-        vertLines: { color: '#1c2733' },
-        horzLines: { color: '#1c2733' },
+        vertLines: { color: color('--color-chart-grid') },
+        horzLines: { color: color('--color-chart-grid') },
       },
       crosshair: {
-        vertLine: { color: '#6686a3', labelBackgroundColor: '#24384a' },
-        horzLine: { color: '#6686a3', labelBackgroundColor: '#24384a' },
+        vertLine: { color: color('--color-chart-crosshair'), labelBackgroundColor: color('--color-chart-axis') },
+        horzLine: { color: color('--color-chart-crosshair'), labelBackgroundColor: color('--color-chart-axis') },
       },
-      rightPriceScale: { borderColor: '#2b3a49' },
+      rightPriceScale: { borderColor: color('--color-chart-grid') },
       timeScale: {
-        borderColor: '#2b3a49',
+        borderColor: color('--color-chart-grid'),
         timeVisible: false,
         rightOffset: 3,
       },
     });
 
     const candles = chart.addSeries(CandlestickSeries, {
-      upColor: '#34c99a',
-      downColor: '#ef6a74',
+      upColor: color('--color-chart-up'),
+      downColor: color('--color-chart-down'),
       borderVisible: false,
-      wickUpColor: '#34c99a',
-      wickDownColor: '#ef6a74',
+      wickUpColor: color('--color-chart-up'),
+      wickDownColor: color('--color-chart-down'),
       priceLineVisible: false,
     });
     const volume = chart.addSeries(HistogramSeries, {
@@ -114,7 +118,7 @@ export function PriceChart({ bars, priceLines, describedBy }: PriceChartProps) {
         volumeData.push({
           time,
           value: bar.volume,
-          color: bar.close >= bar.open ? '#34c99a55' : '#ef6a7455',
+          color: color('--color-chart-volume'),
         });
       }
     }
@@ -139,11 +143,13 @@ export function PriceChart({ bars, priceLines, describedBy }: PriceChartProps) {
 
   useEffect(() => {
     const candles = candleSeriesRef.current;
-    if (!candles) return;
+    const container = containerRef.current;
+    if (!candles || !container) return;
+    const style = getComputedStyle(container);
 
     const handles = priceLines.map(line => candles.createPriceLine({
       price: line.price,
-      color: line.color,
+      color: style.getPropertyValue(line.colorToken).trim(),
       lineWidth: 1,
       lineStyle: LineStyle.Dashed,
       axisLabelVisible: true,

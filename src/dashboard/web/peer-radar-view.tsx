@@ -1,4 +1,5 @@
 import { useId } from 'react';
+import { Value } from './primitives.js';
 import type { DashboardViewModel, DisplayValue } from './presentation.js';
 
 type PeerRadarView = NonNullable<DashboardViewModel['peer']>;
@@ -22,7 +23,7 @@ function pointList(values: readonly number[], radius = RADAR_RADIUS): string {
 }
 
 function RadarValue({ value }: { value: DisplayValue }) {
-  return <span className={value.available ? undefined : 'unavailable'}>{value.text}</span>;
+  return <Value value={value} kind="data" />;
 }
 
 export function PeerRadarPresentation({ peer }: { peer: PeerRadarView }) {
@@ -37,7 +38,7 @@ export function PeerRadarPresentation({ peer }: { peer: PeerRadarView }) {
   return (
     <>
       <dl aria-label="Peer Radarの選定状態" className="peer-radar-meta">
-        <div><dt>選定Peer数</dt><dd>{peer.selectedPeerCount} 社</dd></div>
+        <div><dt>選定Peer数</dt><dd><span className="design-data">{peer.selectedPeerCount}</span> 社</dd></div>
         <div><dt>tooFewPeers</dt><dd>{String(peer.tooFewPeers)}</dd></div>
         <div>
           <dt>選定状態</dt>
@@ -45,7 +46,7 @@ export function PeerRadarPresentation({ peer }: { peer: PeerRadarView }) {
             {peer.selectionStateText}
           </dd>
         </div>
-        <div><dt>時価総額priority</dt><dd><RadarValue value={peer.marketCapPriority} /></dd></div>
+        <div><dt>時価総額priority</dt><dd><Value value={peer.marketCapPriority} /></dd></div>
       </dl>
 
       <figure className="peer-radar-figure">
@@ -116,11 +117,11 @@ export function PeerRadarPresentation({ peer }: { peer: PeerRadarView }) {
           <thead>
             <tr>
               <th>指標</th>
-              <th>対象企業</th>
-              <th>同業中央値</th>
-              <th>順位</th>
-              <th>パーセンタイル (保存値 / %)</th>
-              <th>有効Peer数</th>
+              <th className="numeric-cell">対象企業</th>
+              <th className="numeric-cell">同業中央値</th>
+              <th className="numeric-cell">順位</th>
+              <th className="numeric-cell">パーセンタイル (保存値 / %)</th>
+              <th className="numeric-cell">有効Peer数</th>
               <th>方向</th>
               <th>データ基準日</th>
               <th>状態</th>
@@ -130,11 +131,11 @@ export function PeerRadarPresentation({ peer }: { peer: PeerRadarView }) {
             {peer.rows.map(row => (
               <tr data-radar-state={row.state} key={row.metric}>
                 <th>{row.label}</th>
-                <td><RadarValue value={row.target} /></td>
-                <td><RadarValue value={row.median} /></td>
-                <td><RadarValue value={row.rank} /></td>
-                <td><RadarValue value={row.percentile} /></td>
-                <td><RadarValue value={row.sampleSize} /></td>
+                <td className="numeric-cell"><RadarValue value={row.target} /></td>
+                <td className="numeric-cell"><RadarValue value={row.median} /></td>
+                <td className="numeric-cell"><RadarValue value={row.rank} /></td>
+                <td className="numeric-cell"><RadarValue value={row.percentile} /></td>
+                <td className="numeric-cell"><Value value={row.sampleSize} /></td>
                 <td>{row.direction}</td>
                 <td><RadarValue value={row.dataDate} /></td>
                 <td className={row.state === 'available' ? undefined : 'unavailable'}>{row.stateText}</td>

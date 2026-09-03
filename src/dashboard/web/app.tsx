@@ -59,6 +59,7 @@ import {
   buildMarketOverviewPath,
   buildWatchlistPath,
   hasCanonicalDetailTab,
+  formatMetric,
   mapSnapshotToDashboard,
   mapLatestAnalysisToWatchlistItem,
   moveDashboardTab,
@@ -74,8 +75,13 @@ import {
 } from './presentation.js';
 import { PeerRadarPresentation } from './peer-radar-view.js';
 import { StrategyValidationPanel } from './strategy-validation-panel.js';
-import { DashboardRouteError, MarketOverviewPlaceholder, Watchlist } from './watchlist.js';
+import { DashboardHeader, DashboardRouteError, MarketOverviewContent, MarketOverviewPlaceholder, Watchlist, type PageNavigation } from './watchlist.js';
 import {
+  Button,
+  DashboardDesign,
+  StatusBadge,
+  StatusNotice,
+  TableScroll,
   AvailabilityBadges,
   Card,
   GuidanceButton,
@@ -125,7 +131,7 @@ function GlossaryDialog({ selection, onSelect, onClosed }: {
             {selectedEntry ? `用語集 / ${selectedEntry.label}` : '用語集'}
           </h2>
         </div>
-        <button
+        <Button
           aria-label="用語集を閉じる"
           className="glossary-close"
           onClick={() => dialogRef.current?.close()}
@@ -133,16 +139,16 @@ function GlossaryDialog({ selection, onSelect, onClosed }: {
           type="button"
         >
           閉じる
-        </button>
+        </Button>
       </header>
       <p className="glossary-description" id="glossary-dialog-description">
         Snapshotに保存された指標の読み方と制約を確認できます。ここでは値を再計算しません。
       </p>
       {selectedEntry ? (
         <>
-          <button className="glossary-back" onClick={() => onSelect('index')} type="button">
+          <Button className="glossary-back" onClick={() => onSelect('index')} type="button">
             ← 用語一覧
-          </button>
+          </Button>
           <dl className="glossary-definition">
             <div>
               <dt>何を測るか</dt>
@@ -166,10 +172,10 @@ function GlossaryDialog({ selection, onSelect, onClosed }: {
         <ul className="glossary-index">
           {DASHBOARD_GLOSSARY_ENTRIES.map(entry => (
             <li key={entry.id}>
-              <button onClick={() => onSelect(entry.id)} type="button">
+              <Button onClick={() => onSelect(entry.id)} type="button">
                 <strong>{entry.label}</strong>
                 <span>{entry.measures}</span>
-              </button>
+              </Button>
             </li>
           ))}
         </ul>
@@ -315,7 +321,7 @@ function VolumeProfileChart({ profile }: { profile: VolumeProfileView }) {
                 key={bin.index}
               >
                 <span aria-hidden="true" className="volume-profile-bin-price">
-                  <Value value={bin.representativePrice} />
+                  <Value value={bin.representativePrice} kind="data" />
                 </span>
                 <meter
                   aria-label={`価格帯 ${bin.index}、代表価格 ${bin.representativePrice.text}、配分出来高 ${bin.allocatedVolume.text}、出来高比率 ${bin.volumeShare.text}${marker ? `、${marker}` : ''}`}
@@ -346,16 +352,16 @@ function InvestorTypeTable({ label, rows }: {
     <div aria-label={label} className="table-scroll" role="region" tabIndex={0}>
       <table className="investor-type-table">
         <thead>
-          <tr><th>公式区分</th><th>売り</th><th>買い</th><th>合計</th><th>差引</th></tr>
+          <tr><th>公式区分</th><th className="numeric-cell">売り</th><th className="numeric-cell">買い</th><th className="numeric-cell">合計</th><th className="numeric-cell">差引</th></tr>
         </thead>
         <tbody>
           {rows.map(row => (
             <tr key={row.category}>
               <th>{row.category}</th>
-              <td><Value value={row.sell} /></td>
-              <td><Value value={row.buy} /></td>
-              <td><Value value={row.total} /></td>
-              <td><Value value={row.balance} /></td>
+              <td className="numeric-cell"><Value value={row.sell} kind="data" /></td>
+              <td className="numeric-cell"><Value value={row.buy} kind="data" /></td>
+              <td className="numeric-cell"><Value value={row.total} kind="data" /></td>
+              <td className="numeric-cell"><Value value={row.balance} kind="data" /></td>
             </tr>
           ))}
         </tbody>
@@ -416,6 +422,7 @@ function DashboardTabs({
 
   return (
     <nav className="detail-tabs-shell" aria-label="分析表示の切り替え">
+      <p className="tabs-scroll-hint">タブは横にスクロールできます</p>
       <div
         aria-label="分析セクション"
         className="detail-tabs"
@@ -423,7 +430,7 @@ function DashboardTabs({
         role="tablist"
       >
         {DASHBOARD_TABS.map(tab => (
-          <button
+          <Button
             aria-controls={`dashboard-panel-${tab.id}`}
             aria-selected={selectedTab === tab.id}
             className="detail-tab"
@@ -441,7 +448,7 @@ function DashboardTabs({
           >
             <span className="detail-tab-label">{tab.label}</span>
             <AvailabilityBadges compact counts={availability[tab.id]} />
-          </button>
+          </Button>
         ))}
       </div>
     </nav>
@@ -496,7 +503,9 @@ function Dashboard({
   targetSnapshotPending,
   onSelectTab,
   selectedTab,
+  pageNavigation,
 }: {
+  pageNavigation: PageNavigation;
   comparison: Extract<AnalysisSnapshotComparisonResponseV1, { outcome: 'success' }> | null;
   comparisonIssue: ComparisonPanelIssue | null;
   comparisonLoading: boolean;
@@ -633,16 +642,18 @@ function Dashboard({
   const requestedTargetSnapshotId = targetSnapshotIssue?.snapshotId ?? comparisonPair?.targetSnapshotId;
 
   return (
-    <main className={`dashboard-shell${targetSnapshotBlocked ? ' target-snapshot-unavailable' : ''}`}>
-      <button className="back-button" type="button" onClick={onBack}>
-        ← Analysis Portfolio
-      </button>
+    <DashboardDesign>
+    <DashboardHeader {...pageNavigation} />
+    <main className={`design-content dashboard-shell${targetSnapshotBlocked ? ' target-snapshot-unavailable' : ''}`}>
+      <Button className="back-button" type="button" onClick={onBack}>
+        ← 保存済み分析
+      </Button>
       <header className="hero">
         {targetSnapshotBlocked ? (
           <div className="target-snapshot-status">
             <div className="brand-line">
               <span className="brand-mark">DEXTER / JP</span>
-              <span className="local-badge">LOCAL SNAPSHOT</span>
+              <StatusBadge label="LOCAL SNAPSHOT" />
             </div>
             <div className="company-title">
               <span className="ticker">{view.header.ticker}</span>
@@ -650,31 +661,31 @@ function Dashboard({
                 {targetSnapshotIssue ? '対象Snapshotを表示できません' : '対象Snapshotを読み込み中…'}
               </h1>
             </div>
-            <p className="target-snapshot-id">対象Snapshot {requestedTargetSnapshotId}</p>
+            <p className="target-snapshot-id">対象Snapshot <span className="design-data">{requestedTargetSnapshotId}</span></p>
           </div>
         ) : null}
         <div className="snapshot-detail-mask">
         <div>
           <div className="brand-line">
             <span className="brand-mark">DEXTER / JP</span>
-            <span className="local-badge">LOCAL SNAPSHOT</span>
+            <StatusBadge label="LOCAL SNAPSHOT" />
           </div>
           <div className="company-title">
             <span className="ticker">{view.header.ticker}</span>
             <h1 data-main-heading tabIndex={-1}>{view.header.companyName}</h1>
           </div>
-          <p className="generated-at">生成日時 {view.header.generatedAt}</p>
+          <p className="generated-at">生成日時 <span className="design-metadata" data-kind="data">{view.header.generatedAt}</span></p>
         </div>
         <div className="hero-actions">
           <div className="snapshot-reload-control">
-            <button
+            <Button
               aria-busy={reloadState.status === 'loading'}
               className="snapshot-reload-button"
               onClick={onReload}
               type="button"
             >
               保存済みSnapshotを再読み込み
-            </button>
+            </Button>
             <p
               aria-atomic="true"
               aria-live="polite"
@@ -684,22 +695,19 @@ function Dashboard({
               {reloadMessage}
             </p>
             {reloadState.status === 'newer' ? (
-              <button className="snapshot-adopt-button" onClick={onAdoptNewerSnapshot} type="button">
+              <Button className="snapshot-adopt-button" onClick={onAdoptNewerSnapshot} type="button">
                 新しい保存済み分析を対象にする
-              </button>
+              </Button>
             ) : null}
           </div>
-          <button
+          <Button
             className="glossary-open"
             onClick={event => openGlossaryIndex(event.currentTarget)}
             type="button"
           >
             用語集
-          </button>
-          <div className={`status-badge ${view.header.status}`}>
-            <span className="status-dot" />
-            {view.header.status.toUpperCase()}
-          </div>
+          </Button>
+          <StatusBadge label={view.header.status.toUpperCase()} tone={view.header.status === 'complete' ? 'neutral' : 'warning'} />
         </div>
         </div>
       </header>
@@ -709,7 +717,7 @@ function Dashboard({
         {view.kpis.map(kpi => (
           <article className="kpi-card" key={kpi.label}>
             <span>{kpi.label}</span>
-            <strong><Value value={kpi.value} /></strong>
+            <strong className={kpi.valueKind === 'data' && kpi.value.available ? 'design-kpi' : 'kpi-text'}><Value value={kpi.value} kind={kpi.valueKind} /></strong>
           </article>
         ))}
       </section>
@@ -756,16 +764,16 @@ function Dashboard({
                   {view.chart.priceLines.map(line => {
                     const visible = !hiddenPriceLineLabels.includes(line.label);
                     return (
-                      <button
+                      <Button
                         aria-pressed={visible}
                         key={line.label}
                         onClick={() => togglePriceLine(line.label)}
                         type="button"
                       >
-                        <span aria-hidden="true" style={{ backgroundColor: line.color }} />
+                        <span aria-hidden="true" style={{ backgroundColor: `var(${line.colorToken})` }} />
                         <strong>{line.label}</strong>
-                        <small>{line.displayPrice.text}</small>
-                      </button>
+                        <small className="design-data">{line.displayPrice.text}</small>
+                      </Button>
                     );
                   })}
                 </div>
@@ -777,7 +785,7 @@ function Dashboard({
               {view.advancedTechnical ? (
                 <>
                   <p>
-                    データ基準日 <Value value={view.advancedTechnical.dataDate} />。
+                    データ基準日 <Value value={view.advancedTechnical.dataDate} kind="data" />。
                     チャートのcrosshair日付とは連動しません。
                   </p>
                   <MetricGrid
@@ -790,7 +798,7 @@ function Dashboard({
                       'ボリンジャー上限': 'bollingerBands',
                       'ボリンジャー下限': 'bollingerBands',
                     }}
-                    metrics={view.advancedTechnical.metrics}
+                    metrics={view.advancedTechnical.metrics.map(metric => ({ ...metric, valueKind: 'data' }))}
                     onOpenGuidance={openGlossary}
                   />
                   {view.advancedTechnical.unavailableReasons.length > 0 ? (
@@ -803,6 +811,20 @@ function Dashboard({
             </section>
           </aside>
         </div>
+        <TableScroll label="保存済み調整後OHLCVの正確な値">
+          <table className="stored-price-table">
+            <caption>保存済み調整後OHLCV（全行・欠損は利用不可。チャートで描画できない行も含みます）</caption>
+            <thead><tr><th>日付</th>{['始値', '高値', '安値', '終値', '出来高'].map(label => <th className="numeric-cell" key={label}>{label}</th>)}</tr></thead>
+            <tbody>{snapshot.priceHistory?.map(bar => (
+              <tr key={bar.date}>
+                <th><span className="design-data">{bar.date}</span></th>
+                {(['open', 'high', 'low', 'close', 'volume'] as const).map(field => (
+                  <td className="numeric-cell" key={field}><Value kind="data" value={formatMetric(bar[field], snapshot.units.priceHistory[field])} /></td>
+                ))}
+              </tr>
+            ))}</tbody>
+          </table>
+        </TableScroll>
         <p className="chart-credit">
           <span>{LIGHTWEIGHT_CHARTS_NOTICE[0]}</span>
           <span>
@@ -819,12 +841,12 @@ function Dashboard({
         {view.volumeProfile.state !== 'not_collected' ? (
           <>
             <MetricGrid metrics={[
-              { label: '分析基準日', value: view.volumeProfile.analysisAsOfDate },
-              { label: '収集日時', value: view.volumeProfile.collectedAt },
-              { label: 'データ基準日', value: view.volumeProfile.dataDate },
-              { label: '対象期間の開始日', value: view.volumeProfile.windowStartDate },
-              { label: '対象期間の終了日', value: view.volumeProfile.windowEndDate },
-              { label: '入力日足数', value: view.volumeProfile.inputBarCount },
+              { label: '分析基準日', valueKind: 'data', value: view.volumeProfile.analysisAsOfDate },
+              { label: '収集日時', valueKind: 'data', value: view.volumeProfile.collectedAt },
+              { label: 'データ基準日', valueKind: 'data', value: view.volumeProfile.dataDate },
+              { label: '対象期間の開始日', valueKind: 'data', value: view.volumeProfile.windowStartDate },
+              { label: '対象期間の終了日', valueKind: 'data', value: view.volumeProfile.windowEndDate },
+              { label: '入力日足数', valueKind: 'data', value: view.volumeProfile.inputBarCount },
             ]} />
             <StoredDisclosure
               open={disclosures.volumeProfileMethodology}
@@ -836,12 +858,12 @@ function Dashboard({
                 { label: '出来高の基準', value: view.volumeProfile.volumeBasis },
                 { label: '配分方法', value: view.volumeProfile.allocationMethod },
                 { label: '価格帯分割方法', value: view.volumeProfile.binningMethod },
-                { label: '指定価格帯数', value: view.volumeProfile.requestedBinCount },
-                { label: '有効価格帯数', value: view.volumeProfile.effectiveBinCount },
-                { label: '最小価格', value: view.volumeProfile.minPrice },
-                { label: '最大価格', value: view.volumeProfile.maxPrice },
-                { label: '算出方法ID', value: view.volumeProfile.methodology },
-                { label: '推定方法ID', value: view.volumeProfile.approximation },
+                { label: '指定価格帯数', valueKind: 'data', value: view.volumeProfile.requestedBinCount },
+                { label: '有効価格帯数', valueKind: 'data', value: view.volumeProfile.effectiveBinCount },
+                { label: '最小価格', valueKind: 'data', value: view.volumeProfile.minPrice },
+                { label: '最大価格', valueKind: 'data', value: view.volumeProfile.maxPrice },
+                { label: '算出方法ID', valueKind: 'data', value: view.volumeProfile.methodology },
+                { label: '推定方法ID', valueKind: 'data', value: view.volumeProfile.approximation },
                 {
                   label: 'コーポレートアクション基準',
                   value: view.volumeProfile.corporateActionBasisStatus,
@@ -859,21 +881,21 @@ function Dashboard({
                         <GuidanceButton term="poc" onOpen={openGlossary} />
                       </div>
                       <MetricGrid metrics={[
-                        { label: '価格帯番号', value: { text: String(view.volumeProfile.poc.binIndex), available: true } },
-                        { label: '代表価格', value: view.volumeProfile.poc.price },
-                        { label: '配分出来高', value: view.volumeProfile.poc.allocatedVolume },
-                        { label: '出来高比率', value: view.volumeProfile.poc.volumeShare },
+                        { label: '価格帯番号', valueKind: 'data', value: { text: String(view.volumeProfile.poc.binIndex), available: true } },
+                        { label: '代表価格', valueKind: 'data', value: view.volumeProfile.poc.price },
+                        { label: '配分出来高', valueKind: 'data', value: view.volumeProfile.poc.allocatedVolume },
+                        { label: '出来高比率', valueKind: 'data', value: view.volumeProfile.poc.volumeShare },
                       ]} />
                     </article>
                     <article className="window-card">
                       <h3>Value Area（保存済みの連続価格帯）</h3>
                       <MetricGrid guidance={{ VAL: 'val', VAH: 'vah' }} metrics={[
-                        { label: '目標出来高比率', value: view.volumeProfile.valueArea.targetVolumeShare },
-                        { label: '達成出来高比率', value: view.volumeProfile.valueArea.achievedVolumeShare },
-                        { label: 'VAL', value: view.volumeProfile.valueArea.val },
-                        { label: 'VAH', value: view.volumeProfile.valueArea.vah },
-                        { label: '開始価格帯番号', value: { text: String(view.volumeProfile.valueArea.firstBinIndex), available: true } },
-                        { label: '終了価格帯番号', value: { text: String(view.volumeProfile.valueArea.lastBinIndex), available: true } },
+                        { label: '目標出来高比率', valueKind: 'data', value: view.volumeProfile.valueArea.targetVolumeShare },
+                        { label: '達成出来高比率', valueKind: 'data', value: view.volumeProfile.valueArea.achievedVolumeShare },
+                        { label: 'VAL', valueKind: 'data', value: view.volumeProfile.valueArea.val },
+                        { label: 'VAH', valueKind: 'data', value: view.volumeProfile.valueArea.vah },
+                        { label: '開始価格帯番号', valueKind: 'data', value: { text: String(view.volumeProfile.valueArea.firstBinIndex), available: true } },
+                        { label: '終了価格帯番号', valueKind: 'data', value: { text: String(view.volumeProfile.valueArea.lastBinIndex), available: true } },
                       ]} onOpenGuidance={openGlossary} />
                     </article>
                   </div>
@@ -892,19 +914,19 @@ function Dashboard({
                       <table>
                         <thead>
                           <tr>
-                            <th>価格帯番号</th><th>下端</th><th>上端</th><th>代表価格</th>
-                            <th>配分出来高</th><th>出来高比率</th>
+                            <th>価格帯番号</th><th className="numeric-cell">下端</th><th className="numeric-cell">上端</th><th className="numeric-cell">代表価格</th>
+                            <th className="numeric-cell">配分出来高</th><th className="numeric-cell">出来高比率</th>
                           </tr>
                         </thead>
                         <tbody>
                           {view.volumeProfile.bins.map(bin => (
                             <tr key={bin.index}>
-                              <th>{bin.index}</th>
-                              <td><Value value={bin.lowerPrice} /></td>
-                              <td><Value value={bin.upperPrice} /></td>
-                              <td><Value value={bin.representativePrice} /></td>
-                              <td><Value value={bin.allocatedVolume} /></td>
-                              <td><Value value={bin.volumeShare} /></td>
+                              <th><span className="design-data">{bin.index}</span></th>
+                              <td className="numeric-cell"><Value value={bin.lowerPrice} kind="data" /></td>
+                              <td className="numeric-cell"><Value value={bin.upperPrice} kind="data" /></td>
+                              <td className="numeric-cell"><Value value={bin.representativePrice} kind="data" /></td>
+                              <td className="numeric-cell"><Value value={bin.allocatedVolume} kind="data" /></td>
+                              <td className="numeric-cell"><Value value={bin.volumeShare} kind="data" /></td>
                             </tr>
                           ))}
                         </tbody>
@@ -945,7 +967,7 @@ function Dashboard({
             ? (
                 <MetricGrid
                   guidance={{ 信用倍率: 'marginBalanceRatio', 消化日数: 'digestionDays' }}
-                  metrics={view.supplyDemand}
+                  metrics={view.supplyDemand.map(metric => ({ ...metric, valueKind: 'data' }))}
                   onOpenGuidance={openGlossary}
                 />
               )
@@ -960,11 +982,12 @@ function Dashboard({
           <>
             <div className="investor-flow-meta">
               <MetricGrid metrics={[
-                { label: '分析基準日', value: view.advancedDividend.analysisAsOfDate },
-                { label: 'データ基準日', value: view.advancedDividend.dataDate },
-                { label: '収集日時', value: view.advancedDividend.collectedAt },
+                { label: '分析基準日', valueKind: 'data', value: view.advancedDividend.analysisAsOfDate },
+                { label: 'データ基準日', valueKind: 'data', value: view.advancedDividend.dataDate },
+                { label: '収集日時', valueKind: 'data', value: view.advancedDividend.collectedAt },
                 {
                   label: '既存の配当利回り',
+                  valueKind: 'data',
                   value: view.advancedDividend.existingDividendYield,
                   note: '既存analyze_financial_metricsのdeterministic value',
                 },
@@ -980,7 +1003,7 @@ function Dashboard({
                   {' / '}配当イベント {view.advancedDividend.events === null
                     ? '利用不可'
                     : `${view.advancedDividend.events.length}件`}
-                  {' / '}データ基準日 <Value value={view.advancedDividend.dataDate} />
+                  {' / '}データ基準日 <Value value={view.advancedDividend.dataDate} kind="data" />
                 </>
               )}
             >
@@ -997,8 +1020,8 @@ function Dashboard({
                     <thead>
                       <tr>
                         <th>種別</th><th>会計年度末</th><th>開示日</th>
-                        <th>開示時刻</th><th>利用可能日</th><th>年間1株配当</th>
-                        <th>配当性向</th><th>配当額のsource field</th>
+                        <th>開示時刻</th><th>利用可能日</th><th className="numeric-cell">年間1株配当</th>
+                        <th className="numeric-cell">配当性向</th><th>配当額のsource field</th>
                         <th>配当性向のsource field</th><th>開示番号</th>
                       </tr>
                     </thead>
@@ -1006,15 +1029,15 @@ function Dashboard({
                       {view.advancedDividend.observations.map(observation => (
                         <tr key={`${observation.disclosureNumber.text}-${observation.sourceField.text}`}>
                           <th>{observation.kind}</th>
-                          <td><Value value={observation.fiscalYearEndDate} /></td>
-                          <td><Value value={observation.disclosedDate} /></td>
-                          <td><Value value={observation.disclosedTime} /></td>
-                          <td><Value value={observation.sourceEligibleDate} /></td>
-                          <td><Value value={observation.annualDividendPerShare} /></td>
-                          <td><Value value={observation.payoutRatio} /></td>
+                          <td><Value value={observation.fiscalYearEndDate} kind="data" /></td>
+                          <td><Value value={observation.disclosedDate} kind="data" /></td>
+                          <td><Value value={observation.disclosedTime} kind="data" /></td>
+                          <td><Value value={observation.sourceEligibleDate} kind="data" /></td>
+                          <td className="numeric-cell"><Value value={observation.annualDividendPerShare} kind="data" /></td>
+                          <td className="numeric-cell"><Value value={observation.payoutRatio} kind="data" /></td>
                           <td><Value value={observation.sourceField} /></td>
                           <td><Value value={observation.payoutRatioSourceField} /></td>
-                          <td><Value value={observation.disclosureNumber} /></td>
+                          <td><Value value={observation.disclosureNumber} kind="data" /></td>
                         </tr>
                       ))}
                     </tbody>
@@ -1041,8 +1064,8 @@ function Dashboard({
                       <tr>
                         <th>通知日</th><th>通知時刻</th><th>利用可能日</th>
                         <th>種別</th><th>決定区分</th><th>基準年月</th>
-                        <th>1株配当合計</th><th>普通配当</th>
-                        <th>記念配当</th><th>特別配当</th>
+                        <th className="numeric-cell">1株配当合計</th><th className="numeric-cell">普通配当</th>
+                        <th className="numeric-cell">記念配当</th><th className="numeric-cell">特別配当</th>
                         <th>基準日</th><th>権利基準日</th><th>権利落ち日</th>
                         <th>支払日</th><th>参照番号</th><th>CA参照番号</th>
                       </tr>
@@ -1050,22 +1073,22 @@ function Dashboard({
                     <tbody>
                       {view.advancedDividend.events.map(event => (
                         <tr key={`${event.referenceNumber.text}-${event.corporateActionReferenceNumber.text}`}>
-                          <td><Value value={event.notifiedDate} /></td>
-                          <td><Value value={event.notifiedTime} /></td>
-                          <td><Value value={event.sourceEligibleDate} /></td>
+                          <td><Value value={event.notifiedDate} kind="data" /></td>
+                          <td><Value value={event.notifiedTime} kind="data" /></td>
+                          <td><Value value={event.sourceEligibleDate} kind="data" /></td>
                           <td><Value value={event.kind} /></td>
                           <td><Value value={event.decision} /></td>
-                          <td><Value value={event.recordDateYearMonth} /></td>
-                          <td><Value value={event.dividendPerShare} /></td>
-                          <td><Value value={event.ordinaryDividendPerShare} /></td>
-                          <td><Value value={event.commemorativeDividendPerShare} /></td>
-                          <td><Value value={event.specialDividendPerShare} /></td>
-                          <td><Value value={event.recordDate} /></td>
-                          <td><Value value={event.rightsRecordDate} /></td>
-                          <td><Value value={event.exDate} /></td>
-                          <td><Value value={event.paymentDate} /></td>
-                          <td><Value value={event.referenceNumber} /></td>
-                          <td><Value value={event.corporateActionReferenceNumber} /></td>
+                          <td><Value value={event.recordDateYearMonth} kind="data" /></td>
+                          <td className="numeric-cell"><Value value={event.dividendPerShare} kind="data" /></td>
+                          <td className="numeric-cell"><Value value={event.ordinaryDividendPerShare} kind="data" /></td>
+                          <td className="numeric-cell"><Value value={event.commemorativeDividendPerShare} kind="data" /></td>
+                          <td className="numeric-cell"><Value value={event.specialDividendPerShare} kind="data" /></td>
+                          <td><Value value={event.recordDate} kind="data" /></td>
+                          <td><Value value={event.rightsRecordDate} kind="data" /></td>
+                          <td><Value value={event.exDate} kind="data" /></td>
+                          <td><Value value={event.paymentDate} kind="data" /></td>
+                          <td><Value value={event.referenceNumber} kind="data" /></td>
+                          <td><Value value={event.corporateActionReferenceNumber} kind="data" /></td>
                         </tr>
                       ))}
                     </tbody>
@@ -1102,7 +1125,7 @@ function Dashboard({
             summary={(
               <>
                 公開報告 {view.reportedShortPositions.reports.length}件
-                {' / '}データ基準日 <Value value={view.reportedShortPositions.dataDate} />
+                {' / '}データ基準日 <Value value={view.reportedShortPositions.dataDate} kind="data" />
               </>
             )}
           >
@@ -1120,26 +1143,26 @@ function Dashboard({
                     <th>報告者</th>
                     <th>運用委託先</th>
                     <th>ファンド</th>
-                    <th>残高比率</th>
-                    <th>残高株数</th>
+                    <th className="numeric-cell">残高比率</th>
+                    <th className="numeric-cell">残高株数</th>
                     <th>前回計算日</th>
-                    <th>前回残高比率</th>
-                    <th>比率増減</th>
+                    <th className="numeric-cell">前回残高比率</th>
+                    <th className="numeric-cell">比率増減</th>
                   </tr>
                 </thead>
                 <tbody>
                   {view.reportedShortPositions.reports.map((report, index) => (
                     <tr key={`${report.disclosedDate.text}-${report.calculatedDate.text}-${index}`}>
-                      <td><Value value={report.disclosedDate} /></td>
-                      <td><Value value={report.calculatedDate} /></td>
+                      <td><Value value={report.disclosedDate} kind="data" /></td>
+                      <td><Value value={report.calculatedDate} kind="data" /></td>
                       <td><Value value={report.reporterName} /></td>
                       <td><Value value={report.discretionaryManagerName} /></td>
                       <td><Value value={report.fundName} /></td>
-                      <td><Value value={report.shortPositionRatio} /></td>
-                      <td><Value value={report.shortPositionShares} /></td>
-                      <td><Value value={report.previousCalculatedDate} /></td>
-                      <td><Value value={report.previousReportedRatio} /></td>
-                      <td><Value value={report.ratioDelta} /></td>
+                      <td className="numeric-cell"><Value value={report.shortPositionRatio} kind="data" /></td>
+                      <td className="numeric-cell"><Value value={report.shortPositionShares} kind="data" /></td>
+                      <td><Value value={report.previousCalculatedDate} kind="data" /></td>
+                      <td className="numeric-cell"><Value value={report.previousReportedRatio} kind="data" /></td>
+                      <td className="numeric-cell"><Value value={report.ratioDelta} kind="data" /></td>
                     </tr>
                   ))}
                 </tbody>
@@ -1169,9 +1192,9 @@ function Dashboard({
             <div className="investor-flow-meta">
               <MetricGrid metrics={[
                 { label: '市場区分', value: view.investorTypeFlows.section },
-                { label: '公表日', value: view.investorTypeFlows.publishedDate },
-                { label: '対象期間の開始日', value: view.investorTypeFlows.periodStartDate },
-                { label: '対象期間の終了日', value: view.investorTypeFlows.periodEndDate },
+                { label: '公表日', valueKind: 'data', value: view.investorTypeFlows.publishedDate },
+                { label: '対象期間の開始日', valueKind: 'data', value: view.investorTypeFlows.periodStartDate },
+                { label: '対象期間の終了日', valueKind: 'data', value: view.investorTypeFlows.periodEndDate },
               ]} />
             </div>
             <section className="investor-flow-group">
@@ -1216,11 +1239,11 @@ function Dashboard({
                 <article className="window-card" key={window.period}>
                   <h3>{window.period}日</h3>
                   <MetricGrid guidance={{ Beta: 'beta', '年率Alpha': 'alpha', 'R²': 'rSquared' }} metrics={[
-                    { label: '観測数', value: window.observations },
-                    { label: '相関係数', value: window.correlation },
-                    { label: 'Beta', value: window.beta },
-                    { label: '年率Alpha', value: window.alpha },
-                    { label: 'R²', value: window.rSquared },
+                    { label: '観測数', valueKind: 'data', value: window.observations },
+                    { label: '相関係数', valueKind: 'data', value: window.correlation },
+                    { label: 'Beta', valueKind: 'data', value: window.beta },
+                    { label: '年率Alpha', valueKind: 'data', value: window.alpha },
+                    { label: 'R²', valueKind: 'data', value: window.rSquared },
                   ]} onOpenGuidance={openGlossary} />
                   {window.unavailableReasons.length
                     ? <p className="reason-list">{window.unavailableReasons.join(' / ')}</p>
@@ -1238,14 +1261,14 @@ function Dashboard({
         {view.sectorBenchmark.state !== 'not_collected' ? (
           <>
             <MetricGrid metrics={[
-              { label: '分析基準日', value: view.sectorBenchmark.analysisAsOfDate },
+              { label: '分析基準日', valueKind: 'data', value: view.sectorBenchmark.analysisAsOfDate },
               { label: '比較対象種別', value: view.sectorBenchmark.benchmarkType },
-              { label: '業種コード', value: view.sectorBenchmark.sectorCode },
+              { label: '業種コード', valueKind: 'data', value: view.sectorBenchmark.sectorCode },
               { label: '業種名', value: view.sectorBenchmark.sectorName },
-              { label: '指数コード', value: view.sectorBenchmark.indexCode },
-              { label: '業種分類の基準日', value: view.sectorBenchmark.classificationDate },
-              { label: 'データ基準日', value: view.sectorBenchmark.dataDate },
-              { label: '日付一致終値数', value: view.sectorBenchmark.alignedPriceCount },
+              { label: '指数コード', valueKind: 'data', value: view.sectorBenchmark.indexCode },
+              { label: '業種分類の基準日', valueKind: 'data', value: view.sectorBenchmark.classificationDate },
+              { label: 'データ基準日', valueKind: 'data', value: view.sectorBenchmark.dataDate },
+              { label: '日付一致終値数', valueKind: 'data', value: view.sectorBenchmark.alignedPriceCount },
             ]} />
             {view.sectorBenchmark.windows.length ? (
               <div className="correlation-grid">
@@ -1253,14 +1276,14 @@ function Dashboard({
                   <article className="window-card" key={window.period}>
                     <h3>{window.period}日</h3>
                     <MetricGrid guidance={{ Beta: 'beta', '年率Alpha': 'alpha', 'R²': 'rSquared' }} metrics={[
-                      { label: '観測数', value: window.observations },
-                      { label: '相関係数', value: window.correlation },
-                      { label: 'Beta', value: window.beta },
-                      { label: '年率Alpha', value: window.alpha },
-                      { label: 'R²', value: window.rSquared },
-                      { label: '銘柄の年率ボラティリティ', value: window.stockVolatility },
-                      { label: '業種指数の年率ボラティリティ', value: window.benchmarkVolatility },
-                      { label: '超過リターン', value: window.excessReturn },
+                      { label: '観測数', valueKind: 'data', value: window.observations },
+                      { label: '相関係数', valueKind: 'data', value: window.correlation },
+                      { label: 'Beta', valueKind: 'data', value: window.beta },
+                      { label: '年率Alpha', valueKind: 'data', value: window.alpha },
+                      { label: 'R²', valueKind: 'data', value: window.rSquared },
+                      { label: '銘柄の年率ボラティリティ', valueKind: 'data', value: window.stockVolatility },
+                      { label: '業種指数の年率ボラティリティ', valueKind: 'data', value: window.benchmarkVolatility },
+                      { label: '超過リターン', valueKind: 'data', value: window.excessReturn },
                     ]} onOpenGuidance={openGlossary} />
                     {window.unavailableReasons.length
                       ? <p className="reason-list">{window.unavailableReasons.join(' / ')}</p>
@@ -1287,11 +1310,11 @@ function Dashboard({
         {view.sectorShortRatio.state !== 'not_collected' ? (
           <>
             <MetricGrid metrics={[
-              { label: '分析基準日', value: view.sectorShortRatio.analysisAsOfDate },
-              { label: '業種分類の基準日', value: view.sectorShortRatio.classificationDate },
-              { label: '業種コード', value: view.sectorShortRatio.sectorCode },
+              { label: '分析基準日', valueKind: 'data', value: view.sectorShortRatio.analysisAsOfDate },
+              { label: '業種分類の基準日', valueKind: 'data', value: view.sectorShortRatio.classificationDate },
+              { label: '業種コード', valueKind: 'data', value: view.sectorShortRatio.sectorCode },
               { label: '業種名', value: view.sectorShortRatio.sectorName },
-              { label: 'データ基準日', value: view.sectorShortRatio.dataDate },
+              { label: 'データ基準日', valueKind: 'data', value: view.sectorShortRatio.dataDate },
             ]} />
             <p className="record-count">保存済み観測 {view.sectorShortRatio.observations.length}件</p>
             {view.sectorShortRatio.observations.length ? (
@@ -1304,21 +1327,21 @@ function Dashboard({
                 <table>
                   <thead>
                     <tr>
-                      <th>日付</th><th>空売り以外</th><th>価格規制あり空売り</th>
-                      <th>価格規制なし空売り</th><th>空売り合計</th>
-                      <th>売り合計</th><th>空売り比率</th><th>利用状態</th>
+                      <th>日付</th><th className="numeric-cell">空売り以外</th><th className="numeric-cell">価格規制あり空売り</th>
+                      <th className="numeric-cell">価格規制なし空売り</th><th className="numeric-cell">空売り合計</th>
+                      <th className="numeric-cell">売り合計</th><th className="numeric-cell">空売り比率</th><th>利用状態</th>
                     </tr>
                   </thead>
                   <tbody>
                     {view.sectorShortRatio.observations.map(observation => (
                       <tr key={observation.date.text}>
-                        <td><Value value={observation.date} /></td>
-                        <td><Value value={observation.nonShortSellingValue} /></td>
-                        <td><Value value={observation.restrictedShortSellingValue} /></td>
-                        <td><Value value={observation.unrestrictedShortSellingValue} /></td>
-                        <td><Value value={observation.shortSellingValue} /></td>
-                        <td><Value value={observation.totalSellingValue} /></td>
-                        <td><Value value={observation.shortSellingRatio} /></td>
+                        <td><Value value={observation.date} kind="data" /></td>
+                        <td className="numeric-cell"><Value value={observation.nonShortSellingValue} kind="data" /></td>
+                        <td className="numeric-cell"><Value value={observation.restrictedShortSellingValue} kind="data" /></td>
+                        <td className="numeric-cell"><Value value={observation.unrestrictedShortSellingValue} kind="data" /></td>
+                        <td className="numeric-cell"><Value value={observation.shortSellingValue} kind="data" /></td>
+                        <td className="numeric-cell"><Value value={observation.totalSellingValue} kind="data" /></td>
+                        <td className="numeric-cell"><Value value={observation.shortSellingRatio} kind="data" /></td>
                         <td>{observation.unavailableReasons.join(' / ') || '利用可能'}</td>
                       </tr>
                     ))}
@@ -1343,17 +1366,17 @@ function Dashboard({
           {view.strategy ? (
             <>
               <MetricGrid metrics={[
-                { label: '発動条件', value: view.strategy.trigger },
-                { label: '確定Entry', value: view.strategy.exactEntry },
+                { label: '発動条件', valueKind: 'data', value: view.strategy.trigger },
+                { label: '確定Entry', valueKind: 'data', value: view.strategy.exactEntry },
               ]} />
               {view.strategy.candidates.map((candidate, index) => (
                 <article className="strategy-candidate" key={`${candidate.entry.text}-${index}`}>
                   <span>実行可能な候補 {index + 1}</span>
                   <MetricGrid metrics={[
-                    { label: 'Entry', value: candidate.entry },
-                    { label: 'Stop', value: candidate.stop },
-                    { label: 'Target', value: candidate.target },
-                    { label: 'Reward / Risk', value: candidate.rewardRisk },
+                    { label: 'Entry', valueKind: 'data', value: candidate.entry },
+                    { label: 'Stop', valueKind: 'data', value: candidate.stop },
+                    { label: 'Target', valueKind: 'data', value: candidate.target },
+                    { label: 'Reward / Risk', valueKind: 'data', value: candidate.rewardRisk },
                   ]} />
                 </article>
               ))}
@@ -1387,7 +1410,7 @@ function Dashboard({
       <div className="snapshot-detail-mask">
       <div className="two-column">
         <Card title="データ基準日" eyebrow="ソース基準日">
-          <MetricGrid metrics={view.dataDates} />
+          <MetricGrid metrics={view.dataDates.map(metric => ({ ...metric, valueKind: 'data' }))} />
         </Card>
         <Card title="データ状態" eyebrow={`保存済みレコード ${view.unavailable.length}件`}>
           <AvailabilityBadges counts={view.availability.global} />
@@ -1456,6 +1479,8 @@ function Dashboard({
             </>
           ) : null}
 
+          {tab.id === 'market-overview' ? <MarketOverviewContent /> : null}
+
           {tab.id === 'validation' ? (
             <StrategyValidationPanel
               history={history}
@@ -1477,6 +1502,7 @@ function Dashboard({
         onClosed={handleGlossaryClosed}
       />
     </main>
+    </DashboardDesign>
   );
 }
 
@@ -2180,55 +2206,38 @@ function App() {
       />
     );
   }
-  if (error) {
+  if (error || loading || (selectedTicker && targetSnapshotIssue && !snapshot)) {
+    const title = targetSnapshotIssue && !loading
+      ? '対象Snapshotを表示できません' : '銘柄詳細';
     return (
-      <main className="load-state">
-        <span className="brand-mark">DEXTER / JP</span>
-        <h1 data-main-heading tabIndex={-1}>
-          {selectedTicker ? 'Single Stock Dashboard' : 'Analysis Watchlist'}
-        </h1>
-        <p>{error}</p>
-        <small>{UNAVAILABLE_TEXT}は0を意味しません。</small>
-        {selectedTicker ? (
-          <button className="back-button centered" type="button" onClick={navigateToWatchlist}>
-            ← Analysis Portfolio
-          </button>
-        ) : null}
-      </main>
-    );
-  }
-  if (loading) {
-    return (
-      <main className="load-state">
-        <span className="brand-mark">DEXTER / JP</span>
-        <h1 className="visually-hidden" tabIndex={-1}>
-          {selectedTicker ? 'Single Stock Dashboard' : 'Analysis Watchlist'}
-        </h1>
-        <div className="loading-bar" />
-        <p>{selectedTicker ? `${selectedTicker} Snapshotを読み込み中…` : '保存済みAnalysisを読み込み中…'}</p>
-      </main>
-    );
-  }
-  if (selectedTicker && targetSnapshotIssue && !snapshot) {
-    return (
-      <main className="load-state target-snapshot-failure">
-        <span className="brand-mark">DEXTER / JP</span>
-        <h1 data-main-heading tabIndex={-1}>対象Snapshotを表示できません</h1>
-        <p>対象Snapshot {targetSnapshotIssue.snapshotId}</p>
-        <p role="alert">{targetSnapshotIssue.message}</p>
-        {comparisonIssue?.retryable ? (
-          <button type="button" onClick={retryComparison}>比較を再試行</button>
-        ) : null}
-        <button type="button" onClick={resetComparison}>比較を解除して最新へ戻る</button>
-        <button className="back-button centered" type="button" onClick={navigateToWatchlist}>
-          ← Analysis Portfolio
-        </button>
-      </main>
+      <DashboardDesign>
+        <DashboardHeader {...pageNavigation} />
+        <main className="design-content design-stack">
+          <h1 data-main-heading tabIndex={-1}>{title}</h1>
+          <Card title="保存済みSnapshot">
+            {loading ? <StatusNotice title="読み込み中" tone="neutral" role="status">
+              <p><span className="design-data">{selectedTicker}</span> Snapshotを読み込み中…</p>
+            </StatusNotice> : <StatusNotice title="表示できません" tone="error" role="alert">
+              {targetSnapshotIssue ? <p>対象Snapshot <span className="design-data">{targetSnapshotIssue.snapshotId}</span></p> : null}
+              <p>{error ?? targetSnapshotIssue?.message}</p>
+              <p>{UNAVAILABLE_TEXT}は0を意味しません。</p>
+            </StatusNotice>}
+            <div className="design-actions detail-state-actions">
+              {targetSnapshotIssue && !loading ? <>
+                {comparisonIssue?.retryable ? <Button onClick={retryComparison}>比較を再試行</Button> : null}
+                <Button onClick={resetComparison}>比較を解除して最新へ戻る</Button>
+              </> : null}
+              <Button onClick={navigateToWatchlist}>← 保存済み分析</Button>
+            </div>
+          </Card>
+        </main>
+      </DashboardDesign>
     );
   }
   if (selectedTicker && snapshot) {
     return (
       <Dashboard
+        pageNavigation={pageNavigation}
         key={snapshot.canonicalTicker}
         comparison={comparison}
         comparisonIssue={comparisonIssue}

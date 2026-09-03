@@ -10,7 +10,7 @@ import {
 } from './presentation.js';
 import { Button, Card, DashboardDesign, StatusBadge, StatusNotice, TableScroll, Value } from './primitives.js';
 
-interface PageNavigation {
+export interface PageNavigation {
   currentSearch: string;
   onShowWatchlist: () => void;
   onShowMarketOverview: () => void;
@@ -22,14 +22,10 @@ function followLocalLink(event: MouseEvent<HTMLAnchorElement>, navigate: () => v
   navigate();
 }
 
-function DashboardPage({ title, page, children, summary, ...navigation }: PageNavigation & {
-  title: string;
-  page: 'watchlist' | 'market-overview' | 'invalid';
-  children: ReactNode;
-  summary?: ReactNode;
+export function DashboardHeader({ page = 'detail', ...navigation }: PageNavigation & {
+  page?: 'watchlist' | 'market-overview' | 'invalid' | 'detail';
 }) {
   return (
-    <DashboardDesign>
       <header className="dashboard-page-header">
         <div className="design-content dashboard-header-content">
           <span className="dashboard-wordmark">DEXTER / JP</span>
@@ -47,12 +43,35 @@ function DashboardPage({ title, page, children, summary, ...navigation }: PageNa
           </nav>
         </div>
       </header>
+  );
+}
+
+export function MarketOverviewContent() {
+  return (
+    <Card title="市場データは準備中です">
+      <div className="design-stack">
+        <StatusBadge label="全市場共通" />
+        <p>データの取得・表示は後続ステップで追加します。現在、この画面では市場データを読み込まず、外部通信も行いません。</p>
+        <p>このページは銘柄に依存しない全市場共通の情報を表示する予定です。</p>
+      </div>
+    </Card>
+  );
+}
+
+function DashboardPage({ title, page, children, summary, ...navigation }: PageNavigation & {
+  title: string;
+  page: 'watchlist' | 'market-overview' | 'invalid';
+  children: ReactNode;
+  summary?: ReactNode;
+}) {
+  return (
+    <DashboardDesign>
+      <DashboardHeader {...navigation} page={page} />
       <main className="design-content design-stack">
         <header className="dashboard-page-intro">
           <div className="dashboard-page-identity">
             <h1 data-main-heading tabIndex={-1}>{title}</h1>
             {page === 'watchlist' ? <p>各銘柄の最新の保存済みSnapshot。保有資産・配分情報は含みません。</p> : null}
-            {page === 'market-overview' ? <StatusBadge label="全市場共通" /> : null}
           </div>
           {summary}
         </header>
@@ -174,12 +193,7 @@ export function Watchlist({ items, sortKey, onSort, onSelect, loading, error, on
 export function MarketOverviewPlaceholder(navigation: PageNavigation) {
   return (
     <DashboardPage {...navigation} page="market-overview" title="市場概況">
-      <Card title="市場データは準備中です">
-        <div className="design-stack">
-          <p>データの取得・表示は後続ステップで追加します。現在、この画面では市場データを読み込まず、外部通信も行いません。</p>
-          <p>このページは銘柄に依存しない全市場共通の情報を表示する予定です。</p>
-        </div>
-      </Card>
+      <MarketOverviewContent />
     </DashboardPage>
   );
 }

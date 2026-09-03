@@ -1,3 +1,4 @@
+import { Button, Value } from './primitives.js';
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type {
   AnalysisSnapshotComparisonResponseV1,
@@ -149,10 +150,10 @@ function ComparisonResults({
   return (
     <div className="comparison-results">
       <p className="comparison-as-of">
-        比較基準日時 {comparison.comparisonAsOf}。差分は対象値 − 基準値です。相対変化や良否判定は行いません。
+        比較基準日時 <span className="design-data">{comparison.comparisonAsOf}</span>。差分は対象値 − 基準値です。相対変化や良否判定は行いません。
       </p>
       <div className="comparison-filters" aria-label="比較行フィルター">
-        <label>
+        <label className="design-field">
           表示
           <select
             value={historyState.rowFilter}
@@ -163,7 +164,7 @@ function ComparisonResults({
             ))}
           </select>
         </label>
-        <label>
+        <label className="design-field">
           セクション
           <select
             value={historyState.sectionFilter}
@@ -189,14 +190,14 @@ function ComparisonResults({
             <h3 id={`comparison-${section}`}>{label}</h3>
             <div
               aria-label={`${label}の保存済み分析比較表`}
-              className="comparison-table-scroll"
+              className="comparison-table-scroll table-scroll"
               role="region"
               tabIndex={0}
             >
               <table className="comparison-table">
                 <thead>
                   <tr>
-                    <th>指標</th><th>基準値</th><th>対象値</th><th>差分</th><th>状態</th>
+                    <th>指標</th><th className="numeric-cell">基準値</th><th className="numeric-cell">対象値</th><th className="numeric-cell">差分</th><th>状態</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -212,9 +213,17 @@ function ComparisonResults({
                             onOpenChange={open => setDisclosure(rowId, open)}
                           />
                         </th>
-                        <td>{formatComparisonObservation(row.base, row)}</td>
-                        <td>{formatComparisonObservation(row.target, row)}</td>
-                        <td>{formatComparisonDelta(row)}</td>
+                        <td className={row.valueKind === 'number' ? 'numeric-cell' : undefined}><Value kind={row.valueKind === 'number' ? 'data' : 'text'} value={{ text: formatComparisonObservation(row.base, row), available: row.base.state === 'available' }} /></td>
+                        <td className={row.valueKind === 'number' ? 'numeric-cell' : undefined}><Value kind={row.valueKind === 'number' ? 'data' : 'text'} value={{ text: formatComparisonObservation(row.target, row), available: row.target.state === 'available' }} /></td>
+                        <td className={row.comparison.mode === 'from_to' ? undefined : 'numeric-cell'}>
+                          <Value
+                            kind={row.comparison.mode === 'absolute_delta' ? 'data' : 'text'}
+                            value={{
+                              text: formatComparisonDelta(row),
+                              available: row.comparison.mode === 'absolute_delta' || row.comparison.mode === 'from_to',
+                            }}
+                          />
+                        </td>
                         <td>{comparisonStatusLabel(row)}</td>
                       </tr>
                     );
@@ -274,13 +283,13 @@ export function ComparisonPanel({
           <h2 id="comparison-title">保存済み分析の比較</h2>
         </div>
         {selectionPresent ? (
-          <button className="comparison-reset" onClick={onReset} type="button">比較を解除</button>
+          <Button className="comparison-reset" onClick={onReset} type="button">比較を解除</Button>
         ) : null}
       </header>
 
       {pair ? (
         <div className="comparison-selectors">
-          <label>
+          <label className="design-field">
             基準Snapshot
             <select value={pair.baseSnapshotId} onChange={event => onAdoptBase(event.currentTarget.value)}>
               {ascendingHistory.map((item, index) => (
@@ -294,7 +303,7 @@ export function ComparisonPanel({
                 ))}
             </select>
           </label>
-          <label>
+          <label className="design-field">
             対象Snapshot
             <select
               value={pair.targetSnapshotId}
@@ -317,7 +326,7 @@ export function ComparisonPanel({
       ) : !selectionPresent ? (
         <div className="comparison-start">
           <p>表示中の分析と、その直前に保存された分析を比較します。</p>
-          <button disabled={initialPair === null} onClick={onStart} type="button">比較を開始</button>
+          <Button disabled={initialPair === null} onClick={onStart} type="button">比較を開始</Button>
           {initialPair === null ? <p className="comparison-requirement">{COMPARISON_PAIR_REQUIREMENT}</p> : null}
         </div>
       ) : null}
@@ -328,7 +337,7 @@ export function ComparisonPanel({
       {issue ? (
         <div className="comparison-error" role="alert">
           <p>{issue.message}</p>
-          {issue.retryable ? <button onClick={onRetry} type="button">比較を再試行</button> : null}
+          {issue.retryable ? <Button onClick={onRetry} type="button">比較を再試行</Button> : null}
         </div>
       ) : null}
       {comparison ? (

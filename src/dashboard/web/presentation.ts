@@ -18,6 +18,7 @@ export const DASHBOARD_TABS = [
   { id: 'technical', label: '株価・テクニカル' },
   { id: 'fundamentals', label: '比較・配当' },
   { id: 'supply-demand', label: '需給・空売り' },
+  { id: 'market-overview', label: '市場概況' },
   { id: 'market', label: '市場・セクター' },
   { id: 'validation', label: '戦略検証' },
 ] as const;
@@ -158,6 +159,7 @@ export interface DisplayValue {
 }
 
 export interface DashboardMetric {
+  valueKind?: 'text' | 'data';
   label: string;
   value: DisplayValue;
   note?: string;
@@ -175,7 +177,7 @@ export interface ChartBar {
 export interface ChartPriceLine {
   label: string;
   price: number;
-  color: string;
+  colorToken: '--color-chart-sma20' | '--color-chart-swing-high' | '--color-chart-swing-low';
   displayPrice: DisplayValue;
 }
 
@@ -853,7 +855,7 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
     priceLines.push({
       label: 'SMA 20',
       price: snapshot.technical.ma20,
-      color: '#5aa9ff',
+      colorToken: '--color-chart-sma20',
       displayPrice: formatMetric(snapshot.technical.ma20, technicalUnits.ma20),
     });
   }
@@ -864,7 +866,7 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
     priceLines.push({
       label: 'Swing High',
       price: snapshot.technical.latestSwingHigh,
-      color: '#f0b35a',
+      colorToken: '--color-chart-swing-high',
       displayPrice: formatMetric(
         snapshot.technical.latestSwingHigh,
         technicalUnits.latestSwingHigh,
@@ -878,7 +880,7 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
     priceLines.push({
       label: 'Swing Low',
       price: snapshot.technical.latestSwingLow,
-      color: '#b478ff',
+      colorToken: '--color-chart-swing-low',
       displayPrice: formatMetric(
         snapshot.technical.latestSwingLow,
         technicalUnits.latestSwingLow,
@@ -1487,12 +1489,14 @@ export function mapSnapshotToDashboard(snapshot: AnalysisSnapshot): DashboardVie
     kpis: [
       {
         label: 'Price',
+        valueKind: 'data',
         value: formatMetric(snapshot.valuation?.currentPrice, valuationUnits.currentPrice),
       },
-      { label: 'PER', value: formatMetric(snapshot.valuation?.per, valuationUnits.per) },
-      { label: 'PBR', value: formatMetric(snapshot.valuation?.pbr, valuationUnits.pbr) },
+      { label: 'PER', valueKind: 'data', value: formatMetric(snapshot.valuation?.per, valuationUnits.per) },
+      { label: 'PBR', valueKind: 'data', value: formatMetric(snapshot.valuation?.pbr, valuationUnits.pbr) },
       {
         label: 'ROE',
+        valueKind: 'data',
         value: formatMetric(latestFundamental?.roe, snapshot.units.fundamental.roe, {
           ratioAsPercent: true,
         }),

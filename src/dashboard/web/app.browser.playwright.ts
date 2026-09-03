@@ -31,6 +31,7 @@ import {
   buildDashboardAvailabilityNavigation,
   type DashboardTabId,
 } from './presentation.js';
+import { contrastRatio } from './primitives.test-fixtures.js';
 import { COMPARISON_PAIR_REQUIREMENT } from './comparison.js';
 import {
   campaignCandidateCase,
@@ -1431,10 +1432,10 @@ test.describe('DR-V2 Watchlist and global navigation', () => {
     await page.locator('tr[data-ticker="7203"]').getByRole('button', { name: /の詳細を表示$/ }).click();
     await expectSelectedTab(page, 'report');
     await expect(page.locator('[data-main-heading]')).toBeFocused();
-    await expect(page.getByRole('tab')).toHaveCount(6);
-    await expect(page.locator('.dashboard-design')).toHaveCount(0);
+    await expect(page.getByRole('tab')).toHaveCount(7);
+    await expect(page.locator('.dashboard-design')).toHaveCount(1);
     expect(new URL(page.url()).searchParams.getAll('future')).toEqual(['keep', 'again']);
-    await page.getByRole('button', { name: '← Analysis Portfolio' }).click();
+    await page.getByRole('button', { name: '← 保存済み分析' }).click();
     await expect(page.getByRole('heading', { name: '保存済み分析', exact: true })).toBeFocused();
     expect(new URL(page.url()).search).toBe('?future=keep&future=again');
     expect(requests.unexpected).toEqual([]);
@@ -2194,12 +2195,13 @@ test.describe('strategy validation Dashboard interaction', () => {
       await mockStrategyValidationApi(page, fixture);
       await openDetail(page, '7203', 'validation');
 
-      await expect(page.getByRole('tab')).toHaveCount(6);
+      await expect(page.getByRole('tab')).toHaveCount(7);
       expect(await page.locator('.detail-tab-label').allTextContents()).toEqual([
         '概要・レポート',
         '株価・テクニカル',
         '比較・配当',
         '需給・空売り',
+        '市場概況',
         '市場・セクター',
         '戦略検証',
       ]);
@@ -2227,7 +2229,7 @@ test.describe('strategy validation Dashboard interaction', () => {
       await expect(page.getByText('日本株検証 / 1基準日を検証しました。', { exact: true }))
         .toBeVisible();
 
-      await page.getByLabel('保存済みSnapshot', { exact: true }).check();
+      await page.getByRole('radio', { name: '保存済みSnapshot', exact: true }).check();
       await page.locator('.validation-field select').selectOption({ index: 1 });
       await page.getByRole('button', { name: 'ローカルPreflightを実行' }).click();
 
@@ -2330,7 +2332,7 @@ test.describe('strategy validation Dashboard interaction', () => {
       await page.goBack();
       await expect(page.getByRole('heading', { name: 'キャンペーン全体（2銘柄・4基準日）' }))
         .toBeVisible();
-      await page.getByRole('button', { name: '← Analysis Portfolio' }).click();
+      await page.getByRole('button', { name: '← 保存済み分析' }).click();
       await expect(page.getByRole('heading', { name: '保存済み分析', exact: true })).toBeVisible();
       expect(new URL(page.url()).searchParams.has('validationRun')).toBe(false);
       expect(new URL(page.url()).searchParams.has('validationCase')).toBe(false);
@@ -2690,15 +2692,15 @@ test.describe('Dashboard detail tab browser interaction', () => {
         window.dispatchEvent(new PopStateEvent('popstate'));
       });
       await expectSelectedTab(page, 'technical');
-      await page.getByRole('button', { name: '← Analysis Portfolio' }).focus();
+      await page.getByRole('button', { name: '← 保存済み分析' }).focus();
       await page.goBack();
       await expectSelectedTab(page, 'fundamentals');
       expect(await page.evaluate(() => document.activeElement?.textContent?.trim()))
-        .toBe('← Analysis Portfolio');
+        .toBe('← 保存済み分析');
       await page.goForward();
       await expectSelectedTab(page, 'technical');
       expect(await page.evaluate(() => document.activeElement?.textContent?.trim()))
-        .toBe('← Analysis Portfolio');
+        .toBe('← 保存済み分析');
     } finally {
       await page.close();
     }
@@ -2899,7 +2901,7 @@ test.describe('Dashboard detail tab browser interaction', () => {
           overflow: document.documentElement.scrollWidth - window.innerWidth,
         };
       });
-      expect(mobileLayout.chartHeight).toBeGreaterThanOrEqual(390);
+      expect(mobileLayout.chartHeight).toBe(384);
       expect(mobileLayout.legendTop).toBeGreaterThanOrEqual(mobileLayout.chartBottom);
       expect(mobileLayout.latestTop).toBeGreaterThanOrEqual(mobileLayout.legendBottom);
       expect(mobileLayout.overflow).toBeLessThanOrEqual(0);
@@ -3119,7 +3121,7 @@ test.describe('Dashboard detail tab browser interaction', () => {
         name: '保存済みSnapshotを再読み込み',
         exact: true,
       }).click();
-      await listPage.getByRole('button', { name: '← Analysis Portfolio' }).click();
+      await listPage.getByRole('button', { name: '← 保存済み分析' }).click();
       await expect(listPage.getByRole('heading', { name: '保存済み分析', exact: true })).toBeVisible();
       await listPage.waitForTimeout(600);
       await expect(listPage.getByRole('heading', { name: '保存済み分析', exact: true })).toBeVisible();
@@ -3143,8 +3145,7 @@ test.describe('Dashboard detail tab browser interaction', () => {
         const selected = document.getElementById('dashboard-tab-market')!.getBoundingClientRect();
         const tablist = document.querySelector<HTMLElement>('[role="tablist"]')!;
         const listRect = tablist.getBoundingClientRect();
-        const cueStyle = getComputedStyle(tablist.parentElement!, '::after');
-        const cueWidth = cueStyle.display === 'none' ? 0 : Number.parseFloat(cueStyle.width);
+        const cueWidth = 0; // The visible cue is now a separate text row, not an overlay.
         return {
           documentOverflow: document.documentElement.scrollWidth - window.innerWidth,
           scrollLeft: tablist.scrollLeft,
@@ -3161,7 +3162,7 @@ test.describe('Dashboard detail tab browser interaction', () => {
       );
       expect(directLinkLayout.documentOverflow).toBeLessThanOrEqual(0);
 
-      await page.evaluate(() => window.scrollTo(0, 400));
+      await page.evaluate(() => window.scrollTo(0, document.querySelector<HTMLElement>('.detail-tabs-shell')!.offsetTop));
       const stickyScrollY = await page.evaluate(() => window.scrollY);
       await page.locator('#dashboard-tab-market').focus();
       for (const key of ['Home', 'End', 'ArrowLeft'] as const) {
@@ -3198,8 +3199,7 @@ test.describe('Dashboard detail tab browser interaction', () => {
               .getBoundingClientRect();
             const tablist = document.querySelector<HTMLElement>('[role="tablist"]')!;
             const listRect = tablist.getBoundingClientRect();
-            const cueStyle = getComputedStyle(tablist.parentElement!, '::after');
-            const cueWidth = cueStyle.display === 'none' ? 0 : Number.parseFloat(cueStyle.width);
+            const cueWidth = 0; // The text cue does not obscure any tab.
             const overflowingElements = [...document.querySelectorAll<HTMLElement>('body *')]
               .filter(element => element.getBoundingClientRect().right > window.innerWidth + 1)
               .slice(0, 10)
@@ -3460,7 +3460,7 @@ test.describe('Dashboard detail tab browser interaction', () => {
       await openDetail(page, '1010');
 
       await expect(page.getByRole('heading', { name: '1010 テスト株式会社' })).toBeVisible();
-      await expect(page.locator('.status-badge.complete')).toHaveText('COMPLETE');
+      await expect(page.locator('.hero-actions .design-badge')).toHaveText('COMPLETE');
       await expect(page.getByLabel('Snapshotのデータ利用状況')).toBeVisible();
       await expect(page.getByRole('heading', { name: 'データ基準日', exact: true })).toBeVisible();
       await expect(page.getByRole('heading', { name: 'データ状態', exact: true })).toBeVisible();
@@ -3557,6 +3557,7 @@ test.describe('Dashboard detail tab browser interaction', () => {
       ],
       fundamentals: ['同業比較', '配当分析'],
       'supply-demand': ['信用需給', '公開空売り残高報告'],
+      'market-overview': ['市場データは準備中です'],
       market: ['投資部門別売買', '市場相関', '業種指数比較', '業種別空売り売買代金'],
       validation: ['戦略検証を実行', '保存済み検証結果'],
     } as const satisfies Record<DashboardTabId, readonly string[]>;
@@ -3579,5 +3580,218 @@ test.describe('Dashboard detail tab browser interaction', () => {
     } finally {
       await page.close();
     }
+  });
+});
+
+async function expectLightSurface(page: Page) {
+  await expect(page.locator('html')).toHaveCSS('color-scheme', 'light');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0);
+  const pairs = await page.locator('h1, h2, h3, h4, h5, p, dt, dd, small, .design-value, .design-badge, .availability-badge, button, label, th, td, summary, a')
+    .evaluateAll(elements => elements.filter(element =>
+      element.getClientRects().length > 0 && !element.closest('.price-chart, [hidden]')
+      && getComputedStyle(element).visibility !== 'hidden',
+    ).map(element => {
+      let ancestor: Element | null = element;
+      let background = '';
+      while (ancestor) {
+        background = getComputedStyle(ancestor).backgroundColor;
+        if (background !== 'rgba(0, 0, 0, 0)') break;
+        ancestor = ancestor.parentElement;
+      }
+      return { color: getComputedStyle(element).color, background, text: element.textContent?.slice(0, 60) };
+    }));
+  for (const pair of pairs) expect(contrastRatio(pair.color, pair.background), pair.text).toBeGreaterThanOrEqual(4.5);
+  for (const panel of await page.locator('.panel:visible').all()) {
+    await expect(panel).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+    await expect(panel).toHaveCSS('border-radius', '12px');
+    await expect(panel).toHaveCSS('box-shadow', 'none');
+  }
+}
+
+test.describe('DR-V3 complete Light detail', () => {
+  for (const width of [320, 390, 680, 768, 980, 1024, 1280]) {
+    test(`all seven surfaces, exact data, dialogue and focus at ${width}px`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width, height: 900 });
+      const requests = await guardRefreshRequests(page);
+      await mockSnapshotApi(page);
+      await mockStrategyValidationApi(page, strategyValidationBrowserFixture());
+      await openDetail(page, '1010');
+      for (const tab of DASHBOARD_TABS) {
+        await page.locator(`#dashboard-tab-${tab.id}`).click();
+        await expectSelectedTab(page, tab.id);
+        await expectLightSurface(page);
+        const selected = page.locator(`#dashboard-tab-${tab.id}`);
+        await selected.focus();
+        await page.keyboard.press('Tab');
+        await page.keyboard.press('Shift+Tab');
+        await expect(selected).toHaveCSS('outline-width', '2px');
+        await expect(selected).toHaveCSS('min-height', '48px');
+        const styles = await page.locator('.detail-tabs').evaluate(element => {
+          const selected = element.querySelector('[aria-selected="true"]')!.getBoundingClientRect();
+          const list = element.getBoundingClientRect();
+          return { left: selected.left - list.left, right: selected.right - list.right };
+        });
+        expect(styles.left).toBeGreaterThanOrEqual(0);
+        expect(styles.right).toBeLessThanOrEqual(0);
+        await page.evaluate(() => window.scrollTo(0, 0));
+        await page.screenshot({ path: testInfo.outputPath(`dr-v3-${tab.id}-${width}.png`), fullPage: true });
+        if (tab.id === 'market-overview') {
+          await expect(page.getByText('全市場共通', { exact: true })).toBeVisible();
+          await expect(selected.locator('.availability-badge')).toHaveCount(0);
+        }
+      }
+      await page.getByRole('button', { name: '用語集', exact: true }).click();
+      const dialog = page.getByRole('dialog');
+      await expect(dialog).toBeVisible();
+      await expectLightSurface(page);
+      await expect(dialog).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+      await page.screenshot({ path: testInfo.outputPath(`dr-v3-dialog-${width}.png`) });
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('button', { name: '用語集', exact: true })).toBeFocused();
+      expect(requests.unexpected).toEqual([]);
+      expect(requests.api.every(request => request.startsWith('GET '))).toBe(true);
+    });
+  }
+
+  test('detail Market Overview preserves dormant state on reload, Back/Forward and header navigation', async ({ page }) => {
+    const requests = await guardRefreshRequests(page);
+    await mockSnapshotApi(page);
+    await mockWatchlistApi(page);
+    await page.goto(`${baseUrl}/?ticker=1010&tab=market-overview&marketRange=3y&interval=month&chartSource=latest&future=one&future=two`);
+    await expectSelectedTab(page, 'market-overview');
+    const original = new URL(page.url()).search;
+    const reads = [...requests.api];
+    await page.locator('#dashboard-tab-market').click();
+    await page.locator('#dashboard-tab-market-overview').click();
+    expect(requests.api).toEqual(reads);
+    expect(new URL(page.url()).search).toBe(original);
+    await page.reload();
+    await expectSelectedTab(page, 'market-overview');
+    await page.getByRole('link', { name: '市場概況', exact: true }).click();
+    await expect(page.getByRole('heading', { name: '市場概況', exact: true })).toBeFocused();
+    expect(new URL(page.url()).searchParams.get('marketRange')).toBe('3y');
+    expect(new URL(page.url()).searchParams.has('ticker')).toBe(false);
+    await page.goBack();
+    await expectSelectedTab(page, 'market-overview');
+    expect(new URL(page.url()).search).toBe(original);
+    await page.goForward();
+    await expect(page.getByRole('heading', { name: '市場概況', exact: true })).toBeVisible();
+    expect(requests.unexpected).toEqual([]);
+  });
+
+  test('stored OHLCV table keeps zero and incomplete rows, and data/category roles stay explicit', async ({ page }) => {
+    const requests = await guardRefreshRequests(page);
+    const original = snapshotFor('1010');
+    const snapshot = AnalysisSnapshotSchema.parse({
+      ...original,
+      priceHistory: original.priceHistory!.map((bar, index) => index === 2 ? { ...bar, close: null, volume: null } : bar),
+      finalReportMarkdown: '<script>window.untrusted = true</script> 日本語の保存済みレポート',
+    });
+    await mockComparisonApi(page, [snapshot]);
+    await openDetail(page, '1010', 'technical');
+    const table = page.getByRole('region', { name: '保存済み調整後OHLCVの正確な値' });
+    await expect(table.locator('tbody tr')).toHaveCount(3);
+    await expect(table.locator('tbody tr').nth(1)).toContainText('0 株');
+    await expect(table.locator('tbody tr').nth(2).locator('.unavailable')).toHaveCount(2);
+    await expect(table.locator('.unavailable').first()).toHaveCSS('font-family', /ui-sans-serif/);
+    await expect(table.locator('tbody td .design-value[data-kind="data"]').first()).toHaveCSS('font-family', /Consolas/);
+    await expect(page.locator('.kpi-card').last().locator('.design-value')).toHaveCSS('font-family', /ui-sans-serif/);
+    await table.focus();
+    await expect(table).toBeFocused();
+    await page.locator('#dashboard-tab-report').click();
+    await expect(page.locator('.report-markdown')).toHaveCSS('font-family', /ui-sans-serif/);
+    await expect(page.locator('.report-markdown')).toContainText('<script>');
+    expect(await page.evaluate(() => 'untrusted' in window)).toBe(false);
+    expect(requests.unexpected).toEqual([]);
+  });
+
+  test('Comparison, populated Validation and default-No confirmation keep readable controls and numeric roles', async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 320, height: 900 });
+    const requests = await guardRefreshRequests(page);
+    const fixture = strategyValidationBrowserFixture();
+    await mockComparisonApi(page, [
+      comparisonSnapshot('2026-08-21T01:02:03.000Z'),
+      comparisonSnapshot('2026-08-22T01:02:03.000Z'),
+    ]);
+    await mockStrategyValidationApi(page, fixture);
+    await openDetail(page, '7203');
+    await page.getByRole('button', { name: '比較を開始' }).click();
+    await page.getByRole('combobox', { name: '表示', exact: true }).selectOption('all');
+    await expect(page.locator('.comparison-table').first()).toBeVisible();
+    await expectLightSurface(page);
+    await expect(page.locator('tr[data-comparison-row="valuation.currentPrice"] td').first()).toHaveCSS('text-align', 'right');
+    const categoryDelta = page.locator('tr[data-comparison-row="technical.trend"] td').nth(2);
+    await expect(categoryDelta).toHaveText('変更なし');
+    await expect(categoryDelta).toHaveCSS('text-align', 'left');
+    await expect(categoryDelta.locator('.design-value')).toHaveCSS('font-family', /ui-sans-serif/);
+    await expect(categoryDelta.locator('.unavailable')).toHaveCount(0);
+    await page.screenshot({ path: testInfo.outputPath('dr-v3-comparison-320.png'), fullPage: true });
+    await openDetail(page, '7203', 'validation',
+      `&validationRun=${fixture.campaignRun.runId}&validationCase=${fixture.currentTickerCase.caseId}`);
+    await expect(page.getByRole('heading', { name: 'ケース詳細' })).toBeVisible();
+    await expectLightSurface(page);
+    await page.screenshot({ path: testInfo.outputPath('dr-v3-validation-results-320.png'), fullPage: true });
+    await page.getByRole('combobox', { name: '保存済みSnapshot', exact: true }).selectOption({ index: 1 });
+    await page.getByRole('button', { name: 'ローカルPreflightを実行' }).click();
+    const confirm = page.getByRole('checkbox');
+    await expect(confirm).not.toBeChecked();
+    await expect(page.getByRole('button', { name: 'Jobを開始', exact: true })).toBeDisabled();
+    await expectLightSurface(page);
+    const targetHeight = await confirm.evaluate(element => element.closest('label')!.getBoundingClientRect().height);
+    expect(targetHeight).toBeGreaterThanOrEqual(44);
+    await page.screenshot({ path: testInfo.outputPath('dr-v3-preflight-320.png'), fullPage: true });
+    expect(requests.unexpected).toEqual([]);
+    expect(requests.api.some(request => request === 'POST /api/strategy-validation/jobs')).toBe(false);
+  });
+});
+
+test.describe('DR-V3 state and touch boundaries', () => {
+  test('detail loading and failure use Light cards with safe recovery and no fabricated values', async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 320, height: 900 });
+    const requests = await guardRefreshRequests(page);
+    let release: (() => void) | undefined;
+    const ready = new Promise<void>(resolve => { release = resolve; });
+    await page.route('**/api/analyses/7203/history', async route => {
+      await ready;
+      await route.fulfill({ status: 500, contentType: 'application/json', body: '{}' });
+    });
+    await page.goto(`${baseUrl}/?ticker=7203&tab=report`);
+    await expect(page.getByRole('heading', { name: '読み込み中', exact: true })).toBeVisible();
+    await expect(page.locator('.kpi-card')).toHaveCount(0);
+    await expectLightSurface(page);
+    await page.screenshot({ path: testInfo.outputPath('dr-v3-loading-320.png') });
+    release!();
+    await expect(page.getByRole('heading', { name: '表示できません', exact: true })).toBeVisible();
+    await expectLightSurface(page);
+    await page.screenshot({ path: testInfo.outputPath('dr-v3-error-320.png') });
+    await mockWatchlistApi(page);
+    await page.getByRole('button', { name: '← 保存済み分析', exact: true }).click();
+    await expect(page.getByRole('heading', { name: '保存済み分析', exact: true })).toBeFocused();
+    expect(requests.unexpected).toEqual([]);
+  });
+
+  test('wide coarse-pointer detail keeps tab, dialogue and validation label targets safe', async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width: 980, height: 900 }, hasTouch: true });
+    const page = await context.newPage();
+    try {
+      const requests = await guardRefreshRequests(page);
+      await mockSnapshotApi(page);
+      await mockStrategyValidationApi(page, strategyValidationBrowserFixture());
+      await openDetail(page, '1010', 'validation');
+      const controls = await page.locator('button:visible, .validation-mode label, select:visible, a:visible')
+        .evaluateAll(elements => elements.filter(element => element.getClientRects().length > 0).map(element => {
+          const rect = element.getBoundingClientRect();
+          return { width: rect.width, height: rect.height, label: element.textContent?.slice(0, 30) };
+        }));
+      for (const control of controls) {
+        expect(control.width, control.label).toBeGreaterThanOrEqual(44);
+        expect(control.height, control.label).toBeGreaterThanOrEqual(44);
+      }
+      await page.getByRole('radio', { name: 'Campaign JSON', exact: true }).check();
+      await expect(page.locator('input[type="file"]')).toBeVisible();
+      await page.getByRole('button', { name: '用語集', exact: true }).click();
+      await expect(page.getByRole('button', { name: '用語集を閉じる' })).toHaveCSS('min-height', '44px');
+      expect(requests.unexpected).toEqual([]);
+    } finally { await context.close(); }
   });
 });

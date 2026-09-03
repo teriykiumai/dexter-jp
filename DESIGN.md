@@ -452,6 +452,32 @@ numeric columns align right. Sort controls reuse native Button with `aria-presse
 they never derive a quality ranking. Detail pages, including their loading/error
 surfaces, remain outside this migration until DR-V3.
 
+DR-V3 completes the production Light boundary, including detail loading/error,
+Comparison, Radar, Validation, glossary, and chart surfaces. The document itself
+uses Light color-scheme and canvas; the old stylesheet is retained only for the
+isolated migration regression fixture. The shared header is reused on detail pages.
+KPI numbers use the KPI role; category and missing-state KPI text uses subsection
+typography without clipping. Exact dates/IDs stay data-typed, not entire sentences.
+
+Detail panels use the standard card gap. Grouped subsections are muted, flat,
+surface-rounded areas. Tabs keep their 48px minimum, a persistent textual horizontal
+scroll cue, and an inset focus ring inside the scroll boundary. Chart height is
+480px (15 space-8 units), with mobile aligned to 384px (12 units); price/volume
+retain the inherited 70/30 split. A permanently available, locally scrollable table
+exposes every stored OHLCV row, including missing cells. It does not calculate data.
+Radar retains its seven-axis geometry and uses label typography; exact values stay
+in the adjacent table. Volume Profile markers are rectangular, using space-4 by
+space-2 geometry and the approved palette, with explicit POC/VA text.
+
+Validation radio/checkbox inputs keep native appearance and accent color. Their
+associated whole label is the interactive target: at least 40px high, or 44px on
+touch/mobile. File inputs have the same surface/border/radius as fields, a native
+button styled as secondary, and an associated status/help message. These patterns
+do not change the rectangular text-field allowlist. The glossary is at most 768px
+wide (24 space-8 units), with space-3 viewport gutters, standard padding, and the
+approved overlay. Long-form report text uses UI body typography, preserving literal
+whitespace and escaping; IDs/financial data never cause document overflow.
+
 ## 9. Change checklist
 
 For every user-facing UI task:

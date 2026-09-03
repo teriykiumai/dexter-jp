@@ -1,7 +1,7 @@
 # Dexter JP Dashboard Refresh Handoff
 
-**Status:** DR-0 and DR-V1 merged; DR-V2 candidate implementation awaiting independent
-review and merge. DR-V3 and later steps have not started.
+**Status:** DR-0, DR-V1, and DR-V2 merged; DR-V3 candidate implementation awaiting
+independent review and merge. DR-T0 and later steps have not started.
 
 **Last Updated:** 2026-09-03
 
@@ -41,7 +41,7 @@ The implemented baseline includes:
 No Dashboard Refresh Technical artifact, Market Overview artifact, refresh route,
 new visual token system, or seventh tab exists at this baseline.
 
-## 3. DR-0 / DR-V1 merges and current DR-V2 boundary
+## 3. DR-0 / DR-V1 / DR-V2 merges and current DR-V3 boundary
 
 The DR-0 branch was:
 
@@ -131,6 +131,38 @@ The six-tab detail, including its loading/error states, keeps its legacy design
 and behavior until DR-V3. No seventh tab, artifact read, refresh API, source fetch,
 Snapshot/schema change, dependency, polling, or external asset is added by DR-V2.
 
+PR #96 received an independent `Mergeable` review for exact head
+`3eceece85b5c977fd81972ec55db01ae6d5808ef`, with zero unresolved BLOCKING/MAJOR
+findings and both canonical CI checks green. Following user authorization it was
+merged on 2026-09-03 as `194b54774cf8cc0ef4a4b7bffa75069e7c31782d`. Local `main`
+was fast-forwarded to that exact commit before creating:
+
+```text
+feat/dashboard-detail-surfaces-step3
+```
+
+DR-V3 completes the production Light migration for detail, its loading/error states,
+Comparison, Radar, Strategy Validation, glossary, and chart. It reuses the existing
+header and primitives. The reviewer-requested document-level Light color-scheme is
+now applied; production no longer loads the legacy stylesheet, which remains only
+in the isolated migration regression fixture. Root `DESIGN.md` records the detailed
+composition, native radio/checkbox/file controls, and chart/table conventions.
+
+The exact seven-tab order is implemented. The new `market-overview / 市場概況` tab
+shares the global placeholder, permanently identifies itself as `全市場共通`, owns no
+Snapshot sections, and has no fabricated availability counts. Existing market and
+investor sections remain in their inherited destinations. Dormant chart/range state,
+unknown query keys, History API, reload, race, disclosure, and focus rules remain.
+
+Numeric/ID/date values explicitly select shared data roles; categories and missing
+states retain UI typography. Financial table columns align right inside named local
+scroll regions. The Technical card adds a permanent exact table of every stored
+OHLCV row, including rows that cannot be drawn and valid zero/missing distinctions.
+It adds no series calculation, interval control, refresh, source request, API,
+artifact, Snapshot/schema change, dependency, or external asset. Chart pane ratios,
+Radar geometry, and financial semantics remain inherited; mobile chart height is
+aligned from 390px to the approved 384px spacing multiple.
+
 ## 4. Adopted product boundary
 
 Dashboard Refresh is independent from Phase 5 and must finish first. It adopts:
@@ -208,20 +240,24 @@ contract and fail closed for IPO, delist/relist, or code-reuse ambiguity before 
 production adapter or UI is exposed. Normal CI and Playwright use fixtures only and
 must not contact J-Quants.
 
-## 6. Next step after DR-V2 merge
+## 6. Next step after DR-V3 merge
 
-The next step is **DR-V3 — detail shell and complex surfaces**. It may start only after:
+The next ordered step is **DR-T0 — Technical source and lifetime gate**. It may
+start only after:
 
-1. the exact DR-V2 head has no BLOCKING or MAJOR independent-review finding;
+1. the exact DR-V3 head has no BLOCKING or MAJOR independent-review finding;
 2. required CI is green;
 3. the user authorizes and completes merge;
 4. local `main` is fast-forwarded to the merged `origin/main`; and
-5. the DR-V3 branch is created from that updated clean main.
+5. the next step branch is created from that updated clean main.
 
-DR-V3 migrates the complete detail shell, Card/Table/Dialog/Comparison/Radar/
-Validation/chart theme and enacts the exact seven-tab shell without moving existing
-Snapshot sections. It must audit each value/metadata/table call site against
-`DESIGN.md` and preserve inherited URL, focus, missing-data, and Snapshot contracts.
+DR-T0 must resolve the documented source/lifetime proof before any explicitly
+authorized credentialed smoke. It exposes no public route and publishes no Market
+Data artifact. Failure to prove continuity within the frozen bounds returns to
+design review, not a guessed source adapter. The plan dependency graph also permits
+DR-T1 pure chart series after DR-V3 without waiting for DR-T0; each remains its own
+reviewed step, and production Technical I/O still requires the DR-T0 gate.
+
 Market Overview remains a placeholder until the corresponding data steps merge.
 The Technical source/lifetime gate belongs to DR-T0; shared session/coordinator
 ownership, empty-start admission, and the cross-domain recovery guard belong to
@@ -234,19 +270,19 @@ modules belong to DR-M1a-c/DR-E1, and user instructions belong to DR-X.
 
 | Validation | Result |
 | --- | --- |
-| focused `bun test` for navigation, Watchlist, presentation, and primitives | 71 passed, 0 failed |
-| `bun test` | 950 passed, 0 failed |
+| `bun test src/dashboard/web` | 99 passed, 0 failed |
+| `bun test` | 953 passed, 0 failed |
 | `bun run typecheck` | local Bun launcher stopped before TypeScript execution; see below |
 | `bun node_modules/typescript/bin/tsc --noEmit` | passed using the same installed compiler |
-| `bun run test:dashboard-browser` | all 64 passed (38 inherited + 17 primitive + 9 DR-V2 tests) |
+| `bun run test:dashboard-browser` | all 76 passed (64 inherited + 12 DR-V3 tests) |
 | `git diff --check` | passed; Git emitted only the checkout's LF-to-CRLF conversion warning |
-| Watchlist/global visual QA | 320, 390, 680, 768, 980, 1024, 1280px; no document overflow or overlapping controls |
-| merged DR-V1 main CI | succeeded for `d7728d2456e20102c28f7be8ef5f056ea4d3d5f7` |
+| detail visual/contrast/overflow matrix | all seven tabs and glossary at 320, 390, 680, 768, 980, 1024, 1280px; 980px coarse pointer also checked |
+| merged DR-V2 main CI | succeeded for `194b54774cf8cc0ef4a4b7bffa75069e7c31782d` |
 
 On this Windows checkout, `bun run typecheck` returned Bun's existing
 `could not create process` / local-bin-remap failure. It did not report a TypeScript
 diagnostic. The direct command above ran the installed TypeScript compiler to
-completion without changing dependencies. The exact DR-V2 PR must still pass the
+completion without changing dependencies. The exact DR-V3 PR must still pass the
 canonical `bun run typecheck` CI job; the local launcher failure is disclosed, not
 treated as a canonical-command pass.
 
@@ -260,12 +296,20 @@ user while loading is not stolen on completion. Visual checks exposed and fixed 
 absolute screen-reader label escaping the table scroll boundary and short status/
 action labels wrapping unnecessarily. The local table has a visible scroll hint.
 
-The full configured suite also retains the shared primitive contrast, font-role,
-field, keyboard, touch, and reduced-motion checks and verifies the existing six-tab
-journeys, glossary, Snapshot V1-V9, Comparison, Radar, reload races, and Strategy
-Validation behavior. All new journeys reject unexpected API and external requests;
-all data is synthetic. The complex detail migration and market-data functionality
-are not claimed complete by these results.
+DR-V3 adds computed contrast/flat-surface checks across every detail tab and glossary
+at all seven required widths. It verifies Light loading/error recovery, 48px tabs,
+touch-sized native controls, global/detail Market Overview history and dormant state,
+complete stored OHLCV including zero/incomplete rows, explicit numeric/category/
+missing roles (including category changes without a numeric delta), and escaped
+Japanese report text. Populated Comparison and Validation
+fixtures cover exact tables and default-No preflight without starting a job.
+
+The full configured suite also retains shared primitive contrast, font-role, field,
+keyboard, touch, and reduced-motion checks and the inherited glossary, Snapshot
+V1-V9, Comparison, sparse Radar, reload races, and Strategy Validation journeys,
+updated only where the approved seven-tab/Light composition changes expectations.
+All new journeys reject unexpected API and external requests; all data is synthetic.
+These candidate results do not approve DR-V3 or prove any market-data source gate.
 
 ## 8. Remaining risks
 

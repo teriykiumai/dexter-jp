@@ -2143,6 +2143,7 @@ describe('watchlist presentation mapping', () => {
       'technical',
       'fundamentals',
       'supply-demand',
+      'market-overview',
       'market',
       'validation',
     ]);
@@ -2189,6 +2190,7 @@ describe('watchlist presentation mapping', () => {
         technical: { unavailable: 3, uncollected: 2 },
         fundamentals: { unavailable: 1, uncollected: 1 },
         'supply-demand': { unavailable: 1, uncollected: 1 },
+        'market-overview': { unavailable: 0, uncollected: 0 },
         market: { unavailable: 1, uncollected: 3 },
         validation: { unavailable: 0, uncollected: 0 },
       });
@@ -2245,6 +2247,7 @@ describe('watchlist presentation mapping', () => {
 
     expect(availability.global).toEqual({ unavailable: 1, uncollected: 0 });
     expect(Object.values(availability.tabs)).toEqual([
+      { unavailable: 0, uncollected: 0 },
       { unavailable: 0, uncollected: 0 },
       { unavailable: 0, uncollected: 0 },
       { unavailable: 0, uncollected: 0 },
