@@ -28,6 +28,12 @@ function isPositiveFiniteClose(close: number | null): close is number {
   return typeof close === 'number' && Number.isFinite(close) && close > 0;
 }
 
+function assertSeriesCloses(closes: readonly number[]): void {
+  for (const close of closes) {
+    if (!isPositiveFiniteClose(close)) throw new RangeError('Invalid adjusted closes.');
+  }
+}
+
 function calculateRsiValue(averageGain: number, averageLoss: number): number {
   if (averageGain === 0 && averageLoss === 0) return 50;
   if (averageLoss === 0) return 100;
@@ -52,29 +58,48 @@ export function calculateRsi(
     return unavailableRsi('invalid_data');
   }
 
+  try {
+    return { rsi14: calculateRsiSeries(chronologicalAdjustedCloses).at(-1)!, unavailable: [] };
+  } catch (error) {
+    if (!(error instanceof RangeError)) throw error;
+    return unavailableRsi('invalid_data');
+  }
+}
+
+/** Aligned RSI values; null is warm-up only. Callers must not skip invalid closes. */
+export function calculateRsiSeries(closes: readonly number[]): (number | null)[] {
+  assertSeriesCloses(closes);
+  const series: (number | null)[] = Array(closes.length).fill(null);
+  if (closes.length < RSI_PERIOD + 1) return series;
+
   let totalGain = 0;
   let totalLoss = 0;
   for (let index = 1; index <= RSI_PERIOD; index += 1) {
-    const change = chronologicalAdjustedCloses[index] - chronologicalAdjustedCloses[index - 1];
+    const change = closes[index] - closes[index - 1];
     totalGain += Math.max(change, 0);
     totalLoss += Math.max(-change, 0);
   }
 
   let averageGain = totalGain / RSI_PERIOD;
   let averageLoss = totalLoss / RSI_PERIOD;
+  const value = () => {
+    if (!Number.isFinite(averageGain) || !Number.isFinite(averageLoss)) {
+      throw new RangeError('RSI arithmetic overflow.');
+    }
+    return calculateRsiValue(averageGain, averageLoss);
+  };
+  series[RSI_PERIOD] = value();
 
-  for (let index = RSI_PERIOD + 1; index < chronologicalAdjustedCloses.length; index += 1) {
-    const change = chronologicalAdjustedCloses[index] - chronologicalAdjustedCloses[index - 1];
+  for (let index = RSI_PERIOD + 1; index < closes.length; index += 1) {
+    const change = closes[index] - closes[index - 1];
     const currentGain = Math.max(change, 0);
     const currentLoss = Math.max(-change, 0);
     averageGain = (averageGain * (RSI_PERIOD - 1) + currentGain) / RSI_PERIOD;
     averageLoss = (averageLoss * (RSI_PERIOD - 1) + currentLoss) / RSI_PERIOD;
+    series[index] = value();
   }
 
-  return {
-    rsi14: calculateRsiValue(averageGain, averageLoss),
-    unavailable: [],
-  };
+  return series;
 }
 
 export const MACD_PERIODS = {
@@ -120,10 +145,12 @@ function calculateSmaSeededEmaSeries(
     .slice(0, period)
     .reduce((sum, value) => sum + value, 0) / period;
   const series = [seed];
+  if (!Number.isFinite(seed)) throw new RangeError('EMA arithmetic overflow.');
 
   for (let index = period; index < values.length; index += 1) {
     const previousEma = series[series.length - 1];
     series.push(values[index] * multiplier + previousEma * (1 - multiplier));
+    if (!Number.isFinite(series.at(-1))) throw new RangeError('EMA arithmetic overflow.');
   }
 
   return series;
@@ -144,12 +171,26 @@ export function calculateMacd(
     return unavailableMacd('invalid_data');
   }
 
+  try {
+    return { macd: calculateMacdSeries(chronologicalAdjustedCloses).at(-1)!, unavailable: [] };
+  } catch (error) {
+    if (!(error instanceof RangeError)) throw error;
+    return unavailableMacd('invalid_data');
+  }
+}
+
+/** Aligned MACD bundles, including signal/histogram; all three share warm-up. */
+export function calculateMacdSeries(closes: readonly number[]): (MacdValues | null)[] {
+  assertSeriesCloses(closes);
+  const series: (MacdValues | null)[] = Array(closes.length).fill(null);
+  const firstIndex = MACD_PERIODS.slow + MACD_PERIODS.signal - 2;
+  if (closes.length <= firstIndex) return series;
   const fastEmaSeries = calculateSmaSeededEmaSeries(
-    chronologicalAdjustedCloses,
+    closes,
     MACD_PERIODS.fast,
   );
   const slowEmaSeries = calculateSmaSeededEmaSeries(
-    chronologicalAdjustedCloses,
+    closes,
     MACD_PERIODS.slow,
   );
   const fastEmaOffset = MACD_PERIODS.slow - MACD_PERIODS.fast;
@@ -157,17 +198,16 @@ export function calculateMacd(
     fastEmaSeries[index + fastEmaOffset] - slowEma
   ));
   const signalSeries = calculateSmaSeededEmaSeries(macdSeries, MACD_PERIODS.signal);
-  const value = macdSeries[macdSeries.length - 1];
-  const signal = signalSeries[signalSeries.length - 1];
-
-  return {
-    macd: {
-      value,
-      signal,
-      histogram: value - signal,
-    },
-    unavailable: [],
-  };
+  for (let index = firstIndex; index < closes.length; index += 1) {
+    const value = macdSeries[index - (MACD_PERIODS.slow - 1)];
+    const signal = signalSeries[index - firstIndex];
+    const histogram = value - signal;
+    if (![value, signal, histogram].every(Number.isFinite)) {
+      throw new RangeError('MACD arithmetic overflow.');
+    }
+    series[index] = { value, signal, histogram };
+  }
+  return series;
 }
 
 export const BOLLINGER_PERIOD = 20 as const;

@@ -1,7 +1,8 @@
 # Dexter JP Dashboard Refresh Handoff
 
-**Status:** DR-0, DR-V1, and DR-V2 merged; DR-V3 candidate implementation awaiting
-independent review and merge. DR-T0 and later steps have not started.
+**Status:** DR-0 and DR-V1-V3 merged. DR-T0 remains on hold after read-only source
+investigation; DR-T1 pure-series candidate awaits independent review and merge.
+No Technical source adapter, artifact, refresh API, or new chart controls exist yet.
 
 **Last Updated:** 2026-09-03
 
@@ -41,7 +42,7 @@ The implemented baseline includes:
 No Dashboard Refresh Technical artifact, Market Overview artifact, refresh route,
 new visual token system, or seventh tab exists at this baseline.
 
-## 3. DR-0 / DR-V1 / DR-V2 merges and current DR-V3 boundary
+## 3. Merged visual steps and current DR-T1 boundary
 
 The DR-0 branch was:
 
@@ -163,6 +164,39 @@ artifact, Snapshot/schema change, dependency, or external asset. Chart pane rati
 Radar geometry, and financial semantics remain inherited; mobile chart height is
 aligned from 390px to the approved 384px spacing multiple.
 
+PR #97 received an independent `Mergeable` review for exact head
+`307fdc2ded629f1099ccbe6535260030747b079d`, with zero BLOCKING/MAJOR findings,
+two non-blocking MINOR findings, and both canonical CI checks green. With explicit
+user authorization it merged on 2026-09-03 as
+`2f2aff185e3d9b95db4e2526b5c87f9bd21d188f`; merged-main CI also passed. Local `main`
+was fast-forwarded to that commit before creating:
+
+```text
+feat/dashboard-technical-series-step1
+```
+
+The two MINOR findings remain open: consistent data roles for Validation schema/
+version identifiers, and mixed numeric/category Comparison column-header alignment.
+They do not block the next pure calculation step and are not silently marked fixed
+or bundled into DR-T1.
+
+DR-T1 adds the pure Technical bar/gap parser, normalized adjusted-OHLCV null handling,
+exact calendar/lifetime-clipped window checks, chronological day/week/month candles,
+gap-only unavailable periods, RSI/MACD series, and observed cross state. The existing
+Phase 2 Engine shares the same single-pass indicator arithmetic; its canonical
+251-bar selector, formulas, warm-up/missing precedence, and Snapshot V1-V9 contracts
+are unchanged. Arithmetic overflow returns invalid-data failure, not a non-finite
+available indicator. Leading/trailing partial candles never enter indicators.
+
+`TechnicalCalculationWindowV1.listingWindow` is structural calculation context,
+not verified identity provenance. DR-T0/DR-T2 must prove the real source identity,
+continuous lifetime, adjusted basis, complete pagination, exact production ten-year
+range, and admission cutoff before calling it. The pure engine deliberately also
+accepts shorter explicit windows for deterministic same-window parity tests. It
+cannot infer a missing instrument row: callers must supply a proved gap or fail.
+It exposes no full artifact schema, source registry, persistence, job, API, CLI,
+UI, or dependency. Dashboard charts still render stored Snapshot values only.
+
 ## 4. Adopted product boundary
 
 Dashboard Refresh is independent from Phase 5 and must finish first. It adopts:
@@ -240,23 +274,29 @@ contract and fail closed for IPO, delist/relist, or code-reuse ambiguity before 
 production adapter or UI is exposed. Normal CI and Playwright use fixtures only and
 must not contact J-Quants.
 
-## 6. Next step after DR-V3 merge
+## 6. DR-T0 hold and next step after DR-T1 merge
 
-The next ordered step is **DR-T0 — Technical source and lifetime gate**. It may
-start only after:
+Read-only investigation of the official J-Quants master specification did not
+establish a continuous listing-segment proof within the planned attempt/time bounds.
+A current master row or equal code is not sufficient. No credentialed smoke was run,
+no source contract was approved, and no lifetime source ID was frozen. The user
+explicitly accepted keeping DR-T0 on hold and proceeding with the independent DR-T1
+pure step allowed by the approved dependency graph.
 
-1. the exact DR-V3 head has no BLOCKING or MAJOR independent-review finding;
+The next dependency step is **DR-C1 — shared Dashboard session and empty-start
+coordinator**. It may start only after:
+
+1. the exact DR-T1 head has no BLOCKING or MAJOR independent-review finding;
 2. required CI is green;
 3. the user authorizes and completes merge;
 4. local `main` is fast-forwarded to the merged `origin/main`; and
 5. the next step branch is created from that updated clean main.
 
-DR-T0 must resolve the documented source/lifetime proof before any explicitly
-authorized credentialed smoke. It exposes no public route and publishes no Market
-Data artifact. Failure to prove continuity within the frozen bounds returns to
-design review, not a guessed source adapter. The plan dependency graph also permits
-DR-T1 pure chart series after DR-V3 without waiting for DR-T0; each remains its own
-reviewed step, and production Technical I/O still requires the DR-T0 gate.
+DR-T0 must still resolve the documented source/lifetime proof before any explicitly
+authorized credentialed smoke. Failure to prove continuity within the frozen bounds
+returns to design review, not a guessed adapter. DR-C1/DR-A1/DR-O1 can proceed by the
+dependency graph; production Technical I/O in DR-T2 remains blocked on both DR-O1
+and the independently reviewed DR-T0 gate. Pure test success does not lift that gate.
 
 Market Overview remains a placeholder until the corresponding data steps merge.
 The Technical source/lifetime gate belongs to DR-T0; shared session/coordinator
@@ -266,7 +306,9 @@ Market Data job repository/recovery adapter and generic Overview API before DR-T
 adds Technical source I/O. This dependency does not wait for DR-M0. Market source
 modules belong to DR-M1a-c/DR-E1, and user instructions belong to DR-X.
 
-## 7. Candidate validation
+## 7. Validation evidence
+
+### 7.1 Merged DR-V3 predecessor evidence
 
 | Validation | Result |
 | --- | --- |
@@ -282,9 +324,9 @@ modules belong to DR-M1a-c/DR-E1, and user instructions belong to DR-X.
 On this Windows checkout, `bun run typecheck` returned Bun's existing
 `could not create process` / local-bin-remap failure. It did not report a TypeScript
 diagnostic. The direct command above ran the installed TypeScript compiler to
-completion without changing dependencies. The exact DR-V3 PR must still pass the
-canonical `bun run typecheck` CI job; the local launcher failure is disclosed, not
-treated as a canonical-command pass.
+completion without changing dependencies. PR #97 and merged-main CI subsequently
+passed the canonical `bun run typecheck` job; the local launcher failure remains
+disclosed, not treated as a canonical-command pass.
 
 DR-V2's real browser journeys cover initial loading/failure/empty states, retention
 of valid rows after a failed re-entry, retry, keyboard sorting, global navigation,
@@ -309,7 +351,27 @@ keyboard, touch, and reduced-motion checks and the inherited glossary, Snapshot
 V1-V9, Comparison, sparse Radar, reload races, and Strategy Validation journeys,
 updated only where the approved seven-tab/Light composition changes expectations.
 All new journeys reject unexpected API and external requests; all data is synthetic.
-These candidate results do not approve DR-V3 or prove any market-data source gate.
+These predecessor results do not prove any market-data source gate.
+
+### 7.2 Current DR-T1 candidate
+
+| Validation | Result |
+| --- | --- |
+| `bun test src/analysis/market-data/technical-series.test.ts src/tools/finance/advanced-technical-engine.test.ts` | 92 passed, 0 failed |
+| `bun test` | 1003 passed, 0 failed, across 85 files |
+| `bun run typecheck` | same local Bun launcher failure before compiler execution |
+| `bun node_modules/typescript/bin/tsc --noEmit` | passed using the installed compiler |
+| `bun run test:dashboard-browser` | 76 passed, 0 failed; unchanged UI journeys |
+| `git diff --check` | passed; only the checkout's LF-to-CRLF conversion warning |
+
+The new 50 tests cover strict fields/geometry/zero/null/sparse/duplicate/future input,
+complete official-calendar envelopes, structural lifetime bounds and IPO clipping,
+gap-only periods/all-gap failure, holiday/year/leap boundaries, leading and trailing
+partial exclusion, indicator warm-up and exact-prefix parity, cross equality, the
+34-month boundary, arithmetic overflow, and non-mutation. All new fixtures are
+synthetic and perform no external I/O. Shared Engine regression and existing
+Snapshot/API/Strategy tests are retained; no source entitlement was tested.
+The DR-T1 PR still requires independent review and canonical test/typecheck CI.
 
 ## 8. Remaining risks
 
