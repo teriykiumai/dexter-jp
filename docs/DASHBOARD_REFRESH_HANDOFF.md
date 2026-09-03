@@ -1,9 +1,10 @@
 # Dexter JP Dashboard Refresh Handoff
 
-**Status:** DR-0, DR-V1-V3, and DR-T1 merged. DR-T0 remains on hold after read-only
-source investigation; DR-C1 shared-coordinator candidate awaits independent review
-and merge.
-No Technical source adapter, artifact, refresh API, or new chart controls exist yet.
+**Status:** DR-0, DR-V1-V3, DR-T1, and DR-C1 merged. DR-T0 remains on hold after
+read-only source investigation; DR-A1 content/observation repository candidate
+awaits independent review and merge.
+No production Technical/source-module codec, source adapter, refresh API, or new
+chart controls exist yet. DR-A1 is an internal storage foundation only.
 
 **Last Updated:** 2026-09-03
 
@@ -43,7 +44,7 @@ The implemented baseline includes:
 No Dashboard Refresh Technical artifact, Market Overview artifact, refresh route,
 new visual token system, or seventh tab exists at this baseline.
 
-## 3. Merged visual/pure-series steps and current DR-C1 boundary
+## 3. Merged predecessor steps and current DR-A1 boundary
 
 The DR-0 branch was:
 
@@ -227,6 +228,46 @@ full reload. Cooldown preserves preflight/confirmation for explicit manual retry
 No visual tokens, financial calculations, Snapshot versions, dependencies, or
 standalone CLI behavior change. The DR-V3 MINOR findings remain outside this scope.
 
+PR #99 received an independent `Mergeable` re-review for exact head
+`86ae8c38a2bdaf213892b33c9ee6e5641ee7e79e`, with zero BLOCKING/MAJOR findings and
+canonical test/typecheck CI green (run `33760251709`). Following user authorization,
+it merged on 2026-09-03 as `4d4646c68edb34995f05587b75e8da759974e2df`. Local `main`
+was fast-forwarded before creating:
+
+```text
+feat/dashboard-artifact-repository-step1
+```
+
+DR-A1 implements the strict source-input/root-envelope preimages, all seven closed
+calculation/target/role families, original-provenance-preserving content reuse,
+immutable observation receipts, exact association reads, receipt-authoritative
+latest resolution, bounded warned fallback, and rebuildable cache writes. It reuses
+`CanonicalJsonV1`, the existing strict UTF-8/duplicate-key parser, credential/path
+safety grammar, and P3-I0 no-replace hard-link publisher. An optional private-temp
+writer adds explicit flush/close for Market Data without changing existing Snapshot
+callers. Corrupt/colliding canonical files are never overwritten or cleaned up.
+
+The repository requires a full closed module-owned codec and a source-manifest
+allowlist/coverage validator; there is no default/open production codec. DR-A1 tests
+use explicitly synthetic Technical/Overview payload codecs. Actual Technical
+output/provenance schemas and source mappers remain DR-T0/DR-T2-owned; actual module
+calculation/output schemas remain DR-M1a-c/DR-E1-owned. The source digest helper
+requires the source mapper's closed, ordered normalized-row validator. It does not
+claim that a read-time manifest can reconstruct input rows that were not stored.
+No candidate lifetime or post-migration source has been promoted to approved.
+
+Content publication/reuse precedes a no-replace receipt. Post-link errors are not
+treated as absence: only a fully reopened matching file allows progress or a
+committed-receipt success. Cache failure cannot hide a committed receipt. A(t1),
+corrected B(t2), and re-observed A(t3) select t3 while retaining t1's content bytes;
+older-admission completion cannot roll latest backwards. Same-millisecond valid
+receipts that name different artifacts fail closed even if one artifact is corrupt.
+An unreadable member of an admission group requires prior-group fallback rather
+than guessing its missing identity. Exact observation reads never use fallback.
+
+There is no Market Data job repository, source request, route, UI, dependency,
+Snapshot change, retention deletion, or source-gate waiver in this candidate.
+
 ## 4. Adopted product boundary
 
 Dashboard Refresh is independent from Phase 5 and must finish first. It adopts:
@@ -304,7 +345,7 @@ contract and fail closed for IPO, delist/relist, or code-reuse ambiguity before 
 production adapter or UI is exposed. Normal CI and Playwright use fixtures only and
 must not contact J-Quants.
 
-## 6. DR-T0 hold and next step after DR-C1 merge
+## 6. DR-T0 hold and next step after DR-A1 merge
 
 Read-only investigation of the official J-Quants master specification did not
 establish a continuous listing-segment proof within the planned attempt/time bounds.
@@ -313,10 +354,10 @@ no source contract was approved, and no lifetime source ID was frozen. The user
 explicitly accepted keeping DR-T0 on hold and proceeding with the independent DR-T1
 pure step allowed by the approved dependency graph.
 
-The next dependency step is **DR-A1 — canonical content/receipt repository**.
+The next dependency step is **DR-O1 — generic Overview job and read API foundation**.
 It may start only after:
 
-1. the exact DR-C1 head has no BLOCKING or MAJOR independent-review finding;
+1. the exact DR-A1 head has no BLOCKING or MAJOR independent-review finding;
 2. required CI is green;
 3. the user authorizes and completes merge;
 4. local `main` is fast-forwarded to the merged `origin/main`; and
@@ -403,7 +444,7 @@ synthetic and perform no external I/O. Shared Engine regression and existing
 Snapshot/API/Strategy tests are retained; no source entitlement was tested.
 PR #98 subsequently passed independent review and canonical test/typecheck CI.
 
-### 7.3 Current DR-C1 candidate
+### 7.3 Merged DR-C1 predecessor evidence
 
 The synthetic coordinator tests cover all nine job-kind transitions, R=1/2/5 shared
 dispatch, exact newest-attempt cooldown boundaries, concurrent manual retries,
@@ -438,8 +479,42 @@ All data and requests are local synthetic fixtures, not entitlement/source smoke
 | `git diff --check` | passed; only the checkout's LF-to-CRLF conversion warning |
 | merged DR-T1 main CI | passed for `dd4c593e3538828a843db024b136a36f931905d5` |
 
-The DR-C1 candidate still requires independent review and canonical test/typecheck
-CI; local direct-compiler success does not replace the canonical CI command.
+PR #99 subsequently passed independent re-review and canonical test/typecheck CI.
+Local direct-compiler success does not replace the canonical CI command.
+
+### 7.4 Current DR-A1 candidate
+
+The repository suite exercises literal root/input golden preimages and digests,
+closed target/calculation/role sets, forbidden volatile fields, date rollover,
+maximum-provider fetch time, original-byte reuse, concurrent calculation collisions,
+receipt identity/digest/no-replace, A-B-A, delayed completion, and two actual Bun
+processes completing in reverse admission order. Strict reads cover unknown fields,
+duplicate JSON keys, invalid UTF-8, corruption, orphans, exact receipt associations,
+path/junction containment, stale/corrupt/missing caches, pre/post-link failures, and
+preservation of unowned private temps. No external API is called.
+
+Enumeration measurements on this Windows checkout were 1.35 ms / 1.47 ms / 19.49 ms
+for 1 / 256 / 10,000 receipt filenames respectively (one focused run, not a latency
+guarantee). Each latest read enumerated the complete set despite a warm cache, but
+read only the newest proved group. This is O(total filenames) enumeration plus
+ordering, not a constant-time lookup. With time/byte budgets available, 255 corrupt
+references plus one valid receipt recover at exactly 256; 256 corrupt references
+before the valid receipt fail with `artifact_recovery_bound_exceeded`. Separate
+tests enforce the 256 MiB and two-second bounds. Repeated content references do not
+skip receipt validation or conflict checks.
+
+Full-suite/browser validation and canonical CI must be rechecked on the exact
+candidate head before independent review; DR-T0 remains unresolved regardless of
+these synthetic storage results.
+
+| Validation | Result |
+| --- | --- |
+| new source-contract/repository tests | 42 passed, 0 failed |
+| `bun test` | 1105 passed, 0 failed, across 89 files |
+| `bun run typecheck` | same Windows Bun launcher failure before compiler execution |
+| `bun node_modules/typescript/bin/tsc --noEmit` | passed using the installed compiler |
+| `bun run test:dashboard-browser` | 80 passed, 0 failed; unchanged Dashboard journeys |
+| `git diff --check` | passed; only the checkout's LF-to-CRLF conversion warning |
 
 ## 8. Remaining risks
 
@@ -453,8 +528,8 @@ CI; local direct-compiler success does not replace the canonical CI command.
 - Adjusted ETF price is not distribution-reinvested total return.
 - Unadjusted margin quantities can have a unit-basis break at a split and must not be
   drawn as one continuous comparable series.
-- DR-C1's candidate shared session/coordinator still requires independent review;
-  its guarantee is limited to one running Dashboard process. A recent
+- DR-C1's merged shared session/coordinator guarantee is limited to one running
+  Dashboard process. A recent
   dispatch can refuse new admission for up to 60 seconds even after job completion;
   the client must retry explicitly. CLI/second-process account-level coordination
   remains explicitly unsupported.
