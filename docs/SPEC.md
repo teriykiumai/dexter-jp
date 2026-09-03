@@ -474,8 +474,15 @@ Phase 1.5〜4の完了条件を再度開くものではなく、Phase 5 Portfoli
   job作成・preflight消費・自動待機・自動再実行はせず、手動再試行時に再検証する。
   logが空になった後の受付成立時にのみ`acceptedAt`とexecution budgetを開始し、
   Phase 4の`rolling_attempt_log_v1`、empty-start最小dispatch時間、保存済み
-  execution controlsの意味を維持する。追加する挙動はDashboardの受付制約と
-  warning/error説明に限り、CLIとaccepted jobの仕様を変更しない
+  execution controlsの意味を維持する。CLIと受付後の計算・時間上限は変更しない
+- `dashboard_job_recovery_v1`により、job保存の例外を「未保存」と扱わない。
+  保存結果を`definitely_not_published | published | ambiguous`で区別し、
+  両domainの永続jobを照合して安全を証明できない間は共通の受付を停止する。
+  in-memoryの完了表示だけでは実行枠を解放しない。曖昧な保存後はprocess内の
+  復旧待ち状態を維持し、ユーザーによる再起動時に両保存先を一括照合する。
+  複数nonterminal・破損記録を自動修復・削除せず、Phase 4のstatus別run復旧と
+  Market Dataの確定済みreceiptを維持する。追加する受付・復旧・error表示の
+  契約はDashboardに限定し、既存Phase 4のjob/run schemaとpublic error code集合は維持する
 - exact 10-year Technical/ETF dataは、eligible end dateでactiveなinstrumentの
   effective-dated continuous listing segmentを一次sourceで証明できる範囲だけを
   calculation/display envelopeとする。上場前を欠損扱いせず、delist/relistや

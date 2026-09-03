@@ -92,6 +92,16 @@ returns immediate 409 plus `Retry-After`, without a job, preflight consumption,
 keeps Phase 4's empty-start `rolling_attempt_log_v1` estimate and execution deadline
 unchanged; DR-C1 explicitly adds this admission behavior and warning/error copy.
 
+`dashboard_job_recovery_v1` also guards both durable job repositories. Create and
+replace distinguish definitely-unpublished, proved-published, and ambiguous results;
+an exception after final promotion cannot imply absence. Unproved publication or
+terminal state keeps a sticky global admission blocker, even if Market Data can
+show a validated in-memory completed result. Restart performs one combined inventory
+before native reconciliation: zero/valid may open admission, one valid nonterminal
+uses its domain's local recovery, and multiple/corrupt/unreadable records fail closed
+without choosing a winner or deleting evidence. No live force-unlock or automatic
+external retry is added. See the source plan for the exact HTTP/read contract.
+
 It does not adopt Python, a Dashboard DB, realtime data, automatic market-data
 refresh/polling (active-job status polling is allowed), Snapshot V10, total-return
 claims, score, signal, Buy/Sell advice, or Phase 5 Portfolio work.
@@ -144,11 +154,11 @@ The next step is **DR-V1 — visual tokens and primitives**. It may start only a
 DR-V1 implements root `DESIGN.md` tokens and shared primitives only. It must preserve
 the current six-tab behavior. The seven-tab navigation change belongs to DR-V3;
 the Technical source/lifetime gate belongs to DR-T0; shared session/coordinator
-ownership and empty-start admission belong to DR-C1; the content/receipt repository
-belongs to DR-A1;
-Technical source I/O belongs to DR-T2; generic Overview job/API ownership belongs to
-DR-O1; Market source modules belong to DR-M1a-c/DR-E1; and user instructions belong
-to DR-X.
+ownership, empty-start admission, and the cross-domain recovery guard belong to
+DR-C1; the content/receipt repository belongs to DR-A1. DR-O1 supplies the common
+Market Data job repository/recovery adapter and generic Overview API before DR-T2
+adds Technical source I/O. This dependency does not wait for DR-M0. Market source
+modules belong to DR-M1a-c/DR-E1, and user instructions belong to DR-X.
 
 ## 7. Candidate validation
 
@@ -188,6 +198,11 @@ configured suite, and DR-X must run the full suite and responsive visual QA.
   dispatch can refuse new admission for up to 60 seconds even after job completion;
   the client must retry explicitly. CLI/second-process account-level coordination
   remains explicitly unsupported.
+- A post-promotion job cleanup/read error can require a Dashboard restart even when
+  the final file was written. The sticky recovery guard favors safety over live
+  self-repair. Persistent corruption or multiple nonterminal records require
+  investigation and separately authorized repair; restarting does not bypass them.
+  Published market receipts remain visible independently of job-record recovery.
 - Every successful refresh adds a receipt. V1 latest reads enumerate all receipt
   filenames, and the 256-receipt fallback limit can prevent reaching an older valid
   artifact after repeated references to corrupt content. These are explicit local-

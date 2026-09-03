@@ -44,9 +44,10 @@ This plan inherits and does not weaken:
 This file is the normative plan for Dashboard Refresh. Historical plans are not
 rewritten. Where this plan deliberately changes the current six-tab shell, adds a
 guarded market-data mutation surface, or introduces the versioned Dashboard-only
-pre-admission gate in section 8.3, the change is explicit and applies only after the
-corresponding step is reviewed and merged. The admission gate preserves Phase 4's
-empty-start execution controls; it does not redefine `rolling_attempt_log_v1`.
+admission and cross-domain job-recovery guards in section 8.3, the change is explicit
+and applies only after the corresponding step is reviewed and merged. These guards
+preserve Phase 4's empty-start execution controls and status-specific run recovery;
+they do not redefine `rolling_attempt_log_v1` or its persisted job/run schemas.
 
 ## 2. Scope and preserved baseline
 
@@ -539,7 +540,14 @@ Dashboard Refresh persists normalized data separately from AnalysisSnapshot:
   overview/<sourceId>/latest.json
   observations/technical/<ticker>/<acceptedAtEpochMs>_<jobId>.json
   observations/overview/<sourceId>/<acceptedAtEpochMs>_<jobId>.json
+  jobs/<jobId>.json
 ```
+
+`jobs/` contains mutable Market Data job records, not canonical content or
+observation receipts. Section 8.3 governs their publication and cross-domain
+recovery; section 8.4 governs their native schema/lifecycle. Both Market Data job
+kinds use this one repository. Phase 4 jobs remain at their existing
+`.dexter/research/strategy-validation/jobs/<jobId>.json` location.
 
 `sourcePayloadDigestHex` is only the 64-character lowercase hexadecimal portion of
 the JSON field `sourcePayloadDigest`; the `sha256:` prefix is never part of a Windows
@@ -1624,18 +1632,23 @@ is not trusted; chunked bodies are counted and stopped at the same cap.
 
 ### 8.3 Dashboard-process J-Quants coordinator
 
-One coordinator owned by one running Dashboard server process owns admission and
-request rate for every Dashboard J-Quants job: Strategy Validation, Technical
-refresh, and Overview refresh. There is exactly one nonterminal external job across
-all three kinds inside that process. While a lease is active, another POST receives 409
+One coordinator owned by one running Dashboard server process owns admission,
+durable-job reconciliation, and request rate for every Dashboard J-Quants job:
+Strategy Validation, Technical refresh, and Overview refresh. A healthy process
+admits at most one nonterminal job across all three kinds and both durable job
+repositories. An uncertain record is an admission blocker, never evidence of an
+idle coordinator. While a healthy lease is active, another POST receives 409
 `active_job_conflict`; its safe message may name only the active job kind and does
-not expose provider or source inputs.
+not expose provider or source inputs. Recovery-required state takes precedence over
+ordinary active-job conflict and cooldown.
 
 The coordinator's closed admission discriminator is
-`strategy_validation | technical_refresh | overview_refresh`. It shares only the
-lease, cancellation-checkpoint interface, and rate limiter. Market Data does not
-change, parse, persist, or return Phase 4 Strategy Validation job schemas, routes, or
-lifecycle; Strategy Validation likewise does not own Market Data job records.
+`strategy_validation | technical_refresh | overview_refresh`. It shares the lease,
+native-adapter inventory/publication proofs, recovery barrier, cancellation-
+checkpoint interface, and rate limiter. Domain adapters alone parse, persist,
+validate, and reconcile their native records. The coordinator receives validated
+identity/terminal-state projections and outcomes, not a second generic persisted
+job schema. Market Data does not own Phase 4 records, and vice versa.
 
 All J-Quants requests from these Dashboard jobs share that process-local rate limiter
 and the existing configured requests-per-minute ceiling. A Dashboard job may make
@@ -1650,16 +1663,22 @@ second post-admission limiter with a different feasibility model. The coordinato
 uses one process monotonic clock for admission and actual dispatch. It retains
 timestamps of all actual original/pagination/retry attempts, including failed or
 cancelled fetches, until their age is at least 60,000 ms. Merely finishing the job
-does not clear this log. An active lease is released normally at terminal state;
-cooldown is a coordinator condition, not a nonterminal job or a held job lease.
+does not clear this log. An active lease is released only after the durable terminal
+and all-domain inventory proofs below, not merely an in-memory terminal event or a
+worker's `finally`. Cooldown is a coordinator condition, not a nonterminal job or a
+held job lease.
 
 Every job-creation POST for the three Dashboard kinds, including a zero-attempt
 Strategy Validation plan, follows this order after Host/Origin/CSRF/media/body and
 local request/preflight/registered-module validation:
 
-1. Under the one admission critical section, reject an existing active lease with
-   the existing HTTP 409 `active_job_conflict`. This busy response has no
-   `Retry-After`, because active-job completion time is unknown.
+1. Under the one admission critical section, require successful shared startup
+   recovery and no `admission_recovery_required` latch. An existing healthy active
+   or provisional lease returns the existing HTTP 409 `active_job_conflict`, without
+   `Retry-After` because completion time is unknown. Before admitting from idle,
+   strictly inventory both repositories and prove that neither contains a durable
+   nonterminal record. An unexpected record or an unprovable inventory enters
+   recovery-required state; a domain-local active scan is insufficient.
 2. With no active lease, expire timestamps with age >= 60,000 ms. If any remain,
    return HTTP 409 `active_job_conflict` immediately, now meaning temporarily
    unavailable coordinator admission. Add a seconds-only `Retry-After` header:
@@ -1687,12 +1706,12 @@ local request/preflight/registered-module validation:
    new lease and freeze `acceptedAt` and its monotonic budget origin. Recheck
    preflight expiry/consumption/digest inside this same critical section before
    reservation; validation only outside the section is insufficient. Create the
-   normal job and consume the Phase 4 preflight through the inherited admission
-   transaction. Another simultaneous POST cannot pass the same empty-start check.
-   A job-creation failure uses the existing domain persistence/recovery rules;
-   release an uncommitted provisional lease, invent no attempt, and do not consume
-   the preflight before successful creation. Do not delete a durable job to pretend
-   that a crash or ambiguous storage failure never occurred.
+   normal job through `dashboard_job_recovery_v1` below. Only a proved `published`
+   create becomes the active lease, consumes the Phase 4 preflight, and queues its
+   execution once. Another simultaneous POST cannot pass the same check. A rejected
+   promise is not proof that nothing was saved: release after a failed create only
+   under the explicit all-domain absence rule. Never delete a durable job or roll
+   back a consumed preflight to hide an uncertain publication.
 
 Neither an HTTP disconnect after a cooldown refusal nor passage of `Retry-After`
 can start an external request. Non-finite/backwards process-clock state fails closed
@@ -1728,8 +1747,141 @@ retry caveats still apply after acceptance.
 This is an explicit versioned addition to Dashboard admission and its warning/error
 copy, not a behavior-preserving refactor claim. Phase 4 routes, public code enums,
 preflight/job/run/control schemas, accepted-job calculation semantics, and standalone
-CLI behavior stay unchanged. The new admission version is a Dashboard coordinator
-policy, not a replacement value in persisted Phase 4 `rateLimitVersion`.
+CLI behavior stay unchanged. The admission and recovery versions are Dashboard
+coordinator policies, not replacement values in persisted Phase 4 `rateLimitVersion`.
+
+#### Durable job guard: `dashboard_job_recovery_v1`
+
+Use a sticky fail-closed recovery barrier, not best-effort lease release or live
+automatic repair after an uncertain write. The process states are `initializing`,
+`idle`, `provisional`, `active`, and `admission_recovery_required`. Only healthy
+`idle` may acquire a new provisional lease. All job mutations, inventory/release
+proofs, and admission transitions share the same critical section; native adapters
+must not use independent mutation queues to bypass it. External fetches never hold
+this critical section, but each dispatch rechecks the live lease and recovery latch.
+
+Each native repository adapter exposes this internal closed result for job create
+and every atomic replace, including progress, cancellation, and terminal writes:
+
+```text
+JobWriteOutcomeV1<T> =
+  { state: "definitely_not_published" }
+| { state: "published", record: T }
+| { state: "ambiguous" }
+```
+
+- `definitely_not_published` requires proof that this invocation never attempted
+  final-path promotion. It describes this write, not the absence of an older record.
+- `published` requires a successful promotion, completed private-temp cleanup, and
+  a strict final-path reread whose identity and complete canonical payload equal the
+  proposed native record. A successful syscall alone is not that proof.
+- Once promotion was attempted, any exception or missing/mismatching/unreadable
+  final record is conservatively `ambiguous`. This includes final `link` success
+  followed by cleanup failure, create success followed by final-read failure, and
+  terminal `rename` success followed by read failure. Even known promotion success
+  is not downgraded to `definitely_not_published`. Collision does not authorize
+  adopting an existing job as this invocation's job.
+
+These are internal proof outcomes, not new HTTP, job-status, or persisted schema
+fields. DR-C1 adds the Phase 4 adapter contract without inferring outcomes from the
+legacy exception kind. Proposed/previous native records stay with their owner; no
+raw exception, path, or credential reaches the coordinator's public response.
+
+| Write and proof | Required coordinator action |
+| --- | --- |
+| create is `published` | adopt that exact job into the active lease, consume its preflight once if applicable, and enqueue once; return the normal 202 |
+| create is `definitely_not_published` | under the same critical section, prove the proposed final identity is absent and a fresh strict inventory of **both** repositories has zero nonterminal records; only then release the provisional lease and return the domain's sanitized 500, with no preflight consumption or dispatch |
+| create is `ambiguous`, absence/inventory cannot be proved, or adoption/queueing fails after publication | retain the reservation as a recovery blocker and latch `admission_recovery_required`; never queue/requeue from the failed path or release merely because POST failed |
+| replace is `published` and nonterminal | keep the same active lease and continue only its permitted lifecycle |
+| terminal replace is `published` | validate the exact native terminal record and its required run/receipt associations, then strictly inventory both repositories; release only if zero durable nonterminal records remain |
+| any replace is not `published`, or terminal/inventory proof fails | retain the blocker and latch `admission_recovery_required`, including when an in-memory terminal view exists |
+
+No broad catch/finally, cancelled fetch, expired execution deadline, HTTP disconnect,
+or controller removal releases this blocker. On latching, stop future dispatch and
+abort any in-flight fetch through its existing controller; quota may already have
+been consumed. A canonical promotion that already crossed its noninterruptible
+commit boundary may finish, but cannot reopen admission. Late worker callbacks
+cannot rewrite jobs, enqueue work, or clear the latch. Existing attempt times remain
+in the process log. A preflight not yet consumed stays unconsumed but cannot be reused
+in this blocked process; a consumed one is never restored.
+
+The latch stays set for the lifetime of this process, even if a later diagnostic
+read succeeds. Recovery requires a user-initiated Dashboard restart and successful
+shared startup reconciliation. There is no unlock API, automatic write retry,
+repair timer, force flag, or new persisted lock/recovery-marker file. This deliberately
+trades availability after a transient storage error for an unambiguous single-job
+boundary; a private-temp cleanup failure after promotion can require a restart.
+
+#### Shared startup and read semantics
+
+The adapter registry has two fixed repository slots: `strategy_validation` and
+`market_data` (the latter owns both refresh kinds). It is frozen before initialization,
+even with zero registered source modules. DR-C1 uses the real Phase 4 adapter and an
+absent-domain probe for Market Data: only an absent or empty `market-data/jobs/`
+directory proves that unimplemented domain empty; any entry or probe failure blocks
+startup. DR-O1 supplies the real common Market Data job repository/adapter before
+either refresh route may create a job. DR-T2 depends on that foundation and never
+creates a competing repository or coordinator.
+
+One shared startup barrier replaces independent Dashboard domain initialization.
+First perform a read-only strict inventory of both slots, including native schema,
+filename/identity, and terminal-record validation. Do not run a domain's cleanup or
+status-reconciliation side effects before this combined inventory is adjudicated.
+An in-memory completion from a previous process is never startup evidence.
+
+| Combined durable inventory | Startup action before admission |
+| --- | --- |
+| zero nonterminal records, all records valid | finish only the native allowed temp cleanup, re-inventory both slots, and enter `idle` only after another zero/valid proof |
+| exactly one valid nonterminal record in either slot | hold one recovery reservation; run only its native local reconciliation, then verify its terminal record/associations and re-inventory both slots; enter `idle` only at zero/valid |
+| two or more nonterminal records, including one in each domain | latch recovery-required before any cleanup or rewrite; retain all records, choose no winner, and require investigation rather than automatically interrupting them all |
+| corrupt/unknown record, invalid entry/identity, missing adapter, failed enumeration/read/cleanup/reconciliation, or ambiguous recovery write | latch recovery-required; preserve evidence and never treat that slot as empty |
+
+Phase 4 reconciliation keeps section 7.6 of its source plan: pre-publication jobs
+become `interrupted`; a `publishing` job with its exact fully verified final run
+becomes `completed`; missing final run becomes `interrupted`; a suspect final run
+follows the existing sanitized failure/retention rule. Do not blanket-interrupt a
+valid already-promoted Phase 4 run. Market Data uses section 8.4: abandoned
+nonterminal jobs become `interrupted` with null result, while committed receipts
+remain independently authoritative. Neither adapter resumes external work. A
+failed startup proof is sticky for that process, and restarting alone does not
+repair persistent corruption or a multiple-nonterminal inventory. Investigate
+without deleting records; any manual repair requires separate explicit authority.
+
+Method, route/body, Host/Origin/CSRF checks retain precedence over these errors.
+During `initializing` or recovery-required state, valid job-creation POSTs and job
+DELETEs fail closed, and both `/jobs/active` routes return a sanitized 500 rather
+than a false idle/busy view. The internal recovery reason maps to Phase 4
+`artifact_unavailable` and Market Data `repository_failure`, with no `Retry-After`.
+Initializing uses `ジョブ記録を確認中です。完了後に再度操作してください。`; the
+latched state uses
+`ジョブ記録の整合性を確認できないため、新規実行を停止しました。Dashboardを再起動してください。解消しない場合は記録を変更せず調査してください。`
+No target, path, or uncertain completion time is interpolated. These mappings add
+no public error code. Phase 4 preflight creation is also blocked in these states;
+an ordinary active job or rate cooldown still does not block local preflight.
+
+In a healthy process, Market Data's active route uses section 8.4's envelope.
+Phase 4's active route returns its own native job or, for a Market Data lease,
+409 `active_job_conflict` with only the kind-labelled safe message; it does not
+return `job: null` while another domain blocks admission. True idle, including
+rate-only cooldown after durable completion, uses each existing empty envelope.
+Read/release/creation cannot interleave outside the shared critical section.
+
+Exact job GETs may still return an independently validated terminal native record;
+an uncertain/nonterminal record without a healthy active owner returns the same
+recovery 500, never an apparently running ghost. Proved missing exact identity is
+still 404. Section 8.4's validated Market Data in-memory completed view is the one
+explicit exception to durable terminal reads; it carries its storage warning and
+does not clear the latch. Snapshot, artifact/receipt, and valid run/case GETs retain
+their own strict validation and can remain readable; a suspect Phase 4 run must not
+bypass its existing job/run association checks. `GET /api/session` remains available.
+
+Browser job-read failures stop automatic job polling, including visibility-triggered
+resumption, until an explicit page reload; show the returned safe error in existing
+surfaces and label retained nonterminal content as last-known, not currently running.
+Do not parse message text to infer recovery or retry POST/DELETE automatically. A
+reload can reread status but cannot clear a server latch. These error/recovery flows
+are part of DR-C1 and the later Market Data UI steps, with no new styling or job-status
+variant. Restart invalidates old CSRF/preflight capabilities as before.
 
 #### Rate scope and accepted-job execution
 
@@ -1799,6 +1951,15 @@ bounded progress counts, safe failure code/message, and terminal artifact identi
 They never contain credentials, raw rows, raw response, request ID, headers, absolute
 paths, or provider exception text.
 
+The common repository persists exactly this closed `MarketDataJobViewV1` payload
+at `jobs/<jobId>.json`, with a 65,536-byte UTF-8 limit and filename/body identity
+agreement. There is no second persisted wrapper. Create is atomic no-replace;
+replace is atomic private-temp promotion to the existing exact job path. Both use
+section 8.3's write outcomes, containment, strict reread, and coordinator guard.
+The domain adapter alone validates result/receipt associations and native lifecycle.
+Job records and attributable private job temps are not content/receipt revisions;
+recovery never deletes or rewrites a canonical artifact or observation receipt.
+
 The active-job recovery read is:
 
 ```text
@@ -1811,12 +1972,14 @@ MarketDataActiveJobV1 = {
 
 Exactly one of `marketJob` and `blockingKind` may be non-null. A running Market Data
 job returns its view; an active Strategy Validation lease returns only
-`blockingKind`; no lease returns both null. The specific `/jobs/active` route is
-dispatched before `/:jobId`. On reload, the matching Market Data page reads it once,
-then polls that market job every 1,000 ms only while it is nonterminal and the
-document is visible; polling stops on terminal state/unmount and resumes on
-visibility return. A Strategy Validation blocker is shown but cannot be cancelled
-through a Market Data route. This status polling is not market-data auto-refresh.
+`blockingKind`; only proved healthy idle returns both null. Initializing/recovery-
+required state returns section 8.3's 500, not this empty envelope. The specific
+`/jobs/active` route is dispatched before `/:jobId`. On reload, the matching Market
+Data page reads it once, then polls that market job every 1,000 ms only while it is
+nonterminal and the document is visible; polling stops on terminal state/unmount and resumes on
+visibility return unless a job-read error stopped it under section 8.3. A Strategy
+Validation blocker is shown but cannot be cancelled through a Market Data route.
+This status polling is not market-data auto-refresh.
 
 Cancellation is cooperative between source requests and before publication. DELETE
 returns 202 while cancellation is being accepted, 200 for already cancelled, 404 for
@@ -1843,20 +2006,31 @@ recorded receipt/artifact identity and reports an interrupted job without preten
 the set was atomic. A receipt committed before interruption remains authoritative
 for that module; an orphan artifact committed before its receipt is ignored.
 
-Mutable job recovery state is stored separately from canonical market artifacts.
-Process startup marks abandoned nonterminal jobs `interrupted`; it never resumes an
-external request automatically. A save failure after a successful external response
-reports that quota may have been consumed. If failure occurred before receipt commit,
-the previous authoritative observation remains. If it occurred after receipt commit,
-the immutable receipt remains visible even when cache or job-record update failed.
+The section 8.3 shared startup barrier owns all recovery. Only after its combined
+inventory permits single-job reconciliation does this adapter mark an abandoned
+nonterminal Market Data job `interrupted`; it never resumes an external request.
+A save failure after a successful external response reports that quota may have been
+consumed. If failure occurred before receipt commit, the previous authoritative
+observation remains. If it occurred after receipt commit, the immutable receipt
+remains visible even when cache or job-record update failed.
 
 If only the terminal job-record rewrite fails after receipt commit, the running
-process keeps serving its validated in-memory `completed` view. Technical adds
+process latches `admission_recovery_required` and retains the coordinator blocker.
+An exact job GET may still serve its validated in-memory `completed` view, but the
+active-job route returns recovery 500 and every new job POST is refused. The
+in-memory view is publication evidence only, never proof of durable job completion
+or permission to release the blocker. Technical adds
 `job_record_write_failed` to result warning codes; Overview adds it to the successful
-module results. Cache-write failure alone does not change publication success. On
-restart, an unreconciled nonterminal job record becomes `interrupted` with
-`result: null`; its committed receipts remain independently readable. Recovery
-never invents a result or repeats the external requests to repair a job record.
+module results. Its visible warning includes section 8.3's recovery-required message
+and restart action, even though publication is shown as completed.
+Cache-write failure alone does not change publication success or
+poison an otherwise proved terminal job. There is no live terminal-write retry.
+On restart, if the terminal write had actually succeeded and its complete record
+validates, keep it terminal. Otherwise, the one valid remaining nonterminal record
+is reconciled as `interrupted` with `result: null`, and must be durably verified
+before reopening admission. Its committed receipts remain independently readable.
+Corrupt or multiple records use the shared fail-closed branch, not blanket
+interruption. Recovery never invents a result or repeats external requests.
 
 After completion, only the matching current Browser request issues one corresponding
 latest/overview GET and adopts its authoritative receipt-resolved result. A
@@ -1878,7 +2052,7 @@ and no automatic background freshness loop.
 | 409 | coordinator admission conflict (active job or empty-start cooldown), or invalid cancellation/lifecycle action |
 | 413 | request body exceeds the route cap |
 | 415 | unsupported media type |
-| 500 | Technical corruption without a valid fallback; Overview corruption when no implemented module validates; ambiguous latest-receipt order; repository-wide filesystem or invariant failure |
+| 500 | Technical corruption without a valid fallback; Overview corruption when no implemented module validates; ambiguous latest-receipt order; shared startup/recovery admission block; repository-wide filesystem or invariant failure |
 
 Every response is a strict success or `{ "error": { "code", "message" } }` union.
 The closed HTTP error codes are `invalid_request`, `invalid_query`, `invalid_ticker`,
@@ -1887,6 +2061,9 @@ The closed HTTP error codes are `invalid_request`, `invalid_query`, `invalid_tic
 `request_body_too_large`, `unsupported_media_type`, `artifact_corrupt`,
 `artifact_recovery_bound_exceeded`, `latest_resolution_failed`,
 `repository_failure`, and `invariant_failure`.
+The internal `admission_recovery_required` state is not an additional public code:
+section 8.3 maps it to `repository_failure` here and `artifact_unavailable` on Phase 4
+routes. Healthy active-job/cooldown conflicts remain 409, never storage-recovery 409.
 Async provider/runtime failures use only `MarketDataJobFailureCodeV1`; they never
 include raw provider text. A provider response that exceeds its bound terminates the
 accepted job with `source_response_too_large`; it does not retroactively change the
@@ -1964,22 +2141,29 @@ visual list order alone, controls admission; Phase 5 still waits for DR-X.
    - implement `dashboard_empty_start_admission_v1`, including immediate cooldown
      refusal, manual-retry warning/error copy, preflight preservation, and atomic
      empty-start acceptance;
+   - implement `dashboard_job_recovery_v1`, typed publication outcomes through the
+     Phase 4 adapter, both fixed repository slots, the initial Market Data absence
+     probe, all-domain release/startup proofs, and sticky recovery/read semantics;
    - preserve Phase 4 routes, public code enums, schemas, accepted-job timing/
-     financial semantics, and CLI behavior. Reuse existing Browser surfaces; add no
-     layout, styling, or job-status variant.
+     financial semantics, status-specific run recovery, and CLI behavior. Reuse
+     existing Browser error surfaces with the explicit cross-domain/recovery flow;
+     add no layout, styling, or persisted job-status variant.
 8. **DR-A1 — market-data artifact and observation repository**
    - implement `MarketDataSourcePayloadEnvelopeV1`, calculation versions, canonical
      artifact create/reuse, immutable observation receipts, authoritative latest
      resolution, rebuildable cache, collision/recovery, and pure repository tests;
    - add no source request, mutation route, or UI.
 9. **DR-O1 — generic Overview job and read API foundation**
+   - implement the one common Market Data job repository and native recovery
+     adapter for both refresh kinds, replacing DR-C1's absence probe before startup;
    - implement the strict module registry, per-module atomic artifact/receipt
      orchestration, root result semantics, and read/job routes over DR-C1/DR-A1;
    - with zero registered source modules, GET remains 404 and POST returns 400
      `source_configuration_missing` without a job, lease, or external request.
 10. **DR-T2 — Technical source and job API**
    - implement the DR-T0-frozen strict J-Quants mappers, manual Technical refresh,
-     and GET/job routes over DR-C1/DR-A1.
+     and GET/job routes over DR-C1/DR-A1/DR-O1; reuse DR-O1's job repository and
+     registered recovery adapter rather than owning a separate job store.
 11. **DR-T3 — Technical UI**
    - implement source precedence, day/week/month, four panes, crosshair OHLCV,
      exact table, URL/race/focus, and Comparison separation.
@@ -2020,7 +2204,7 @@ DR-0 -> DR-V1 -> DR-V2 -> DR-V3
 DR-V3 -> { DR-T0, DR-T1 }
 DR-T1 -> DR-C1 -> DR-A1
 DR-A1 -> DR-O1
-{ DR-A1, DR-T0 } -> DR-T2
+{ DR-O1, DR-T0 } -> DR-T2
 DR-T2 -> DR-T3
 { DR-O1, DR-T2 } -> DR-E1 -> DR-E2
 DR-O1 -> DR-M0 -> { DR-M1a, DR-M1b, DR-M1c } -> DR-M2
@@ -2032,9 +2216,11 @@ DR-M2 waits for all three. A delayed DR-M0 does not block DR-T3 or the independe
 ETF path. No step opportunistically implements a later step. DR-V1-V3 do not fetch
 market data; DR-T0 exposes no public route and persists no market-data artifact;
 DR-T1 and DR-A1 expose no new route; DR-O1 cannot dispatch without a registered
-module; DR-C1 changes only shared ownership plus the explicit pre-admission/copy
-contract while preserving accepted-job semantics; DR-M0 is a gate rather than a
-UI/source implementation; DR-X adds no new runtime behavior.
+module. DR-O1 precedes DR-T2 to establish the common job repository/recovery owner;
+it has no margin-source dependency. DR-C1 changes shared ownership and the explicit
+admission/recovery/copy contract while preserving accepted-job calculation/timing
+and Phase 4's native recovery outcomes. DR-M0 is a gate rather than a UI/source
+implementation; DR-X adds no new runtime behavior.
 
 ## 11. Test and acceptance matrix
 
@@ -2046,10 +2232,10 @@ UI/source implementation; DR-X adds no new runtime behavior.
 | DR-V3 | exact seven IDs/labels/order, Home/End/arrows/roving focus, all existing complex surfaces, availability ownership, token contrast at every required surface |
 | DR-T0 | exact official endpoint/query/field/effective-date/entitlement registry; bounded four-input source proof; no-publication smoke; current identity and continuous segment fixtures; IPO/later listing, current-master absence, delisting/relisting, code reuse, conflicting/incomplete continuity; request/page/row/byte/deadline ceilings; secret non-exposure |
 | DR-T1 | strict bar/gap union, positive OHLC/non-negative volume and valid zero, lifetime-clipped calculation envelope without pre-listing gaps, fewer-than-251 current-segment bars, daily `partial:false`, gap-only period, OHLCV aggregation, week/month/calendar/holiday boundaries, week-mid/month-mid `queryFrom` leading partials, partial current week/month, all-null/partial-null, RSI index 14, MACD bundle index 33, first cross index 34/equality, 34-month boundary, same-window Engine parity, input immutability |
-| DR-C1 | one Dashboard session token and one three-kind process coordinator; unchanged Phase 4 routes/public code enums/schemas/accepted-job controls/CLI; empty-start admission and exact cooldown 409/Retry-After; retained attempt log across job completion/failure/cancel/runtime construction; preflight preservation and atomic admission; manual-retry warning/error Browser flow; two runtime instances cannot bypass the shared Dashboard limiter |
+| DR-C1 | one Dashboard session token and one three-kind process coordinator; unchanged Phase 4 routes/public code enums/schemas/accepted-job controls/CLI; empty-start admission and exact cooldown 409/Retry-After; typed create/replace publication outcomes; all-domain inventory/release/startup proofs; sticky recovery blocker; retained attempt log across failure/cancel/runtime construction; preflight preservation and atomic admission; cross-domain active/read/recovery Browser flow; two runtime instances cannot bypass the shared Dashboard limiter |
 | DR-A1 | literal `MarketDataSourcePayloadEnvelopeV1` golden vectors; target/role/calculation-version mismatch; volatile/derived-field exclusion; exact digest-to-path-to-artifactDigest derivation; persisted calculation version and maximum-provider `fetchedAt`; create/reuse/collision; receipt no-replace and digest/identity; A(t1)->B(t2)->A(t3); delayed older-admission completion; two-process inverse completion; equal-millisecond equal-artifact equivalence and conflicting-artifact `latest_resolution_failed`; stale/backwards/corrupt/missing cache reconstruction; orphan artifact exclusion; interrupted after-receipt visibility; bounded corrupt-receipt/artifact fallback; containment |
-| DR-O1 | zero-module GET 404 and POST 400 `source_configuration_missing` with no job/lease/dispatch, strict module registration/order, one root Overview `checkedAt` copied to every module result, success receipt versus retained-previous/failed identity rules, per-module artifact/receipt atomicity, partial success/all-modules-failed root, interrupted publication, active-job recovery, GET persisted-vs-uncollected/corrupt identity |
-| DR-T2 | strict frozen-source mappers, acceptedAt/16:30/query-range gate, exact four-input manifest, current identity/lifetime agreement, all-gap `source_no_observation` with prior-receipt retention and initial GET 404; Technical `published` versus `idempotent_reuse` result/`checkedAt`/receipt schema; GET 404/500/no-fetch; shared CSRF/coordinator/active-job recovery, timeout/cancel/startup |
+| DR-O1 | common two-kind job repository/native recovery adapter; strict 65,536-byte job record and filename identity; create/replace fault injection and cross-domain admission/restart; zero-module GET 404 and POST 400 `source_configuration_missing` in a healthy process with no job/lease/dispatch; strict module registration/order; one root Overview `checkedAt`; success receipt versus retained-previous/failed identities; per-module artifact/receipt atomicity; partial success/all-modules-failed root; terminal-write recovery latch; GET persisted-vs-uncollected/corrupt identity |
+| DR-T2 | strict frozen-source mappers, acceptedAt/16:30/query-range gate, exact four-input manifest, current identity/lifetime agreement, all-gap `source_no_observation` with prior-receipt retention and initial GET 404; Technical `published` versus `idempotent_reuse` result/`checkedAt`/receipt schema; GET 404/500/no-fetch; shared CSRF/coordinator/DR-O1 job repository and recovery adapter; cross-kind create/terminal-write faults, timeout/cancel/startup |
 | DR-T3 | auto/snapshot/latest precedence, absent latest, refresh adoption, URL/Back/Forward/reload, latest-request-wins, collapse, keyboard crosshair, exact table, Comparison isolation |
 | DR-M0 | old/new fixtures, official migration evidence, individual-Standard entitlement, exact source primary key/fields/issue and sector allowlists/units/vintages, schedule/calendar and short-week/boundary resolver, one-date reconciliation smoke, exact 26-window bootstrap caps, secret-safe record |
 | DR-M1a | complete issue aggregation, shared margin-input reuse, field-level valid zero/ratio denominator, verified primary key/unit, canonical expected-date unavailable artifact, proved-missing/duplicate versus malformed/incomplete no-publish, 1570 identity/unit/old-transition-new official basis break, two registered module results |
@@ -2062,6 +2248,40 @@ UI/source implementation; DR-X adds no new runtime behavior.
 
 The review regressions also require these exact boundary cases:
 
+DR-C1 exercises the common guard with the real Phase 4 adapter and synthetic Market
+Data adapter fixtures; DR-O1/T2 repeat the applicable cases with the real shared
+Market Data repository. DR-C1 does not pre-implement a Market Data source or job API.
+
+- DR-C1/O1/T2: inject failures before promotion, after final `link` but before temp
+  cleanup, during cleanup, after create promotion but before final read, and after
+  terminal `rename` but before final read. Assert the actual final file as well as
+  the typed outcome; no exception may be treated as evidence of absence. Check the
+  complete proposed/previous payload, collision/non-owned identity, byte cap,
+  partial/invalid JSON, and filename mismatch. Include cancellation/progress
+  replacement faults, failure between publication/adoption/preflight consumption/
+  queueing, and late worker callbacks after the latch.
+- DR-C1/O1/T2: a definitely-unpublished create releases only after both valid
+  repositories prove zero nonterminal and the proposed identity is absent. Inject
+  other-domain preparing/publishing records and failed inventories; each must block
+  Strategy -> Technical/Overview and Technical/Overview -> Strategy, plus same-kind
+  retry, even with an empty attempt log or N=0. Ordinary successful create queues
+  once and consumes once; an uncertain create dispatches zero and never reuses its
+  preflight in that process. Any unproved terminal write keeps the global blocker.
+- DR-C1/O1/T2: shared startup sees zero, one in either domain, two within one domain,
+  one in each domain, corrupt/unknown records, missing/disabled adapter, and unreadable
+  or nonempty absent-domain slot. Assert no cleanup/rewrite occurs before combined
+  inventory adjudication. Valid Phase 4 promoted runs still recover as completed;
+  valid Market Data nonterminals become interrupted without replaying source calls.
+  Recovery write/read failure is sticky; restart after an actually successful
+  terminal rename preserves completed rather than rewriting interrupted. A second
+  restart cannot silently skip multiple/corrupt records. GET must never trigger
+  reconciliation or return false idle while blocked.
+- DR-C1 and Market UI steps: verify exact 500/domain-code/message/no-Retry-After,
+  preserved security/method precedence, cross-domain active responses, last-known
+  labels, halted polling through visibility/reload races, and no automatic POST,
+  DELETE, or repair. A validated in-memory Market completion can refresh its visible
+  artifact once while both active routes and subsequent job POSTs still report
+  recovery-required. No error-path output exposes private paths or exceptions.
 - DR-C1: fake-clock prior-job bursts at R=1/2/5; empty versus partly occupied logs;
   rejection at latest attempt +59,999 ms and acceptance at +60,000 ms; newest rather
   than oldest expiry controls admission. Verify N=R, N=0, and the 90/91 and 180/181
@@ -2097,8 +2317,10 @@ The review regressions also require these exact boundary cases:
 - DR-O1/T2: enumerate result/failure nullability for every status; copy the one
   Overview `checkedAt` to every result, including failed/unattempted modules. A
   receipt failure differs from a successful receipt followed by a terminal-job
-  rewrite failure; test `job_record_write_failed`, in-memory completed status, and
-  restarted interrupted/null-result status with the committed receipt still visible.
+  rewrite failure; test `job_record_write_failed`, in-memory completed status with
+  a retained global blocker, and both restart outcomes (proved completed versus
+  remaining nonterminal -> interrupted/null result) with the committed receipt
+  still visible. Cache-only failure must not falsely poison healthy job completion.
 - DR-T3/M2/E2: one authoritative GET after job completion precedes adoption; an
   older completed job cannot install its result over a newer admitted receipt. A
   failed adoption read preserves the previous display with a warning.
@@ -2163,6 +2385,8 @@ authorize a weaker source or block the independent Technical/ETF path.
 - Python, a Dashboard database, Snapshot V10, or artifact backfill;
 - artifact revision browser, automatic retention deletion, receipt sharding/bounded
   indexing, or receipt-group skipping without a separate storage/order review;
+- live job-recovery/force-unlock APIs, automatic ambiguous-write retry, and automatic
+  repair or deletion of corrupt/multiple durable job records;
 - Buy/Sell/Hold, score, signal, prediction, or investment advice; and
 - Phase 5 Portfolio, cross-stock correlation, VaR, monitoring, or notification work.
 
