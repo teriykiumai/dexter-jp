@@ -1,7 +1,7 @@
 # Dexter JP Dashboard Refresh Handoff
 
-**Status:** DR-0 merged; DR-V1 candidate implementation awaiting independent re-review
-and merge. DR-V2 and later steps have not started.
+**Status:** DR-0 and DR-V1 merged; DR-V2 candidate implementation awaiting independent
+review and merge. DR-V3 and later steps have not started.
 
 **Last Updated:** 2026-09-03
 
@@ -41,7 +41,7 @@ The implemented baseline includes:
 No Dashboard Refresh Technical artifact, Market Overview artifact, refresh route,
 new visual token system, or seventh tab exists at this baseline.
 
-## 3. DR-0 merge and current DR-V1 boundary
+## 3. DR-0 / DR-V1 merges and current DR-V2 boundary
 
 The DR-0 branch was:
 
@@ -90,12 +90,46 @@ cells. Native rectangular-field rules have a text-like input allowlist and do no
 restyle checkbox/radio or other non-text controls. `DESIGN.md` records these shared
 usage contracts; the corrections do not activate a production surface migration.
 
-The production Watchlist and six-tab detail retain their legacy appearance. The
-new light boundary is not activated around a partially migrated page, and no
-public design-preview route is added. Watchlist/global navigation belongs to
-DR-V2; complex detail/Table/Dialog/Radar/Validation/chart migration and the seven-tab
-shell belong to DR-V3. No source, API, Snapshot, dependency, or operation changes
-are part of this candidate.
+At the DR-V1 boundary, the production Watchlist and six-tab detail retained their
+legacy appearance. The new light boundary was not activated around a partially
+migrated page, and no public design-preview route was added.
+
+PR #95 received an independent `Mergeable` review for exact head
+`523602ebb576a994e6e7fe05210b732ea7f5f5d7`, with zero unresolved BLOCKING/MAJOR
+findings and both canonical CI checks green. The reviewer confirmed the earlier
+two MAJOR and one MINOR findings were resolved. Following user authorization it
+was merged on 2026-09-03 as `d7728d2456e20102c28f7be8ef5f056ea4d3d5f7`. Local `main`
+was fast-forwarded to that exact commit before creating:
+
+```text
+feat/dashboard-watchlist-step2
+```
+
+DR-V2 activates the light boundary for the complete Watchlist, its loading/error/
+empty states, the global Market Overview placeholder, and scoped page errors.
+The common header links to `保存済み分析` and `市場概況`; the latter always shows
+`全市場共通` and an explicit not-yet-available message, without reading market
+data or starting a job. All stored Watchlist columns and existing date/sort/zero/
+missing semantics are retained. Summary counts appear only after a successful
+list read; failed re-entry retains the last valid rows with an explicit warning.
+
+The DR-V1 review's call-site audit applies here: Japanese company/category/status
+text uses the UI family; ticker/date/timestamp and available numeric values
+explicitly use data roles. Financial column headers and values align right,
+identity/explanatory columns align left, and unavailable text stays UI typography.
+The complete table remains available in a named keyboard-scrollable region.
+
+The page-level URL guard implements plan section 4.3 before dispatching reads:
+global/detail ownership conflicts, orphan owned state, and malformed/duplicate new
+enum keys show a scoped error without automatic URL repair. Explicit navigation
+preserves unknown query keys and applies the documented selection ownership.
+Valid Technical/range keys remain dormant; their controls are not implemented.
+Back/Forward, reload, latest-request-wins, cancellation, and focus are covered by
+real browser journeys, including a transport that ignores aborts.
+
+The six-tab detail, including its loading/error states, keeps its legacy design
+and behavior until DR-V3. No seventh tab, artifact read, refresh API, source fetch,
+Snapshot/schema change, dependency, polling, or external asset is added by DR-V2.
 
 ## 4. Adopted product boundary
 
@@ -174,21 +208,22 @@ contract and fail closed for IPO, delist/relist, or code-reuse ambiguity before 
 production adapter or UI is exposed. Normal CI and Playwright use fixtures only and
 must not contact J-Quants.
 
-## 6. Next step after DR-V1 merge
+## 6. Next step after DR-V2 merge
 
-The next step is **DR-V2 — Watchlist and global navigation**. It may start only after:
+The next step is **DR-V3 — detail shell and complex surfaces**. It may start only after:
 
-1. the exact DR-V1 head has no BLOCKING or MAJOR independent-review finding;
+1. the exact DR-V2 head has no BLOCKING or MAJOR independent-review finding;
 2. required CI is green;
 3. the user authorizes and completes merge;
 4. local `main` is fast-forwarded to the merged `origin/main`; and
-5. the DR-V2 branch is created from that updated clean main.
+5. the DR-V3 branch is created from that updated clean main.
 
-DR-V2 migrates the Watchlist/loading/error/empty surfaces to the shared visual
-system and adds the global Market Overview entry with an explicit not-yet-available
-state. It must preserve the current six-tab detail behavior and inherited URL/focus
-contracts. The seven-tab navigation change belongs to DR-V3;
-the Technical source/lifetime gate belongs to DR-T0; shared session/coordinator
+DR-V3 migrates the complete detail shell, Card/Table/Dialog/Comparison/Radar/
+Validation/chart theme and enacts the exact seven-tab shell without moving existing
+Snapshot sections. It must audit each value/metadata/table call site against
+`DESIGN.md` and preserve inherited URL, focus, missing-data, and Snapshot contracts.
+Market Overview remains a placeholder until the corresponding data steps merge.
+The Technical source/lifetime gate belongs to DR-T0; shared session/coordinator
 ownership, empty-start admission, and the cross-domain recovery guard belong to
 DR-C1; the content/receipt repository belongs to DR-A1. DR-O1 supplies the common
 Market Data job repository/recovery adapter and generic Overview API before DR-T2
@@ -199,33 +234,38 @@ modules belong to DR-M1a-c/DR-E1, and user instructions belong to DR-X.
 
 | Validation | Result |
 | --- | --- |
-| focused `bun test src/dashboard/web/primitives.test.ts` | 11 passed, 0 failed |
-| `bun test` | 936 passed, 0 failed |
+| focused `bun test` for navigation, Watchlist, presentation, and primitives | 71 passed, 0 failed |
+| `bun test` | 950 passed, 0 failed |
 | `bun run typecheck` | local Bun launcher stopped before TypeScript execution; see below |
 | `bun node_modules/typescript/bin/tsc --noEmit` | passed using the same installed compiler |
-| `bun run test:dashboard-browser` | all 55 passed (38 inherited + 17 primitive tests) |
+| `bun run test:dashboard-browser` | all 64 passed (38 inherited + 17 primitive + 9 DR-V2 tests) |
 | `git diff --check` | passed; Git emitted only the checkout's LF-to-CRLF conversion warning |
-| primitive visual QA | 320, 390, 680, 768, 980, 1024, 1280px; no document overflow or overlapping controls |
+| Watchlist/global visual QA | 320, 390, 680, 768, 980, 1024, 1280px; no document overflow or overlapping controls |
+| merged DR-V1 main CI | succeeded for `d7728d2456e20102c28f7be8ef5f056ea4d3d5f7` |
 
 On this Windows checkout, `bun run typecheck` returned Bun's existing
 `could not create process` / local-bin-remap failure. It did not report a TypeScript
 diagnostic. The direct command above ran the installed TypeScript compiler to
-completion without changing dependencies. The exact DR-V1 PR must still pass the
+completion without changing dependencies. The exact DR-V2 PR must still pass the
 canonical `bun run typecheck` CI job; the local launcher failure is disclosed, not
 treated as a canonical-command pass.
 
-DR-V1 exercises actual React-rendered primitives in a local test-only composition,
-including computed color contrast, native disabled behavior, keyboard focus,
-associated field help/errors, touch targets on wide coarse-pointer devices, exact
-table scrolling, and reduced motion. Review regressions cover computed families
-for zero, Japanese states, IDs, dates, and mixed metadata; numeric versus explanatory
-header/body alignment; and text-like input inclusion/non-text exclusion in normal,
-invalid, disabled, narrow, and coarse-pointer states. The original two MAJOR
-findings were reproduced by failing browser tests before their fixes. The full
-configured suite separately verifies
-the existing six-tab journeys, glossary, Snapshot V1-V9, Comparison, Radar, reload
-races, and Strategy Validation behavior. No external provider request is part of
-these tests. New-route visual migration is not claimed complete by these results.
+DR-V2's real browser journeys cover initial loading/failure/empty states, retention
+of valid rows after a failed re-entry, retry, keyboard sorting, global navigation,
+Back/Forward/reload, focus restoration, ownership conflicts, closed-enum errors,
+dormant keys, and inherited unknown-tab canonicalization. Abort-ignoring fixtures
+prove that delayed list/reload responses cannot replace the current page and that a
+cancelled history read cannot start a subsequent Snapshot read. Focus moved by the
+user while loading is not stolen on completion. Visual checks exposed and fixed an
+absolute screen-reader label escaping the table scroll boundary and short status/
+action labels wrapping unnecessarily. The local table has a visible scroll hint.
+
+The full configured suite also retains the shared primitive contrast, font-role,
+field, keyboard, touch, and reduced-motion checks and verifies the existing six-tab
+journeys, glossary, Snapshot V1-V9, Comparison, Radar, reload races, and Strategy
+Validation behavior. All new journeys reject unexpected API and external requests;
+all data is synthetic. The complex detail migration and market-data functionality
+are not claimed complete by these results.
 
 ## 8. Remaining risks
 

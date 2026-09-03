@@ -13,8 +13,10 @@ import {
   AnalysisSnapshotV8Schema,
   AnalysisSnapshotV9Schema,
   buildAnalysisSnapshot,
+  buildAnalysisSnapshotLatestItem,
   createSnapshotId,
   type AnalysisSnapshot,
+  type AnalysisSnapshotLatestItem,
   type AnalysisSnapshotInput,
   type AnalysisSnapshotV9,
 } from '../../analysis/snapshot/index.js';
@@ -1243,13 +1245,85 @@ async function installAbortIgnoringReloadFetch(
   }, { requestedTicker: ticker, queuedResponses: responses });
 }
 
-async function mockWatchlistApi(page: Page): Promise<void> {
+async function mockWatchlistApi(page: Page, items: readonly AnalysisSnapshotLatestItem[] = []): Promise<void> {
   await page.route('**/api/analyses', async route => {
     await route.fulfill({
-      body: '[]',
+      body: JSON.stringify(items),
       contentType: 'application/json; charset=utf-8',
       status: 200,
     });
+  });
+}
+
+function watchlistFixtures(): AnalysisSnapshotLatestItem[] {
+  const base = buildAnalysisSnapshotLatestItem(snapshotFor('1009'));
+  return [
+    {
+      ...base, canonicalTicker: '7203', companyName: '日本語の長い会社名と海外事業部門を持つテスト株式会社',
+      generatedAt: '2026-08-23T01:02:03.000Z', latestSourceDataDate: '2026-08-21', status: 'complete',
+      metrics: { latestPrice: 0, per: 0, pbr: 1.35, roe: 0, trend: 'range_or_transition', marginPercentile: 0, beta250: 0 },
+    },
+    {
+      ...base, canonicalTicker: '6758', companyName: '比較用株式会社',
+      generatedAt: '2026-08-22T01:02:03.000Z', latestSourceDataDate: '2026-08-22', status: 'partial',
+      metrics: { latestPrice: 1234.5, per: 12.5, pbr: 0.8, roe: 0.123, trend: 'uptrend', marginPercentile: 0.4, beta250: 1.05 },
+    },
+    {
+      ...base, canonicalTicker: '130A', companyName: '利用不可 <script>株式会社',
+      generatedAt: '2026-08-24T01:02:03.000Z', latestSourceDataDate: null, status: 'partial',
+      metrics: { latestPrice: null, per: null, pbr: null, roe: null, trend: null, marginPercentile: null, beta250: null },
+    },
+  ];
+}
+
+async function guardRefreshRequests(page: Page): Promise<{ api: string[]; unexpected: string[] }> {
+  const api: string[] = [];
+  const unexpected: string[] = [];
+  page.on('request', request => {
+    const url = new URL(request.url());
+    if (url.pathname.startsWith('/api/')) api.push(`${request.method()} ${url.pathname}`);
+  });
+  await page.route('**/*', async route => {
+    const url = new URL(route.request().url());
+    if (url.origin !== baseUrl || url.pathname.startsWith('/api/')) {
+      unexpected.push(route.request().url());
+      await route.abort();
+    } else {
+      await route.continue();
+    }
+  });
+  return { api, unexpected };
+}
+
+/** Exercise the app's identity guard even when the transport ignores AbortSignal. */
+async function holdNextFetchIgnoringAbort(page: Page, path: string, body: unknown): Promise<void> {
+  await page.evaluate(({ heldPath, heldBody }) => {
+    const original = window.fetch.bind(window);
+    const fixtureWindow = window as Window & { fixtureFetchPaths?: string[]; releaseHeldFetch?: () => void };
+    fixtureWindow.fixtureFetchPaths = [];
+    let held = false;
+    window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+      if (typeof input === 'string') fixtureWindow.fixtureFetchPaths?.push(new URL(input, location.href).pathname);
+      if (!held && typeof input === 'string' && new URL(input, location.href).pathname === heldPath) {
+        held = true;
+        return new Promise<Response>(resolve => {
+          fixtureWindow.releaseHeldFetch = () => {
+            resolve(new Response(JSON.stringify(heldBody), { headers: { 'Content-Type': 'application/json' } }));
+          };
+        });
+      }
+      return original(input, init);
+    }) as typeof window.fetch;
+  }, { heldPath: path, heldBody: body });
+}
+
+async function releaseHeldFetch(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const fixtureWindow = window as Window & { releaseHeldFetch?: () => void };
+    if (!fixtureWindow.releaseHeldFetch) throw new Error('Expected a held fixture request.');
+    fixtureWindow.releaseHeldFetch();
+    delete fixtureWindow.releaseHeldFetch;
+    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
   });
 }
 
@@ -1272,6 +1346,337 @@ test.beforeAll(async () => {
 
 test.afterAll(() => {
   dashboardProcess.kill();
+});
+
+test.describe('DR-V2 Watchlist and global navigation', () => {
+  test('preserves all stored columns, exact zero, content roles, and keyboard sorting', async ({ page }) => {
+    const requests = await guardRefreshRequests(page);
+    await mockWatchlistApi(page, watchlistFixtures());
+    await page.goto(`${baseUrl}/?future=keep`);
+    const table = page.getByRole('table');
+    await expect(table.locator('tbody tr')).toHaveCount(3);
+    await expect(table.locator('thead th')).toHaveCount(12);
+    await expect(page.getByRole('link', { name: '保存済み分析', exact: true })).toHaveAttribute('aria-current', 'page');
+    expect(await table.locator('tbody tr').evaluateAll(rows => rows.map(row => row.getAttribute('data-ticker'))))
+      .toEqual(['6758', '7203', '130A']);
+    const zero = table.locator('tr[data-ticker="7203"]');
+    await expect(zero.locator('td').first().locator('.unavailable')).toHaveCount(0);
+    await expect(zero.locator('td').first()).toContainText('0');
+    const missing = table.locator('tr[data-ticker="130A"]');
+    await expect(missing.locator('.unavailable')).toHaveCount(8);
+    await expect(missing.locator('.analysis-company')).toContainText('利用不可 <script>株式会社');
+    const roles = await zero.evaluate(row => {
+      const style = (selector: string) => {
+        const element = row.querySelector(selector)!;
+        const computed = getComputedStyle(element);
+        return { font: computed.fontFamily, size: computed.fontSize, weight: computed.fontWeight, align: computed.textAlign, numerals: computed.fontVariantNumeric };
+      };
+      return {
+        company: style('.analysis-company span:last-child'), ticker: style('.design-data'),
+        number: style('td:nth-child(2) .design-value'), trend: style('td:nth-child(6) .design-value'),
+        date: style('td:nth-child(9) .design-value'), status: style('td:nth-child(11) .design-badge'),
+      };
+    });
+    expect(roles.number).toMatchObject({ size: '12px', weight: '500', align: 'right', numerals: 'tabular-nums' });
+    expect(roles.date).toMatchObject({ size: '12px', weight: '500', align: 'left', numerals: 'tabular-nums' });
+    expect(roles.ticker.font).toBe(roles.number.font);
+    expect(roles.date.font).toBe(roles.number.font);
+    expect(roles.company.font).toBe(roles.trend.font);
+    expect(roles.status.font).toBe(roles.trend.font);
+    expect(roles.number.font).not.toBe(roles.company.font);
+    for (const selector of ['td .design-button', 'td .design-badge']) {
+      expect(await zero.locator(selector).first().evaluate(element => getComputedStyle(element).whiteSpace)).toBe('nowrap');
+    }
+    expect(await missing.locator('.unavailable').first().evaluate(element => getComputedStyle(element).fontFamily))
+      .toBe(roles.company.font);
+    const sort = page.getByRole('button', { name: '生成日時順', exact: true });
+    const initialReads = [...requests.api];
+    await sort.focus();
+    await sort.press('Enter');
+    await expect(sort).toBeFocused();
+    await expect(sort).toHaveAttribute('aria-pressed', 'true');
+    expect(await table.locator('tbody tr').evaluateAll(rows => rows.map(row => row.getAttribute('data-ticker'))))
+      .toEqual(['130A', '7203', '6758']);
+    expect(initialReads.length).toBeGreaterThan(0);
+    expect(initialReads.every(request => request === 'GET /api/analyses')).toBe(true);
+    expect(requests.api).toEqual(initialReads);
+    expect(requests.unexpected).toEqual([]);
+  });
+
+  test('restores global/list/detail navigation, focus, unknown queries, and reload without global data reads', async ({ page }) => {
+    const requests = await guardRefreshRequests(page);
+    await mockWatchlistApi(page, watchlistFixtures());
+    await mockSnapshotApi(page);
+    await page.goto(`${baseUrl}/?future=keep&future=again`);
+    await expect(page.getByRole('table')).toBeVisible();
+    const initialLength = await page.evaluate(() => history.length);
+    const initialReads = [...requests.api];
+    await page.getByRole('link', { name: '市場概況', exact: true }).click();
+    await expect(page.getByRole('heading', { name: '市場概況', exact: true })).toBeFocused();
+    await expect(page.getByText('全市場共通', { exact: true })).toBeVisible();
+    expect(new URL(page.url()).search).toBe('?future=keep&future=again&view=market-overview');
+    expect(await page.evaluate(() => history.length)).toBe(initialLength + 1);
+    expect(requests.api).toEqual(initialReads);
+    await page.goBack();
+    await expect(page.getByRole('heading', { name: '保存済み分析', exact: true })).toBeFocused();
+    await expect(page.getByRole('table')).toBeVisible();
+    await page.goForward();
+    await expect(page.getByRole('heading', { name: '市場概況', exact: true })).toBeFocused();
+    const beforeReload = [...requests.api];
+    await page.reload();
+    await expect(page.getByRole('heading', { name: '市場データは準備中です' })).toBeVisible();
+    expect(requests.api).toEqual(beforeReload);
+    await page.getByRole('link', { name: '保存済み分析', exact: true }).click();
+    await expect(page.getByRole('table')).toBeVisible();
+    await page.locator('tr[data-ticker="7203"]').getByRole('button', { name: /の詳細を表示$/ }).click();
+    await expectSelectedTab(page, 'report');
+    await expect(page.locator('[data-main-heading]')).toBeFocused();
+    await expect(page.getByRole('tab')).toHaveCount(6);
+    await expect(page.locator('.dashboard-design')).toHaveCount(0);
+    expect(new URL(page.url()).searchParams.getAll('future')).toEqual(['keep', 'again']);
+    await page.getByRole('button', { name: '← Analysis Portfolio' }).click();
+    await expect(page.getByRole('heading', { name: '保存済み分析', exact: true })).toBeFocused();
+    expect(new URL(page.url()).search).toBe('?future=keep&future=again');
+    expect(requests.unexpected).toEqual([]);
+  });
+
+  test('loading, initial error, retry, and empty states retain the common header without fabricated counts', async ({ page }, testInfo) => {
+    const requests = await guardRefreshRequests(page);
+    await page.setViewportSize({ width: 320, height: 850 });
+    let release = () => {};
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    let requestCount = 0;
+    let fail = true;
+    await page.route('**/api/analyses', async route => {
+      requestCount++;
+      const status = fail ? 500 : 200;
+      await pending;
+      await route.fulfill({ status, body: '[]', contentType: 'application/json' });
+    });
+    try {
+      await page.goto(baseUrl);
+      await expect(page.getByRole('status')).toContainText('読み込み中');
+      await expect(page.locator('.watchlist-summary')).toHaveCount(0);
+      await expect(page.getByRole('link', { name: '市場概況', exact: true })).toBeVisible();
+      await page.screenshot({ path: testInfo.outputPath('watchlist-loading-320.png'), fullPage: true });
+      release();
+      await expect(page.getByRole('alert')).toBeVisible();
+      await expect(page.getByRole('heading', { name: '一覧を読み込めませんでした' })).toBeVisible();
+      await expect(page.locator('.watchlist-summary')).toHaveCount(0);
+      await page.screenshot({ path: testInfo.outputPath('watchlist-error-320.png'), fullPage: true });
+      const initialReads = requestCount;
+      fail = false;
+      await page.getByRole('button', { name: '一覧の読み込みを再試行' }).click();
+      await expect(page.getByRole('heading', { name: '保存済み分析はありません' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: '保存済み分析', exact: true })).toBeFocused();
+      await expect(page.getByRole('table')).toHaveCount(0);
+      await expect(page.locator('.watchlist-summary dd').first()).toHaveText('0');
+      await page.screenshot({ path: testInfo.outputPath('watchlist-empty-320.png'), fullPage: true });
+      await page.getByRole('link', { name: '市場概況', exact: true }).click();
+      await expect(page.getByRole('heading', { name: '市場概況', exact: true })).toBeVisible();
+      expect(requestCount).toBe(initialReads + 1);
+      expect(requests.unexpected).toEqual([]);
+    } finally { release(); }
+  });
+
+  test('failed list re-entry retains valid rows with a warning and retry repairs focus', async ({ page }) => {
+    const requests = await guardRefreshRequests(page);
+    let requestCount = 0;
+    let failed = false;
+    await page.route('**/api/analyses', async route => {
+      requestCount++;
+      await route.fulfill({ status: failed ? 500 : 200, body: JSON.stringify(watchlistFixtures()), contentType: 'application/json' });
+    });
+    await page.goto(baseUrl);
+    await expect(page.getByRole('table')).toBeVisible();
+    const initialReads = requestCount;
+    await page.getByRole('link', { name: '市場概況', exact: true }).click();
+    failed = true;
+    await page.getByRole('link', { name: '保存済み分析', exact: true }).click();
+    await expect(page.getByRole('alert')).toContainText('前回の保存済み一覧');
+    await expect(page.locator('tbody tr')).toHaveCount(3);
+    failed = false;
+    await page.getByRole('button', { name: '一覧の読み込みを再試行' }).click();
+    await expect(page.getByRole('alert')).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: '保存済み分析', exact: true })).toBeFocused();
+    await expect(page.locator('tbody tr')).toHaveCount(3);
+    expect(requestCount).toBe(initialReads + 2);
+    await holdNextFetchIgnoringAbort(page, '/api/analyses', watchlistFixtures());
+    await page.getByRole('link', { name: '市場概況', exact: true }).click();
+    await page.getByRole('link', { name: '保存済み分析', exact: true }).click();
+    await expect(page.getByRole('status')).toContainText('再読み込み中');
+    const sort = page.getByRole('button', { name: '生成日時順', exact: true });
+    await sort.focus();
+    await sort.press('Enter');
+    await releaseHeldFetch(page);
+    await expect(page.getByRole('status')).toHaveCount(0);
+    await expect(sort).toBeFocused();
+    expect(requests.unexpected).toEqual([]);
+  });
+
+  test('rejects conflicting, orphan, duplicate, and malformed new URL state before any data read or repair', async ({ page }) => {
+    const requests = await guardRefreshRequests(page);
+    const conflicts = ['ticker=7203', 'ticker=', 'tab=report', 'base=old', 'target=new', 'validationRun=run', 'validationCase=case', 'chartSource=auto', 'interval=day'];
+    const invalid = [
+      ...conflicts.map(key => `view=market-overview&${key}`),
+      'tab=technical', 'base=old&target=new', 'validationRun=run', 'chartSource=latest', 'interval=week', 'marketRange=1y',
+      'view=unknown', 'view=market-overview&view=market-overview',
+      'ticker=7203&tab=unknown&chartSource=bad', 'ticker=7203&chartSource=auto&chartSource=latest',
+      'ticker=7203&interval=DAY', 'ticker=7203&interval=day&interval=day',
+      'view=market-overview&marketRange=1Y', 'view=market-overview&marketRange=max&marketRange=max',
+    ];
+    for (const query of invalid) {
+      const url = `${baseUrl}/?${query}&future=keep&future=again`;
+      await page.goto(url);
+      await expect(page.getByRole('heading', { name: '表示先を確認してください' })).toBeVisible();
+      await expect(page.getByRole('alert')).toContainText('読み込みは行っていません');
+      expect(page.url()).toBe(url);
+      expect(requests.api).toEqual([]);
+    }
+    await page.reload();
+    await expect(page.getByRole('heading', { name: '表示先を確認してください' })).toBeVisible();
+    expect(requests.api).toEqual([]);
+    await mockWatchlistApi(page);
+    await page.getByRole('button', { name: '保存済み分析の一覧へ戻る' }).click();
+    await expect(page.getByRole('heading', { name: '保存済み分析はありません' })).toBeVisible();
+    expect(new URL(page.url()).search).toBe('?future=keep&future=again');
+    expect(requests.unexpected).toEqual([]);
+  });
+
+  test('keeps valid global ranges and dormant detail keys through canonicalization and tab changes', async ({ page }) => {
+    const requests = await guardRefreshRequests(page);
+    await mockSnapshotApi(page);
+    await page.goto(`${baseUrl}/?view=market-overview&marketRange=3y&future=keep`);
+    await expect(page.getByText('全市場共通', { exact: true })).toBeVisible();
+    const globalUrl = page.url();
+    await page.reload();
+    await expect(page.getByRole('heading', { name: '市場概況', exact: true })).toBeVisible();
+    expect(page.url()).toBe(globalUrl);
+    expect(requests.api).toEqual([]);
+    await page.goto(`${baseUrl}/?ticker=1009&tab=unknown&chartSource=latest&interval=month&marketRange=max&future=keep`);
+    await expectSelectedTab(page, 'report');
+    const historyLength = await page.evaluate(() => history.length);
+    const initialReads = [...requests.api];
+    for (const tab of ['technical', 'report'] as const) {
+      await page.locator(`#dashboard-tab-${tab}`).click();
+      await expectSelectedTab(page, tab);
+      const query = new URL(page.url()).searchParams;
+      expect(query.get('chartSource')).toBe('latest');
+      expect(query.get('interval')).toBe('month');
+      expect(query.get('marketRange')).toBe('max');
+      expect(query.get('future')).toBe('keep');
+      expect(await page.evaluate(() => history.length)).toBe(historyLength);
+    }
+    expect(requests.api).toEqual(initialReads);
+    expect(requests.unexpected).toEqual([]);
+  });
+
+  test('late abort-ignoring list and Snapshot reload responses cannot overwrite a new page or list', async ({ page }) => {
+    const requests = await guardRefreshRequests(page);
+    await mockWatchlistApi(page, watchlistFixtures());
+    await mockSnapshotApi(page);
+    await page.goto(`${baseUrl}/?view=market-overview`);
+    await expect(page.getByRole('heading', { name: '市場概況', exact: true })).toBeVisible();
+    await holdNextFetchIgnoringAbort(page, '/api/analyses', []);
+    await page.getByRole('link', { name: '保存済み分析', exact: true }).click();
+    await expect(page.getByRole('status')).toContainText('読み込み中');
+    await page.getByRole('link', { name: '市場概況', exact: true }).click();
+    await expect(page.getByRole('heading', { name: '市場概況', exact: true })).toBeFocused();
+    await page.getByRole('link', { name: '保存済み分析', exact: true }).click();
+    await expect(page.locator('tbody tr')).toHaveCount(3);
+    await releaseHeldFetch(page);
+    await expect(page.locator('tbody tr')).toHaveCount(3);
+    await openDetail(page, '1009');
+    await holdNextFetchIgnoringAbort(page, '/api/analyses/1009', snapshotWithIdentity('1009', '2026-08-24T01:02:03.000Z', '遅延結果株式会社'));
+    await page.getByRole('button', { name: '保存済みSnapshotを再読み込み' }).click();
+    await page.waitForFunction(() => 'releaseHeldFetch' in window);
+    await page.evaluate(() => {
+      history.pushState({}, '', '/?view=market-overview&future=keep');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    await expect(page.getByRole('heading', { name: '市場概況', exact: true })).toBeFocused();
+    await releaseHeldFetch(page);
+    await expect(page.getByRole('heading', { name: '市場概況', exact: true })).toBeVisible();
+    await expect(page.getByText('遅延結果株式会社', { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('alert')).toHaveCount(0);
+    await holdNextFetchIgnoringAbort(page, '/api/analyses/1009/history', [historyItemFor(snapshotFor('1009'))]);
+    await page.evaluate(() => {
+      history.pushState({}, '', '/?ticker=1009&tab=report');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    await page.waitForFunction(() => 'releaseHeldFetch' in window);
+    await page.goBack();
+    await expect(page.getByRole('heading', { name: '市場概況', exact: true })).toBeFocused();
+    await releaseHeldFetch(page);
+    const fetchPaths = await page.evaluate(() => (window as Window & { fixtureFetchPaths?: string[] }).fixtureFetchPaths);
+    expect(fetchPaths).not.toContain('/api/analyses/1009');
+    await expect(page.getByRole('heading', { name: '市場概況', exact: true })).toBeVisible();
+    expect(requests.unexpected).toEqual([]);
+  });
+
+  test('keeps complete Watchlist/global pages within every required viewport with exact local table access', async ({ page }, testInfo) => {
+    const requests = await guardRefreshRequests(page);
+    await mockWatchlistApi(page, watchlistFixtures());
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    for (const width of [320, 390, 680, 768, 980, 1024, 1280]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto(baseUrl);
+      const table = page.getByRole('region', { name: '保存済み分析一覧を横スクロール' });
+      await expect(page.locator('tbody tr')).toHaveCount(3);
+      const layout = await page.evaluate(() => ({
+        documentWidth: document.documentElement.scrollWidth,
+        boxes: [...document.querySelectorAll('.design-content, .dashboard-page-intro, .watchlist-summary, .panel, .design-stack, .table-scroll')]
+          .map(element => ({ className: element.className, width: element.getBoundingClientRect().width, scrollWidth: element.scrollWidth })),
+      }));
+      await page.screenshot({ path: testInfo.outputPath(`watchlist-${width}.png`), fullPage: true });
+      expect(layout.documentWidth, JSON.stringify(layout)).toBeLessThanOrEqual(width);
+      const needsScroll = await table.evaluate(element => element.scrollWidth > element.clientWidth);
+      if (width < 680) expect(needsScroll).toBe(true);
+      await table.focus();
+      if (needsScroll) {
+        await table.press('ArrowRight');
+        await expect.poll(() => table.evaluate(element => element.scrollLeft)).toBeGreaterThan(0);
+      }
+      expect(await table.evaluate(element => getComputedStyle(element).outlineWidth)).toBe('2px');
+      if (width < 680) {
+        const sizes = await page.locator('button, nav a').evaluateAll(elements => elements.map(element => {
+          const rect = element.getBoundingClientRect();
+          return [rect.width, rect.height];
+        }));
+        for (const [targetWidth, targetHeight] of sizes) {
+          expect(targetWidth).toBeGreaterThanOrEqual(44);
+          expect(targetHeight).toBeGreaterThanOrEqual(44);
+        }
+      }
+      await table.evaluate(element => { element.scrollLeft = 0; });
+      await page.getByRole('link', { name: '市場概況', exact: true }).focus();
+      await page.screenshot({ path: testInfo.outputPath(`watchlist-${width}.png`), fullPage: true });
+      await page.getByRole('link', { name: '市場概況', exact: true }).press('Enter');
+      await expect(page.getByRole('heading', { name: '市場概況', exact: true })).toBeFocused();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      await page.screenshot({ path: testInfo.outputPath(`market-placeholder-${width}.png`), fullPage: true });
+    }
+    expect(requests.unexpected).toEqual([]);
+  });
+
+  test('uses touch-sized controls for a coarse pointer even on a wide viewport', async ({ browser }) => {
+    const page = await browser.newPage({ viewport: { width: 980, height: 900 }, hasTouch: true });
+    try {
+      const requests = await guardRefreshRequests(page);
+      await mockWatchlistApi(page, watchlistFixtures());
+      await page.goto(baseUrl);
+      await expect(page.locator('tbody tr')).toHaveCount(3);
+      const sizes = await page.locator('button, nav a').evaluateAll(elements => elements.map(element => {
+        const rect = element.getBoundingClientRect();
+        return [rect.width, rect.height];
+      }));
+      for (const [width, height] of sizes) {
+        expect(width).toBeGreaterThanOrEqual(44);
+        expect(height).toBeGreaterThanOrEqual(44);
+      }
+      expect(requests.unexpected).toEqual([]);
+    } finally { await page.close(); }
+  });
 });
 
 async function openDetail(
@@ -1926,7 +2331,7 @@ test.describe('strategy validation Dashboard interaction', () => {
       await expect(page.getByRole('heading', { name: 'キャンペーン全体（2銘柄・4基準日）' }))
         .toBeVisible();
       await page.getByRole('button', { name: '← Analysis Portfolio' }).click();
-      await expect(page.getByRole('heading', { name: 'Analysis Watchlist' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: '保存済み分析', exact: true })).toBeVisible();
       expect(new URL(page.url()).searchParams.has('validationRun')).toBe(false);
       expect(new URL(page.url()).searchParams.has('validationCase')).toBe(false);
 
@@ -2379,7 +2784,7 @@ test.describe('Dashboard detail tab browser interaction', () => {
         window.history.pushState({}, '', '/');
         window.dispatchEvent(new PopStateEvent('popstate'));
       });
-      const watchlistHeading = page.getByRole('heading', { name: 'Saved Analysis' });
+      const watchlistHeading = page.getByRole('heading', { name: '保存済み分析', exact: true });
       await expect(watchlistHeading).toBeVisible();
       await expect(page.getByRole('dialog')).toHaveCount(0);
       await expect(watchlistHeading).toBeFocused();
@@ -2715,9 +3120,9 @@ test.describe('Dashboard detail tab browser interaction', () => {
         exact: true,
       }).click();
       await listPage.getByRole('button', { name: '← Analysis Portfolio' }).click();
-      await expect(listPage.getByRole('heading', { name: 'Saved Analysis' })).toBeVisible();
+      await expect(listPage.getByRole('heading', { name: '保存済み分析', exact: true })).toBeVisible();
       await listPage.waitForTimeout(600);
-      await expect(listPage.getByRole('heading', { name: 'Saved Analysis' })).toBeVisible();
+      await expect(listPage.getByRole('heading', { name: '保存済み分析', exact: true })).toBeVisible();
       await expect(listPage.getByRole('heading', { name: '1010 stale after list navigation' }))
         .toHaveCount(0);
     } finally {

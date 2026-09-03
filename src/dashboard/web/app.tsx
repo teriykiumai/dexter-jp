@@ -54,17 +54,17 @@ import {
   SECTOR_BENCHMARK_CONTEXT_NOTE,
   SECTOR_SHORT_RATIO_CONTEXT_NOTE,
   VOLUME_PROFILE_CONTEXT_NOTE,
-  WATCHLIST_STALE_AFTER_DAYS,
   buildDashboardTabPath,
   buildDetailPath,
+  buildMarketOverviewPath,
   buildWatchlistPath,
   hasCanonicalDetailTab,
   mapSnapshotToDashboard,
   mapLatestAnalysisToWatchlistItem,
   moveDashboardTab,
+  parseDashboardPageRoute,
   parseDetailTab,
   parseDetailTicker,
-  sortWatchlistItems,
   type DashboardAvailabilityCount,
   type DashboardTabId,
   type InvestorTypeCategoryView,
@@ -74,6 +74,7 @@ import {
 } from './presentation.js';
 import { PeerRadarPresentation } from './peer-radar-view.js';
 import { StrategyValidationPanel } from './strategy-validation-panel.js';
+import { DashboardRouteError, MarketOverviewPlaceholder, Watchlist } from './watchlist.js';
 import {
   AvailabilityBadges,
   Card,
@@ -1479,145 +1480,6 @@ function Dashboard({
   );
 }
 
-function Watchlist({
-  items,
-  sortKey,
-  onSort,
-  onSelect,
-}: {
-  items: WatchlistItemView[];
-  sortKey: WatchlistSortKey;
-  onSort: (sortKey: WatchlistSortKey) => void;
-  onSelect: (ticker: string) => void;
-}) {
-  const sortedItems = useMemo(() => sortWatchlistItems(items, sortKey), [items, sortKey]);
-  const completeCount = items.filter(item => item.status === 'complete').length;
-  const staleCount = items.filter(item => item.stale).length;
-
-  return (
-    <main className="dashboard-shell watchlist-shell">
-      <header className="portfolio-hero">
-        <div>
-          <div className="brand-line">
-            <span className="brand-mark">DEXTER / JP</span>
-            <span className="local-badge">ANALYSIS PORTFOLIO</span>
-          </div>
-          <h1 data-main-heading tabIndex={-1}>Saved Analysis</h1>
-          <p>保存済み企業分析のlatest Snapshot。保有資産・配分情報は含みません。</p>
-        </div>
-        <dl className="portfolio-summary">
-          <div><dt>Tracked</dt><dd>{items.length}</dd></div>
-          <div><dt>Complete</dt><dd>{completeCount}</dd></div>
-          <div><dt>Stale</dt><dd>{staleCount}</dd></div>
-        </dl>
-      </header>
-
-      <section className="watchlist-panel" aria-labelledby="watchlist-title">
-        <header className="watchlist-header">
-          <div>
-            <span className="eyebrow">Latest snapshots</span>
-            <h2 id="watchlist-title">Analysis Watchlist</h2>
-          </div>
-          <div className="sort-control" aria-label="一覧の並び順">
-            <span>Sort</span>
-            <button
-              className={sortKey === 'latestDataDate' ? 'active' : undefined}
-              type="button"
-              onClick={() => onSort('latestDataDate')}
-            >
-              Source date
-            </button>
-            <button
-              className={sortKey === 'generatedAt' ? 'active' : undefined}
-              type="button"
-              onClick={() => onSort('generatedAt')}
-            >
-              Generated
-            </button>
-          </div>
-        </header>
-
-        {sortedItems.length === 0 ? (
-          <div className="empty-state watchlist-empty">
-            保存済みAnalysis Snapshotはありません。
-          </div>
-        ) : (
-          <div className="table-scroll">
-            <table className="watchlist-table">
-              <thead>
-                <tr>
-                  <th>Company</th>
-                  <th>Price</th>
-                  <th>PER</th>
-                  <th>PBR</th>
-                  <th>ROE</th>
-                  <th>Trend</th>
-                  <th>Margin %ile</th>
-                  <th>Beta 250</th>
-                  <th>Latest source</th>
-                  <th>Generated</th>
-                  <th>Status</th>
-                  <th><span className="visually-hidden">Detail</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedItems.map(item => (
-                  <tr key={item.ticker}>
-                    <th>
-                      <button
-                        className="company-link"
-                        type="button"
-                        onClick={() => onSelect(item.ticker)}
-                      >
-                        <span>{item.ticker}</span>
-                        <strong>{item.companyName}</strong>
-                      </button>
-                    </th>
-                    <td><Value value={item.price} /></td>
-                    <td><Value value={item.per} /></td>
-                    <td><Value value={item.pbr} /></td>
-                    <td><Value value={item.roe} /></td>
-                    <td><Value value={item.trend} /></td>
-                    <td><Value value={item.marginPercentile} /></td>
-                    <td><Value value={item.beta250} /></td>
-                    <td>
-                      <Value value={item.latestDataDate} />
-                      {item.stale
-                        ? <small className="stale-label">{WATCHLIST_STALE_AFTER_DAYS}日超</small>
-                        : null}
-                    </td>
-                    <td><Value value={item.generatedAt} /></td>
-                    <td>
-                      <span className={`compact-status ${item.status}`}>
-                        {item.status}
-                      </span>
-                    </td>
-                    <td>
-                      <button
-                        className="detail-button"
-                        type="button"
-                        aria-label={`${item.ticker} ${item.companyName}の詳細を表示`}
-                        onClick={() => onSelect(item.ticker)}
-                      >
-                        詳細 →
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      <footer className="footer">
-        <span>DEXTER JP / READ-ONLY LOCAL ANALYSIS</span>
-        <span>Sorted and formatted from canonical Snapshot values.</span>
-      </footer>
-    </main>
-  );
-}
-
 class DashboardHttpError extends Error {
   readonly status: number;
 
@@ -1787,14 +1649,13 @@ function matchingHistorySnapshotId(
 }
 
 function App() {
-  const [selectedTicker, setSelectedTicker] = useState<string | null>(() => (
-    parseDetailTicker(window.location.search)
-  ));
+  const [pageRoute, setPageRoute] = useState(() => parseDashboardPageRoute(window.location.search));
+  const selectedTicker = pageRoute.kind === 'detail' ? pageRoute.ticker : null;
   const [selectedTab, setSelectedTab] = useState<DashboardTabId>(() => (
     parseDetailTab(window.location.search)
   ));
   const [comparisonSelection, setComparisonSelection] = useState<ComparisonPageSelection>(() => (
-    parseComparisonPageSelection(window.location.search)
+    pageRoute.kind === 'detail' ? parseComparisonPageSelection(window.location.search) : { kind: 'none' }
   ));
   const [navigationRevision, setNavigationRevision] = useState(0);
   const [loadRevision, setLoadRevision] = useState(0);
@@ -1809,7 +1670,7 @@ function App() {
   const [comparisonLoading, setComparisonLoading] = useState(false);
   const [comparisonNotice, setComparisonNotice] = useState<string | null>(null);
   const [targetSnapshotIssue, setTargetSnapshotIssue] = useState<TargetSnapshotIssue | null>(null);
-  const [watchlistItems, setWatchlistItems] = useState<WatchlistItemView[]>([]);
+  const [watchlistItems, setWatchlistItems] = useState<WatchlistItemView[] | null>(null);
   const [sortKey, setSortKey] = useState<WatchlistSortKey>('latestDataDate');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1820,7 +1681,10 @@ function App() {
   const mainRequestTokenRef = useRef(0);
   const reloadAbortControllerRef = useRef<AbortController | null>(null);
   const reloadRequestTokenRef = useRef(0);
-  const pendingGlossaryFocusRef = useRef<GlossaryFocusDestination | null>(null);
+  const pendingNavigationFocusRef = useRef<GlossaryFocusDestination | null>(null);
+  const navigationFocusOriginRef = useRef<Element | null>(null);
+  const pageRouteRef = useRef(pageRoute);
+  pageRouteRef.current = pageRoute;
   selectedTickerRef.current = selectedTicker;
   comparisonSelectionRef.current = comparisonSelection;
   snapshotRef.current = snapshot;
@@ -1833,9 +1697,14 @@ function App() {
     setReloadState({ status: 'idle' });
   }, []);
 
-  const rememberGlossaryFocusDestination = (ticker: string | null) => {
+  const queueNavigationFocus = (destination: GlossaryFocusDestination) => {
+    pendingNavigationFocusRef.current = destination;
+    navigationFocusOriginRef.current = document.activeElement;
+  };
+  const rememberNavigationFocusDestination = (ticker: string | null, pageChanged = false) => {
+    if (pageChanged) queueNavigationFocus('main-heading');
     if (document.querySelector<HTMLDialogElement>('dialog.glossary-dialog[open]')) {
-      pendingGlossaryFocusRef.current = ticker ? 'active-tab' : 'main-heading';
+      queueNavigationFocus(ticker ? 'active-tab' : 'main-heading');
     }
   };
 
@@ -1849,21 +1718,27 @@ function App() {
         );
       }
     };
-    const initialTicker = parseDetailTicker(window.location.search);
-    if (initialTicker) canonicalizeTab(initialTicker, parseDetailTab(window.location.search));
+    const initialRoute = parseDashboardPageRoute(window.location.search);
+    if (initialRoute.kind === 'detail') canonicalizeTab(initialRoute.ticker, parseDetailTab(window.location.search));
 
     const handlePopState = () => {
       const focusWasInTablist = document.activeElement instanceof HTMLElement
         && document.activeElement.closest('[role="tablist"]') !== null;
-      const nextTicker = parseDetailTicker(window.location.search);
+      const nextRoute = parseDashboardPageRoute(window.location.search);
+      const nextTicker = nextRoute.kind === 'detail' ? nextRoute.ticker : null;
       const nextTab = nextTicker ? parseDetailTab(window.location.search) : DEFAULT_DASHBOARD_TAB;
-      const nextComparison = parseComparisonPageSelection(window.location.search);
+      const nextComparison: ComparisonPageSelection = nextTicker
+        ? parseComparisonPageSelection(window.location.search)
+        : { kind: 'none' };
       if (nextTicker) canonicalizeTab(nextTicker, nextTab);
-      rememberGlossaryFocusDestination(nextTicker);
-      const loadIdentityChanged = nextTicker !== selectedTickerRef.current
+      const pageChanged = nextRoute.kind !== pageRouteRef.current.kind;
+      rememberNavigationFocusDestination(nextTicker, pageChanged);
+      const loadIdentityChanged = pageChanged || nextTicker !== selectedTickerRef.current
         || comparisonSelectionKey(nextComparison) !== comparisonSelectionKey(comparisonSelectionRef.current);
       if (loadIdentityChanged) {
+        mainRequestTokenRef.current += 1;
         cancelSnapshotReload();
+        setError(null);
         setComparison(null);
         setComparisonPair(nextComparison.kind === 'valid' ? nextComparison.pair : null);
         setComparisonIssue(null);
@@ -1876,7 +1751,7 @@ function App() {
           setLoading(true);
         }
       }
-      setSelectedTicker(nextTicker);
+      setPageRoute(nextRoute);
       setSelectedTab(nextTab);
       setComparisonSelection(nextComparison);
       setNavigationRevision(current => current + 1);
@@ -1897,16 +1772,25 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const destination = pendingGlossaryFocusRef.current;
+    const destination = pendingNavigationFocusRef.current;
     if (!destination || loading) return;
+    const activeElement = document.activeElement;
+    // A user who moved focus while a read was pending owns the new destination.
+    if (activeElement instanceof HTMLElement && activeElement !== document.body
+      && activeElement !== navigationFocusOriginRef.current && isVisibleFocusTarget(activeElement)) {
+      pendingNavigationFocusRef.current = null;
+      navigationFocusOriginRef.current = null;
+      return;
+    }
     const target = destination === 'active-tab' && selectedTicker && snapshot && !error
       ? document.getElementById(`dashboard-tab-${selectedTab}`)
       : document.querySelector<HTMLElement>('[data-main-heading]');
     if (isVisibleFocusTarget(target)) {
       target.focus();
-      pendingGlossaryFocusRef.current = null;
+      pendingNavigationFocusRef.current = null;
+      navigationFocusOriginRef.current = null;
     }
-  }, [error, loading, selectedTab, selectedTicker, snapshot]);
+  }, [error, loading, selectedTab, selectedTicker, snapshot, pageRoute.kind, navigationRevision]);
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -1914,6 +1798,15 @@ function App() {
     mainRequestTokenRef.current = requestToken;
     const isCurrent = () => !abortController.signal.aborted
       && mainRequestTokenRef.current === requestToken;
+    if (pageRoute.kind !== 'detail' && pageRoute.kind !== 'watchlist') {
+      setSnapshot(null);
+      setDisplayedSnapshotId(null);
+      setHistoryItems([]);
+      setError(null);
+      setLoading(false);
+      setComparisonLoading(false);
+      return () => abortController.abort();
+    }
     const scopedDetailLoad = selectedTicker !== null
       && snapshot !== null
       && snapshot.canonicalTicker === selectedTicker;
@@ -1939,6 +1832,7 @@ function App() {
       }
       void (async () => {
         const history = await fetchSnapshotHistory(selectedTicker, abortController.signal);
+        if (!isCurrent()) return;
         if (comparisonSelection.kind === 'valid') {
           const [targetResult, comparisonResult] = await Promise.allSettled([
             fetchSnapshot(selectedTicker, abortController.signal, comparisonSelection.pair.targetSnapshotId),
@@ -2055,11 +1949,11 @@ function App() {
       });
     }
     return () => abortController.abort();
-  }, [loadRevision, selectedTicker, selectionKey]);
+  }, [loadRevision, selectedTicker, selectionKey, pageRoute.kind]);
 
   const commitComparisonPair = (pair: ComparisonPair) => {
     if (!selectedTicker) return;
-    rememberGlossaryFocusDestination(selectedTicker);
+    rememberNavigationFocusDestination(selectedTicker);
     cancelSnapshotReload();
     const path = buildComparisonPath(
       selectedTicker,
@@ -2079,7 +1973,8 @@ function App() {
   };
 
   const navigateToTicker = (ticker: string) => {
-    rememberGlossaryFocusDestination(ticker);
+    rememberNavigationFocusDestination(ticker, true);
+    mainRequestTokenRef.current += 1;
     cancelSnapshotReload();
     window.history.pushState(
       {},
@@ -2087,22 +1982,42 @@ function App() {
       buildDetailPath(ticker, DEFAULT_DASHBOARD_TAB, window.location.search),
     );
     setLoading(true);
+    setError(null);
     setComparisonLoading(false);
     setTargetSnapshotIssue(null);
-    setSelectedTicker(ticker);
+    setPageRoute({ kind: 'detail', ticker });
     setSelectedTab(DEFAULT_DASHBOARD_TAB);
     setComparisonSelection({ kind: 'none' });
   };
   const navigateToWatchlist = () => {
-    rememberGlossaryFocusDestination(null);
+    const path = buildWatchlistPath(window.location.search);
+    if (pageRoute.kind === 'watchlist' && `${window.location.pathname}${window.location.search}` === path) return;
+    rememberNavigationFocusDestination(null, true);
+    mainRequestTokenRef.current += 1;
     cancelSnapshotReload();
-    window.history.pushState({}, '', buildWatchlistPath(window.location.search));
+    window.history.pushState({}, '', path);
     setLoading(true);
+    setError(null);
     setComparisonLoading(false);
     setTargetSnapshotIssue(null);
-    setSelectedTicker(null);
+    setPageRoute({ kind: 'watchlist' });
     setSelectedTab(DEFAULT_DASHBOARD_TAB);
     setComparisonSelection({ kind: 'none' });
+    setLoadRevision(current => current + 1);
+  };
+  const navigateToMarketOverview = () => {
+    const path = buildMarketOverviewPath(window.location.search);
+    if (pageRoute.kind === 'market-overview' && `${window.location.pathname}${window.location.search}` === path) return;
+    rememberNavigationFocusDestination(null, true);
+    mainRequestTokenRef.current += 1;
+    cancelSnapshotReload();
+    window.history.pushState({}, '', path);
+    setPageRoute({ kind: 'market-overview' });
+    setComparisonSelection({ kind: 'none' });
+    setSelectedTab(DEFAULT_DASHBOARD_TAB);
+    setError(null);
+    setLoading(false);
+    setNavigationRevision(current => current + 1);
   };
   const navigateToTab = (tab: DashboardTabId) => {
     if (!selectedTicker) return;
@@ -2239,6 +2154,32 @@ function App() {
     commitComparisonPair(pair);
   };
 
+  const pageNavigation = {
+    currentSearch: window.location.search,
+    onShowWatchlist: navigateToWatchlist,
+    onShowMarketOverview: navigateToMarketOverview,
+  };
+  if (pageRoute.kind === 'invalid') return <DashboardRouteError {...pageNavigation} reason={pageRoute.reason} />;
+  if (pageRoute.kind === 'market-overview') return <MarketOverviewPlaceholder {...pageNavigation} />;
+  if (pageRoute.kind === 'watchlist') {
+    return (
+      <Watchlist
+        {...pageNavigation}
+        items={watchlistItems}
+        sortKey={sortKey}
+        loading={loading}
+        error={error}
+        onSort={setSortKey}
+        onSelect={navigateToTicker}
+        onRetry={() => {
+          queueNavigationFocus('main-heading');
+          setLoading(true);
+          setError(null);
+          setLoadRevision(current => current + 1);
+        }}
+      />
+    );
+  }
   if (error) {
     return (
       <main className="load-state">
@@ -2318,14 +2259,7 @@ function App() {
       />
     );
   }
-  return (
-    <Watchlist
-      items={watchlistItems}
-      sortKey={sortKey}
-      onSort={setSortKey}
-      onSelect={navigateToTicker}
-    />
-  );
+  return null;
 }
 
 const rootElement = document.getElementById('root');

@@ -1,0 +1,33 @@
+/* DR-V2 owns only complete Watchlist/global pages; detail keeps its legacy styles. */
+.dashboard-design .dashboard-page-header { background: var(--color-surface); border-bottom: var(--border-width) solid var(--color-border); }
+.dashboard-design .dashboard-header-content { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3) var(--space-6); padding-block: var(--space-3); }
+.dashboard-design .dashboard-wordmark { color: var(--color-text-strong); font: var(--type-subsection-heading); }
+.dashboard-design .dashboard-page-nav { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.dashboard-design .dashboard-page-nav a { display: inline-flex; align-items: center; justify-content: center; min-height: var(--control-height); padding: var(--space-2) var(--space-3); border-bottom: var(--tab-underline-width) solid transparent; text-decoration: none; }
+.dashboard-design .dashboard-page-nav a[aria-current="page"] { color: var(--color-accent-active); border-bottom-color: var(--color-accent); background: var(--color-surface-muted); }
+.dashboard-design .dashboard-page-nav a:hover { background: var(--color-surface-muted); }
+.dashboard-design .dashboard-page-intro { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--space-6); }
+.dashboard-design .dashboard-page-identity { display: grid; min-width: 0; gap: var(--space-3); justify-items: start; }
+.dashboard-design .dashboard-page-identity p { color: var(--color-text-muted); }
+.dashboard-design .watchlist-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-4); max-width: 100%; margin: 0; padding: var(--space-4); border-radius: var(--radius-surface); background: var(--color-surface-muted); }
+.dashboard-design .watchlist-summary div { min-width: 0; }
+.dashboard-design .watchlist-summary dt { color: var(--color-text-muted); font: var(--type-label); }
+.dashboard-design .watchlist-summary dd { margin: var(--space-2) 0 0; color: var(--color-text-strong); font: var(--type-kpi); font-variant-numeric: tabular-nums; }
+.dashboard-design .watchlist-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.dashboard-design .watchlist-toolbar p { color: var(--color-text-muted); font: var(--type-small); }
+/* Keep the absolute screen-reader column label inside the local scroll boundary. */
+.dashboard-design .analysis-list-table { position: relative; white-space: nowrap; }
+.dashboard-design .analysis-list-table .design-value[data-kind="data"] { font: var(--type-data); font-variant-numeric: tabular-nums; }
+.dashboard-design .analysis-list-table :is(.design-badge, td .design-button) { white-space: nowrap; }
+.dashboard-design .analysis-company { display: grid; justify-items: start; justify-content: start; min-width: calc(var(--space-8) * 5); max-width: calc(var(--space-8) * 8); gap: var(--space-1); text-align: left; }
+.dashboard-design .analysis-date-note { display: block; margin-top: var(--space-1); }
+.dashboard-design .dashboard-page-footer { color: var(--color-text-muted); font: var(--type-small); }
+
+@media (width < 680px) {
+  .dashboard-design .dashboard-page-nav { width: 100%; }
+  .dashboard-design .dashboard-page-nav a { flex: 1 1 auto; }
+}
+
+@media (width < 680px), (pointer: coarse) {
+  .dashboard-design .dashboard-page-nav a { min-width: var(--touch-target-size); min-height: var(--touch-target-size); }
+}
