@@ -1,4 +1,7 @@
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { DashboardSessionV1, DashboardSecurityErrorV1, dashboardSecurityFailureV1,
+  readDashboardBody as readBody, requireDashboardJsonMediaType as requireJsonMediaType } from './session.js';
+import { DashboardJobCoordinatorErrorV1, dashboardCoordinatorFailureV1 } from '../analysis/dashboard-jobs/coordinator.js';
+import { validateStrategyValidationInputV1 } from '../analysis/strategy-validation/manifest.js';
 import { z } from 'zod';
 import {
   AnalysisSnapshotPersistenceError,
@@ -220,46 +223,6 @@ function sameCaseCursor(value: StrategyValidationCaseV1, cursor: CaseCursorV1): 
     && value.caseKind === cursor.caseKind
     && (value.caseKind === 'candidate' ? value.candidateId : null) === cursor.candidateId;
 }
-
-async function readBody(request: Request, maximumBytes: number): Promise<Uint8Array> {
-  const length = request.headers.get('content-length');
-  if (length !== null) {
-    if (!/^\d+$/.test(length)) {
-      throw new StrategyValidationApiErrorV1(400, 'invalid_request', 'The request is invalid.');
-    }
-    if (Number(length) > maximumBytes) {
-      throw new StrategyValidationApiErrorV1(413, 'payload_too_large', 'The request body is too large.');
-    }
-  }
-  if (request.body === null) return new Uint8Array();
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    while (true) {
-      const part = await reader.read();
-      if (part.done) break;
-      total += part.value.byteLength;
-      if (total > maximumBytes) {
-        await reader.cancel();
-        throw new StrategyValidationApiErrorV1(
-          413, 'payload_too_large', 'The request body is too large.',
-        );
-      }
-      chunks.push(part.value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  const result = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    result.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return result;
-}
-
 function parseJsonBody(bytes: Uint8Array, maximumBytes: number): unknown {
   try {
     return parseStrictJsonBytesV1(bytes, maximumBytes);
@@ -270,26 +233,16 @@ function parseJsonBody(bytes: Uint8Array, maximumBytes: number): unknown {
     throw new StrategyValidationApiErrorV1(400, 'invalid_json', 'The request JSON is invalid.');
   }
 }
-
-function requireJsonMediaType(request: Request): void {
-  const contentType = request.headers.get('content-type');
-  if (contentType === null
-    || !/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(contentType)) {
-    throw new StrategyValidationApiErrorV1(
-      415, 'unsupported_media_type', 'The request media type is not supported.',
-    );
-  }
-}
-
-function constantTimeTokenEqual(actual: string | null, expected: string): boolean {
-  if (actual === null) return false;
-  const actualBytes = Buffer.from(actual, 'utf8');
-  const expectedBytes = Buffer.from(expected, 'utf8');
-  return actualBytes.byteLength === expectedBytes.byteLength
-    && timingSafeEqual(actualBytes, expectedBytes);
-}
-
 function mapServiceError(error: unknown): Response {
+  if (error instanceof DashboardJobCoordinatorErrorV1) {
+    const failure = dashboardCoordinatorFailureV1(error, 'strategy_validation');
+    return errorResponse(failure.status, failure.code, failure.message,
+      failure.retryAfterSeconds ? { 'Retry-After': String(failure.retryAfterSeconds) } : undefined);
+  }
+  if (error instanceof DashboardSecurityErrorV1) {
+    const failure = dashboardSecurityFailureV1(error, 'strategy_validation');
+    return errorResponse(failure.status, failure.code, failure.message);
+  }
   if (error instanceof StrategyValidationApiErrorV1) {
     return errorResponse(error.status, error.code, error.publicMessage);
   }
@@ -348,19 +301,15 @@ function mapServiceError(error: unknown): Response {
 }
 
 export class StrategyValidationDashboardApiV1 {
-  readonly csrfToken: string;
-  readonly #startupReconciliation: Promise<void>;
+  readonly session: DashboardSessionV1;
+  get csrfToken(): string { return this.session.csrfToken; }
 
   constructor(
     readonly service: StrategyValidationJobServiceV1,
-    csrfToken: string = randomBytes(32).toString('base64url'),
+    session: DashboardSessionV1 | string = new DashboardSessionV1(),
   ) {
-    if (!/^[A-Za-z0-9_-]{43}$/.test(csrfToken)) {
-      throw new TypeError('The Dashboard CSRF token must be 32-byte unpadded base64url.');
-    }
-    this.csrfToken = csrfToken;
-    this.#startupReconciliation = service.initialize();
-    void this.#startupReconciliation.catch(() => undefined);
+    this.session = typeof session === 'string' ? new DashboardSessionV1(session) : session;
+    void service.initialize().catch(() => undefined);
   }
 
   async handle(
@@ -378,14 +327,8 @@ export class StrategyValidationDashboardApiV1 {
       if (isSession) {
         if (request.method !== 'GET') return methodNotAllowed('GET');
         requireOnlyQueryParameters(url, []);
-        return jsonResponse({
-          schemaVersion: 'dashboard_session_v1',
-          csrfHeader: 'X-Dexter-CSRF',
-          csrfToken: this.csrfToken,
-        });
+        return jsonResponse(this.session.view());
       }
-
-      await this.#startupReconciliation;
 
       if (segments.length === 3 && segments[2] === 'preflights') {
         if (request.method !== 'POST') return methodNotAllowed('POST');
@@ -393,6 +336,8 @@ export class StrategyValidationDashboardApiV1 {
         requireOnlyQueryParameters(url, []);
         requireJsonMediaType(request);
         const body = parseJsonBody(await readBody(request, PREFLIGHT_BODY_LIMIT), PREFLIGHT_BODY_LIMIT);
+        validateStrategyValidationInputV1(body);
+        this.service.coordinator.assertHealthy();
         return jsonResponse(await this.service.createPreflight(body));
       }
 
@@ -409,6 +354,7 @@ export class StrategyValidationDashboardApiV1 {
         if (!parsed.success) {
           throw new StrategyValidationApiErrorV1(400, 'invalid_request', 'The request is invalid.');
         }
+        this.service.coordinator.assertHealthy();
         return jsonResponse(
           await this.service.acceptPreflight(parsed.data.preflightId, true),
           202,
@@ -418,6 +364,7 @@ export class StrategyValidationDashboardApiV1 {
       if (segments.length === 4 && segments[2] === 'jobs' && segments[3] === 'active') {
         if (request.method !== 'GET') return methodNotAllowed('GET');
         requireOnlyQueryParameters(url, []);
+        this.service.coordinator.assertHealthy();
         return jsonResponse({
           schemaVersion: 'strategy_validation_active_job_v1',
           job: await this.service.activeJob(),
@@ -435,7 +382,7 @@ export class StrategyValidationDashboardApiV1 {
         if (request.method === 'DELETE') {
           this.#requireMutationSecurity(request, url);
           const body = await readBody(request, 0).catch(error => {
-            if (error instanceof StrategyValidationApiErrorV1 && error.status === 413) {
+            if (error instanceof DashboardSecurityErrorV1 && error.reason === 'payload_too_large') {
               throw new StrategyValidationApiErrorV1(400, 'invalid_request', 'The request is invalid.');
             }
             throw error;
@@ -443,6 +390,7 @@ export class StrategyValidationDashboardApiV1 {
           if (body.byteLength !== 0) {
             throw new StrategyValidationApiErrorV1(400, 'invalid_request', 'The request is invalid.');
           }
+          this.service.coordinator.assertHealthy();
           const result = await this.service.cancelJob(segments[3]!);
           return jsonResponse(result.job, result.status);
         }
@@ -544,17 +492,7 @@ export class StrategyValidationDashboardApiV1 {
   }
 
   #requireMutationSecurity(request: Request, url: URL): void {
-    const host = request.headers.get('host');
-    const origin = request.headers.get('origin');
-    if (host === null || host.toLowerCase() !== url.host.toLowerCase()
-      || origin === null || origin !== url.origin) {
-      throw new StrategyValidationApiErrorV1(
-        403, 'forbidden_origin', 'The request Origin is not allowed.',
-      );
-    }
-    if (!constantTimeTokenEqual(request.headers.get('x-dexter-csrf'), this.csrfToken)) {
-      throw new StrategyValidationApiErrorV1(403, 'csrf_failed', 'The CSRF token is invalid.');
-    }
+    this.session.requireMutation(request, url);
   }
 
   #requireUuid(value: string | undefined): void {

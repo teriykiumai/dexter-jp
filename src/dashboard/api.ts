@@ -15,6 +15,8 @@ import {
 } from '../analysis/comparison/index.js';
 import { loadDashboardAsset } from './assets.js';
 import type { StrategyValidationDashboardApiV1 } from './strategy-validation-api.js';
+import { isAllowedDashboardHost } from './session.js';
+export { isAllowedDashboardHost } from './session.js';
 
 export type AnalysisSnapshotReader = Pick<
   AnalysisSnapshotRepository,
@@ -194,15 +196,6 @@ async function handleComparisonRequest(
   const target = await loadComparisonInput(repository, request, 'target');
   if ('outcome' in target) return comparisonResponse(target);
   return comparisonResponse(compareAnalysisSnapshotsV1({ ticker, base, target }));
-}
-
-export function isAllowedDashboardHost(host: string | null): boolean {
-  if (host === null) return false;
-  const match = /^(?:127\.0\.0\.1|localhost)(?::([1-9]\d{0,4}))?$/.exec(
-    host.trim().toLowerCase(),
-  );
-  if (!match) return false;
-  return match[1] === undefined || Number(match[1]) <= 65_535;
 }
 
 export async function handleDashboardRequest(

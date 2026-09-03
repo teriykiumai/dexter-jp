@@ -1,4 +1,10 @@
 import { randomUUID } from 'node:crypto';
+import { dexterPath } from '../../utils/paths.js';
+import {
+  absentMarketDataJobAdapterV1, DASHBOARD_ADMISSION_WARNING_V1, DashboardJobCoordinatorErrorV1,
+  DashboardJobCoordinatorV1, type DashboardJobLeaseV1, type DashboardJobProjectionV1,
+  type JobWriteOutcomeV1,
+} from '../dashboard-jobs/coordinator.js';
 import type { AnalysisSnapshotRepository } from '../snapshot/repository.js';
 import { canonicalJsonV1, type CanonicalJsonValue } from '../snapshot/canonical-json.js';
 import {
@@ -126,6 +132,9 @@ export interface StrategyValidationJobServiceOptionsV1 {
   readonly jobRepository?: StrategyValidationJobRepositoryV1;
   readonly executionEnvironment?: JQuantsExecutionEnvironmentV1;
   readonly requestsPerMinute?: number;
+  readonly coordinator?: DashboardJobCoordinatorV1;
+  readonly marketDataJobsDirectory?: string;
+  readonly enqueue?: (work: () => void) => void;
 }
 
 function utcFromMilliseconds(value: number): string {
@@ -155,22 +164,56 @@ export class StrategyValidationJobServiceV1 {
   readonly #requestsPerMinute: number;
   readonly #preflights = new Map<string, PreflightEntryV1>();
   readonly #controllers = new Map<string, AbortController>();
-  #initialization: Promise<void> | null = null;
-  #mutationTail: Promise<void> = Promise.resolve();
+  readonly coordinator: DashboardJobCoordinatorV1;
+  readonly #leases = new Map<string, DashboardJobLeaseV1>();
+  readonly #enqueue: (work: () => void) => void;
+  #recovering = false;
 
   constructor(options: StrategyValidationJobServiceOptionsV1) {
     this.#snapshotRepository = options.snapshotRepository;
     this.runRepository = options.runRepository ?? new StrategyValidationRunRepositoryV1();
     this.jobRepository = options.jobRepository ?? new StrategyValidationJobRepositoryV1();
-    this.#environment = options.executionEnvironment
-      ?? DEFAULT_JQUANTS_EXECUTION_ENVIRONMENT_V1;
-    this.#requestsPerMinute = options.requestsPerMinute
-      ?? resolveJQuantsRequestsPerMinuteV1();
+    this.#environment = options.coordinator?.environment ?? options.executionEnvironment ?? DEFAULT_JQUANTS_EXECUTION_ENVIRONMENT_V1;
+    this.#requestsPerMinute = options.coordinator?.requestsPerMinute ?? options.requestsPerMinute ?? resolveJQuantsRequestsPerMinuteV1();
+    this.#enqueue = options.enqueue ?? queueMicrotask;
+    this.coordinator = options.coordinator ?? new DashboardJobCoordinatorV1(this.#environment, this.#requestsPerMinute);
+    if (!options.coordinator) this.coordinator.register(absentMarketDataJobAdapterV1(
+      options.marketDataJobsDirectory ?? dexterPath('market-data', 'jobs'),
+    ));
+    this.coordinator.register({
+      domain: 'strategy_validation',
+      inventory: async () => {
+        const jobs = await this.jobRepository.list();
+        for (const job of jobs) {
+          await this.#validateTerminalJob(job);
+          if (!isStrategyValidationJobTerminalV1(job.status) && job.status !== 'publishing'
+            && await this.runRepository.hasRun(job.runId)) throw new StrategyValidationJobServiceErrorV1('artifact_unavailable');
+        }
+        return jobs.map(job => this.#projection(job));
+      },
+      isAbsent: async jobId => {
+        try { await this.jobRepository.load(jobId); return false; } catch (error) {
+          if (error instanceof StrategyValidationJobRepositoryErrorV1 && error.kind === 'missing_job') return true;
+          throw error;
+        }
+      },
+      cleanup: async () => {
+        await this.jobRepository.cleanupTemporaryFiles();
+        for (const job of await this.jobRepository.list()) {
+          if (isStrategyValidationJobTerminalV1(job.status)) await this.runRepository.cleanupTemporaryRun(job.runId);
+        }
+      },
+      reconcile: async projection => {
+        this.#recovering = true;
+        try { await this.#reconcileJob(await this.jobRepository.load(projection.jobId)); }
+        finally { this.#recovering = false; }
+      },
+    });
   }
 
-  initialize(): Promise<void> {
-    this.#initialization ??= this.#reconcileStartup();
-    return this.#initialization;
+  async initialize(): Promise<void> {
+    await this.coordinator.initialize();
+    this.coordinator.assertHealthy();
   }
 
   async createPreflight(value: unknown): Promise<StrategyValidationPreflightViewV1> {
@@ -189,11 +232,6 @@ export class StrategyValidationJobServiceV1 {
         requestsPerMinute: this.#requestsPerMinute,
       });
     const controls = requireFeasibleJQuantsExecutionV1(prepared.executionPlan);
-    this.#prunePreflights();
-    // A returned expiry is a capability contract; never evict a live identity for capacity.
-    if (this.#preflights.size >= STRATEGY_VALIDATION_PREFLIGHT_MAX_ENTRIES) {
-      throw new StrategyValidationJobServiceErrorV1('internal_failure');
-    }
     const preflightId = randomUUID();
     const expiresAt = utcFromMilliseconds(Date.parse(startedAt) + STRATEGY_VALIDATION_PREFLIGHT_TTL_MS);
     const tickers = input.mode === 'snapshot'
@@ -204,9 +242,11 @@ export class StrategyValidationJobServiceV1 {
       ? Object.freeze([
         CAMPAIGN_RECONSTRUCTION_WARNING_V1,
         'Pagination, retries, response latency, validation, and persistence can still exhaust the fixed execution budget.',
+        DASHBOARD_ADMISSION_WARNING_V1,
       ])
       : Object.freeze([
         'Pagination, retries, response latency, validation, and persistence can still exhaust the fixed execution budget.',
+        DASHBOARD_ADMISSION_WARNING_V1,
       ]);
     const view: StrategyValidationPreflightViewV1 = Object.freeze({
       schemaVersion: STRATEGY_VALIDATION_PREFLIGHT_SCHEMA_VERSION,
@@ -227,13 +267,16 @@ export class StrategyValidationJobServiceV1 {
       executionBudgetMs: controls.executionBudgetMs,
       warnings,
     });
-    this.#preflights.set(preflightId, Object.freeze({
-      view,
-      input,
-      prepared,
-      consumed: false,
-    }));
-    return view;
+    return this.#exclusive(async () => {
+      this.coordinator.assertHealthy();
+      this.#prunePreflights();
+      // Keep capability capacity atomic even when local preflights finish concurrently.
+      if (this.#preflights.size >= STRATEGY_VALIDATION_PREFLIGHT_MAX_ENTRIES) {
+        throw new StrategyValidationJobServiceErrorV1('internal_failure');
+      }
+      this.#preflights.set(preflightId, Object.freeze({ view, input, prepared, consumed: false }));
+      return view;
+    });
   }
 
   async acceptPreflight(
@@ -244,8 +287,13 @@ export class StrategyValidationJobServiceV1 {
     if (confirmExternalFetch !== true) {
       throw new StrategyValidationJobServiceErrorV1('preflight_mismatch');
     }
-    return this.#exclusive(async () => {
-      const entry = this.#preflight(preflightId);
+    const jobId = createStrategyValidationJobIdV1();
+    let created!: StrategyValidationJobV1;
+    let prepared!: StrategyValidationPreparedPreflightV1;
+    let accepted!: AcceptedJQuantsExecutionV1;
+    let entry!: PreflightEntryV1;
+    const revalidate = () => {
+      entry = this.#preflight(preflightId);
       const now = this.#environment.wallNowMs();
       if (now >= Date.parse(entry.view.expiresAt)) {
         this.#preflights.delete(preflightId);
@@ -255,70 +303,106 @@ export class StrategyValidationJobServiceV1 {
       if (digestStrategyValidationInputV1(entry.input) !== entry.view.inputDigest) {
         throw new StrategyValidationJobServiceErrorV1('preflight_mismatch');
       }
-      if (await this.#activeJobInternal() !== null) {
-        throw new StrategyValidationJobServiceErrorV1('active_job_conflict');
-      }
-      const accepted = acceptJQuantsExecutionV1(entry.prepared.executionPlan, this.#environment);
-      const jobId = createStrategyValidationJobIdV1();
-      const runId = createStrategyValidationRunIdV1();
-      const job = StrategyValidationJobV1Schema.parse({
-        schemaVersion: 'strategy_validation_job_v1',
-        jobId,
-        runId,
-        mode: entry.input.mode,
-        inputDigest: entry.view.inputDigest,
-        selector: entry.prepared.selector,
-        startedAt: entry.prepared.startedAt,
-        acceptedAt: accepted.acceptedAt,
-        executionDeadline: accepted.executionDeadline,
-        executionControls: accepted.controls,
-        status: 'preparing',
-        createdAt: accepted.acceptedAt,
-        updatedAt: accepted.acceptedAt,
-        finishedAt: null,
-        cancellationRequestedAt: null,
-        outcomeAsOfSession: null,
-        expectedRunPayloadDigest: null,
-        progress: { attemptCount: 0, caseCount: 0 },
-        failure: null,
-      });
-      const created = await this.jobRepository.create(job);
-      this.#preflights.set(preflightId, Object.freeze({ ...entry, consumed: true }));
-      queueMicrotask(() => {
-        void this.#execute(created, entry.prepared, accepted);
-      });
-      return Object.freeze({
-        schemaVersion: 'strategy_validation_job_accepted_v1',
-        job: strategyValidationJobViewV1(created),
-        statusUrl: `/api/strategy-validation/jobs/${jobId}`,
-      });
+      requireFeasibleJQuantsExecutionV1(entry.prepared.executionPlan);
+    };
+    await this.coordinator.admit({ kind: 'strategy_validation', jobId, revalidate,
+      create: async lease => {
+        prepared = entry.prepared;
+        accepted = acceptJQuantsExecutionV1(prepared.executionPlan, {
+          ...this.#environment, wallNowMs: () => lease.acceptedAtMs, monotonicNowMs: () => lease.monotonicOriginMs,
+        });
+        const runId = createStrategyValidationRunIdV1();
+        const job = StrategyValidationJobV1Schema.parse({
+          schemaVersion: 'strategy_validation_job_v1',
+          jobId,
+          runId,
+          mode: entry.input.mode,
+          inputDigest: entry.view.inputDigest,
+          selector: entry.prepared.selector,
+          startedAt: entry.prepared.startedAt,
+          acceptedAt: accepted.acceptedAt,
+          executionDeadline: accepted.executionDeadline,
+          executionControls: accepted.controls,
+          status: 'preparing',
+          createdAt: accepted.acceptedAt,
+          updatedAt: accepted.acceptedAt,
+          finishedAt: null,
+          cancellationRequestedAt: null,
+          outcomeAsOfSession: null,
+          expectedRunPayloadDigest: null,
+          progress: { attemptCount: 0, caseCount: 0 },
+          failure: null,
+        });
+        const outcome = await this.jobRepository.createWithOutcome(job);
+        if (outcome.state === 'published') created = outcome.record;
+        return this.#projectOutcome(outcome);
+      },
+      adopt: lease => {
+        this.#leases.set(jobId, lease);
+        this.#preflights.set(preflightId, Object.freeze({ ...entry, consumed: true }));
+        this.#enqueue(() => {
+          void this.#execute(created, prepared, accepted);
+        });
+      },
+    });
+    return Object.freeze({
+      schemaVersion: 'strategy_validation_job_accepted_v1',
+      job: strategyValidationJobViewV1(created),
+      statusUrl: `/api/strategy-validation/jobs/${jobId}`,
     });
   }
 
   async activeJob(): Promise<StrategyValidationJobViewV1 | null> {
     await this.initialize();
     return this.#exclusive(async () => {
-      const job = await this.#activeJobInternal();
-      return job === null ? null : strategyValidationJobViewV1(job);
+      const active = await this.coordinator.active();
+      if (!active) return null;
+      if (active.kind !== 'strategy_validation') throw new DashboardJobCoordinatorErrorV1('active_job_conflict', undefined, active.kind);
+      try {
+        const job = await this.jobRepository.load(active.jobId);
+        if (isStrategyValidationJobTerminalV1(job.status)) throw new Error('Active record changed.');
+        return strategyValidationJobViewV1(job);
+      } catch {
+        this.coordinator.latchRecovery();
+        this.coordinator.assertHealthy();
+        return null;
+      }
     });
   }
 
   async getJob(jobId: string): Promise<StrategyValidationJobViewV1> {
-    await this.initialize();
+    void this.initialize().catch(() => undefined);
     return this.#exclusive(async () => {
       let job: StrategyValidationJobV1;
       try {
         job = await this.jobRepository.load(jobId);
       } catch (error) {
+        if (!(error instanceof StrategyValidationJobRepositoryErrorV1) || error.kind !== 'missing_job'
+          || this.coordinator.owns({ domain: 'strategy_validation', kind: 'strategy_validation', jobId, terminal: false })) {
+          this.coordinator.latchRecovery();
+          if (!(error instanceof StrategyValidationJobRepositoryErrorV1) || error.kind !== 'missing_job') {
+            this.coordinator.assertHealthy();
+          }
+        }
         throw this.#mapJobRepositoryError(error);
       }
-      await this.#validateTerminalJob(job);
+      try { await this.#validateTerminalJob(job); } catch {
+        this.coordinator.latchRecovery();
+        this.coordinator.assertHealthy();
+      }
+      if (!isStrategyValidationJobTerminalV1(job.status)) {
+        this.coordinator.assertHealthy();
+        if (!this.coordinator.owns(this.#projection(job))) {
+          this.coordinator.latchRecovery();
+          this.coordinator.assertHealthy();
+        }
+      }
       return strategyValidationJobViewV1(job);
     });
   }
 
   async listRuns(): Promise<readonly LoadedStrategyValidationRunV1[]> {
-    await this.initialize();
+    void this.initialize().catch(() => undefined);
     return this.#exclusive(async () => {
       const runs = await this.runRepository.list();
       const jobs = await this.#jobsForRunValidation();
@@ -328,7 +412,7 @@ export class StrategyValidationJobServiceV1 {
   }
 
   async loadRun(runId: string): Promise<LoadedStrategyValidationRunV1> {
-    await this.initialize();
+    void this.initialize().catch(() => undefined);
     return this.#exclusive(async () => {
       const run = await this.runRepository.load(runId);
       await this.#validateRunJobAssociation(run, await this.#jobsForRunValidation());
@@ -346,16 +430,29 @@ export class StrategyValidationJobServiceV1 {
   async cancelJob(jobId: string): Promise<StrategyValidationCancellationResultV1> {
     await this.initialize();
     return this.#exclusive(async () => {
+      this.coordinator.assertHealthy();
       let job: StrategyValidationJobV1;
       try {
         job = await this.jobRepository.load(jobId);
       } catch (error) {
+        if (!(error instanceof StrategyValidationJobRepositoryErrorV1) || error.kind !== 'missing_job') {
+          this.coordinator.latchRecovery();
+          this.coordinator.assertHealthy();
+        }
+        if (this.coordinator.owns({ domain: 'strategy_validation', kind: 'strategy_validation', jobId, terminal: false })) {
+          this.coordinator.latchRecovery();
+        }
         throw this.#mapJobRepositoryError(error);
       }
       if (job.status === 'cancelled') {
+        try { await this.#validateTerminalJob(job); } catch {
+          this.coordinator.latchRecovery();
+          this.coordinator.assertHealthy();
+        }
         return Object.freeze({ status: 200, job: strategyValidationJobViewV1(job) });
       }
       if (job.status === 'cancel_requested') {
+        this.#requireLease(job.jobId);
         return Object.freeze({ status: 202, job: strategyValidationJobViewV1(job) });
       }
       if (!['preparing', 'collecting', 'validating'].includes(job.status)) {
@@ -379,6 +476,7 @@ export class StrategyValidationJobServiceV1 {
     this.#controllers.set(initial.jobId, controller);
     try {
       const collecting = await this.#exclusive(async () => {
+        this.#requireLease(initial.jobId);
         const current = await this.jobRepository.load(initial.jobId);
         if (current.status === 'cancel_requested') {
           controller.abort();
@@ -388,11 +486,16 @@ export class StrategyValidationJobServiceV1 {
       });
       const activeRuntime = new JQuantsExecutionRuntimeV1(accepted, {
         environment: this.#environment,
-        signal: controller.signal,
+        signal: AbortSignal.any([controller.signal, this.#requireLease(initial.jobId).signal]),
+        dashboardDispatch: {
+          assertCanContinue: () => { this.#requireLease(initial.jobId); },
+          dispatch: (check, start, signal) => this.coordinator.dispatch(this.#requireLease(initial.jobId), check, start, signal),
+        },
       });
       runtime = activeRuntime;
       const onOutcomeAsOfSession = async (outcomeAsOfSession: string): Promise<void> => {
         await this.#exclusive(async () => {
+          this.#requireLease(initial.jobId);
           const current = await this.jobRepository.load(collecting.jobId);
           if (current.status !== 'collecting' && current.status !== 'cancel_requested') {
             controller.abort();
@@ -417,6 +520,7 @@ export class StrategyValidationJobServiceV1 {
         attemptCount: number;
       }>): Promise<void> => {
         await this.#exclusive(async () => {
+          this.#requireLease(initial.jobId);
           const current = await this.jobRepository.load(collecting.jobId);
           if (current.status !== 'collecting') {
             controller.abort();
@@ -470,6 +574,7 @@ export class StrategyValidationJobServiceV1 {
           beforePromote,
         });
       await this.#exclusive(async () => {
+        this.#requireLease(initial.jobId);
         const current = await this.jobRepository.load(initial.jobId);
         const loaded = await this.runRepository.load(initial.runId);
         if (current.status !== 'publishing'
@@ -495,6 +600,7 @@ export class StrategyValidationJobServiceV1 {
       );
     } finally {
       this.#controllers.delete(initial.jobId);
+      this.#leases.delete(initial.jobId);
     }
   }
 
@@ -505,13 +611,18 @@ export class StrategyValidationJobServiceV1 {
     attemptCount: number,
   ): Promise<void> {
     await this.#exclusive(async () => {
+      try { this.#requireLease(jobId); } catch { return; }
       let current: StrategyValidationJobV1;
       try {
         current = await this.jobRepository.load(jobId);
       } catch {
+        this.coordinator.latchRecovery();
         return;
       }
-      if (isStrategyValidationJobTerminalV1(current.status)) return;
+      if (isStrategyValidationJobTerminalV1(current.status)) {
+        this.coordinator.latchRecovery();
+        return;
+      }
       const cancelled = signal.aborted
         || current.status === 'cancel_requested'
         || (error instanceof JQuantsValidationErrorV1 && error.code === 'cancelled');
@@ -591,22 +702,7 @@ export class StrategyValidationJobServiceV1 {
           progress: Object.freeze({ ...current.progress, attemptCount }),
         });
       }
-    }).catch(() => undefined);
-  }
-
-  async #reconcileStartup(): Promise<void> {
-    try {
-      await this.jobRepository.cleanupTemporaryFiles();
-      const jobs = await this.jobRepository.list();
-      const nonterminal = jobs.filter(job => !isStrategyValidationJobTerminalV1(job.status));
-      if (nonterminal.length > 1) {
-        throw new StrategyValidationJobServiceErrorV1('artifact_unavailable');
-      }
-      for (const job of jobs) await this.#reconcileJob(job);
-    } catch (error) {
-      if (error instanceof StrategyValidationJobServiceErrorV1) throw error;
-      throw new StrategyValidationJobServiceErrorV1('artifact_unavailable', error);
-    }
+    }).catch(() => { this.coordinator.latchRecovery(); });
   }
 
   async #reconcileJob(job: StrategyValidationJobV1): Promise<void> {
@@ -637,6 +733,7 @@ export class StrategyValidationJobServiceV1 {
           }),
         });
       } catch (error) {
+        if (error instanceof DashboardJobCoordinatorErrorV1) throw error;
         await this.#transition(job, 'failed', {
           failure: publicFailure('artifact_unavailable'),
         });
@@ -714,22 +811,11 @@ export class StrategyValidationJobServiceV1 {
       && job.progress.caseCount === loaded.run.caseReferences.length;
   }
 
-  async #activeJobInternal(): Promise<StrategyValidationJobV1 | null> {
-    let jobs: readonly StrategyValidationJobV1[];
-    try {
-      jobs = await this.jobRepository.list();
-    } catch (error) {
-      throw this.#mapJobRepositoryError(error);
-    }
-    const active = jobs.filter(job => !isStrategyValidationJobTerminalV1(job.status));
-    if (active.length > 1) throw new StrategyValidationJobServiceErrorV1('artifact_unavailable');
-    return active[0] ?? null;
-  }
-
   async #jobsForRunValidation(): Promise<readonly StrategyValidationJobV1[]> {
     try {
       return await this.jobRepository.list();
     } catch (error) {
+      this.coordinator.latchRecovery();
       throw this.#mapJobRepositoryError(error);
     }
   }
@@ -789,7 +875,7 @@ export class StrategyValidationJobServiceV1 {
         ? patch.expectedRunPayloadDigest ?? current.expectedRunPayloadDigest
         : null,
     });
-    return this.jobRepository.replace(next);
+    return this.#storeJob(next);
   }
 
   async #rewriteJob(
@@ -801,7 +887,36 @@ export class StrategyValidationJobServiceV1 {
       ...patch,
       updatedAt: utcFromMilliseconds(this.#environment.wallNowMs()),
     });
-    return this.jobRepository.replace(next);
+    return this.#storeJob(next);
+  }
+
+  #projection(job: StrategyValidationJobV1): DashboardJobProjectionV1 {
+    return { domain: 'strategy_validation', kind: 'strategy_validation', jobId: job.jobId,
+      terminal: isStrategyValidationJobTerminalV1(job.status) };
+  }
+
+  #projectOutcome(outcome: JobWriteOutcomeV1<StrategyValidationJobV1>): JobWriteOutcomeV1<DashboardJobProjectionV1> {
+    return outcome.state === 'published' ? { state: 'published', record: this.#projection(outcome.record) } : outcome;
+  }
+
+  #requireLease(jobId: string): DashboardJobLeaseV1 {
+    this.coordinator.assertHealthy();
+    const lease = this.#leases.get(jobId);
+    if (!lease) throw new DashboardJobCoordinatorErrorV1('recovery_required');
+    this.coordinator.assertOwner(lease);
+    return lease;
+  }
+
+  async #storeJob(next: StrategyValidationJobV1): Promise<StrategyValidationJobV1> {
+    const lease = this.#recovering ? null : this.#requireLease(next.jobId);
+    let outcome: JobWriteOutcomeV1<StrategyValidationJobV1>;
+    try { outcome = await this.jobRepository.replaceWithOutcome(next); } catch { outcome = { state: 'ambiguous' }; }
+    if (lease) await this.coordinator.afterReplace(lease, this.#projectOutcome(outcome));
+    if (outcome.state !== 'published') {
+      this.coordinator.latchRecovery();
+      throw new DashboardJobCoordinatorErrorV1('recovery_required');
+    }
+    return outcome.record;
   }
 
   #mapJobRepositoryError(error: unknown): StrategyValidationJobServiceErrorV1 {
@@ -818,14 +933,6 @@ export class StrategyValidationJobServiceV1 {
   }
 
   async #exclusive<T>(operation: () => Promise<T>): Promise<T> {
-    const preceding = this.#mutationTail;
-    let release!: () => void;
-    this.#mutationTail = new Promise<void>(resolve => { release = resolve; });
-    await preceding;
-    try {
-      return await operation();
-    } finally {
-      release();
-    }
+    return this.coordinator.exclusive(operation);
   }
 }

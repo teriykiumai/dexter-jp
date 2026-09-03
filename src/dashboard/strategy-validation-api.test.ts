@@ -15,6 +15,8 @@ import {
 } from '../analysis/strategy-validation/index.js';
 import { handleDashboardRequest } from './api.js';
 import { StrategyValidationDashboardApiV1 } from './strategy-validation-api.js';
+import { DashboardJobCoordinatorV1, DASHBOARD_ADMISSION_WARNING_V1, DASHBOARD_INITIALIZING_MESSAGE_V1,
+  DASHBOARD_RECOVERY_MESSAGE_V1, type DashboardJobLeaseV1, type DashboardJobProjectionV1 } from '../analysis/dashboard-jobs/coordinator.js';
 
 const roots: string[] = [];
 const CSRF_TOKEN = Buffer.alloc(32, 7).toString('base64url');
@@ -102,6 +104,9 @@ async function context(options: Readonly<{
   promoteDirectory?: PromoteStrategyValidationRunDirectoryV1;
   beforePublish?: () => Promise<void>;
   requestsPerMinute?: number;
+  coordinator?: DashboardJobCoordinatorV1;
+  enqueue?: (work: () => void) => void;
+  initialize?: boolean;
 }> = {}) {
   const root = await mkdtemp(join(tmpdir(), 'dexter-strategy-api-'));
   roots.push(root);
@@ -127,8 +132,12 @@ async function context(options: Readonly<{
     jobRepository: jobs,
     executionEnvironment: options.environment ?? executionEnvironment(),
     requestsPerMinute: options.requestsPerMinute ?? 500,
+    marketDataJobsDirectory: join(root, 'market-data', 'jobs'),
+    coordinator: options.coordinator,
+    enqueue: options.enqueue,
   });
   const api = new StrategyValidationDashboardApiV1(service, CSRF_TOKEN);
+  if (options.initialize !== false) await service.initialize();
   return { root, snapshots, runs, jobs, service, api };
 }
 
@@ -206,6 +215,109 @@ afterEach(async () => {
 });
 
 describe('Phase 4 Strategy-validation local API', () => {
+  test('cross-kind admission keeps cooldown separate from active and preserves an unconsumed preflight', async () => {
+    let now = 0;
+    const environment = { ...executionEnvironment(), monotonicNowMs: () => now };
+    const coordinator = new DashboardJobCoordinatorV1(environment, 5);
+    let marketJob: DashboardJobProjectionV1 | null = null;
+    let lease!: DashboardJobLeaseV1;
+    coordinator.register({ domain: 'market_data', inventory: async () => marketJob ? [marketJob] : [],
+      isAbsent: async () => marketJob === null, cleanup: async () => {}, reconcile: async () => {} });
+    const queued: Array<() => void> = [];
+    const value = await context({ coordinator, enqueue: work => queued.push(work) });
+    const saved = await value.snapshots.save(comparisonSnapshot());
+    const preflightResponse = await call(value, request('/api/strategy-validation/preflights', { method: 'POST',
+      body: JSON.stringify({ mode: 'snapshot', ticker: '7203', snapshotId: saved.snapshotId }) }));
+    const preflight = await json(preflightResponse);
+    expect(preflight.warnings).toContain(DASHBOARD_ADMISSION_WARNING_V1);
+    await coordinator.admit({ kind: 'technical_refresh', jobId: '12345678-1234-4234-8234-123456789012',
+      revalidate() {}, create: async accepted => {
+        marketJob = { domain: 'market_data', kind: accepted.kind, jobId: accepted.jobId, terminal: false };
+        return { state: 'published', record: marketJob };
+      }, adopt: accepted => { lease = accepted; } });
+    const active = await call(value, request('/api/strategy-validation/jobs/active'));
+    expect(active.status).toBe(409);
+    expect(active.headers.get('Retry-After')).toBeNull();
+    expect(await json(active)).toEqual({ error: { code: 'active_job_conflict', message: 'テクニカル更新ジョブが実行中です。' } });
+    await coordinator.dispatch(lease, () => {}, async () => undefined);
+    now = 10_000;
+    await coordinator.dispatch(lease, () => {}, async () => undefined);
+    await coordinator.exclusive(async () => {
+      marketJob = { ...marketJob!, terminal: true };
+      await coordinator.afterReplace(lease, { state: 'published', record: marketJob });
+    });
+    const start = () => call(value, request('/api/strategy-validation/jobs', { method: 'POST',
+      body: JSON.stringify({ preflightId: preflight.preflightId, confirmExternalFetch: true }) }));
+    now = 60_000;
+    const cooldown = await start();
+    expect(cooldown.status).toBe(409);
+    expect(cooldown.headers.get('Retry-After')).toBe('10');
+    expect(await json(cooldown)).toEqual({ error: { code: 'active_job_conflict',
+      message: 'J-Quantsの通信間隔を確保するため、あと 10 秒待って再度実行してください。ジョブは未受付です。' } });
+    expect(await value.jobs.list()).toHaveLength(0);
+    expect(queued).toHaveLength(0);
+    expect(await json(await call(value, request('/api/strategy-validation/jobs/active')))).toMatchObject({ job: null });
+    now = 70_000;
+    const accepted = await start();
+    expect(accepted.status).toBe(202);
+    expect(await value.jobs.list()).toHaveLength(1);
+    expect(queued).toHaveLength(1);
+    expect(await json(await start())).toMatchObject({ error: { code: 'preflight_consumed' } });
+  });
+
+  test('initializing and latched recovery retain session access and method/security/body precedence', async () => {
+    let resolveProbe!: () => void;
+    const barrier = new Promise<void>(resolve => { resolveProbe = resolve; });
+    const coordinator = new DashboardJobCoordinatorV1(executionEnvironment(), 5);
+    coordinator.register({ domain: 'market_data', inventory: async () => { await barrier; return []; },
+      isAbsent: async () => true, cleanup: async () => {}, reconcile: async () => {} });
+    const value = await context({ coordinator, initialize: false });
+    const jobPath = '/api/strategy-validation/jobs/12345678-1234-4234-8234-123456789012';
+    const startBody = JSON.stringify({ preflightId: '12345678-1234-4234-8234-123456789012', confirmExternalFetch: true });
+    for (const message of [DASHBOARD_INITIALIZING_MESSAGE_V1, DASHBOARD_RECOVERY_MESSAGE_V1]) {
+      expect((await call(value, request('/api/session'))).status).toBe(200);
+      for (const req of [request('/api/strategy-validation/jobs/active'),
+        request('/api/strategy-validation/jobs', { method: 'POST', body: startBody }),
+        request(jobPath, { method: 'DELETE' })]) {
+        const response = await call(value, req);
+        expect(response.status).toBe(500);
+        expect(response.headers.get('Retry-After')).toBeNull();
+        expect(await json(response)).toEqual({ error: { code: 'artifact_unavailable', message } });
+      }
+      for (const [req, status] of [
+        [request('/api/strategy-validation/jobs', { method: 'GET' }), 405],
+        [request('/api/strategy-validation/jobs', { method: 'POST', body: startBody, csrf: null }), 403],
+        [request('/api/strategy-validation/jobs', { method: 'POST', body: '{}' }), 400],
+        [request('/api/strategy-validation/jobs', { method: 'POST', body: ' '.repeat(4097) }), 413],
+        [request('/api/strategy-validation/preflights', { method: 'POST', body: '{}' }), 400],
+        [request(jobPath, { method: 'DELETE', body: '{}' }), 400],
+      ] as const) expect((await call(value, req)).status).toBe(status);
+      if (message === DASHBOARD_INITIALIZING_MESSAGE_V1) {
+        resolveProbe();
+        await value.service.initialize();
+        coordinator.latchRecovery();
+      }
+    }
+    expect((await call(value, request(jobPath))).status).toBe(404);
+    expect(await value.jobs.list()).toHaveLength(0);
+  });
+
+  test.each(['GET', 'DELETE'])('a corrupt exact-job %s immediately latches admission without rewriting evidence', async method => {
+    const value = await context({ enqueue: () => {} });
+    const saved = await value.snapshots.save(comparisonSnapshot());
+    const preflight = await value.service.createPreflight({ mode: 'snapshot', ticker: '7203', snapshotId: saved.snapshotId });
+    const accepted = await value.service.acceptPreflight(preflight.preflightId, true);
+    const path = join(value.jobs.jobsDirectory, `${accepted.job.jobId}.json`);
+    await writeFile(path, '{');
+    const response = await call(value, request(`/api/strategy-validation/jobs/${accepted.job.jobId}`, { method }));
+    expect(response.status).toBe(500);
+    expect(await json(response)).toEqual({ error: { code: 'artifact_unavailable', message: DASHBOARD_RECOVERY_MESSAGE_V1 } });
+    expect(response.headers.get('Retry-After')).toBeNull();
+    expect(() => value.service.coordinator.assertHealthy()).toThrow();
+    expect(await Bun.file(path).text()).toBe('{');
+    expect((await call(value, request('/api/strategy-validation/jobs/active'))).status).toBe(500);
+  });
+
   test('rotates a 32-byte process CSRF token and returns no capability or path detail', async () => {
     const first = await context();
     const response = await call(first, request('/api/session', { origin: null, csrf: null }));

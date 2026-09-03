@@ -1,7 +1,8 @@
 # Dexter JP Dashboard Refresh Handoff
 
-**Status:** DR-0 and DR-V1-V3 merged. DR-T0 remains on hold after read-only source
-investigation; DR-T1 pure-series candidate awaits independent review and merge.
+**Status:** DR-0, DR-V1-V3, and DR-T1 merged. DR-T0 remains on hold after read-only
+source investigation; DR-C1 shared-coordinator candidate awaits independent review
+and merge.
 No Technical source adapter, artifact, refresh API, or new chart controls exist yet.
 
 **Last Updated:** 2026-09-03
@@ -42,7 +43,7 @@ The implemented baseline includes:
 No Dashboard Refresh Technical artifact, Market Overview artifact, refresh route,
 new visual token system, or seventh tab exists at this baseline.
 
-## 3. Merged visual steps and current DR-T1 boundary
+## 3. Merged visual/pure-series steps and current DR-C1 boundary
 
 The DR-0 branch was:
 
@@ -197,6 +198,35 @@ cannot infer a missing instrument row: callers must supply a proved gap or fail.
 It exposes no full artifact schema, source registry, persistence, job, API, CLI,
 UI, or dependency. Dashboard charts still render stored Snapshot values only.
 
+PR #98 received an independent `Mergeable` review for exact head
+`07af3dc72e900bad0b1444384175264b03db1d18`, with zero BLOCKING/MAJOR findings and
+canonical test/typecheck CI green. Following user authorization it merged on
+2026-09-03 as `dd4c593e3538828a843db024b136a36f931905d5`; merged-main CI also passed.
+Local `main` was fast-forwarded before creating:
+
+```text
+feat/dashboard-coordinator-step1
+```
+
+DR-C1 extracts the shared Dashboard session/security helpers and introduces one
+process-owned coordinator for all three job kinds. It retains actual-attempt times
+across runtime/job boundaries, rejects admission until the log is empty, serializes
+native inventory/write/release proofs, and latches uncertain storage until restart.
+The native Phase 4 schema and publishing/completed-run reconciliation are retained.
+Create/replace results now distinguish definitely-unpublished, strictly proved full-
+payload publication, and ambiguous publication. Failed exact-job/cancellation reads
+also stop admission rather than allowing an unverified owner to continue.
+
+The two-slot registry uses the real Strategy Validation adapter and an absent/empty
+Market Data jobs-directory probe. It does not implement a Market Data job schema,
+repository, API, source, artifact, or refresh UI. Combined startup inventory precedes
+all native cleanup/reconciliation; multiple or unreadable records preserve evidence.
+The existing Validation error surface stops automatic job reads after failure and
+labels retained nonterminal content as last-known through tab/ticker remounts until
+full reload. Cooldown preserves preflight/confirmation for explicit manual retry.
+No visual tokens, financial calculations, Snapshot versions, dependencies, or
+standalone CLI behavior change. The DR-V3 MINOR findings remain outside this scope.
+
 ## 4. Adopted product boundary
 
 Dashboard Refresh is independent from Phase 5 and must finish first. It adopts:
@@ -274,7 +304,7 @@ contract and fail closed for IPO, delist/relist, or code-reuse ambiguity before 
 production adapter or UI is exposed. Normal CI and Playwright use fixtures only and
 must not contact J-Quants.
 
-## 6. DR-T0 hold and next step after DR-T1 merge
+## 6. DR-T0 hold and next step after DR-C1 merge
 
 Read-only investigation of the official J-Quants master specification did not
 establish a continuous listing-segment proof within the planned attempt/time bounds.
@@ -283,10 +313,10 @@ no source contract was approved, and no lifetime source ID was frozen. The user
 explicitly accepted keeping DR-T0 on hold and proceeding with the independent DR-T1
 pure step allowed by the approved dependency graph.
 
-The next dependency step is **DR-C1 — shared Dashboard session and empty-start
-coordinator**. It may start only after:
+The next dependency step is **DR-A1 — canonical content/receipt repository**.
+It may start only after:
 
-1. the exact DR-T1 head has no BLOCKING or MAJOR independent-review finding;
+1. the exact DR-C1 head has no BLOCKING or MAJOR independent-review finding;
 2. required CI is green;
 3. the user authorizes and completes merge;
 4. local `main` is fast-forwarded to the merged `origin/main`; and
@@ -353,7 +383,7 @@ updated only where the approved seven-tab/Light composition changes expectations
 All new journeys reject unexpected API and external requests; all data is synthetic.
 These predecessor results do not prove any market-data source gate.
 
-### 7.2 Current DR-T1 candidate
+### 7.2 Merged DR-T1 predecessor evidence
 
 | Validation | Result |
 | --- | --- |
@@ -371,7 +401,37 @@ partial exclusion, indicator warm-up and exact-prefix parity, cross equality, th
 34-month boundary, arithmetic overflow, and non-mutation. All new fixtures are
 synthetic and perform no external I/O. Shared Engine regression and existing
 Snapshot/API/Strategy tests are retained; no source entitlement was tested.
-The DR-T1 PR still requires independent review and canonical test/typecheck CI.
+PR #98 subsequently passed independent review and canonical test/typecheck CI.
+
+### 7.3 Current DR-C1 candidate
+
+The synthetic coordinator tests cover all nine job-kind transitions, R=1/2/5 shared
+dispatch, exact newest-attempt cooldown boundaries, concurrent manual retries,
+preflight revalidation after inventory, stale ownership, monotonic-clock failures,
+zero/one/multiple/corrupt startup inventories, and create/replace/queue failure.
+Native filesystem fault tests cover errors before and after actual link/rename,
+cleanup/final-read failures, strict full-payload mismatch, preserved evidence,
+cancel-request writes, and restart after a completed rename. HTTP tests preserve
+security/method/body precedence, session availability, safe native codes/messages,
+true-idle versus other-kind conflict, and manual preflight reuse without admission.
+
+Browser coverage includes retained confirmation, manual retry and preflight expiry,
+cross-kind/initialization failures, last-known state, no automatic mutations, halted
+reads through visibility/tab/ticker changes, and explicit full-reload recovery.
+All data and requests are local synthetic fixtures, not entitlement/source smoke.
+
+| Validation | Result |
+| --- | --- |
+| coordinator, native job artifact, shared session and API focused tests | 63 passed, 0 failed |
+| `bun test` | 1058 passed, 0 failed, across 87 files |
+| `bun run typecheck` | same Windows Bun launcher failure before compiler execution |
+| `bun node_modules/typescript/bin/tsc --noEmit` | passed using the installed compiler |
+| `bun run test:dashboard-browser` | 80 passed, 0 failed (76 inherited + 4 DR-C1 journeys) |
+| `git diff --check` | passed; only the checkout's LF-to-CRLF conversion warning |
+| merged DR-T1 main CI | passed for `dd4c593e3538828a843db024b136a36f931905d5` |
+
+The DR-C1 candidate still requires independent review and canonical test/typecheck
+CI; local direct-compiler success does not replace the canonical CI command.
 
 ## 8. Remaining risks
 
@@ -385,9 +445,8 @@ The DR-T1 PR still requires independent review and canonical test/typecheck CI.
 - Adjusted ETF price is not distribution-reinvested total return.
 - Unadjusted margin quantities can have a unit-basis break at a split and must not be
   drawn as one continuous comparable series.
-- The existing session token and request limiter are currently owned by narrower
-  Strategy Validation components; DR-C1 must extract shared Dashboard-process
-  ownership while preserving empty-start accepted-job timing and security. A recent
+- DR-C1's candidate shared session/coordinator still requires independent review;
+  its guarantee is limited to one running Dashboard process. A recent
   dispatch can refuse new admission for up to 60 seconds even after job completion;
   the client must retry explicitly. CLI/second-process account-level coordination
   remains explicitly unsupported.

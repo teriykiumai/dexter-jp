@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { access, mkdir, mkdtemp, rename, rm } from 'node:fs/promises';
+import { access, link, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { comparisonSnapshot } from '../comparison/test-fixtures.js';
@@ -19,12 +19,12 @@ import { StrategyValidationJobRepositoryV1, StrategyValidationJobV1Schema } from
 import {
   STRATEGY_VALIDATION_PREFLIGHT_MAX_ENTRIES,
   STRATEGY_VALIDATION_PREFLIGHT_TTL_MS,
-  StrategyValidationJobServiceErrorV1,
   StrategyValidationJobServiceV1,
 } from './job-service.js';
 import type { JQuantsExecutionEnvironmentV1 } from './jquants-execution.js';
 import { StrategyValidationRunRepositoryV1 } from './run-repository.js';
 import { createPointInTimeSourceManifestV1 } from './source-manifest.js';
+import { DashboardJobCoordinatorErrorV1 } from '../dashboard-jobs/coordinator.js';
 
 const roots: string[] = [];
 const JOB_ID = '33333333-3333-4333-8333-333333333333';
@@ -149,6 +149,98 @@ afterEach(async () => {
 });
 
 describe('Strategy-validation Dashboard job service', () => {
+  test('definitely-unpublished create preserves preflight; retry publishes and enqueues exactly once', async () => {
+    const store = await stores(); const clock = environment(); const saved = await localSnapshot(store.snapshots);
+    let fail = true; let queues = 0;
+    const jobs = new StrategyValidationJobRepositoryV1(store.jobs.rootDirectory, { io: {
+      writeFile: async (...args) => { if (fail) throw new Error('before promotion'); return writeFile(...args); },
+    } });
+    const service = new StrategyValidationJobServiceV1({ snapshotRepository: store.snapshots, runRepository: store.runs,
+      jobRepository: jobs, executionEnvironment: clock.value, marketDataJobsDirectory: join(store.root, 'market-data', 'jobs'),
+      enqueue: work => { queues++; queueMicrotask(work); } });
+    const preflight = await service.createPreflight({ mode: 'snapshot', ticker: '7203', snapshotId: saved.snapshotId });
+    await expect(service.acceptPreflight(preflight.preflightId, true)).rejects.toMatchObject({ reason: 'publication_failed' });
+    expect(await service.activeJob()).toBeNull(); expect(await jobs.list()).toEqual([]); expect(queues).toBe(0);
+    fail = false;
+    const accepted = await service.acceptPreflight(preflight.preflightId, true);
+    expect((await waitForTerminal(service, accepted.job.jobId)).status).toBe('completed'); expect(queues).toBe(1);
+    await expect(service.acceptPreflight(preflight.preflightId, true)).rejects.toMatchObject({ kind: 'preflight_consumed' });
+  });
+
+  test('uncertain create cannot dispatch or consume/reuse a preflight; restart interrupts the actual saved job', async () => {
+    const store = await stores(); const clock = environment(); const saved = await localSnapshot(store.snapshots); let queues = 0;
+    const jobs = new StrategyValidationJobRepositoryV1(store.jobs.rootDirectory, { io: {
+      link: async (...args) => { await link(...args); throw new Error('after actual link'); },
+    } });
+    const options = { snapshotRepository: store.snapshots, runRepository: store.runs,
+      jobRepository: jobs, executionEnvironment: clock.value, marketDataJobsDirectory: join(store.root, 'market-data', 'jobs') };
+    const service = new StrategyValidationJobServiceV1({ ...options, enqueue: () => { queues++; } });
+    const preflight = await service.createPreflight({ mode: 'snapshot', ticker: '7203', snapshotId: saved.snapshotId });
+    await expect(service.acceptPreflight(preflight.preflightId, true)).rejects.toMatchObject({ reason: 'recovery_required' });
+    expect(queues).toBe(0); const [savedJob] = await store.jobs.list(); expect(savedJob.status).toBe('preparing');
+    await expect(service.getJob(savedJob.jobId)).rejects.toMatchObject({ reason: 'recovery_required' });
+    await expect(service.acceptPreflight(preflight.preflightId, true)).rejects.toMatchObject({ reason: 'recovery_required' });
+    const restarted = new StrategyValidationJobServiceV1({ ...options, jobRepository: store.jobs });
+    await restarted.initialize(); expect((await restarted.getJob(savedJob.jobId)).status).toBe('interrupted');
+    await expect(service.activeJob()).rejects.toMatchObject({ reason: 'recovery_required' });
+  });
+
+  test('unpublished cancellation replacement latches and late queued worker performs no further writes', async () => {
+    const store = await stores(); const clock = environment(); const saved = await localSnapshot(store.snapshots);
+    let work: (() => void) | undefined; let writes = 0;
+    const jobs = new StrategyValidationJobRepositoryV1(store.jobs.rootDirectory, { io: {
+      writeFile: async (...args) => { writes++; if (writes > 1) throw new Error('cancel write failed'); return writeFile(...args); },
+    } });
+    const service = new StrategyValidationJobServiceV1({ snapshotRepository: store.snapshots, runRepository: store.runs,
+      jobRepository: jobs, executionEnvironment: clock.value, marketDataJobsDirectory: join(store.root, 'market-data', 'jobs'),
+      enqueue: callback => { work = callback; } });
+    const preflight = await service.createPreflight({ mode: 'snapshot', ticker: '7203', snapshotId: saved.snapshotId });
+    const accepted = await service.acceptPreflight(preflight.preflightId, true);
+    await expect(service.cancelJob(accepted.job.jobId)).rejects.toMatchObject({ reason: 'recovery_required' });
+    work!(); await Bun.sleep(10);
+    expect(writes).toBe(2); expect((await store.jobs.load(accepted.job.jobId)).status).toBe('preparing');
+    await expect(service.activeJob()).rejects.toMatchObject({ reason: 'recovery_required' });
+  });
+
+  test('post-terminal-rename read failure remains blocked; a fresh process preserves completed and its exact run', async () => {
+    const store = await stores(); const clock = environment(); const saved = await localSnapshot(store.snapshots);
+    let failRead = false;
+    const jobs = new StrategyValidationJobRepositoryV1(store.jobs.rootDirectory, { io: {
+      rename: async (from, to) => {
+        const payload = JSON.parse(await readFile(from, 'utf8'));
+        await rename(from, to); if (payload.status === 'completed') failRead = true;
+      },
+      readFile: ((...args: Parameters<typeof readFile>) => {
+        if (failRead) throw new Error('read after completed rename'); return readFile(...args);
+      }) as typeof readFile,
+    } });
+    const options = { snapshotRepository: store.snapshots, runRepository: store.runs,
+      executionEnvironment: clock.value, marketDataJobsDirectory: join(store.root, 'market-data', 'jobs') };
+    const service = new StrategyValidationJobServiceV1({ ...options, jobRepository: jobs });
+    const preflight = await service.createPreflight({ mode: 'snapshot', ticker: '7203', snapshotId: saved.snapshotId });
+    const accepted = await service.acceptPreflight(preflight.preflightId, true);
+    for (let i = 0; i < 200 && !failRead; i++) await Bun.sleep(5);
+    expect(failRead).toBe(true); await Bun.sleep(10);
+    expect((await store.jobs.load(accepted.job.jobId)).status).toBe('completed');
+    failRead = false;
+    expect((await service.getJob(accepted.job.jobId)).status).toBe('completed');
+    await expect(service.activeJob()).rejects.toMatchObject({ reason: 'recovery_required' });
+    const restarted = new StrategyValidationJobServiceV1({ ...options, jobRepository: store.jobs });
+    await restarted.initialize(); expect((await restarted.getJob(accepted.job.jobId)).status).toBe('completed');
+    expect((await restarted.loadRun(accepted.job.runId)).run.runId).toBe(accepted.job.runId);
+  });
+
+  test('a nonempty unimplemented Market Data slot prevents Phase 4 startup rewrites', async () => {
+    const store = await stores(); const original = persistedJob('collecting'); await store.jobs.create(original);
+    const marketJobs = join(store.root, 'market-data', 'jobs'); await mkdir(marketJobs, { recursive: true });
+    await writeFile(join(marketJobs, 'unknown-record.json'), '{}');
+    const service = new StrategyValidationJobServiceV1({ snapshotRepository: store.snapshots, runRepository: store.runs,
+      jobRepository: store.jobs, marketDataJobsDirectory: marketJobs });
+    await expect(service.initialize()).rejects.toMatchObject({ reason: 'recovery_required' });
+    expect(await store.jobs.load(original.jobId)).toEqual(original);
+    expect(await readFile(join(marketJobs, 'unknown-record.json'), 'utf8')).toBe('{}');
+  });
+
   test('accepts a one-time local preflight and completes one validated immutable run', async () => {
     const store = await stores();
     const clock = environment();
@@ -157,6 +249,7 @@ describe('Strategy-validation Dashboard job service', () => {
       snapshotRepository: store.snapshots,
       runRepository: store.runs,
       jobRepository: store.jobs,
+      marketDataJobsDirectory: join(store.root, 'market-data', 'jobs'),
       executionEnvironment: clock.value,
     });
     const preflight = await service.createPreflight({
@@ -180,6 +273,7 @@ describe('Strategy-validation Dashboard job service', () => {
       snapshotRepository: store.snapshots,
       runRepository: store.runs,
       jobRepository: store.jobs,
+      marketDataJobsDirectory: join(store.root, 'market-data', 'jobs'),
       executionEnvironment: clock.value,
     });
     await restarted.initialize();
@@ -194,6 +288,7 @@ describe('Strategy-validation Dashboard job service', () => {
       snapshotRepository: store.snapshots,
       runRepository: store.runs,
       jobRepository: store.jobs,
+      marketDataJobsDirectory: join(store.root, 'market-data', 'jobs'),
       executionEnvironment: clock.value,
     });
     await service.initialize();
@@ -211,7 +306,7 @@ describe('Strategy-validation Dashboard job service', () => {
       mode: 'snapshot', ticker: '7203', snapshotId: saved.snapshotId,
     });
     await expect(service.acceptPreflight(fresh.preflightId, true)).rejects.toMatchObject({
-      kind: 'active_job_conflict',
+      reason: 'recovery_required', // unexpected durable job has no healthy in-process owner
     });
   });
 
@@ -223,6 +318,7 @@ describe('Strategy-validation Dashboard job service', () => {
       snapshotRepository: store.snapshots,
       runRepository: store.runs,
       jobRepository: store.jobs,
+      marketDataJobsDirectory: join(store.root, 'market-data', 'jobs'),
       executionEnvironment: clock.value,
     });
     const preflights = [];
@@ -251,6 +347,7 @@ describe('Strategy-validation Dashboard job service', () => {
         snapshotRepository: store.snapshots,
         runRepository: store.runs,
         jobRepository: store.jobs,
+        marketDataJobsDirectory: join(store.root, 'market-data', 'jobs'),
       });
       await service.initialize();
       expect((await store.jobs.load(JOB_ID)).status).toBe('interrupted');
@@ -266,6 +363,7 @@ describe('Strategy-validation Dashboard job service', () => {
         snapshotRepository: store.snapshots,
         runRepository: store.runs,
         jobRepository: store.jobs,
+        marketDataJobsDirectory: join(store.root, 'market-data', 'jobs'),
       });
       await service.initialize();
       const completed = await store.jobs.load(JOB_ID);
@@ -287,6 +385,7 @@ describe('Strategy-validation Dashboard job service', () => {
       snapshotRepository: store.snapshots,
       runRepository: store.runs,
       jobRepository: store.jobs,
+      marketDataJobsDirectory: join(store.root, 'market-data', 'jobs'),
     });
     await service.initialize();
 
@@ -304,8 +403,9 @@ describe('Strategy-validation Dashboard job service', () => {
       snapshotRepository: store.snapshots,
       runRepository: store.runs,
       jobRepository: store.jobs,
+      marketDataJobsDirectory: join(store.root, 'market-data', 'jobs'),
     });
-    await expect(service.initialize()).rejects.toBeInstanceOf(StrategyValidationJobServiceErrorV1);
+    await expect(service.initialize()).rejects.toBeInstanceOf(DashboardJobCoordinatorErrorV1);
     expect((await store.jobs.load(JOB_ID))).toMatchObject({
       status: 'failed',
       failure: { code: 'artifact_unavailable' },
@@ -315,6 +415,7 @@ describe('Strategy-validation Dashboard job service', () => {
       snapshotRepository: store.snapshots,
       runRepository: store.runs,
       jobRepository: store.jobs,
+      marketDataJobsDirectory: join(store.root, 'market-data', 'jobs'),
     });
     await restarted.initialize();
     await expect(restarted.listRuns()).rejects.toMatchObject({
@@ -338,9 +439,10 @@ describe('Strategy-validation Dashboard job service', () => {
         snapshotRepository: store.snapshots,
         runRepository: store.runs,
         jobRepository: store.jobs,
+        marketDataJobsDirectory: join(store.root, 'market-data', 'jobs'),
       });
       await expect(service.initialize()).rejects.toMatchObject({
-        kind: 'artifact_unavailable',
+        reason: 'recovery_required',
       });
       expect(await store.jobs.load(publishing.jobId)).toMatchObject({
         status: 'failed',
@@ -356,6 +458,7 @@ describe('Strategy-validation Dashboard job service', () => {
       snapshotRepository: store.snapshots,
       runRepository: store.runs,
       jobRepository: store.jobs,
+      marketDataJobsDirectory: join(store.root, 'market-data', 'jobs'),
     });
     await service.initialize();
 
@@ -382,7 +485,7 @@ describe('Strategy-validation Dashboard job service', () => {
     for (const tampered of variants) {
       await store.jobs.replace(tampered);
       await expect(service.getJob(completed.jobId)).rejects.toMatchObject({
-        kind: 'artifact_unavailable',
+        reason: 'recovery_required',
       });
       await store.jobs.replace(completed);
     }

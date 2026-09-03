@@ -1117,7 +1117,8 @@ async function mockStrategyValidationApi(
         hardMaximumAttempts: 250,
         requestTimeoutMs: 30_000,
         executionBudgetMs: 5_400_000,
-        warnings: ['Pagination and retries can increase requests.'],
+        warnings: ['Pagination and retries can increase requests.',
+          '最小dispatch時間とExecution budgetは受付成立後の時間です。直前の通信から最大60秒は受付できず、手動再試行が必要です。'],
       });
       return;
     }
@@ -2187,6 +2188,118 @@ test.describe('saved-analysis Comparison browser interaction', () => {
 });
 
 test.describe('strategy validation Dashboard interaction', () => {
+  test('DR-C1 keeps cooldown confirmation and retries only on a manual click', async ({ browser }) => {
+    const page = await browser.newPage();
+    const fixture = strategyValidationBrowserFixture();
+    let posts = 0;
+    try {
+      await mockSnapshotApi(page);
+      await mockStrategyValidationApi(page, fixture);
+      await page.route(url => url.pathname === '/api/strategy-validation/jobs', async route => {
+        posts++;
+        if (posts < 3) {
+          await route.fulfill({ status: 409, contentType: 'application/json',
+            headers: posts === 1 ? { 'Retry-After': '1' } : {},
+            body: JSON.stringify({ error: { code: posts === 1 ? 'active_job_conflict' : 'preflight_expired',
+              message: posts === 1 ? 'J-Quantsの通信間隔を確保するため、あと 1 秒待って再度実行してください。ジョブは未受付です。' : 'The preflight has expired.' } }) });
+        } else await route.fallback();
+      });
+      await openDetail(page, '7203', 'validation');
+      await page.locator('.validation-field select').selectOption({ index: 1 });
+      await page.getByRole('button', { name: 'ローカルPreflightを実行' }).click();
+      const consent = page.getByRole('checkbox', { name: '上記の外部送信と利用枠消費の可能性を確認しました' });
+      await expect(page.getByText('最小dispatch時間とExecution budgetは受付成立後の時間です。直前の通信から最大60秒は受付できず、手動再試行が必要です。', { exact: true })).toBeVisible();
+      await consent.check();
+      await page.getByRole('button', { name: 'Jobを開始' }).click();
+      await expect(page.getByRole('alert').filter({ hasText: 'ジョブは未受付です' })).toBeVisible();
+      await expect(consent).toBeChecked();
+      await expect(page.getByRole('heading', { name: '実行job', exact: true })).toHaveCount(0);
+      await page.waitForTimeout(1200);
+      expect(posts).toBe(1);
+      await page.getByRole('button', { name: 'Jobを開始' }).click();
+      await expect(page.getByRole('alert').filter({ hasText: 'The preflight has expired.' })).toBeVisible();
+      await page.waitForTimeout(200);
+      expect(posts).toBe(2);
+      // Re-preflight and renewed default-No consent remain explicit operations.
+      await page.getByRole('button', { name: 'ローカルPreflightを実行' }).click();
+      await expect(consent).not.toBeChecked();
+      await consent.check();
+      await page.getByRole('button', { name: 'Jobを開始' }).click();
+      await expect(page.getByRole('status').filter({ hasText: '状態 completed' })).toBeVisible();
+      expect(posts).toBe(3);
+    } finally { await page.close(); }
+  });
+
+  test('DR-C1 stops failed job reads across visibility, tabs and ticker remount until full reload', async ({ browser }) => {
+    const page = await browser.newPage();
+    const fixture = strategyValidationBrowserFixture();
+    let activeReads = 0; let exactReads = 0; let reloading = false;
+    try {
+      await mockSnapshotApi(page);
+      await mockStrategyValidationApi(page, fixture);
+      await page.route(url => url.pathname === '/api/strategy-validation/jobs/active', async route => {
+        activeReads++;
+        await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+          schemaVersion: 'strategy_validation_active_job_v1', job: !reloading
+            ? { ...fixture.job, status: 'collecting', finishedAt: null, expectedRunPayloadDigest: null } : null,
+        }) });
+      });
+      await page.route(url => url.pathname === `/api/strategy-validation/jobs/${fixture.job.jobId}`, async route => {
+        exactReads++;
+        await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: {
+          code: 'artifact_unavailable', message: 'ジョブ記録の整合性を確認できません。',
+        } }) });
+      });
+      await openDetail(page, '7203', 'validation');
+      await expect(page.getByRole('status').filter({ hasText: '状態 collecting' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: '最後に確認したjob' })).toBeVisible();
+      await expect(page.getByRole('status').filter({ hasText: '現在の実行状態は未確認' })).toBeVisible();
+      await expect(page.getByRole('button', { name: '実行をキャンセル' })).toBeDisabled();
+      const initialActiveReads = activeReads; // React dev StrictMode may abort an initial mount read.
+      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+      await page.getByRole('tab', { name: /^株価・テクニカル/ }).click();
+      await page.getByRole('tab', { name: '戦略検証', exact: true }).click();
+      await page.evaluate(() => {
+        history.pushState({}, '', '/?ticker=1009&tab=validation');
+        dispatchEvent(new PopStateEvent('popstate'));
+      });
+      await expect(page.getByRole('alert').filter({ hasText: '状態の自動確認を停止しました' })).toBeVisible();
+      await page.waitForTimeout(2300);
+      expect([activeReads, exactReads]).toEqual([initialActiveReads, 1]);
+      expect(fixture.requests.filter(item => item.method !== 'GET')).toHaveLength(0);
+      reloading = true;
+      await page.reload();
+      await expect.poll(() => activeReads).toBeGreaterThan(initialActiveReads);
+      await expect(page.getByText('状態の自動確認を停止しました', { exact: false })).toHaveCount(0);
+    } finally { await page.close(); }
+  });
+
+  for (const status of [409, 500]) {
+    test(`DR-C1 active read ${status} is not interpreted as idle or automatically retried`, async ({ browser }) => {
+      const page = await browser.newPage();
+      const fixture = strategyValidationBrowserFixture();
+      let reads = 0;
+      try {
+        await mockSnapshotApi(page);
+        await mockStrategyValidationApi(page, fixture);
+        await page.route(url => url.pathname === '/api/strategy-validation/jobs/active', async route => {
+          reads++;
+          await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify({ error: {
+            code: status === 409 ? 'active_job_conflict' : 'artifact_unavailable',
+            message: status === 409 ? '市場概況更新ジョブが実行中です。' : 'ジョブ記録を確認中です。完了後に再度操作してください。',
+          } }) });
+        });
+        await openDetail(page, '7203', 'validation');
+        await expect(page.getByRole('alert').filter({ hasText: '状態の自動確認を停止しました' })).toBeVisible();
+        await expect(page.getByRole('heading', { name: '実行job', exact: true })).toHaveCount(0);
+        const initialReads = reads;
+        await page.waitForTimeout(2100);
+        expect(reads).toBe(initialReads);
+        expect(fixture.requests.filter(item => item.method !== 'GET')).toHaveLength(0);
+      } finally { await page.close(); }
+    });
+  }
+
   test('requires a local preflight and default-No confirmation before starting a job', async ({ browser }) => {
     const page = await browser.newPage();
     const fixture = strategyValidationBrowserFixture();

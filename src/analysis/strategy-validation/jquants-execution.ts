@@ -77,6 +77,12 @@ export type JQuantsFetchedRowsV1 = Readonly<{
   fetchedAt: AsOfCutoff;
 }>;
 
+/** Optional Dashboard owner. Standalone CLI keeps its existing operation-local limiter. */
+export interface JQuantsDashboardDispatchV1 {
+  assertCanContinue(): void;
+  dispatch<T>(check: (waitMs?: number) => void, start: () => Promise<T>, signal?: AbortSignal): Promise<T>;
+}
+
 const defaultSleep = (durationMs: number, signal?: AbortSignal): Promise<void> =>
   new Promise((resolve, reject) => {
     if (signal?.aborted) {
@@ -346,6 +352,7 @@ export class JQuantsExecutionRuntimeV1 {
   readonly #attemptTimes: number[] = [];
   readonly #cache = new Map<string, Promise<JQuantsFetchedRowsV1>>();
   readonly #operationController = new AbortController();
+  readonly #dashboardDispatch?: JQuantsDashboardDispatchV1;
   #limiterTail: Promise<void> = Promise.resolve();
   #cacheHitCount = 0;
 
@@ -355,6 +362,7 @@ export class JQuantsExecutionRuntimeV1 {
       environment?: JQuantsExecutionEnvironmentV1;
       actualAttemptLimit?: number;
       signal?: AbortSignal;
+      dashboardDispatch?: JQuantsDashboardDispatchV1;
     }> = {},
   ) {
     if (typeof accepted !== 'object' || accepted === null
@@ -400,6 +408,8 @@ export class JQuantsExecutionRuntimeV1 {
       invalidConfiguration('actualAttemptLimit must match the frozen external-request plan.');
     }
     this.#actualAttemptLimit = actualAttemptLimit;
+    this.#dashboardDispatch = options.dashboardDispatch;
+    this.#dashboardDispatch?.assertCanContinue();
     this.#bindCancellation(options.signal);
   }
 
@@ -424,6 +434,7 @@ export class JQuantsExecutionRuntimeV1 {
   }
 
   assertCanContinue(signal?: AbortSignal): void {
+    this.#dashboardDispatch?.assertCanContinue();
     abortIfNeeded(signal);
     const elapsed = this.#environment.monotonicNowMs() - this.#accepted.monotonicOriginMs;
     if (!Number.isFinite(elapsed) || elapsed < 0) {
@@ -567,7 +578,23 @@ export class JQuantsExecutionRuntimeV1 {
     query: JQuantsQueryV1,
     signal?: AbortSignal,
   ): Promise<CompletedHttpAttempt> {
+    if (this.#dashboardDispatch) {
+      return this.#dashboardDispatch.dispatch(waitMs => {
+        this.assertCanContinue(signal);
+        if (this.#attempts.length >= this.#actualAttemptLimit) {
+          throw new JQuantsValidationErrorV1('attempt_limit_exceeded', 'The J-Quants validation attempt cap was reached.');
+        }
+        if (waitMs !== undefined && waitMs >= this.#remainingMs()) throw timeout();
+      }, () => {
+        this.#attempts.push(Object.freeze({ attempt: this.#attempts.length + 1, dispatchedAt: this.nowUtc() }));
+        return this.#performAttempt(endpoint, query, signal);
+      }, signal);
+    }
     await this.#reserveAttempt(signal);
+    return this.#performAttempt(endpoint, query, signal);
+  }
+
+  async #performAttempt(endpoint: string, query: JQuantsQueryV1, signal?: AbortSignal): Promise<CompletedHttpAttempt> {
     this.assertCanContinue(signal);
     const remainingMs = this.#remainingMs();
     const requestTimeoutMs = Math.min(this.#accepted.controls.requestTimeoutMs, remainingMs);
