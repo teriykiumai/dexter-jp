@@ -40,6 +40,8 @@ export interface CreateOnlyFilePublicationOptions<ExistingOutcome extends string
   readonly validateTemporary: (temporaryPath: string) => Promise<void>;
   readonly resolveExisting: (finalPath: string) => Promise<ExistingOutcome>;
   readonly linkFile?: CreateOnlyLinkFile;
+  /** Must create exclusively with wx and close the complete file before returning. */
+  readonly writeTemporary?: (path: string, payload: string) => Promise<void>;
 }
 
 export async function publishCreateOnlyFile<ExistingOutcome extends string>(
@@ -50,10 +52,14 @@ export async function publishCreateOnlyFile<ExistingOutcome extends string>(
   let result: 'created' | ExistingOutcome | undefined;
   let failure: unknown;
   try {
-    await writeFile(temporaryPath, options.canonicalPayload, {
-      encoding: 'utf8',
-      flag: 'wx',
-    });
+    if (options.writeTemporary) {
+      await options.writeTemporary(temporaryPath, options.canonicalPayload);
+    } else {
+      await writeFile(temporaryPath, options.canonicalPayload, {
+        encoding: 'utf8',
+        flag: 'wx',
+      });
+    }
     await options.validateTemporary(temporaryPath);
     try {
       await (options.linkFile ?? link)(temporaryPath, options.finalPath);
