@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { MarketDataJobViewV1Schema, assertMarketDataJobReplacementV1,
+import { HISTORICAL_IDENTITY_UNVERIFIED_MESSAGE_V1, MarketDataJobViewV1Schema,
+  MarketDataWarningV1Schema, assertMarketDataJobReplacementV1,
+  currentCodeWarningsV1, isCurrentCodePersistedWarningV1,
   marketDataJobFailureV1, marketDataWarningCodesV1 } from './job-schema.js';
 
 function accepted() {
@@ -46,8 +48,73 @@ describe('Market Data job schema', () => {
 
   test('normalizes warning codes to one canonical order', () => {
     expect(marketDataWarningCodesV1([
-      'source_refresh_failed', 'basis_break', 'artifact_corrupt_fallback', 'basis_break',
-    ])).toEqual(['artifact_corrupt_fallback', 'basis_break', 'source_refresh_failed']);
+      'historical_identity_unverified', 'source_refresh_failed', 'basis_break',
+      'history_coverage_clipped', 'artifact_corrupt_fallback', 'basis_break',
+    ])).toEqual(['artifact_corrupt_fallback', 'basis_break', 'source_refresh_failed',
+      'history_coverage_clipped', 'historical_identity_unverified']);
+    expect(MarketDataWarningV1Schema.safeParse({ code: 'instrument_lifetime_clipped',
+      message: 'retired', moduleId: null, artifactIdentity: null }).success).toBeFalse();
+  });
+
+  test('builds exact single-boundary current-code warnings in canonical order', () => {
+    expect(currentCodeWarningsV1({ kind: 'technical', boundary: {
+      state: 'available', sourceCoverageFrom: '2018-03-01', historyCoverageClipped: true,
+    } })).toEqual([
+      { code: 'history_coverage_clipped',
+        message: '取得できた履歴は 2018-03-01 からです。この日付は上場日を示しません。',
+        moduleId: null, artifactIdentity: null },
+      { code: 'historical_identity_unverified',
+        message: HISTORICAL_IDENTITY_UNVERIFIED_MESSAGE_V1,
+        moduleId: null, artifactIdentity: null },
+    ]);
+    expect(currentCodeWarningsV1({ kind: 'etf_1321_eod', boundary: {
+      state: 'unavailable', historyCoverageClipped: false,
+    } })).toEqual([{ code: 'historical_identity_unverified',
+      message: HISTORICAL_IDENTITY_UNVERIFIED_MESSAGE_V1,
+      moduleId: 'etf_1321_eod', artifactIdentity: null }]);
+    expect(() => currentCodeWarningsV1({ kind: 'technical', boundary: {
+      state: 'unavailable', historyCoverageClipped: false,
+    } } as never)).toThrow();
+  });
+
+  test('builds one fixed-order relative warning with an unavailable boundary token', () => {
+    expect(currentCodeWarningsV1({ kind: 'etf_1321_2633_relative',
+      boundary1321: { state: 'unavailable', historyCoverageClipped: false },
+      boundary2633: { state: 'available', sourceCoverageFrom: '2020-01-06',
+        historyCoverageClipped: true } })).toEqual([
+      { code: 'history_coverage_clipped',
+        message: '取得できた履歴の開始日は1321が観測なし、2633が2020-01-06です。これらの日付は上場日を示しません。',
+        moduleId: 'etf_1321_2633_relative', artifactIdentity: null },
+      { code: 'historical_identity_unverified',
+        message: HISTORICAL_IDENTITY_UNVERIFIED_MESSAGE_V1,
+        moduleId: 'etf_1321_2633_relative', artifactIdentity: null },
+    ]);
+    expect(currentCodeWarningsV1({ kind: 'etf_1321_2633_relative',
+      boundary1321: { state: 'available', sourceCoverageFrom: '2019-01-04',
+        historyCoverageClipped: false },
+      boundary2633: { state: 'available', sourceCoverageFrom: '2020-01-06',
+        historyCoverageClipped: false } })).toEqual([
+      { code: 'historical_identity_unverified',
+        message: HISTORICAL_IDENTITY_UNVERIFIED_MESSAGE_V1,
+        moduleId: 'etf_1321_2633_relative', artifactIdentity: null },
+    ]);
+    for (const [clipped1321, clipped2633] of [[true, false], [false, true], [true, true]]) {
+      expect(currentCodeWarningsV1({ kind: 'etf_1321_2633_relative',
+        boundary1321: { state: 'available', sourceCoverageFrom: '2019-01-04',
+          historyCoverageClipped: clipped1321 },
+        boundary2633: { state: 'available', sourceCoverageFrom: '2020-01-06',
+          historyCoverageClipped: clipped2633 } })[0]).toEqual({
+        code: 'history_coverage_clipped',
+        message: '取得できた履歴の開始日は1321が2019-01-04、2633が2020-01-06です。これらの日付は上場日を示しません。',
+        moduleId: 'etf_1321_2633_relative', artifactIdentity: null,
+      });
+    }
+    expect(() => currentCodeWarningsV1({ kind: 'etf_1321_eod', boundary: {
+      state: 'unavailable', historyCoverageClipped: true,
+    } } as never)).toThrow();
+    expect(isCurrentCodePersistedWarningV1({ code: 'history_coverage_clipped',
+      message: '取得できた履歴の開始日は1321が観測なし、2633が観測なしです。これらの日付は上場日を示しません。',
+      moduleId: 'etf_1321_2633_relative', artifactIdentity: null })).toBeFalse();
   });
 
   test('replacement accepts monotonic lifecycle updates and rejects identity or progress rollback', () => {

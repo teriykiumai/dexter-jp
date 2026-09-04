@@ -2,7 +2,9 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fixtureArtifact, fixtureCodec, type FixtureArtifact } from './repository-test-fixtures.js';
+import { HISTORICAL_IDENTITY_UNVERIFIED_MESSAGE_V1, currentCodeWarningsV1 } from './job-schema.js';
+import { fixtureArtifact, fixtureCodec, fixtureOverviewCodec, fixtureOverviewDraft,
+  type FixtureArtifact } from './repository-test-fixtures.js';
 import { MarketDataRepositoryV1 } from './repository.js';
 import { OverviewModuleRegistryV1, createOverviewModuleAdapterV1 } from './overview-registry.js';
 
@@ -38,5 +40,42 @@ describe('Overview module registry', () => {
       expect(module.project(fixtureArtifact())).toEqual({ state: 'unavailable', reason,
         payload: { identity: 'synthetic', value: 0 }, warnings: [] });
     }
+  });
+
+  test('accepts current-code warnings only for their owning ETF module', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dexter-overview-registry-etf-')); roots.push(root);
+    const codec = fixtureOverviewCodec('etf_1321_eod', {});
+    const warnings = currentCodeWarningsV1({ kind: 'etf_1321_eod', boundary: {
+      state: 'available', sourceCoverageFrom: '2018-03-01', historyCoverageClipped: true,
+    } });
+    const valid = createOverviewModuleAdapterV1({
+      repository: new MarketDataRepositoryV1(codec, root),
+      collect: async () => { throw new Error('not used'); },
+      project: artifact => ({ state: 'available', payload: artifact.syntheticResult, warnings }),
+      environment: {},
+    });
+    const artifact = codec.build(fixtureOverviewDraft('etf_1321_eod'));
+    expect(valid.project(artifact).warnings).toEqual(warnings);
+
+    for (const invalidWarnings of [
+      [...warnings].reverse(),
+      [...warnings, warnings[1]!],
+      warnings.map(warning => warning.code === 'historical_identity_unverified'
+        ? { ...warning, message: '同一性は未確認です。' } : warning),
+    ]) {
+      const invalidEtf = createOverviewModuleAdapterV1({
+        repository: new MarketDataRepositoryV1(codec, root),
+        collect: async () => { throw new Error('not used'); },
+        project: value => ({ state: 'available', payload: value.syntheticResult,
+          warnings: invalidWarnings }), environment: {},
+      });
+      expect(() => invalidEtf.project(artifact)).toThrow();
+    }
+
+    const invalid = await adapter(artifact => ({ state: 'available', payload: artifact.syntheticResult,
+      warnings: [{ code: 'historical_identity_unverified',
+        message: HISTORICAL_IDENTITY_UNVERIFIED_MESSAGE_V1,
+        moduleId: 'market_short_ratio', artifactIdentity: null }] }));
+    expect(() => invalid.project(fixtureArtifact())).toThrow();
   });
 });

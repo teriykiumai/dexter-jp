@@ -208,9 +208,9 @@ describe('Market Data Overview job service', () => {
   test('derives persisted warning codes for publish, reuse, and retained previous results', async () => {
     let fail = false;
     const warnings: MarketDataWarningV1[] = [
-      { code: 'basis_break', message: 'Synthetic basis boundary.',
-        moduleId: 'market_short_ratio', artifactIdentity: null },
       { code: 'cadence_changed', message: 'Synthetic cadence boundary.',
+        moduleId: 'market_short_ratio', artifactIdentity: null },
+      { code: 'basis_break', message: 'Synthetic basis boundary.',
         moduleId: 'market_short_ratio', artifactIdentity: null },
     ];
     const h = await harness({ fail: () => fail, warnings });

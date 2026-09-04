@@ -8,7 +8,8 @@ import {
   type MarketDataObservationReceiptIdentityV1,
   type MarketDataTargetV1,
 } from './contracts.js';
-import { MarketDataWarningV1Schema, persistedModuleReasonsV1,
+import { MarketDataWarningV1Schema, isCurrentCodePersistedWarningV1,
+  marketDataWarningCodesV1, persistedModuleReasonsV1,
   type MarketDataWarningV1, type MarketDataModuleFailureCodeV1 } from './job-schema.js';
 import {
   MarketDataRepositoryV1,
@@ -95,9 +96,17 @@ export function createOverviewModuleAdapterV1<T extends MarketDataArtifactFields
     }
     if (!Array.isArray(projected.warnings)) throw new TypeError('Invalid module warnings.');
     const warnings = projected.warnings.map(warning => MarketDataWarningV1Schema.parse(warning));
+    const projectedCodes = warnings.map(warning => warning.code);
     if (warnings.some(warning => !['cadence_changed', 'basis_break', 'source_gap',
-      'instrument_lifetime_clipped'].includes(warning.code) || warning.moduleId !== target.moduleId
-      || warning.artifactIdentity !== null)) throw new TypeError('Invalid persisted module warning.');
+      'history_coverage_clipped', 'historical_identity_unverified'].includes(warning.code)
+      || (['history_coverage_clipped', 'historical_identity_unverified'].includes(warning.code)
+        && (!['etf_1321_eod', 'etf_1321_2633_relative'].includes(target.moduleId)
+          || !isCurrentCodePersistedWarningV1(warning)))
+      || warning.moduleId !== target.moduleId
+      || warning.artifactIdentity !== null)
+      || canonicalJsonV1(projectedCodes) !== canonicalJsonV1(marketDataWarningCodesV1(projectedCodes))) {
+      throw new TypeError('Invalid persisted module warning.');
+    }
     assertMarketDataSafeV1({ payload: projected.payload, warnings } as CanonicalJsonValue,
       options.environment ?? process.env);
     return Object.freeze({ ...projected, payload: cloneJson(projected.payload),
