@@ -162,8 +162,8 @@ function resolveWindow(value: unknown) {
   const calculationFrom = historyBoundary.sourceCoverageFrom;
   const fromWeek = periodFor(queryFrom, 'week').periodStart;
   const fromMonth = periodFor(queryFrom, 'month').periodStart;
-  const toWeek = periodFor(eligibleThrough, 'week').periodEnd;
-  const toMonth = periodFor(eligibleThrough, 'month').periodEnd;
+  const toWeek = periodFor(calculationDate, 'week').periodEnd;
+  const toMonth = periodFor(calculationDate, 'month').periodEnd;
   return {
     window, calculationFrom, calculationTo: eligibleThrough,
     calendarCoverageFrom: fromWeek < fromMonth ? fromWeek : fromMonth,

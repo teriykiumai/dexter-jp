@@ -304,9 +304,24 @@ describe('interval aggregation and completeness', () => {
     const input = fixture({ queryFrom: '2024-01-01', historyBoundary: { sourceCoverageFrom: '2024-03-01' } });
     const result = calculateTechnicalSeriesV1(input);
     expect(result.calendarCoverageFrom).toBe('2024-01-01');
-    expect(result.calendarCoverageTo).toBe('2024-03-31');
+    expect(result.calendarCoverageTo).toBe('2024-04-30');
     expect(result.calculationTo).toBe('2024-03-29');
     expect(result.historyCoverageClipped).toBe(true);
+  });
+
+  test('calendar coverage upper bound is fixed from calculationDate before eligibleThrough is selected', () => {
+    const beforeClosure = fixture({
+      queryFrom: '2024-01-01', eligibleThrough: '2024-03-29', calculationDate: '2024-04-08',
+    }, dates('2024-04-01', '2024-04-08'));
+    const afterClosure = fixture({
+      queryFrom: '2024-01-01', eligibleThrough: '2024-04-05', calculationDate: '2024-04-08',
+    });
+    expect(getTechnicalCalendarCoverageV1(beforeClosure.window)).toEqual({
+      calendarCoverageFrom: '2024-01-01', calendarCoverageTo: '2024-04-30',
+    });
+    expect(calculateTechnicalSeriesV1(beforeClosure).calendarCoverageTo).toBe('2024-04-30');
+    expect(getTechnicalCalendarCoverageV1(afterClosure.window))
+      .toEqual(getTechnicalCalendarCoverageV1(beforeClosure.window));
   });
 
   test('current week/month remain partial even after their final trading session', () => {
@@ -371,7 +386,9 @@ describe('dated RSI/MACD and cross', () => {
     for (const field of ['rsi', 'macd', 'signal', 'histogram', 'cross'] as const) {
       expect(partial[33][field]).toEqual({ state: 'unavailable', reason: 'partial_period' });
     }
-    const completed = calculateTechnicalSeriesV1({ ...input, window: { ...input.window, calculationDate: '2023-11-01' } }).intervals.month;
+    const completed = calculateTechnicalSeriesV1(fixture({
+      queryFrom: '2021-01-01', eligibleThrough: '2023-10-31', calculationDate: '2023-11-01',
+    })).intervals.month;
     const expected = calculateMacd(completed.map(row => row.close)).macd!;
     expect(completed[33].macd).toEqual({ state: 'available', value: expected.value });
     expect(completed[33].signal).toEqual({ state: 'available', value: expected.signal });
