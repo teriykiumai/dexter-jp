@@ -15,6 +15,7 @@ import {
 } from '../analysis/comparison/index.js';
 import { loadDashboardAsset } from './assets.js';
 import type { StrategyValidationDashboardApiV1 } from './strategy-validation-api.js';
+import type { MarketDataDashboardApiV1 } from './market-data-api.js';
 import { isAllowedDashboardHost } from './session.js';
 export { isAllowedDashboardHost } from './session.js';
 
@@ -202,20 +203,30 @@ export async function handleDashboardRequest(
   request: Request,
   repository: AnalysisSnapshotReader,
   strategyValidationApi?: StrategyValidationDashboardApiV1,
+  marketDataApi?: MarketDataDashboardApiV1,
 ): Promise<Response> {
   const url = new URL(request.url);
   if (!isAllowedDashboardHost(request.headers.get('host'))) {
-    return errorResponse(403, 'forbidden_host', 'The request Host is not allowed.');
+    return url.pathname.startsWith('/api/market-data')
+      ? errorResponse(403, 'request_forbidden', 'The request Host is not allowed.')
+      : errorResponse(403, 'forbidden_host', 'The request Host is not allowed.');
   }
 
   const segments = decodedSegments(url.pathname);
   if (segments === null) {
-    return errorResponse(400, 'invalid_route_parameter', 'The route contains invalid encoding.');
+    return url.pathname.startsWith('/api/market-data')
+      ? errorResponse(400, 'invalid_request', 'The request is invalid.')
+      : errorResponse(400, 'invalid_route_parameter', 'The route contains invalid encoding.');
   }
 
   if (strategyValidationApi !== undefined) {
     const strategyResponse = await strategyValidationApi.handle(request, url, segments);
     if (strategyResponse !== null) return strategyResponse;
+  }
+
+  if (marketDataApi !== undefined) {
+    const marketResponse = await marketDataApi.handle(request, url, segments);
+    if (marketResponse !== null) return marketResponse;
   }
 
   if (request.method !== 'GET') {

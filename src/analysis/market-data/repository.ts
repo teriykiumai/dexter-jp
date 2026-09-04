@@ -8,6 +8,7 @@ import { MarketDataArtifactCodecV1, type MarketDataArtifactFieldsV1 } from './ar
 import { MarketDataFilesV1, MarketDataRecoveryBudgetV1, MARKET_DATA_RECOVERY_LIMITS_V1 } from './repository-files.js';
 import {
   MarketDataArtifactIdentityV1Schema, MarketDataInstantV1Schema, MarketDataRepositoryErrorV1,
+  MarketDataReceiptPublicationErrorV1,
   MarketDataObservationReceiptIdentityV1Schema,
   failMarketData, marketDataTargetKeyV1, receiptIdentityV1, validateReceiptV1,
   type MarketDataArtifactIdentityV1, type MarketDataObservationReceiptIdentityV1,
@@ -26,6 +27,7 @@ function recoverable(error: unknown): boolean {
 export interface MarketDataRepositoryOptionsV1 {
   linkFile?: CreateOnlyLinkFile;
   monotonicNow?: () => number;
+  readForPublicationProof?: (path: string, read: () => Promise<unknown>) => Promise<unknown>;
   writeCache?: (path: string, payload: string) => Promise<void>;
 }
 export type ObservedMarketDataV1<T> = {
@@ -86,6 +88,30 @@ export class MarketDataRepositoryV1<T extends MarketDataArtifactFieldsV1> {
     } catch (error) { if (recoverable(error)) return failMarketData('artifact_corrupt'); throw error; }
   }
 
+  /** Resolves the one receipt identity derived from an admitted job. A null result
+   * is returned only when the final receipt path is proved absent; corrupt or
+   * unreadable content remains a fail-closed repository error.
+   */
+  async findObservation(jobId: string, acceptedAt: string): Promise<ObservedMarketDataV1<T> | null> {
+    const job = StrategyValidationUuidV4Schema.safeParse(jobId);
+    const accepted = MarketDataInstantV1Schema.safeParse(acceptedAt);
+    if (!job.success || !accepted.success) return failMarketData('artifact_corrupt');
+    const acceptedAtEpochMs = Date.parse(accepted.data);
+    const relative = `observations/${this.prefix}/${acceptedAtEpochMs}_${job.data}.json`;
+    try {
+      const receipt = validateReceiptV1(await this.files.read(this.files.path(relative)));
+      const identity = receiptIdentityV1(receipt);
+      if (identity.rootRelativeIdentity !== relative || receipt.jobId !== job.data
+        || receipt.acceptedAt !== accepted.data || !same(receipt.target, this.codec.target)) {
+        return failMarketData('artifact_corrupt');
+      }
+      return await this.loadObservation(identity);
+    } catch (error) {
+      if (error instanceof MarketDataRepositoryErrorV1 && error.code === 'artifact_not_found') return null;
+      throw error;
+    }
+  }
+
   private async create(path: string, payload: unknown, validate: (raw: unknown) => void,
     existing: (raw: unknown) => void): Promise<'created' | 'existing'> {
     const canonicalPayload = canonicalJsonV1(json(payload));
@@ -101,6 +127,11 @@ export class MarketDataRepositoryV1<T extends MarketDataArtifactFieldsV1> {
         await (this.options.linkFile ?? link)(source, destination);
       },
     });
+  }
+
+  private readForPublicationProof(path: string): Promise<unknown> {
+    const read = () => this.files.read(path);
+    return this.options.readForPublicationProof?.(path, read) ?? read();
   }
 
   async publish(rawArtifact: unknown, observation: { jobId: string; acceptedAt: string; checkedAt: string })
@@ -134,14 +165,16 @@ export class MarketDataRepositoryV1<T extends MarketDataArtifactFieldsV1> {
       if (error instanceof MarketDataRepositoryErrorV1 && error.code === 'artifact_collision') throw error;
       if (recoverable(error)) return failMarketData('artifact_corrupt');
       if (error instanceof CreateOnlyFilePublicationError && error.kind === 'publish_unsupported') {
-        return failMarketData('create_only_publish_unsupported');
+        throw new MarketDataReceiptPublicationErrorV1('create_only_publish_unsupported',
+          { receiptState: 'definitely_absent' });
       }
       // A promotion exception is not proof of absence. Only a complete matching
       // reopened winner permits advancing to the receipt commit point.
-      try { validateExisting(await this.files.read(path)); state = 'idempotent_reuse'; }
+      try { validateExisting(await this.readForPublicationProof(path)); state = 'idempotent_reuse'; }
       catch (reopen) {
         if (reopen instanceof MarketDataRepositoryErrorV1 && reopen.code === 'artifact_collision') throw reopen;
-        return failMarketData('artifact_write_failed');
+        throw new MarketDataReceiptPublicationErrorV1('artifact_write_failed',
+          { receiptState: 'definitely_absent' });
       }
     }
     const artifactIdentity = this.codec.identity(artifact);
@@ -159,13 +192,16 @@ export class MarketDataRepositoryV1<T extends MarketDataArtifactFieldsV1> {
       exactReceipt(await this.files.read(receiptPath));
     } catch (error) {
       if (error instanceof MarketDataRepositoryErrorV1 && error.code === 'artifact_collision') throw error;
-      try { exactReceipt(await this.files.read(receiptPath)); }
+      try { exactReceipt(await this.readForPublicationProof(receiptPath)); }
       catch (reopen) {
         if (reopen instanceof MarketDataRepositoryErrorV1 && reopen.code === 'artifact_collision') throw reopen;
-        if (error instanceof CreateOnlyFilePublicationError && error.kind === 'publish_unsupported') {
-          return failMarketData('create_only_publish_unsupported');
+        const code = error instanceof CreateOnlyFilePublicationError && error.kind === 'publish_unsupported'
+          ? 'create_only_publish_unsupported' as const : 'artifact_write_failed' as const;
+        if (reopen instanceof MarketDataRepositoryErrorV1 && reopen.code === 'artifact_not_found') {
+          throw new MarketDataReceiptPublicationErrorV1(code, { receiptState: 'definitely_absent' });
         }
-        return failMarketData('artifact_write_failed');
+        throw new MarketDataReceiptPublicationErrorV1(code,
+          { receiptState: 'ambiguous', contentPublicationState: state });
       }
     }
     // Receipt is committed. A cache failure or an older publisher's delayed

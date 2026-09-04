@@ -17,6 +17,23 @@ export class MarketDataRepositoryErrorV1 extends Error {
     this.name = 'MarketDataRepositoryErrorV1';
   }
 }
+
+export type MarketDataReceiptPublicationProofV1 =
+  | Readonly<{ receiptState: 'definitely_absent' }>
+  | Readonly<{ receiptState: 'ambiguous';
+    contentPublicationState: 'published' | 'idempotent_reuse' }>;
+
+/** Proof carried across the repository/service boundary after publication fails.
+ * A filesystem error code alone never proves whether the receipt commit point
+ * was reached.
+ */
+export class MarketDataReceiptPublicationErrorV1 extends MarketDataRepositoryErrorV1 {
+  constructor(code: 'artifact_write_failed' | 'create_only_publish_unsupported',
+    readonly proof: MarketDataReceiptPublicationProofV1) {
+    super(code);
+    this.name = 'MarketDataReceiptPublicationErrorV1';
+  }
+}
 export function failMarketData(code: MarketDataRepositoryErrorCodeV1): never {
   throw new MarketDataRepositoryErrorV1(code);
 }
