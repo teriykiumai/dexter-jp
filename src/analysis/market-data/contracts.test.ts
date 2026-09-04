@@ -11,11 +11,11 @@ describe('Market Data source identity and strict codec', () => {
     const envelope = { kind: 'dexter_market_data_source_payload', version: 1,
       target: { kind: 'technical', ticker: '7203', jquantsCode: '72030' },
       dataDate: '2026-09-03', calculationDate: '2026-09-03', calculationVersion: 'technical_chart_calculation_v1',
-      sourceInputs: ['daily_bars', 'instrument_lifetime', 'security_master', 'trading_calendar']
+      sourceInputs: ['daily_bars', 'security_master', 'trading_calendar']
         .map(role => ({ role, inputDigest: `sha256:${'a'.repeat(64)}` })) };
-    const golden = '{"calculationDate":"2026-09-03","calculationVersion":"technical_chart_calculation_v1","dataDate":"2026-09-03","kind":"dexter_market_data_source_payload","sourceInputs":[{"inputDigest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","role":"daily_bars"},{"inputDigest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","role":"instrument_lifetime"},{"inputDigest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","role":"security_master"},{"inputDigest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","role":"trading_calendar"}],"target":{"jquantsCode":"72030","kind":"technical","ticker":"7203"},"version":1}';
+    const golden = '{"calculationDate":"2026-09-03","calculationVersion":"technical_chart_calculation_v1","dataDate":"2026-09-03","kind":"dexter_market_data_source_payload","sourceInputs":[{"inputDigest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","role":"daily_bars"},{"inputDigest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","role":"security_master"},{"inputDigest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","role":"trading_calendar"}],"target":{"jquantsCode":"72030","kind":"technical","ticker":"7203"},"version":1}';
     expect(canonicalJsonV1(envelope)).toBe(golden);
-    expect(digestMarketDataSourcePayloadV1(envelope)).toBe('sha256:ebe228d5d8967a5b16972903ccf46fbb534a0941df540f036cad61963f68f339');
+    expect(digestMarketDataSourcePayloadV1(envelope)).toBe('sha256:80e5713de4d2a5a36010b86c33568c1304cf932a1b0efc5bd8fc8bac1236d035');
     for (const key of ['sourcePayloadDigest', 'artifactDigest', 'acceptedAt', 'checkedAt', 'fetchedAt',
       'entitlementVerifiedAt', 'rootRelativeIdentity', 'raw', 'derivedValue']) {
       expect(() => digestMarketDataSourcePayloadV1({ ...envelope, [key]: 'unexpected' })).toThrow();
@@ -36,6 +36,35 @@ describe('Market Data source identity and strict codec', () => {
       z.array(z.object({ value: z.number() })).parse(raw), {})).toThrow();
   });
   test('closed target/calculation/roles for all seven families', () => {
+    const technicalTarget = { kind: 'technical' as const, ticker: '7203' };
+    expect(marketDataRolesV1(technicalTarget)).toEqual([
+      'daily_bars', 'security_master', 'trading_calendar',
+    ]);
+    expect(marketDataRolesV1({ kind: 'overview', moduleId: 'etf_1321_eod',
+      sourceId: 'etf_1321_eod_v1' })).toEqual([
+      'corporate_action_registry_1321', 'daily_bars_1321', 'security_master_1321', 'trading_calendar',
+    ]);
+    expect(marketDataRolesV1({ kind: 'overview', moduleId: 'etf_1321_2633_relative',
+      sourceId: 'etf_1321_2633_relative_v1' })).toEqual([
+      'corporate_action_registry_1321', 'corporate_action_registry_2633',
+      'daily_bars_1321', 'daily_bars_2633', 'security_master_1321',
+      'security_master_2633', 'trading_calendar',
+    ]);
+    const technical = { kind: 'dexter_market_data_source_payload', version: 1,
+      target: { ...technicalTarget, jquantsCode: '72030' }, dataDate: '2026-09-03',
+      calculationDate: '2026-09-03', calculationVersion: 'technical_chart_calculation_v1',
+      sourceInputs: marketDataRolesV1(technicalTarget)
+        .map(role => ({ role, inputDigest: `sha256:${'a'.repeat(64)}` })) };
+    expect(MarketDataSourcePayloadEnvelopeV1Schema.safeParse(technical).success).toBe(true);
+    expect(MarketDataSourcePayloadEnvelopeV1Schema.safeParse({ ...technical,
+      sourceInputs: [...technical.sourceInputs, {
+        role: 'instrument_lifetime', inputDigest: `sha256:${'a'.repeat(64)}`,
+      }].sort((a, b) => a.role.localeCompare(b.role)) }).success).toBe(false);
+    const legacyTechnicalDraft = fixtureDraft(undefined, 0, true);
+    legacyTechnicalDraft.sourceInputs = [...legacyTechnicalDraft.sourceInputs, {
+      ...legacyTechnicalDraft.sourceInputs[0]!, role: 'instrument_lifetime',
+    }].sort((a, b) => a.role.localeCompare(b.role));
+    expect(() => fixtureCodec(true).build(legacyTechnicalDraft)).toThrow();
     for (const moduleId of MARKET_DATA_MODULE_IDS_V1) {
       const target = { kind: 'overview' as const, moduleId, sourceId: `${moduleId}_v1` as const };
       const value = { kind: 'dexter_market_data_source_payload', version: 1, target,
@@ -47,6 +76,12 @@ describe('Market Data source identity and strict codec', () => {
       for (const roles of [value.sourceInputs.slice(1), [...value.sourceInputs].reverse(),
         [...value.sourceInputs, value.sourceInputs[0]], value.sourceInputs.map(i => ({ ...i, role: 'unknown' }))]) {
         expect(MarketDataSourcePayloadEnvelopeV1Schema.safeParse({ ...value, sourceInputs: roles }).success).toBe(false);
+      }
+      if (moduleId === 'etf_1321_eod' || moduleId === 'etf_1321_2633_relative') {
+        const legacy = [...value.sourceInputs, {
+          role: 'instrument_lifetime_1321', inputDigest: `sha256:${'a'.repeat(64)}`,
+        }].sort((a, b) => a.role.localeCompare(b.role));
+        expect(MarketDataSourcePayloadEnvelopeV1Schema.safeParse({ ...value, sourceInputs: legacy }).success).toBe(false);
       }
     }
   });

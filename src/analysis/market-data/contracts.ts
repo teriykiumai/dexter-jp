@@ -106,15 +106,16 @@ const envelopeTarget = z.discriminatedUnion('kind', [
     jquantsCode: z.string() }).strict(),
   z.object(overviewTargetFields).strict(),
 ]);
-const etfRoles = (ticker: string) => ['security_master', 'instrument_lifetime', 'daily_bars',
+const etfHistoryRoles = (ticker: string) => ['security_master', 'daily_bars',
   'corporate_action_registry'].map(role => `${role}_${ticker}`);
 const roleSets: Readonly<Record<'technical' | MarketDataModuleIdV1, readonly string[]>> = {
-  technical: ['security_master', 'instrument_lifetime', 'trading_calendar', 'daily_bars'],
+  technical: ['security_master', 'trading_calendar', 'daily_bars'],
   tse_margin_quantities: ['security_master_population', 'trading_calendar', 'margin_cadence_registry', 'margin_rows'],
   market_short_ratio: ['trading_calendar', 'short_ratio_schedule_registry', 'sector_coverage_registry', 'short_ratio_rows'],
   margin_1570: ['security_master_1570', 'trading_calendar', 'margin_cadence_registry', 'margin_rows', 'corporate_action_registry_1570'],
   tokyo_nagoya_foreign_flow: ['trading_calendar', 'investor_type_schedule_registry', 'investor_type_rows'],
-  etf_1321_eod: etfRoles('1321'), etf_1321_2633_relative: [...etfRoles('1321'), ...etfRoles('2633')],
+  etf_1321_eod: [...etfHistoryRoles('1321'), 'trading_calendar'],
+  etf_1321_2633_relative: [...etfHistoryRoles('1321'), ...etfHistoryRoles('2633'), 'trading_calendar'],
 };
 export function marketDataRolesV1(target: MarketDataTargetV1): readonly string[] {
   return [...roleSets[target.kind === 'technical' ? 'technical' : target.moduleId]].sort();

@@ -11,7 +11,7 @@ import { fixtureCodec, fixtureDraft, fixtureOverviewCodec, fixtureOverviewDraft,
 import { MarketDataRepositoryV1 } from './repository.js';
 import { MarketDataJobRepositoryV1 } from './job-repository.js';
 import { MarketDataJobViewV1Schema, type MarketDataModuleFailureCodeV1,
-  type MarketDataWarningV1 } from './job-schema.js';
+  currentCodeWarningsV1, type MarketDataWarningV1 } from './job-schema.js';
 import { MarketDataSourceFailureV1 } from './job-schema.js';
 import { MarketDataJobServiceV1, type MarketDataJobLimitsV1 } from './job-service.js';
 import { OverviewModuleRegistryV1, createOverviewModuleAdapterV1,
@@ -114,7 +114,8 @@ async function harness(options: { configured?: boolean; fail?: () => boolean;
         return result;
       };
       if (options.shared) await context.shareSource('synthetic_shared_source_v1', load); else await load();
-      return { artifact: fixtureCodec(false, {}).build(fixtureDraft(context.acceptedAt, 0)),
+      return { artifact: fixtureCodec(false, {}).build(fixtureDraft(context.acceptedAt, 0, false,
+        options.warnings ?? [])),
         attempts: options.swallowDispatchStop
           ? Math.min(options.dispatches ?? 1, (options.limits ?? limits).maximumAttempts)
           : options.dispatches ?? 1,
@@ -165,6 +166,44 @@ async function harness(options: { configured?: boolean; fail?: () => boolean;
     secondCollects: () => secondCollects, service };
 }
 
+const etfWarningInput = { kind: 'etf_1321_eod', boundary: {
+  state: 'available', sourceCoverageFrom: '2018-03-01', historyCoverageClipped: true,
+} } as const;
+const validEtfWarnings = currentCodeWarningsV1(etfWarningInput);
+
+async function etfWarningHarness(warnings: readonly MarketDataWarningV1[], retainPrior = false) {
+  const root = await mkdtemp(join(tmpdir(), 'dexter-market-etf-warning-')); roots.push(root);
+  const clock = environment();
+  const coordinator = new DashboardJobCoordinatorV1(clock.value, 5);
+  coordinator.register({ domain: 'strategy_validation', inventory: async () => [],
+    isAbsent: async () => true, cleanup: async () => {},
+    reconcile: async () => { throw new Error('unexpected'); } });
+  const codec = fixtureOverviewCodec('etf_1321_eod', {});
+  const repository = new MarketDataRepositoryV1(codec, root);
+  const module = createOverviewModuleAdapterV1({ repository,
+    collect: async context => ({ artifact: codec.build(fixtureOverviewDraft('etf_1321_eod',
+      context.acceptedAt, 0, warnings, etfWarningInput)), attempts: 0, pages: 0,
+    acceptedRows: 0, responseBytes: 0 }),
+    project: artifact => ({ state: 'available', payload: artifact.syntheticResult,
+      warnings: artifact.warnings }),
+    currentCodeWarningInput: artifact => artifact.syntheticCurrentCodeWarningInput!, environment: {},
+  });
+  let priorJobId: string | null = null;
+  if (retainPrior) {
+    const acceptedAt = '2026-09-03T00:00:00.000Z';
+    const priorArtifact = codec.build(fixtureOverviewDraft('etf_1321_eod', acceptedAt, 1,
+      validEtfWarnings, etfWarningInput));
+    priorJobId = randomUUID();
+    await module.publish(priorArtifact, { jobId: priorJobId, acceptedAt,
+      checkedAt: new Date(Date.parse(priorArtifact.fetchedAt) + 1000).toISOString() });
+  }
+  const service = new MarketDataJobServiceV1({ coordinator,
+    jobRepository: new MarketDataJobRepositoryV1(root),
+    overviewRegistry: new OverviewModuleRegistryV1([module]), limits });
+  await service.initialize();
+  return { service, repository, priorJobId };
+}
+
 async function terminal(service: MarketDataJobServiceV1, jobId: string) {
   for (let count = 0; count < 1000; count++) {
     const job = await service.getJob(jobId);
@@ -205,12 +244,52 @@ describe('Market Data Overview job service', () => {
       marketJob: null, blockingKind: null });
   });
 
+  for (const invalid of [
+    { name: 'missing identity', warnings: validEtfWarnings.slice(0, 1) },
+    { name: 'missing clipped coverage', warnings: validEtfWarnings.slice(1) },
+    { name: 'wrong coverage date', warnings: validEtfWarnings.map(warning =>
+      warning.code === 'history_coverage_clipped'
+        ? { ...warning, message: warning.message.replace('2018-03-01', '2018-03-02') }
+        : warning) },
+  ]) {
+    test(`rejects ${invalid.name} warning semantics before committing an ETF receipt`, async () => {
+      const h = await etfWarningHarness(invalid.warnings);
+      const accepted = await h.service.acceptOverview();
+      const job = await terminal(h.service, accepted.jobId);
+      expect(job.status).toBe('failed');
+      if (job.result?.kind !== 'overview') throw new Error('Expected Overview result.');
+      expect(job.result.moduleResults[0]).toMatchObject({ state: 'failed',
+        failureCode: 'source_invalid_response', warningCodes: [] });
+      expect(await h.repository.findObservation(accepted.jobId, accepted.acceptedAt)).toBeNull();
+      await expect(h.repository.latest()).rejects.toMatchObject({ code: 'artifact_not_found' });
+      expect(await h.service.activeJob()).toEqual({ schemaVersion: 'market_data_active_job_v1',
+        marketJob: null, blockingKind: null });
+    });
+  }
+
+  test('retains the prior ETF receipt when new warning semantics fail before publication', async () => {
+    const h = await etfWarningHarness(validEtfWarnings.slice(1), true);
+    const accepted = await h.service.acceptOverview();
+    const job = await terminal(h.service, accepted.jobId);
+    expect(job.status).toBe('failed');
+    if (job.result?.kind !== 'overview') throw new Error('Expected Overview result.');
+    expect(job.result.moduleResults[0]).toMatchObject({ state: 'retained_previous',
+      failureCode: 'source_invalid_response', warningCodes: [
+        'source_refresh_failed', 'history_coverage_clipped', 'historical_identity_unverified',
+    ] });
+    expect(await h.repository.findObservation(accepted.jobId, accepted.acceptedAt)).toBeNull();
+    if (!h.priorJobId) throw new Error('Expected a prior ETF receipt.');
+    expect((await h.repository.latest()).receipt.jobId).toBe(h.priorJobId);
+    expect(await h.service.activeJob()).toEqual({ schemaVersion: 'market_data_active_job_v1',
+      marketJob: null, blockingKind: null });
+  });
+
   test('derives persisted warning codes for publish, reuse, and retained previous results', async () => {
     let fail = false;
     const warnings: MarketDataWarningV1[] = [
-      { code: 'basis_break', message: 'Synthetic basis boundary.',
-        moduleId: 'market_short_ratio', artifactIdentity: null },
       { code: 'cadence_changed', message: 'Synthetic cadence boundary.',
+        moduleId: 'market_short_ratio', artifactIdentity: null },
+      { code: 'basis_break', message: 'Synthetic basis boundary.',
         moduleId: 'market_short_ratio', artifactIdentity: null },
     ];
     const h = await harness({ fail: () => fail, warnings });

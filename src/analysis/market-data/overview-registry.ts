@@ -8,8 +8,10 @@ import {
   type MarketDataObservationReceiptIdentityV1,
   type MarketDataTargetV1,
 } from './contracts.js';
-import { MarketDataWarningV1Schema, persistedModuleReasonsV1,
-  type MarketDataWarningV1, type MarketDataModuleFailureCodeV1 } from './job-schema.js';
+import { MarketDataWarningV1Schema, assertCurrentCodeWarningsV1, isCurrentCodePersistedWarningV1,
+  marketDataWarningCodesV1, persistedModuleReasonsV1,
+  type CurrentCodeWarningInputV1, type MarketDataWarningV1,
+  type MarketDataModuleFailureCodeV1 } from './job-schema.js';
 import {
   MarketDataRepositoryV1,
   type LatestMarketDataV1,
@@ -79,14 +81,21 @@ function cloneJson(value: CanonicalJsonValue): CanonicalJsonValue {
 }
 
 /** Erases a module's generic artifact type only after its strict codec has parsed it. */
-export function createOverviewModuleAdapterV1<T extends MarketDataArtifactFieldsV1>(options: {
+export function createOverviewModuleAdapterV1<T extends MarketDataArtifactFieldsV1
+  & Readonly<{ warnings: readonly MarketDataWarningV1[] }>>(options: {
   repository: MarketDataRepositoryV1<T>;
   collect: (context: OverviewCollectionContextV1) => Promise<OverviewPreparedModuleV1>;
   project: (artifact: T) => MarketOverviewProjectionV1;
+  currentCodeWarningInput?: (artifact: T) => CurrentCodeWarningInputV1;
   environment?: NodeJS.ProcessEnv;
 }): OverviewModuleAdapterV1 {
   const target = options.repository.codec.target;
   if (target.kind !== 'overview') throw new TypeError('Overview modules require an overview repository.');
+  const currentCodeModule = target.moduleId === 'etf_1321_eod'
+    || target.moduleId === 'etf_1321_2633_relative';
+  if (currentCodeModule !== (options.currentCodeWarningInput !== undefined)) {
+    throw new TypeError('ETF modules require structural current-code warning input.');
+  }
   const verifyProjection = (artifact: T): MarketOverviewProjectionV1 => {
     const projected = options.project(artifact);
     if (projected.state !== 'available' && projected.state !== 'unavailable') throw new TypeError('Invalid module projection.');
@@ -94,10 +103,30 @@ export function createOverviewModuleAdapterV1<T extends MarketDataArtifactFields
       throw new TypeError('Invalid unavailable reason.');
     }
     if (!Array.isArray(projected.warnings)) throw new TypeError('Invalid module warnings.');
+    const storedWarnings = artifact.warnings.map(warning => MarketDataWarningV1Schema.parse(warning));
     const warnings = projected.warnings.map(warning => MarketDataWarningV1Schema.parse(warning));
+    if (canonicalJsonV1(storedWarnings) !== canonicalJsonV1(warnings)) {
+      throw new TypeError('Module projection must preserve stored warnings unchanged.');
+    }
+    const projectedCodes = warnings.map(warning => warning.code);
     if (warnings.some(warning => !['cadence_changed', 'basis_break', 'source_gap',
-      'instrument_lifetime_clipped'].includes(warning.code) || warning.moduleId !== target.moduleId
-      || warning.artifactIdentity !== null)) throw new TypeError('Invalid persisted module warning.');
+      'history_coverage_clipped', 'historical_identity_unverified'].includes(warning.code)
+      || (['history_coverage_clipped', 'historical_identity_unverified'].includes(warning.code)
+        && (!['etf_1321_eod', 'etf_1321_2633_relative'].includes(target.moduleId)
+          || !isCurrentCodePersistedWarningV1(warning)))
+      || warning.moduleId !== target.moduleId
+      || warning.artifactIdentity !== null)
+      || canonicalJsonV1(projectedCodes) !== canonicalJsonV1(marketDataWarningCodesV1(projectedCodes))) {
+      throw new TypeError('Invalid persisted module warning.');
+    }
+    if (currentCodeModule) {
+      const expectedInput = options.currentCodeWarningInput!(artifact);
+      if (expectedInput.kind !== target.moduleId) {
+        throw new TypeError('Current-code warning input does not match its module.');
+      }
+      assertCurrentCodeWarningsV1(warnings.filter(warning => warning.code === 'history_coverage_clipped'
+        || warning.code === 'historical_identity_unverified'), expectedInput);
+    }
     assertMarketDataSafeV1({ payload: projected.payload, warnings } as CanonicalJsonValue,
       options.environment ?? process.env);
     return Object.freeze({ ...projected, payload: cloneJson(projected.payload),
@@ -108,9 +137,17 @@ export function createOverviewModuleAdapterV1<T extends MarketDataArtifactFields
     sourceId: target.sourceId,
     target,
     collect: options.collect,
-    validate: (raw: unknown) => options.repository.codec.parse(raw),
-    publish: (raw: unknown, observation: { jobId: string; acceptedAt: string; checkedAt: string }) =>
-      options.repository.publish(raw, observation) as Promise<ObservedMarketDataV1<MarketDataArtifactFieldsV1> & { state: 'published' | 'idempotent_reuse' }>,
+    validate: (raw: unknown) => {
+      const artifact = options.repository.codec.parse(raw);
+      verifyProjection(artifact);
+      return artifact;
+    },
+    publish: (raw: unknown, observation: { jobId: string; acceptedAt: string; checkedAt: string }) => {
+      const artifact = options.repository.codec.parse(raw);
+      verifyProjection(artifact);
+      return options.repository.publish(artifact, observation) as Promise<ObservedMarketDataV1<MarketDataArtifactFieldsV1>
+        & { state: 'published' | 'idempotent_reuse' }>;
+    },
     latest: () => options.repository.latest() as Promise<LatestMarketDataV1<MarketDataArtifactFieldsV1>>,
     loadObservation: (identity: MarketDataObservationReceiptIdentityV1) =>
       options.repository.loadObservation(identity) as Promise<ObservedMarketDataV1<MarketDataArtifactFieldsV1>>,

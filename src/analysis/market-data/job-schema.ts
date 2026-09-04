@@ -3,14 +3,16 @@ import { canonicalJsonV1 } from '../snapshot/canonical-json.js';
 import { CanonicalTickerSchema } from '../snapshot/schema.js';
 import { StrategyValidationUuidV4Schema } from '../strategy-validation/artifacts.js';
 import {
-  MARKET_DATA_MODULE_IDS_V1, MarketDataArtifactIdentityV1Schema, MarketDataInstantV1Schema,
+  MARKET_DATA_MODULE_IDS_V1, MarketDataArtifactIdentityV1Schema, MarketDataDateV1Schema,
+  MarketDataInstantV1Schema,
   MarketDataObservationReceiptIdentityV1Schema, type MarketDataModuleIdV1,
 } from './contracts.js';
 
 export const MARKET_DATA_JOB_MAX_BYTES_V1 = 65_536;
 export const MARKET_DATA_WARNING_CODES_V1 = [
   'artifact_corrupt_fallback', 'artifact_corrupt_no_fallback', 'cadence_changed', 'basis_break',
-  'source_gap', 'source_refresh_failed', 'instrument_lifetime_clipped', 'job_record_write_failed',
+  'source_gap', 'source_refresh_failed', 'history_coverage_clipped',
+  'historical_identity_unverified', 'job_record_write_failed',
 ] as const;
 export type MarketDataWarningCodeV1 = typeof MARKET_DATA_WARNING_CODES_V1[number];
 export function marketDataWarningCodesV1(values: readonly MarketDataWarningCodeV1[]): MarketDataWarningCodeV1[] {
@@ -56,6 +58,92 @@ export const MarketDataWarningV1Schema = z.object({
   moduleId: z.enum(MARKET_DATA_MODULE_IDS_V1).nullable(), artifactIdentity: MarketDataArtifactIdentityV1Schema.nullable(),
 }).strict();
 export type MarketDataWarningV1 = z.infer<typeof MarketDataWarningV1Schema>;
+
+export const HISTORICAL_IDENTITY_UNVERIFIED_MESSAGE_V1 =
+  '履歴は現在の銘柄コードに紐づくJ-Quants調整後価格です。表示期間全体が同一銘柄であることは確認していません。';
+
+const availableCurrentCodeWarningBoundarySchema = z.object({ state: z.literal('available'),
+  sourceCoverageFrom: MarketDataDateV1Schema, historyCoverageClipped: z.boolean() }).strict();
+const currentCodeWarningBoundarySchema = z.discriminatedUnion('state', [
+  availableCurrentCodeWarningBoundarySchema,
+  z.object({ state: z.literal('unavailable'), historyCoverageClipped: z.literal(false) }).strict(),
+]);
+export const CurrentCodeWarningInputV1Schema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('technical'), boundary: availableCurrentCodeWarningBoundarySchema }).strict(),
+  z.object({ kind: z.literal('etf_1321_eod'), boundary: currentCodeWarningBoundarySchema }).strict(),
+  z.object({ kind: z.literal('etf_1321_2633_relative'),
+    boundary1321: currentCodeWarningBoundarySchema,
+    boundary2633: currentCodeWarningBoundarySchema }).strict(),
+]);
+export type CurrentCodeWarningInputV1 = z.infer<typeof CurrentCodeWarningInputV1Schema>;
+
+/** Builds the closed, digest-bearing current-code warning set. The caller supplies
+ * clipping booleans already proved from the shared official-session calendar.
+ */
+export function currentCodeWarningsV1(raw: CurrentCodeWarningInputV1): readonly MarketDataWarningV1[] {
+  const parsed = CurrentCodeWarningInputV1Schema.safeParse(raw);
+  if (!parsed.success) throw new TypeError('Invalid current-code warning input.');
+  const input = parsed.data;
+  const moduleId = input.kind === 'technical' ? null : input.kind;
+  const warnings: MarketDataWarningV1[] = [];
+  if (input.kind === 'etf_1321_2633_relative') {
+    if (input.boundary1321.historyCoverageClipped || input.boundary2633.historyCoverageClipped) {
+      const coverage1321 = input.boundary1321.state === 'available'
+        ? input.boundary1321.sourceCoverageFrom : '観測なし';
+      const coverage2633 = input.boundary2633.state === 'available'
+        ? input.boundary2633.sourceCoverageFrom : '観測なし';
+      warnings.push({ code: 'history_coverage_clipped',
+        message: `取得できた履歴の開始日は1321が${coverage1321}、2633が${coverage2633}です。これらの日付は上場日を示しません。`,
+        moduleId, artifactIdentity: null });
+    }
+  } else if (input.boundary.state === 'available' && input.boundary.historyCoverageClipped) {
+    warnings.push({ code: 'history_coverage_clipped',
+      message: `取得できた履歴は ${input.boundary.sourceCoverageFrom} からです。この日付は上場日を示しません。`,
+      moduleId, artifactIdentity: null });
+  }
+  warnings.push({ code: 'historical_identity_unverified',
+    message: HISTORICAL_IDENTITY_UNVERIFIED_MESSAGE_V1, moduleId, artifactIdentity: null });
+  return Object.freeze(warnings.map(warning => Object.freeze(warning)));
+}
+
+/** Verifies the complete current-code warning set against validated artifact
+ * boundaries. Individual warning syntax is insufficient because it cannot prove
+ * that required warnings are present or that embedded dates are authoritative.
+ */
+export function assertCurrentCodeWarningsV1(
+  actual: readonly MarketDataWarningV1[], expectedInput: CurrentCodeWarningInputV1,
+): void {
+  const warnings = actual.map(warning => MarketDataWarningV1Schema.parse(warning));
+  const expected = currentCodeWarningsV1(expectedInput);
+  if (canonicalJsonV1(warnings) !== canonicalJsonV1(expected)) {
+    throw new TypeError('Current-code warnings do not match the artifact boundary.');
+  }
+}
+
+const singleBoundaryWarningMessage =
+  /^取得できた履歴は (\d{4}-\d{2}-\d{2}) からです。この日付は上場日を示しません。$/u;
+const relativeBoundaryWarningMessage =
+  /^取得できた履歴の開始日は1321が(観測なし|\d{4}-\d{2}-\d{2})、2633が(観測なし|\d{4}-\d{2}-\d{2})です。これらの日付は上場日を示しません。$/u;
+
+export function isCurrentCodePersistedWarningV1(warning: MarketDataWarningV1): boolean {
+  if (warning.artifactIdentity !== null) return false;
+  const validModule = warning.moduleId === null || warning.moduleId === 'etf_1321_eod'
+    || warning.moduleId === 'etf_1321_2633_relative';
+  if (!validModule) return false;
+  if (warning.code === 'historical_identity_unverified') {
+    return warning.message === HISTORICAL_IDENTITY_UNVERIFIED_MESSAGE_V1;
+  }
+  if (warning.code !== 'history_coverage_clipped') return false;
+  if (warning.moduleId === 'etf_1321_2633_relative') {
+    const match = relativeBoundaryWarningMessage.exec(warning.message);
+    return match !== null && !(match[1] === '観測なし' && match[2] === '観測なし')
+      && [match[1], match[2]].every(value => value === '観測なし'
+        || MarketDataDateV1Schema.safeParse(value).success);
+  }
+  const match = singleBoundaryWarningMessage.exec(warning.message);
+  return match !== null && MarketDataDateV1Schema.safeParse(match[1]).success;
+}
+
 const warningCodes = z.array(z.enum(MARKET_DATA_WARNING_CODES_V1)).max(MARKET_DATA_WARNING_CODES_V1.length)
   .refine(values => new Set(values).size === values.length
     && values.every((value, index) => index === 0
