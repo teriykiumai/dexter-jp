@@ -4,7 +4,7 @@
 **Status:** Draft  
 **Base Project:** `edinetdb/dexter-jp`  
 **Use:** Personal / Local only  
-**Last Updated:** 2026-09-03
+**Last Updated:** 2026-09-04
 
 ## 1. 目的
 
@@ -483,10 +483,26 @@ Phase 1.5〜4の完了条件を再度開くものではなく、Phase 5 Portfoli
   複数nonterminal・破損記録を自動修復・削除せず、Phase 4のstatus別run復旧と
   Market Dataの確定済みreceiptを維持する。追加する受付・復旧・error表示の
   契約はDashboardに限定し、既存Phase 4のjob/run schemaとpublic error code集合は維持する
-- exact 10-year Technical/ETF dataは、eligible end dateでactiveなinstrumentの
-  effective-dated continuous listing segmentを一次sourceで証明できる範囲だけを
-  calculation/display envelopeとする。上場前を欠損扱いせず、delist/relistや
-  code reuseを跨がず、continuityを証明できなければfail closedする
+- Technical/ETFは最大10年のJ-Quants調整後価格を取得できるが、eligible end dateの
+  masterで現在のcode・商品区分・市場区分・表示labelを確認するだけで、期間全体が
+  同一instrumentであることは保証しない。Technicalは内国株券`ProdCat=011`かつ現在の東証
+  `Mkt in {0105,0111,0112,0113}`、1321/2633はETF`ProdCat=014`かつ
+  `Mkt=0109`に限定する。`CoName`は正規化・固定値照合を行わず、検証済みの非空な
+  現在表示labelとしてだけ保存する。artifactとDashboardに`current_code_only`および
+  `historical_identity_unverified`を常設し、Phase 4検証、backtest、score、
+  trading/decision signalの入力に使用しない。最初のsource rowより前を上場前と
+  推測せず、取得開始後のofficial session欠落、code不一致、schema/pagination不整合は
+  fail closedする
+- `history_coverage_clipped`は単なる暦日差ではなく、`queryFrom`以上かつ
+  `sourceCoverageFrom`未満にofficial sessionが存在するときだけ付与する。週末・休場日
+  から次の最初のofficial sessionまでの差は欠落としない。1321/2633相対ETFでは1件の
+  warningに1321、2633の順で双方の取得開始日を記録し、unavailable boundaryは
+  `観測なし`とする。exact predicateと文面は`docs/DASHBOARD_REFRESH_PLAN.md`に従う
+- ETFのcompleteな取得でrenderable barが0件の場合は、`eligibleThrough`を観測値では
+  なく照会済みexpected identityの`dataDate`とするcanonical unavailable artifactを
+  保存する。この成功receiptをlatestとして採用し、過去のavailable artifactへfallback
+  しない。片側empty、両側empty、all-null、共通日不足の厳密なpayloadと理由は
+  `docs/DASHBOARD_REFRESH_PLAN.md`に従う
 - raw response、credential、request header、request ID、絶対pathをartifactや
   Browserへ保存・返却しない
 - realtime、automatic market-data refresh/polling（active jobのstatus確認を除く）、
