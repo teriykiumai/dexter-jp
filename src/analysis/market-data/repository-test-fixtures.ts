@@ -3,11 +3,14 @@ import { MarketDataArtifactCodecV1, MarketDataArtifactCommonFieldsV1 } from './a
 import { digestMarketSourceInputV1, marketDataRolesV1, type SourceInputV1, type MarketDataTargetV1,
   type MarketDataModuleIdV1, type MarketDataCalculationVersionV1 } from './contracts.js';
 import { SourceInputIdentityV1Schema } from './contracts.js';
+import { CurrentCodeWarningInputV1Schema, MarketDataWarningV1Schema,
+  type CurrentCodeWarningInputV1, type MarketDataWarningV1 } from './job-schema.js';
 
 // Synthetic storage codecs only. These are not Technical/Overview production
 // output schemas and must never be registered with a Dashboard source adapter.
 const result = z.object({ identity: z.literal('synthetic'), value: z.number().finite() }).strict();
-const common = { ...MarketDataArtifactCommonFieldsV1, syntheticResult: result };
+const common = { ...MarketDataArtifactCommonFieldsV1, syntheticResult: result,
+  warnings: z.array(MarketDataWarningV1Schema) };
 export const technicalFixtureSchema = z.object({ ...common,
   schemaVersion: z.literal('technical_chart_dataset_v1'), calculationVersion: z.literal('technical_chart_calculation_v1'),
   ticker: z.literal('7203'), jquantsCode: z.literal('72030'), acceptedAt: z.string(),
@@ -15,6 +18,7 @@ export const technicalFixtureSchema = z.object({ ...common,
 export const overviewFixtureSchema = z.object({ ...common,
   schemaVersion: z.literal('market_overview_module_v1'), calculationVersion: z.literal('market_short_ratio_calculation_v1'),
   moduleId: z.literal('market_short_ratio'), sourceId: z.literal('market_short_ratio_v1'),
+  syntheticCurrentCodeWarningInput: CurrentCodeWarningInputV1Schema.nullable(),
 }).strict();
 const overviewCalculationVersions: Record<MarketDataModuleIdV1, MarketDataCalculationVersionV1> = {
   tse_margin_quantities: 'tse_margin_quantities_calculation_v1',
@@ -29,7 +33,8 @@ export function fixtureOverviewCodec(moduleId: MarketDataModuleIdV1, environment
   return new MarketDataArtifactCodecV1({
     schema: z.object({ ...common, schemaVersion: z.literal('market_overview_module_v1'),
       calculationVersion: z.literal(calculationVersion), moduleId: z.literal(moduleId),
-      sourceId: z.literal(`${moduleId}_v1` as const) }).strict(),
+      sourceId: z.literal(`${moduleId}_v1` as const),
+      syntheticCurrentCodeWarningInput: CurrentCodeWarningInputV1Schema.nullable() }).strict(),
     target: { kind: 'overview', moduleId, sourceId: `${moduleId}_v1` }, environment,
     validateSourceInputs: inputs => validateSyntheticInputs(inputs),
   });
@@ -63,7 +68,8 @@ export function sourceInputIdentity(input: SourceInputV1) {
   }
   return SourceInputIdentityV1Schema.parse(rest);
 }
-export function fixtureDraft(acceptedAt = '2026-09-03T07:30:00.000Z', value = 0, technical = false) {
+export function fixtureDraft(acceptedAt = '2026-09-03T07:30:00.000Z', value = 0, technical = false,
+  warnings: readonly MarketDataWarningV1[] = []) {
   const codec = fixtureCodec(technical);
   const fetchedAt = new Date(Date.parse(acceptedAt) + 1000).toISOString();
   const calculationDate = new Date(Date.parse(acceptedAt) + 9 * 3600000).toISOString().slice(0, 10);
@@ -85,14 +91,17 @@ export function fixtureDraft(acceptedAt = '2026-09-03T07:30:00.000Z', value = 0,
   });
   const metadata = { asOfCutoff: acceptedAt, calculationDate, dataDate: '2026-09-03',
     fetchedAt: sourceInputs.filter(i => i.kind === 'provider').map(i => i.fetchedAt).sort().at(-1)!,
-    sourceInputs, syntheticResult: { identity: 'synthetic', value } };
+    sourceInputs, syntheticResult: { identity: 'synthetic', value }, warnings: [...warnings] };
   return technical ? { ...metadata, schemaVersion: 'technical_chart_dataset_v1',
     calculationVersion: 'technical_chart_calculation_v1', ticker: '7203', jquantsCode: '72030', acceptedAt }
     : { ...metadata, schemaVersion: 'market_overview_module_v1',
-      calculationVersion: 'market_short_ratio_calculation_v1', moduleId: 'market_short_ratio', sourceId: 'market_short_ratio_v1' };
+      calculationVersion: 'market_short_ratio_calculation_v1', moduleId: 'market_short_ratio',
+      sourceId: 'market_short_ratio_v1', syntheticCurrentCodeWarningInput: null };
 }
 export function fixtureOverviewDraft(moduleId: MarketDataModuleIdV1,
-  acceptedAt = '2026-09-03T07:30:00.000Z', value = 0) {
+  acceptedAt = '2026-09-03T07:30:00.000Z', value = 0,
+  warnings: readonly MarketDataWarningV1[] = [],
+  currentCodeWarningInput: CurrentCodeWarningInputV1 | null = null) {
   const codec = fixtureOverviewCodec(moduleId);
   const fetchedAt = new Date(Date.parse(acceptedAt) + 1000).toISOString();
   const calculationDate = new Date(Date.parse(acceptedAt) + 9 * 3600000).toISOString().slice(0, 10);
@@ -116,7 +125,8 @@ export function fixtureOverviewDraft(moduleId: MarketDataModuleIdV1,
     calculationVersion: overviewCalculationVersions[moduleId], moduleId, sourceId: `${moduleId}_v1` as const,
     asOfCutoff: acceptedAt, calculationDate, dataDate: '2026-09-03',
     fetchedAt: sourceInputs.filter(i => i.kind === 'provider').map(i => i.fetchedAt).sort().at(-1)!,
-    sourceInputs, syntheticResult: { identity: 'synthetic' as const, value } };
+    sourceInputs, syntheticResult: { identity: 'synthetic' as const, value }, warnings: [...warnings],
+    syntheticCurrentCodeWarningInput: currentCodeWarningInput };
 }
 export function fixtureArtifact(acceptedAt?: string, value?: number, technical = false) {
   return fixtureCodec(technical).build(fixtureDraft(acceptedAt, value, technical));

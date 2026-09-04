@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { HISTORICAL_IDENTITY_UNVERIFIED_MESSAGE_V1, MarketDataJobViewV1Schema,
   MarketDataWarningV1Schema, assertMarketDataJobReplacementV1,
-  currentCodeWarningsV1, isCurrentCodePersistedWarningV1,
+  assertCurrentCodeWarningsV1, currentCodeWarningsV1, isCurrentCodePersistedWarningV1,
   marketDataJobFailureV1, marketDataWarningCodesV1 } from './job-schema.js';
 
 function accepted() {
@@ -115,6 +115,38 @@ describe('Market Data job schema', () => {
     expect(isCurrentCodePersistedWarningV1({ code: 'history_coverage_clipped',
       message: '取得できた履歴の開始日は1321が観測なし、2633が観測なしです。これらの日付は上場日を示しません。',
       moduleId: 'etf_1321_2633_relative', artifactIdentity: null })).toBeFalse();
+  });
+
+  test('requires the exact current-code warning set for validated boundaries', () => {
+    const singleInput = { kind: 'etf_1321_eod', boundary: {
+      state: 'available', sourceCoverageFrom: '2018-03-01', historyCoverageClipped: true,
+    } } as const;
+    const single = currentCodeWarningsV1(singleInput);
+    expect(() => assertCurrentCodeWarningsV1(single, singleInput)).not.toThrow();
+    expect(() => assertCurrentCodeWarningsV1([], singleInput)).toThrow();
+    expect(() => assertCurrentCodeWarningsV1(single.slice(0, 1), singleInput)).toThrow();
+    expect(() => assertCurrentCodeWarningsV1(single.slice(1), singleInput)).toThrow();
+    expect(() => assertCurrentCodeWarningsV1(single, { ...singleInput,
+      boundary: { ...singleInput.boundary, historyCoverageClipped: false } })).toThrow();
+    expect(() => assertCurrentCodeWarningsV1(single.map(warning => warning.code === 'history_coverage_clipped'
+      ? { ...warning, message: warning.message.replace('2018-03-01', '2018-03-02') } : warning),
+    singleInput)).toThrow();
+
+    const relativeInput = { kind: 'etf_1321_2633_relative',
+      boundary1321: { state: 'unavailable', historyCoverageClipped: false },
+      boundary2633: { state: 'available', sourceCoverageFrom: '2020-01-06',
+        historyCoverageClipped: true } } as const;
+    const relative = currentCodeWarningsV1(relativeInput);
+    expect(() => assertCurrentCodeWarningsV1(relative, relativeInput)).not.toThrow();
+    for (const replacement of [
+      '取得できた履歴の開始日は1321が観測なし、2633が2020-01-07です。これらの日付は上場日を示しません。',
+      '取得できた履歴の開始日は1321が2020-01-06、2633が観測なしです。これらの日付は上場日を示しません。',
+      '取得できた履歴の開始日は1321が2019-01-04、2633が2020-01-06です。これらの日付は上場日を示しません。',
+    ]) {
+      expect(() => assertCurrentCodeWarningsV1(relative.map(warning =>
+        warning.code === 'history_coverage_clipped' ? { ...warning, message: replacement } : warning),
+      relativeInput)).toThrow();
+    }
   });
 
   test('replacement accepts monotonic lifecycle updates and rejects identity or progress rollback', () => {

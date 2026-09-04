@@ -45,31 +45,61 @@ describe('Overview module registry', () => {
   test('accepts current-code warnings only for their owning ETF module', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dexter-overview-registry-etf-')); roots.push(root);
     const codec = fixtureOverviewCodec('etf_1321_eod', {});
-    const warnings = currentCodeWarningsV1({ kind: 'etf_1321_eod', boundary: {
+    const warningInput = { kind: 'etf_1321_eod', boundary: {
       state: 'available', sourceCoverageFrom: '2018-03-01', historyCoverageClipped: true,
-    } });
+    } } as const;
+    const warnings = currentCodeWarningsV1(warningInput);
     const valid = createOverviewModuleAdapterV1({
       repository: new MarketDataRepositoryV1(codec, root),
       collect: async () => { throw new Error('not used'); },
-      project: artifact => ({ state: 'available', payload: artifact.syntheticResult, warnings }),
+      project: artifact => ({ state: 'available', payload: artifact.syntheticResult,
+        warnings: artifact.warnings }),
+      currentCodeWarningInput: artifact => artifact.syntheticCurrentCodeWarningInput!,
       environment: {},
     });
-    const artifact = codec.build(fixtureOverviewDraft('etf_1321_eod'));
+    const artifact = codec.build(fixtureOverviewDraft('etf_1321_eod', undefined, 0,
+      warnings, warningInput));
     expect(valid.project(artifact).warnings).toEqual(warnings);
+    expect(() => createOverviewModuleAdapterV1({
+      repository: new MarketDataRepositoryV1(codec, root),
+      collect: async () => { throw new Error('not used'); },
+      project: value => ({ state: 'available', payload: value.syntheticResult,
+        warnings: value.warnings }), environment: {},
+    })).toThrow();
 
     for (const invalidWarnings of [
+      [],
+      warnings.slice(0, 1),
+      warnings.slice(1),
       [...warnings].reverse(),
       [...warnings, warnings[1]!],
       warnings.map(warning => warning.code === 'historical_identity_unverified'
         ? { ...warning, message: '同一性は未確認です。' } : warning),
+      warnings.map(warning => warning.code === 'history_coverage_clipped'
+        ? { ...warning, message: warning.message.replace('2018-03-01', '2018-03-02') } : warning),
     ]) {
       const invalidEtf = createOverviewModuleAdapterV1({
         repository: new MarketDataRepositoryV1(codec, root),
         collect: async () => { throw new Error('not used'); },
         project: value => ({ state: 'available', payload: value.syntheticResult,
-          warnings: invalidWarnings }), environment: {},
+          warnings: value.warnings }),
+        currentCodeWarningInput: value => value.syntheticCurrentCodeWarningInput!,
+        environment: {},
       });
-      expect(() => invalidEtf.project(artifact)).toThrow();
+      const invalidArtifact = codec.build(fixtureOverviewDraft('etf_1321_eod', undefined, 0,
+        invalidWarnings, warningInput));
+      expect(() => invalidEtf.project(invalidArtifact)).toThrow();
+    }
+
+    for (const projectedWarnings of [[], warnings.slice(1)]) {
+      const changedByProjection = createOverviewModuleAdapterV1({
+        repository: new MarketDataRepositoryV1(codec, root),
+        collect: async () => { throw new Error('not used'); },
+        project: value => ({ state: 'available', payload: value.syntheticResult,
+          warnings: projectedWarnings }),
+        currentCodeWarningInput: value => value.syntheticCurrentCodeWarningInput!, environment: {},
+      });
+      expect(() => changedByProjection.project(artifact)).toThrow();
     }
 
     const invalid = await adapter(artifact => ({ state: 'available', payload: artifact.syntheticResult,

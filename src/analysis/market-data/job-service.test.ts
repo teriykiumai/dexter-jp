@@ -114,7 +114,8 @@ async function harness(options: { configured?: boolean; fail?: () => boolean;
         return result;
       };
       if (options.shared) await context.shareSource('synthetic_shared_source_v1', load); else await load();
-      return { artifact: fixtureCodec(false, {}).build(fixtureDraft(context.acceptedAt, 0)),
+      return { artifact: fixtureCodec(false, {}).build(fixtureDraft(context.acceptedAt, 0, false,
+        options.warnings ?? [])),
         attempts: options.swallowDispatchStop
           ? Math.min(options.dispatches ?? 1, (options.limits ?? limits).maximumAttempts)
           : options.dispatches ?? 1,

@@ -68,20 +68,20 @@ const currentCodeWarningBoundarySchema = z.discriminatedUnion('state', [
   availableCurrentCodeWarningBoundarySchema,
   z.object({ state: z.literal('unavailable'), historyCoverageClipped: z.literal(false) }).strict(),
 ]);
-const currentCodeWarningInputSchema = z.discriminatedUnion('kind', [
+export const CurrentCodeWarningInputV1Schema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('technical'), boundary: availableCurrentCodeWarningBoundarySchema }).strict(),
   z.object({ kind: z.literal('etf_1321_eod'), boundary: currentCodeWarningBoundarySchema }).strict(),
   z.object({ kind: z.literal('etf_1321_2633_relative'),
     boundary1321: currentCodeWarningBoundarySchema,
     boundary2633: currentCodeWarningBoundarySchema }).strict(),
 ]);
-export type CurrentCodeWarningInputV1 = z.infer<typeof currentCodeWarningInputSchema>;
+export type CurrentCodeWarningInputV1 = z.infer<typeof CurrentCodeWarningInputV1Schema>;
 
 /** Builds the closed, digest-bearing current-code warning set. The caller supplies
  * clipping booleans already proved from the shared official-session calendar.
  */
 export function currentCodeWarningsV1(raw: CurrentCodeWarningInputV1): readonly MarketDataWarningV1[] {
-  const parsed = currentCodeWarningInputSchema.safeParse(raw);
+  const parsed = CurrentCodeWarningInputV1Schema.safeParse(raw);
   if (!parsed.success) throw new TypeError('Invalid current-code warning input.');
   const input = parsed.data;
   const moduleId = input.kind === 'technical' ? null : input.kind;
@@ -104,6 +104,20 @@ export function currentCodeWarningsV1(raw: CurrentCodeWarningInputV1): readonly 
   warnings.push({ code: 'historical_identity_unverified',
     message: HISTORICAL_IDENTITY_UNVERIFIED_MESSAGE_V1, moduleId, artifactIdentity: null });
   return Object.freeze(warnings.map(warning => Object.freeze(warning)));
+}
+
+/** Verifies the complete current-code warning set against validated artifact
+ * boundaries. Individual warning syntax is insufficient because it cannot prove
+ * that required warnings are present or that embedded dates are authoritative.
+ */
+export function assertCurrentCodeWarningsV1(
+  actual: readonly MarketDataWarningV1[], expectedInput: CurrentCodeWarningInputV1,
+): void {
+  const warnings = actual.map(warning => MarketDataWarningV1Schema.parse(warning));
+  const expected = currentCodeWarningsV1(expectedInput);
+  if (canonicalJsonV1(warnings) !== canonicalJsonV1(expected)) {
+    throw new TypeError('Current-code warnings do not match the artifact boundary.');
+  }
 }
 
 const singleBoundaryWarningMessage =
