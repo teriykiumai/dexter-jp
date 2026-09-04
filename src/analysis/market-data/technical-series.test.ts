@@ -4,10 +4,11 @@ import { createTseSessionCalendarV1 } from '../strategy-validation/calendar.js';
 import {
   calculateTechnicalSeriesV1, getTechnicalCalendarCoverageV1, normalizeTechnicalDailyObservationV1,
   parseTechnicalDailyObservationV1, TechnicalSeriesErrorV1, TECHNICAL_INDICATOR_METHODS_V1,
-  type TechnicalCalculationWindowV1, type TechnicalDailyObservationV1,
+  type CurrentCodeHistoryBoundaryAvailableV1, type TechnicalCalculationWindowV1,
+  type TechnicalDailyObservationV1,
 } from './technical-series.js';
 
-// Synthetic weekday calendar only: this is not an official source/lifetime fixture.
+// Synthetic weekday calendar only: this is not an official source or identity fixture.
 function dates(from: string, through: string): string[] {
   const result: string[] = [];
   const date = new Date(`${from}T00:00:00Z`);
@@ -22,23 +23,40 @@ function bar(date: string, close = 100, volume = 10): TechnicalDailyObservationV
   return { kind: 'bar', date, open: close, high: close + 2, low: close - 2, close, volume };
 }
 
+type FixtureWindowOptions = Partial<Omit<TechnicalCalculationWindowV1, 'historyBoundary'>> & {
+  historyBoundary?: Partial<CurrentCodeHistoryBoundaryAvailableV1>;
+};
+
 function fixture(
-  options: Partial<TechnicalCalculationWindowV1> = {},
+  options: FixtureWindowOptions = {},
   holidays: string[] = [],
   close: (index: number) => number = index => 100 + index / 10 + Math.sin(index) * 3,
 ) {
+  const queryFrom = options.queryFrom ?? '2024-01-01';
+  const eligibleThrough = options.eligibleThrough ?? '2024-03-29';
   const window: TechnicalCalculationWindowV1 = {
-    queryFrom: '2024-01-01', eligibleThrough: '2024-03-29', calculationDate: '2024-04-01',
-    listingWindow: { segmentStart: '2000-01-01', segmentEnd: null, proofFrom: '2000-01-01', proofThrough: '2025-12-31' },
-    ...options,
+    queryFrom, eligibleThrough,
+    calculationDate: options.calculationDate ?? '2024-04-01',
+    historyBoundary: {
+      state: 'available', contractVersion: 'current_code_history_v1',
+      mode: 'current_code_only', jquantsCode: '72030',
+      currentMasterDate: eligibleThrough, sourceCoverageFrom: queryFrom,
+      sourceCoverageThrough: eligibleThrough, historicalIdentity: 'not_verified',
+      ...options.historyBoundary,
+    },
   };
   const coverage = getTechnicalCalendarCoverageV1(window);
   const sourceRows = dates(coverage.calendarCoverageFrom, coverage.calendarCoverageTo).map(Date => ({
     Date, HolDiv: holidays.includes(Date) || [0, 6].includes(new globalThis.Date(`${Date}T00:00:00Z`).getUTCDay()) ? '0' : '1',
   }));
   const calendar = createTseSessionCalendarV1(sourceRows, coverage.calendarCoverageFrom, coverage.calendarCoverageTo);
-  const observations = calendar.sessions.filter(date => date >= window.queryFrom
-    && date >= window.listingWindow.segmentStart && date <= window.eligibleThrough)
+  if (options.historyBoundary?.sourceCoverageFrom === undefined) {
+    const firstSession = calendar.sessions.find(date => date >= queryFrom && date <= eligibleThrough);
+    if (firstSession === undefined) throw new Error('Synthetic fixture requires an eligible official session.');
+    window.historyBoundary.sourceCoverageFrom = firstSession;
+  }
+  const observations = calendar.sessions.filter(date => date >= window.historyBoundary.sourceCoverageFrom
+    && date <= window.eligibleThrough)
     .map((date, index) => bar(date, close(index)));
   return { window, calendar, observations };
 }
@@ -74,10 +92,9 @@ describe('strict Technical daily input', () => {
   });
 
   test('gap union is closed and cannot carry values or unknown reasons', () => {
-    for (const patch of [{ reason: 'unknown' }, { close: 0 }, { date: 'bad' }]) {
+    for (const patch of [{ reason: 'unknown' }, { reason: 'missing_in_complete_envelope' }, { close: 0 }, { date: 'bad' }]) {
       expectCode(() => parseTechnicalDailyObservationV1({ kind: 'gap', date: '2024-01-02', reason: 'source_all_null', ...patch }), 'source_invalid_response');
     }
-    expect(parseTechnicalDailyObservationV1({ kind: 'gap', date: '2024-01-02', reason: 'missing_in_complete_envelope' }).kind).toBe('gap');
   });
 
   test('rejects duplicate bar/bar and bar/gap dates instead of deduplicating', () => {
@@ -99,6 +116,27 @@ describe('strict Technical daily input', () => {
       expectCode(() => calculateTechnicalSeriesV1({ ...input, observations: [...input.observations, bar(date)] }), 'source_invalid_response');
     }
     expectCode(() => calculateTechnicalSeriesV1({ ...input, observations: input.observations.slice(1) }), 'source_invalid_response');
+    expectCode(() => calculateTechnicalSeriesV1({
+      ...input, observations: input.observations.filter((_, index) => index !== 10),
+    }), 'source_invalid_response');
+  });
+
+  test('requires the declared first source row and never synthesizes or admits pre-coverage rows', () => {
+    const input = fixture({ historyBoundary: { sourceCoverageFrom: '2024-01-03' } });
+    const result = calculateTechnicalSeriesV1(input);
+    expect(result.calculationFrom).toBe('2024-01-03');
+    expect(result.dailyObservations[0]?.date).toBe('2024-01-03');
+    expectCode(() => calculateTechnicalSeriesV1({
+      ...input, observations: [bar('2024-01-02'), ...input.observations],
+    }), 'source_invalid_response');
+    expectCode(() => calculateTechnicalSeriesV1({
+      ...input, observations: input.observations.slice(1),
+    }), 'source_invalid_response');
+
+    const explicitGap = [{ kind: 'gap', date: '2024-01-03', reason: 'source_all_null' } as const,
+      ...input.observations.slice(1)];
+    expect(calculateTechnicalSeriesV1({ ...input, observations: explicitGap }).dailyObservations[0])
+      .toEqual(explicitGap[0]);
   });
 
   test('requires exact calendar coverage and an eligible official session', () => {
@@ -112,16 +150,38 @@ describe('strict Technical daily input', () => {
     expect(() => createTseSessionCalendarV1(rows, input.calendar.requiredFrom, input.calendar.requiredTo)).toThrow();
   });
 
-  test('rejects invalid windows and incomplete structural lifetime evidence', () => {
+  test('rejects invalid windows and inconsistent current-code history boundaries', () => {
     const input = fixture();
     for (const patch of [{ queryFrom: '2024-04-01' }, { calculationDate: '2024-03-28' }, { queryFrom: '2024-02-30' }, { extra: true }]) {
       expectCode(() => calculateTechnicalSeriesV1({ ...input, window: { ...input.window, ...patch } }), 'source_invalid_response');
     }
-    for (const patch of [{ segmentStart: '2024-04-01' }, { segmentEnd: '2024-03-28' }, { proofFrom: '2024-02-01' }, { proofThrough: '2024-03-28' }]) {
+    for (const patch of [
+      { currentMasterDate: '2024-03-28' }, { sourceCoverageThrough: '2024-03-28' },
+      { sourceCoverageFrom: '2023-12-29' }, { sourceCoverageFrom: '2024-04-01' },
+    ]) {
       expectCode(() => calculateTechnicalSeriesV1({ ...input, window: {
-        ...input.window, listingWindow: { ...input.window.listingWindow, ...patch },
+        ...input.window, historyBoundary: { ...input.window.historyBoundary, ...patch },
       } }), 'instrument_identity_unverified');
     }
+    for (const patch of [
+      { state: 'unavailable' }, { contractVersion: 'other' }, { mode: 'other' },
+      { jquantsCode: '7203' }, { jquantsCode: '72030 ' }, { jquantsCode: '130a0' },
+      { historicalIdentity: 'verified' }, { extra: true },
+    ]) {
+      const window = {
+        ...input.window, historyBoundary: { ...input.window.historyBoundary, ...patch },
+      } as unknown as TechnicalCalculationWindowV1;
+      expectCode(() => calculateTechnicalSeriesV1({ ...input, window }), 'source_invalid_response');
+    }
+    const legacyWindow = {
+      ...input.window,
+      listingWindow: { segmentStart: '2000-01-01', segmentEnd: null, proofFrom: '2000-01-01', proofThrough: '2025-12-31' },
+    } as unknown as TechnicalCalculationWindowV1;
+    expectCode(() => calculateTechnicalSeriesV1({ ...input, window: legacyWindow }), 'source_invalid_response');
+
+    const alphanumeric = fixture({ historyBoundary: { jquantsCode: '130A0' } });
+    expect(calculateTechnicalSeriesV1(alphanumeric).calculationFrom)
+      .toBe(alphanumeric.window.historyBoundary.sourceCoverageFrom);
   });
 
   test('gap-only input fails; gaps after the final bar do not change dataDate', () => {
@@ -142,7 +202,7 @@ describe('interval aggregation and completeness', () => {
     const input = fixture({ queryFrom: '2024-01-01', eligibleThrough: '2024-01-05', calculationDate: '2024-02-01' }, ['2024-01-01']);
     input.observations = [
       { kind: 'bar', date: '2024-01-02', open: 100, high: 115, low: 95, close: 110, volume: 10 },
-      { kind: 'gap', date: '2024-01-03', reason: 'missing_in_complete_envelope' },
+      { kind: 'gap', date: '2024-01-03', reason: 'source_all_null' },
       { kind: 'bar', date: '2024-01-04', open: 105, high: 110, low: 90, close: 95, volume: 0 },
       { kind: 'bar', date: '2024-01-05', open: 95, high: 120, low: 92, close: 118, volume: 30 },
     ];
@@ -208,31 +268,60 @@ describe('interval aggregation and completeness', () => {
     const result = calculateTechnicalSeriesV1(fixture({ queryFrom: '2024-01-03' }, ['2024-01-01', '2024-01-02']));
     expect(result.intervals.week[0].partial).toBe(false);
     expect(result.intervals.month[0].partial).toBe(false);
+    expect(result.historyCoverageClipped).toBe(false);
   });
 
-  test('IPO clipping is not a gap or leading partial and fewer than 251 bars are valid', () => {
-    const input = fixture({ listingWindow: {
-      segmentStart: '2024-01-03', segmentEnd: null, proofFrom: '2024-01-03', proofThrough: '2024-03-29',
-    } });
-    // Rows from outside the current segment, if supplied, cannot enter returned observations.
-    input.observations.unshift(bar('2024-01-01'), { kind: 'gap', date: '2024-01-02', reason: 'source_all_null' });
+  test('derives the coverage-warning input from official sessions rather than calendar-day distance', () => {
+    const clipped = calculateTechnicalSeriesV1(fixture({
+      queryFrom: '2024-01-01', historyBoundary: { sourceCoverageFrom: '2024-01-03' },
+    }));
+    expect(clipped.historyCoverageClipped).toBe(true);
+
+    const holidayStart = calculateTechnicalSeriesV1(fixture({
+      queryFrom: '2024-01-01', historyBoundary: { sourceCoverageFrom: '2024-01-03' },
+    }, ['2024-01-01', '2024-01-02']));
+    expect(holidayStart.historyCoverageClipped).toBe(false);
+
+    const weekendStart = calculateTechnicalSeriesV1(fixture({
+      queryFrom: '2024-01-06', historyBoundary: { sourceCoverageFrom: '2024-01-08' },
+    }));
+    expect(weekendStart.historyCoverageClipped).toBe(false);
+  });
+
+  test('pre-coverage omission is not a gap, remains leading-partial, and permits fewer than 251 bars', () => {
+    const input = fixture({ historyBoundary: { sourceCoverageFrom: '2024-01-03' } });
     const result = calculateTechnicalSeriesV1(input);
     expect(result.calculationFrom).toBe('2024-01-03');
     expect(result.dailyObservations[0].date).toBe('2024-01-03');
     expect(result.unavailablePeriods).toEqual([]);
     expect(result.intervals.day.length).toBeLessThan(251);
-    expect(result.intervals.week[0].partial).toBe(false);
-    expect(result.intervals.month[0].partial).toBe(false);
+    expect(result.intervals.week[0].partial).toBe(true);
+    expect(result.intervals.month[0].partial).toBe(true);
+    expect(result.historyCoverageClipped).toBe(true);
   });
 
-  test('coverage starts at the earlier week/month boundary after lifetime clipping', () => {
-    const input = fixture({ queryFrom: '2024-01-01', listingWindow: {
-      segmentStart: '2024-03-01', segmentEnd: '2024-04-30', proofFrom: '2024-03-01', proofThrough: '2024-03-29',
-    } });
+  test('calendar coverage stays anchored to queryFrom after source coverage begins later', () => {
+    const input = fixture({ queryFrom: '2024-01-01', historyBoundary: { sourceCoverageFrom: '2024-03-01' } });
     const result = calculateTechnicalSeriesV1(input);
-    expect(result.calendarCoverageFrom).toBe('2024-02-26');
-    expect(result.calendarCoverageTo).toBe('2024-03-31');
+    expect(result.calendarCoverageFrom).toBe('2024-01-01');
+    expect(result.calendarCoverageTo).toBe('2024-04-30');
     expect(result.calculationTo).toBe('2024-03-29');
+    expect(result.historyCoverageClipped).toBe(true);
+  });
+
+  test('calendar coverage upper bound is fixed from calculationDate before eligibleThrough is selected', () => {
+    const beforeClosure = fixture({
+      queryFrom: '2024-01-01', eligibleThrough: '2024-03-29', calculationDate: '2024-04-08',
+    }, dates('2024-04-01', '2024-04-08'));
+    const afterClosure = fixture({
+      queryFrom: '2024-01-01', eligibleThrough: '2024-04-05', calculationDate: '2024-04-08',
+    });
+    expect(getTechnicalCalendarCoverageV1(beforeClosure.window)).toEqual({
+      calendarCoverageFrom: '2024-01-01', calendarCoverageTo: '2024-04-30',
+    });
+    expect(calculateTechnicalSeriesV1(beforeClosure).calendarCoverageTo).toBe('2024-04-30');
+    expect(getTechnicalCalendarCoverageV1(afterClosure.window))
+      .toEqual(getTechnicalCalendarCoverageV1(beforeClosure.window));
   });
 
   test('current week/month remain partial even after their final trading session', () => {
@@ -297,7 +386,9 @@ describe('dated RSI/MACD and cross', () => {
     for (const field of ['rsi', 'macd', 'signal', 'histogram', 'cross'] as const) {
       expect(partial[33][field]).toEqual({ state: 'unavailable', reason: 'partial_period' });
     }
-    const completed = calculateTechnicalSeriesV1({ ...input, window: { ...input.window, calculationDate: '2023-11-01' } }).intervals.month;
+    const completed = calculateTechnicalSeriesV1(fixture({
+      queryFrom: '2021-01-01', eligibleThrough: '2023-10-31', calculationDate: '2023-11-01',
+    })).intervals.month;
     const expected = calculateMacd(completed.map(row => row.close)).macd!;
     expect(completed[33].macd).toEqual({ state: 'available', value: expected.value });
     expect(completed[33].signal).toEqual({ state: 'available', value: expected.signal });
@@ -346,7 +437,7 @@ describe('dated RSI/MACD and cross', () => {
     const before = JSON.stringify(input);
     input.observations.forEach(Object.freeze);
     Object.freeze(input.observations);
-    Object.freeze(input.window.listingWindow);
+    Object.freeze(input.window.historyBoundary);
     Object.freeze(input.window);
     expect(calculateTechnicalSeriesV1(input)).toEqual(expected);
     expect(JSON.stringify(input)).toBe(before);
