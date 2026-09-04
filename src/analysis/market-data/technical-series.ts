@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { calculateMacdSeries, calculateRsiSeries } from '../../tools/finance/advanced-technical-engine.js';
+import { toJQuantsSecuritiesCode } from '../../utils/japanese-securities-code.js';
 import { TseSessionCalendarV1 } from '../strategy-validation/calendar.js';
 import { isStrictGregorianDate } from '../strategy-validation/date.js';
 
@@ -26,7 +27,7 @@ const observationSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('bar'), ...barFields }).strict(),
   z.object({
     kind: z.literal('gap'), date: dateSchema,
-    reason: z.enum(['source_all_null', 'missing_in_complete_envelope']),
+    reason: z.literal('source_all_null'),
   }).strict(),
 ]);
 
@@ -53,12 +54,30 @@ export type TechnicalCandleV1 = Period & {
 };
 export type TechnicalUnavailablePeriodV1 = Period & { reason: 'source_gap' };
 
+const jquantsCodeSchema = z.string().refine((value) => {
+  try {
+    return value.length === 5 && toJQuantsSecuritiesCode(value) === value;
+  } catch {
+    return false;
+  }
+});
+
+const historyBoundarySchema = z.object({
+  state: z.literal('available'),
+  contractVersion: z.literal('current_code_history_v1'),
+  mode: z.literal('current_code_only'),
+  jquantsCode: jquantsCodeSchema,
+  currentMasterDate: dateSchema,
+  sourceCoverageFrom: dateSchema,
+  sourceCoverageThrough: dateSchema,
+  historicalIdentity: z.literal('not_verified'),
+}).strict();
+
+export type CurrentCodeHistoryBoundaryAvailableV1 = z.infer<typeof historyBoundarySchema>;
+
 const windowSchema = z.object({
   queryFrom: dateSchema, eligibleThrough: dateSchema, calculationDate: dateSchema,
-  listingWindow: z.object({
-    segmentStart: dateSchema, segmentEnd: dateSchema.nullable(),
-    proofFrom: dateSchema, proofThrough: dateSchema,
-  }).strict(),
+  historyBoundary: historyBoundarySchema,
 }).strict();
 
 /** Structural input only, NOT source/identity proof. DR-T0/DR-T2 must verify provenance.
@@ -69,6 +88,7 @@ export type TechnicalCalculationWindowV1 = z.infer<typeof windowSchema>;
 export type TechnicalSeriesResultV1 = {
   calculationFrom: string; calculationTo: string; dataDate: string;
   calendarCoverageFrom: string; calendarCoverageTo: string;
+  historyCoverageClipped: boolean;
   dailyObservations: TechnicalDailyObservationV1[];
   intervals: Record<TechnicalIntervalV1, TechnicalCandleV1[]>;
   unavailablePeriods: TechnicalUnavailablePeriodV1[];
@@ -93,7 +113,7 @@ const nullableRowSchema = z.object({
 }).strict();
 
 /** Normalize already selected adjusted fields, not raw provider field names.
- * An absent row cannot be inferred here: only a proved-complete adapter may emit that gap.
+ * An absent row has no gap representation and fails after source coverage begins.
  */
 export function normalizeTechnicalDailyObservationV1(value: unknown): TechnicalDailyObservationV1 {
   const result = nullableRowSchema.safeParse(value);
@@ -131,15 +151,17 @@ function resolveWindow(value: unknown) {
   const result = windowSchema.safeParse(value);
   if (!result.success) return fail('source_invalid_response');
   const window = result.data;
-  const { queryFrom, eligibleThrough, calculationDate, listingWindow: listing } = window;
+  const { queryFrom, eligibleThrough, calculationDate, historyBoundary } = window;
   if (queryFrom > eligibleThrough || eligibleThrough > calculationDate) return fail('source_invalid_response');
-  const calculationFrom = queryFrom > listing.segmentStart ? queryFrom : listing.segmentStart;
-  if (listing.segmentStart > eligibleThrough || (listing.segmentEnd !== null && listing.segmentEnd < eligibleThrough)
-    || listing.proofFrom > calculationFrom || listing.proofThrough < eligibleThrough) {
+  if (historyBoundary.currentMasterDate !== eligibleThrough
+    || historyBoundary.sourceCoverageThrough !== eligibleThrough
+    || historyBoundary.sourceCoverageFrom < queryFrom
+    || historyBoundary.sourceCoverageFrom > eligibleThrough) {
     return fail('instrument_identity_unverified');
   }
-  const fromWeek = periodFor(calculationFrom, 'week').periodStart;
-  const fromMonth = periodFor(calculationFrom, 'month').periodStart;
+  const calculationFrom = historyBoundary.sourceCoverageFrom;
+  const fromWeek = periodFor(queryFrom, 'week').periodStart;
+  const fromMonth = periodFor(queryFrom, 'month').periodStart;
   const toWeek = periodFor(eligibleThrough, 'week').periodEnd;
   const toMonth = periodFor(eligibleThrough, 'month').periodEnd;
   return {
@@ -199,23 +221,22 @@ export function calculateTechnicalSeriesV1(input: {
 
   if (!Array.isArray(input.observations)) return fail('source_invalid_response');
   const seen = new Set<string>();
-  const parsed = Array.from(input.observations, parseTechnicalDailyObservationV1);
-  for (const row of parsed) {
-    if (seen.has(row.date) || row.date < window.queryFrom || row.date > window.eligibleThrough) {
+  const dailyObservations = Array.from(input.observations, parseTechnicalDailyObservationV1)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  for (const row of dailyObservations) {
+    if (seen.has(row.date) || row.date < range.calculationFrom || row.date > window.eligibleThrough
+      || !calendar.isSession(row.date)) {
       return fail('source_invalid_response');
     }
     seen.add(row.date);
   }
-  // Sessions before the selected continuous segment are not missing observations.
-  const dailyObservations = parsed.filter(row => row.date >= range.calculationFrom)
-    .sort((a, b) => a.date.localeCompare(b.date));
-  for (const row of dailyObservations) {
-    if (!calendar.isSession(row.date)) return fail('source_invalid_response');
-  }
+  if (dailyObservations[0]?.date !== range.calculationFrom) return fail('source_invalid_response');
   const sessions = calendar.sessions.filter(date => date >= range.calculationFrom && date <= range.calculationTo);
   if (sessions.some(date => !seen.has(date))) return fail('source_invalid_response');
   const lastBar = dailyObservations.findLast((row): row is Bar => row.kind === 'bar');
   if (!lastBar) return fail('source_no_observation');
+  const historyCoverageClipped = calendar.sessions
+    .some(date => date >= window.queryFrom && date < range.calculationFrom);
 
   const intervals: TechnicalSeriesResultV1['intervals'] = { day: [], week: [], month: [] };
   const unavailablePeriods: TechnicalUnavailablePeriodV1[] = [];
@@ -234,7 +255,7 @@ export function calculateTechnicalSeriesV1(input: {
       }
       const periodSessions = interval === 'day' ? [] : calendar.sessions
         .filter(date => date >= period.periodStart && date <= period.periodEnd);
-      const leadingPartial = periodSessions.some(date => date >= window.listingWindow.segmentStart && date < window.queryFrom);
+      const leadingPartial = periodSessions.some(date => date < range.calculationFrom);
       const partial = interval !== 'day' && (leadingPartial || period.periodEnd >= window.calculationDate
         || periodSessions.some(date => date > window.eligibleThrough));
       const first = bars[0];
@@ -252,5 +273,5 @@ export function calculateTechnicalSeriesV1(input: {
     }
     attachIndicators(intervals[interval]);
   }
-  return { ...range, dataDate: lastBar.date, dailyObservations, intervals, unavailablePeriods };
+  return { ...range, dataDate: lastBar.date, historyCoverageClipped, dailyObservations, intervals, unavailablePeriods };
 }
