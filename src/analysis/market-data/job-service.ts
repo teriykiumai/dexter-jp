@@ -9,7 +9,7 @@ import {
 } from '../dashboard-jobs/coordinator.js';
 import { JQUANTS_REQUEST_TIMEOUT_MS_V1, type JQuantsExecutionEnvironmentV1 } from '../strategy-validation/jquants-execution.js';
 import { StrategyValidationUuidV4Schema } from '../strategy-validation/artifacts.js';
-import { MarketDataRepositoryErrorV1, MARKET_DATA_MODULE_IDS_V1,
+import { MarketDataReceiptPublicationErrorV1, MarketDataRepositoryErrorV1, MARKET_DATA_MODULE_IDS_V1,
   type MarketDataArtifactIdentityV1, type MarketDataModuleIdV1,
   type MarketDataObservationReceiptIdentityV1 } from './contracts.js';
 import { MarketDataJobRepositoryErrorV1, MarketDataJobRepositoryV1 } from './job-repository.js';
@@ -394,6 +394,18 @@ export class MarketDataJobServiceV1 {
       const attempts: Attempt[] = [];
       const sharedSources = new Map<string, Promise<unknown>>();
       let jobWideFailure: MarketDataJobStopV1['code'] | null = null;
+      const rememberStop = <T extends Error>(error: T): T => {
+        if (error instanceof MarketDataJobStopV1) jobWideFailure ??= error.code;
+        return error;
+      };
+      const checkExecution = (pendingAttempts: number, pendingWait: number, starting: boolean) => {
+        try { this.#checkExecution(lease, current, pendingAttempts, pendingWait, starting); }
+        catch (error) { throw rememberStop(error as Error); }
+      };
+      const checkProgress = (pages: number, rows: number, bytes: number, attemptCount: number) => {
+        try { this.#checkProgress(current, pages, rows, bytes, attemptCount); }
+        catch (error) { throw rememberStop(error as Error); }
+      };
       for (const module of this.overviewRegistry.implemented()) {
         if (signal.aborted) break;
         const beforeAttempts = current.progress.attempts;
@@ -403,22 +415,23 @@ export class MarketDataJobServiceV1 {
           const prepared = await module.collect({ jobId: current.jobId, acceptedAt: current.acceptedAt, signal,
             dispatch: async <T>(start: (signal: AbortSignal) => Promise<T>, extra?: AbortSignal) => {
               if (signal.aborted || extra?.aborted) {
-                throw this.#dispatchAbort(lease, controller, budget, extra);
+                throw rememberStop(this.#dispatchAbort(lease, controller, budget, extra));
               }
-              this.#checkExecution(lease, current, actualAttempts, 0, true);
+              checkExecution(actualAttempts, 0, true);
               const attempt = new AbortController();
               let attemptTimer: ReturnType<typeof setTimeout> | undefined;
               const combined = AbortSignal.any(extra ? [signal, extra, attempt.signal] : [signal, attempt.signal]);
               let rejectAbort!: () => void;
               const aborted = new Promise<never>((_, reject) => {
-                rejectAbort = () => reject(this.#dispatchAbort(lease, controller, budget, extra, attempt));
+                rejectAbort = () => reject(rememberStop(
+                  this.#dispatchAbort(lease, controller, budget, extra, attempt)));
                 if (combined.aborted) rejectAbort();
                 else combined.addEventListener('abort', rejectAbort, { once: true });
               });
               try {
                 const dispatched = this.coordinator.dispatch(lease, wait => {
                   if (signal.aborted || extra?.aborted) throw new MarketDataJobStopV1('source_timeout');
-                  this.#checkExecution(lease, current, actualAttempts, wait ?? 0, true);
+                  checkExecution(actualAttempts, wait ?? 0, true);
                 }, () => {
                   actualAttempts++;
                   attemptTimer = setTimeout(() => attempt.abort(), JQUANTS_REQUEST_TIMEOUT_MS_V1);
@@ -429,7 +442,7 @@ export class MarketDataJobServiceV1 {
               } catch (error) {
                 if (lease.signal.aborted || controller.signal.aborted || budget.signal.aborted
                   || attempt.signal.aborted || extra?.aborted) {
-                  throw this.#dispatchAbort(lease, controller, budget, extra, attempt);
+                  throw rememberStop(this.#dispatchAbort(lease, controller, budget, extra, attempt));
                 }
                 throw error;
               } finally {
@@ -441,7 +454,7 @@ export class MarketDataJobServiceV1 {
               if (!/^[a-z0-9_.:-]{1,160}$/.test(sourceKey)) {
                 throw new MarketDataSourceFailureV1('source_invalid_response');
               }
-              if (signal.aborted) throw this.#dispatchAbort(lease, controller, budget);
+              if (signal.aborted) throw rememberStop(this.#dispatchAbort(lease, controller, budget));
               const existing = sharedSources.get(sourceKey);
               if (existing) return existing as Promise<T>;
               const pending = Promise.resolve().then(load);
@@ -457,20 +470,23 @@ export class MarketDataJobServiceV1 {
                 throw new MarketDataSourceFailureV1('source_invalid_response');
               }
               actualPages = nextPages; actualRows = nextRows; actualBytes = nextBytes;
-              this.#checkProgress(current, actualPages, actualRows, actualBytes, actualAttempts);
+              checkProgress(actualPages, actualRows, actualBytes, actualAttempts);
             } });
+          if (jobWideFailure) throw new MarketDataJobStopV1(jobWideFailure);
           if (prepared.attempts !== actualAttempts || prepared.pages !== actualPages
             || prepared.acceptedRows !== actualRows || prepared.responseBytes !== actualBytes) {
             throw new Error('Collection accounting mismatch.');
           }
-          this.#checkExecution(lease, current, actualAttempts, 0, false);
+          checkExecution(actualAttempts, 0, false);
+          if (jobWideFailure) throw new MarketDataJobStopV1(jobWideFailure);
           attempts.push({ state: 'prepared', module, artifact: module.validate(prepared.artifact) });
         } catch (error) {
           if (error instanceof DashboardJobCoordinatorErrorV1
             || error instanceof MarketDataJobServiceErrorV1) throw error;
           if (!(error instanceof MarketDataJobCancelledV1)) {
-            if (error instanceof MarketDataJobStopV1) jobWideFailure = error.code;
-            attempts.push({ state: 'failed', module, code: this.#failureCode(error) });
+            if (error instanceof MarketDataJobStopV1) jobWideFailure ??= error.code;
+            attempts.push({ state: 'failed', module,
+              code: jobWideFailure ?? this.#failureCode(error) });
           }
         }
         current = await this.coordinator.exclusive(() => this.#updateProgress(current, {
@@ -522,12 +538,18 @@ export class MarketDataJobServiceV1 {
           try { observed = await module.publish(attempt.artifact,
             { jobId: current.jobId, acceptedAt: current.acceptedAt, checkedAt }); publicationState = observed.state; }
           catch (error) {
-            if (error instanceof MarketDataRepositoryErrorV1 && error.code === 'artifact_write_failed') {
-              observed = await module.findObservation(current.jobId, current.acceptedAt);
-              if (!observed) throw error;
-              if (observed.checkedAt !== checkedAt) throw new Error('Unexpected committed receipt.');
-              publicationState = 'idempotent_reuse';
-            } else throw error;
+            if (!(error instanceof MarketDataReceiptPublicationErrorV1)
+              || error.proof.receiptState !== 'ambiguous') throw error;
+            try { observed = await module.findObservation(current.jobId, current.acceptedAt); }
+            catch { throw error; }
+            if (!observed) {
+              throw new MarketDataReceiptPublicationErrorV1(
+                error.code === 'create_only_publish_unsupported'
+                  ? 'create_only_publish_unsupported' : 'artifact_write_failed',
+                { receiptState: 'definitely_absent' });
+            }
+            if (observed.checkedAt !== checkedAt) throw new Error('Unexpected committed receipt.');
+            publicationState = error.proof.contentPublicationState;
           }
           moduleResults.push({ moduleId: module.moduleId,
             state: publicationState, checkedAt,
@@ -535,8 +557,8 @@ export class MarketDataJobServiceV1 {
             observationReceiptIdentity: observed.observationReceiptIdentity,
             warningCodes: this.#artifactWarningCodes(module, observed.artifact) });
         } catch (error) {
-          if (error instanceof MarketDataRepositoryErrorV1
-            && (error.code === 'artifact_write_failed' || error.code === 'create_only_publish_unsupported')) {
+          if (error instanceof MarketDataReceiptPublicationErrorV1
+            && error.proof.receiptState === 'definitely_absent') {
             moduleResults.push(await this.#failedModule(module, 'artifact_write_failed', checkedAt,
               current.jobId));
           } else if (error instanceof MarketDataRepositoryErrorV1 && error.code === 'artifact_collision') {
@@ -562,8 +584,10 @@ export class MarketDataJobServiceV1 {
       });
       await this.coordinator.exclusive(() => this.#terminalReplace(current, terminal, successful > 0));
     } catch {
-      if (controller.signal.aborted) await this.#finishCancellation(current).catch(() => undefined);
-      else this.coordinator.latchRecovery();
+      if (controller.signal.aborted) {
+        try { await this.#finishCancellation(current); }
+        catch { this.coordinator.latchRecovery(); }
+      } else this.coordinator.latchRecovery();
     } finally {
       if (budgetTimer) clearTimeout(budgetTimer);
       this.#controllers.delete(initial.jobId);

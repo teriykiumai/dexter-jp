@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -21,7 +21,8 @@ afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, {
 const snapshots: AnalysisSnapshotReader = { listLatest: async () => [], listHistory: async () => [],
   loadLatest: async () => { throw new Error('missing'); }, loadHistory: async () => { throw new Error('missing'); } };
 
-async function api(configured = false, limitOverride?: MarketDataJobLimitsV1) {
+async function api(configured = false, limitOverride?: MarketDataJobLimitsV1,
+  failCancellationFinalizationReads = false, holdDispatch = false) {
   const root = await mkdtemp(join(tmpdir(), 'dexter-market-api-')); roots.push(root);
   const environment: JQuantsExecutionEnvironmentV1 = { monotonicNowMs: () => 0,
     wallNowMs: () => Date.parse('2026-09-04T00:00:00.000Z'), apiKey: () => 'synthetic',
@@ -30,15 +31,31 @@ async function api(configured = false, limitOverride?: MarketDataJobLimitsV1) {
   coordinator.register({ domain: 'strategy_validation', inventory: async () => [], isAbsent: async () => true,
     cleanup: async () => {}, reconcile: async () => { throw new Error('unexpected'); } });
   let queued: (() => void) | undefined;
+  let notifyDispatchStarted!: () => void;
+  const dispatchStarted = new Promise<void>(resolve => { notifyDispatchStarted = resolve; });
   const repository = new MarketDataRepositoryV1(fixtureCodec(false, {}), root);
   const module = createOverviewModuleAdapterV1<FixtureArtifact>({ repository,
     collect: async context => {
-      await context.dispatch(async () => null);
+      await context.dispatch(async () => {
+        notifyDispatchStarted();
+        if (holdDispatch) return new Promise<never>(() => {});
+        return null;
+      });
       context.recordProgress({ pages: 1, acceptedRows: 1, responseBytes: 8 });
       return { artifact: fixtureCodec(false, {}).build(fixtureDraft(context.acceptedAt)),
         attempts: 1, pages: 1, acceptedRows: 1, responseBytes: 8 };
     }, project: artifact => ({ state: 'available', payload: artifact.syntheticResult, warnings: [] }), environment: {} });
-  const service = new MarketDataJobServiceV1({ coordinator, jobRepository: new MarketDataJobRepositoryV1(root),
+  let finalCancellationReads = 0;
+  const jobRepository = new MarketDataJobRepositoryV1(root,
+    failCancellationFinalizationReads ? { readRecord: async path => {
+      const raw = JSON.parse(await readFile(path, 'utf8')) as { status?: string };
+      if (path.endsWith('.json') && raw.status === 'cancel_requested'
+        && ++finalCancellationReads > 1) {
+        throw Object.assign(new Error('synthetic persistent cancellation read failure'), { code: 'EIO' });
+      }
+      return raw;
+    } } : {});
+  const service = new MarketDataJobServiceV1({ coordinator, jobRepository,
     overviewRegistry: new OverviewModuleRegistryV1(configured ? [module] : []),
     limits: configured ? limitOverride ?? { estimatedMinimumAttempts: 1, maximumAttempts: 2, maximumPages: 2,
       maximumRows: 2, maximumResponseBytes: 128, executionBudgetMs: 120_000 } : undefined,
@@ -46,7 +63,7 @@ async function api(configured = false, limitOverride?: MarketDataJobLimitsV1) {
   const session = new DashboardSessionV1('a'.repeat(43));
   const value = new MarketDataDashboardApiV1(service, session);
   await service.initialize();
-  return { value, session, queued: () => queued?.() };
+  return { root, value, session, dispatchStarted, queued: () => queued?.() };
 }
 
 function request(path: string, init: RequestInit = {}) {
@@ -150,6 +167,35 @@ describe('Market Data Dashboard API', () => {
     const again = await handleDashboardRequest(request(`/api/market-data/jobs/${accepted.jobId}`,
       { method: 'DELETE', headers }), snapshots, undefined, h.value);
     expect(again.status).toBe(200);
+  });
+
+  test('fails closed after cancellation finalization cannot reread durable evidence', async () => {
+    const h = await api(true, undefined, true, true);
+    const headers = { host: '127.0.0.1', origin: 'http://127.0.0.1',
+      'x-dexter-csrf': h.session.csrfToken, 'content-type': 'application/json' };
+    const acceptedResponse = await handleDashboardRequest(request('/api/market-data/overview/jobs',
+      { method: 'POST', headers, body: '{}' }), snapshots, undefined, h.value);
+    const accepted = await acceptedResponse.json() as { jobId: string };
+    h.queued();
+    await h.dispatchStarted;
+    const running = await handleDashboardRequest(request('/api/market-data/jobs/active'), snapshots, undefined, h.value);
+    expect(await running.json()).toMatchObject({ marketJob: { jobId: accepted.jobId, status: 'running' } });
+    const cancellation = await handleDashboardRequest(request(`/api/market-data/jobs/${accepted.jobId}`,
+      { method: 'DELETE', headers }), snapshots, undefined, h.value);
+    expect(cancellation.status).toBe(202);
+    expect(await cancellation.json()).toMatchObject({ jobId: accepted.jobId, status: 'cancel_requested' });
+    await new Promise(resolve => setTimeout(resolve, 20));
+
+    const active = await handleDashboardRequest(request('/api/market-data/jobs/active'), snapshots, undefined, h.value);
+    const exact = await handleDashboardRequest(request(`/api/market-data/jobs/${accepted.jobId}`), snapshots, undefined, h.value);
+    const next = await handleDashboardRequest(request('/api/market-data/overview/jobs',
+      { method: 'POST', headers, body: '{}' }), snapshots, undefined, h.value);
+    for (const response of [active, exact, next]) {
+      expect(response.status).toBe(500);
+      expect((await body(response)).error?.code).toBe('repository_failure');
+    }
+    const durable = JSON.parse(await readFile(join(h.root, 'jobs', `${accepted.jobId}.json`), 'utf8'));
+    expect(durable).toMatchObject({ jobId: accepted.jobId, status: 'cancel_requested' });
   });
 
   test('default composition gives both domains one session owner', () => {
