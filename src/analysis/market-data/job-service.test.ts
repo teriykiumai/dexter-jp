@@ -471,6 +471,56 @@ describe('Market Data Overview job service', () => {
     });
   }
 
+  test('rejects dispatch and further collection after a caught progress ceiling', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dexter-market-stopped-context-')); roots.push(root);
+    const clock = environment(); const coordinator = new DashboardJobCoordinatorV1(clock.value, 5);
+    coordinator.register({ domain: 'strategy_validation', inventory: async () => [], isAbsent: async () => true,
+      cleanup: async () => {}, reconcile: async () => { throw new Error('unexpected'); } });
+    let firstDispatches = 0, forbiddenDispatches = 0, forbiddenSharedLoads = 0, laterCollects = 0;
+    const firstCodec = fixtureOverviewCodec('market_short_ratio', {});
+    const firstRepository = new MarketDataRepositoryV1(firstCodec, root);
+    const first = createOverviewModuleAdapterV1({ repository: firstRepository,
+      collect: async context => {
+        await context.dispatch(async () => { firstDispatches++; return null; });
+        try { context.recordProgress({ pages: 0, acceptedRows: 3, responseBytes: 0 }); }
+        catch { /* Simulate a pagination adapter that handles a source failure. */ }
+        try { await context.dispatch(async () => { forbiddenDispatches++; return null; }); }
+        catch { /* The central stop must remain authoritative. */ }
+        try { await context.shareSource('after_stop', async () => { forbiddenSharedLoads++; return null; }); }
+        catch { /* A new shared load must not start after the central stop. */ }
+        try { context.recordProgress({ pages: 1, acceptedRows: 1, responseBytes: 1 }); }
+        catch { /* Later accounting must not replace the first overrun. */ }
+        return { artifact: firstCodec.build(fixtureOverviewDraft('market_short_ratio', context.acceptedAt)),
+          attempts: 1, pages: 0, acceptedRows: 3, responseBytes: 0 };
+      }, project: artifact => ({ state: 'available', payload: artifact.syntheticResult, warnings: [] }),
+      environment: {} });
+    const laterCodec = fixtureOverviewCodec('margin_1570', {});
+    const laterRepository = new MarketDataRepositoryV1(laterCodec, root);
+    const later = createOverviewModuleAdapterV1({ repository: laterRepository,
+      collect: async context => {
+        laterCollects++;
+        return { artifact: laterCodec.build(fixtureOverviewDraft('margin_1570', context.acceptedAt)),
+          attempts: 0, pages: 0, acceptedRows: 0, responseBytes: 0 };
+      }, project: artifact => ({ state: 'available', payload: artifact.syntheticResult, warnings: [] }),
+      environment: {} });
+    const service = new MarketDataJobServiceV1({ coordinator,
+      jobRepository: new MarketDataJobRepositoryV1(root),
+      overviewRegistry: new OverviewModuleRegistryV1([later, first]),
+      limits: { estimatedMinimumAttempts: 1, maximumAttempts: 3,
+        maximumPages: 3, maximumRows: 2, maximumResponseBytes: 1024, executionBudgetMs: 120_000 } });
+    await service.initialize();
+    const accepted = await service.acceptOverview(); const job = await terminal(service, accepted.jobId);
+    expect({ firstDispatches, forbiddenDispatches, forbiddenSharedLoads, laterCollects }).toEqual({
+      firstDispatches: 1, forbiddenDispatches: 0, forbiddenSharedLoads: 0, laterCollects: 0,
+    });
+    expect(job.progress).toMatchObject({ attempts: 1, pages: 0, acceptedRows: 3, responseBytes: 0 });
+    if (job.result?.kind !== 'overview') throw new Error('Expected Overview result.');
+    expect(job.result.moduleResults.map(result => 'failureCode' in result ? result.failureCode : null))
+      .toEqual(['source_response_too_large', 'source_response_too_large']);
+    await expect(firstRepository.latest()).rejects.toMatchObject({ code: 'artifact_not_found' });
+    await expect(laterRepository.latest()).rejects.toMatchObject({ code: 'artifact_not_found' });
+  });
+
   test('classifies a real execution-budget abort as a whole-job timeout', async () => {
     const started = deferred();
     const h = await harness({ partial: true, pendingDispatch: true,

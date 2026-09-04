@@ -398,6 +398,9 @@ export class MarketDataJobServiceV1 {
         if (error instanceof MarketDataJobStopV1) jobWideFailure ??= error.code;
         return error;
       };
+      const rejectAfterStop = () => {
+        if (jobWideFailure) throw new MarketDataJobStopV1(jobWideFailure);
+      };
       const checkExecution = (pendingAttempts: number, pendingWait: number, starting: boolean) => {
         try { this.#checkExecution(lease, current, pendingAttempts, pendingWait, starting); }
         catch (error) { throw rememberStop(error as Error); }
@@ -414,6 +417,7 @@ export class MarketDataJobServiceV1 {
         try {
           const prepared = await module.collect({ jobId: current.jobId, acceptedAt: current.acceptedAt, signal,
             dispatch: async <T>(start: (signal: AbortSignal) => Promise<T>, extra?: AbortSignal) => {
+              rejectAfterStop();
               if (signal.aborted || extra?.aborted) {
                 throw rememberStop(this.#dispatchAbort(lease, controller, budget, extra));
               }
@@ -451,6 +455,7 @@ export class MarketDataJobServiceV1 {
               }
             },
             shareSource: <T>(sourceKey: string, load: () => Promise<T>) => {
+              rejectAfterStop();
               if (!/^[a-z0-9_.:-]{1,160}$/.test(sourceKey)) {
                 throw new MarketDataSourceFailureV1('source_invalid_response');
               }
@@ -462,6 +467,7 @@ export class MarketDataJobServiceV1 {
               return pending;
             },
             recordProgress: progress => {
+              rejectAfterStop();
               const nextPages = actualPages + progress.pages;
               const nextRows = actualRows + progress.acceptedRows;
               const nextBytes = actualBytes + progress.responseBytes;
