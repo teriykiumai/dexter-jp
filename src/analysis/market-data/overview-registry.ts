@@ -137,9 +137,17 @@ export function createOverviewModuleAdapterV1<T extends MarketDataArtifactFields
     sourceId: target.sourceId,
     target,
     collect: options.collect,
-    validate: (raw: unknown) => options.repository.codec.parse(raw),
-    publish: (raw: unknown, observation: { jobId: string; acceptedAt: string; checkedAt: string }) =>
-      options.repository.publish(raw, observation) as Promise<ObservedMarketDataV1<MarketDataArtifactFieldsV1> & { state: 'published' | 'idempotent_reuse' }>,
+    validate: (raw: unknown) => {
+      const artifact = options.repository.codec.parse(raw);
+      verifyProjection(artifact);
+      return artifact;
+    },
+    publish: (raw: unknown, observation: { jobId: string; acceptedAt: string; checkedAt: string }) => {
+      const artifact = options.repository.codec.parse(raw);
+      verifyProjection(artifact);
+      return options.repository.publish(artifact, observation) as Promise<ObservedMarketDataV1<MarketDataArtifactFieldsV1>
+        & { state: 'published' | 'idempotent_reuse' }>;
+    },
     latest: () => options.repository.latest() as Promise<LatestMarketDataV1<MarketDataArtifactFieldsV1>>,
     loadObservation: (identity: MarketDataObservationReceiptIdentityV1) =>
       options.repository.loadObservation(identity) as Promise<ObservedMarketDataV1<MarketDataArtifactFieldsV1>>,

@@ -59,6 +59,7 @@ describe('Overview module registry', () => {
     });
     const artifact = codec.build(fixtureOverviewDraft('etf_1321_eod', undefined, 0,
       warnings, warningInput));
+    expect(valid.validate(artifact)).toEqual(artifact);
     expect(valid.project(artifact).warnings).toEqual(warnings);
     expect(() => createOverviewModuleAdapterV1({
       repository: new MarketDataRepositoryV1(codec, root),
@@ -88,6 +89,7 @@ describe('Overview module registry', () => {
       });
       const invalidArtifact = codec.build(fixtureOverviewDraft('etf_1321_eod', undefined, 0,
         invalidWarnings, warningInput));
+      expect(() => invalidEtf.validate(invalidArtifact)).toThrow();
       expect(() => invalidEtf.project(invalidArtifact)).toThrow();
     }
 
