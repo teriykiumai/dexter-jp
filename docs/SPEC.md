@@ -4,7 +4,7 @@
 **Status:** Draft  
 **Base Project:** `edinetdb/dexter-jp`  
 **Use:** Personal / Local only  
-**Last Updated:** 2026-09-03
+**Last Updated:** 2026-09-04
 
 ## 1. 目的
 
@@ -483,10 +483,12 @@ Phase 1.5〜4の完了条件を再度開くものではなく、Phase 5 Portfoli
   複数nonterminal・破損記録を自動修復・削除せず、Phase 4のstatus別run復旧と
   Market Dataの確定済みreceiptを維持する。追加する受付・復旧・error表示の
   契約はDashboardに限定し、既存Phase 4のjob/run schemaとpublic error code集合は維持する
-- exact 10-year Technical/ETF dataは、eligible end dateでactiveなinstrumentの
-  effective-dated continuous listing segmentを一次sourceで証明できる範囲だけを
-  calculation/display envelopeとする。上場前を欠損扱いせず、delist/relistや
-  code reuseを跨がず、continuityを証明できなければfail closedする
+- Technical/ETFは最大10年のJ-Quants調整後価格を取得できるが、eligible end dateの
+  masterで現在のcode・商品区分を確認するだけで、期間全体が同一instrumentである
+  ことは保証しない。artifactとDashboardに`current_code_only`および
+  `historical_identity_unverified`を常設し、Phase 4検証、backtest、score、signalの
+  入力に使用しない。最初のsource rowより前を上場前と推測せず、取得開始後の
+  official session欠落、code不一致、schema/pagination不整合はfail closedする
 - raw response、credential、request header、request ID、絶対pathをartifactや
   Browserへ保存・返却しない
 - realtime、automatic market-data refresh/polling（active jobのstatus確認を除く）、

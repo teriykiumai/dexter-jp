@@ -1,8 +1,8 @@
 # Dexter JP Dashboard Refresh Handoff
 
-**Status:** DR-0, DR-V1-V3, DR-T1, DR-C1, and DR-A1 merged. DR-T0 remains on hold
-after read-only source investigation. DR-O1 generic Overview job/read foundation is
-the current candidate.
+**Status:** DR-0, DR-V1-V3, DR-T1, DR-C1, DR-A1, and DR-O1 merged. DR-T0A is the
+current docs-only candidate that replaces the unprovable ten-year lifetime contract
+with an explicit `current_code_only` history boundary.
 No production Technical/source-module codec, source adapter, external Market Data
 request, or new chart controls exist yet. With zero registered Overview modules,
 the read remains 404 and refresh admission is refused before creating a job.
@@ -45,7 +45,7 @@ The implemented baseline includes:
 No Dashboard Refresh Technical artifact, Market Overview artifact, refresh route,
 new visual token system, or seventh tab exists at this baseline.
 
-## 3. Merged predecessor steps and current DR-O1 boundary
+## 3. Merged predecessor steps and current DR-T0A boundary
 
 The DR-0 branch was:
 
@@ -184,19 +184,22 @@ They do not block the next pure calculation step and are not silently marked fix
 or bundled into DR-T1.
 
 DR-T1 adds the pure Technical bar/gap parser, normalized adjusted-OHLCV null handling,
-exact calendar/lifetime-clipped window checks, chronological day/week/month candles,
+exact calendar/window checks, chronological day/week/month candles,
 gap-only unavailable periods, RSI/MACD series, and observed cross state. The existing
 Phase 2 Engine shares the same single-pass indicator arithmetic; its canonical
 251-bar selector, formulas, warm-up/missing precedence, and Snapshot V1-V9 contracts
 are unchanged. Arithmetic overflow returns invalid-data failure, not a non-finite
 available indicator. Leading/trailing partial candles never enter indicators.
 
-`TechnicalCalculationWindowV1.listingWindow` is structural calculation context,
-not verified identity provenance. DR-T0/DR-T2 must prove the real source identity,
-continuous lifetime, adjusted basis, complete pagination, exact production ten-year
-range, and admission cutoff before calling it. The pure engine deliberately also
-accepts shorter explicit windows for deterministic same-window parity tests. It
-cannot infer a missing instrument row: callers must supply a proved gap or fail.
+`TechnicalCalculationWindowV1.listingWindow` is structural calculation context from
+the superseded pre-production design, not verified identity provenance. DR-T1A must
+replace it with `historyBoundary` before any production codec or route exists.
+DR-T0/DR-T2 then verify current end-date master identity, adjusted basis, complete
+pagination, the exact production maximum-ten-year range, and admission cutoff. The
+pure engine deliberately also accepts shorter explicit windows for deterministic
+same-window parity tests. Under the amended contract it cannot infer a missing
+instrument row: callers omit only sessions before the first returned source row and
+fail an absent official-session row after that boundary.
 It exposes no full artifact schema, source registry, persistence, job, API, CLI,
 UI, or dependency. Dashboard charts still render stored Snapshot values only.
 
@@ -251,11 +254,12 @@ callers. Corrupt/colliding canonical files are never overwritten or cleaned up.
 The repository requires a full closed module-owned codec and a source-manifest
 allowlist/coverage validator; there is no default/open production codec. DR-A1 tests
 use explicitly synthetic Technical/Overview payload codecs. Actual Technical
-output/provenance schemas and source mappers remain DR-T0/DR-T2-owned; actual module
-calculation/output schemas remain DR-M1a-c/DR-E1-owned. The source digest helper
+output/provenance schemas and source mappers remain DR-A2/DR-T0/DR-T2-owned; actual
+module calculation/output schemas remain DR-M1a-c/DR-E1-owned. The source digest helper
 requires the source mapper's closed, ordered normalized-row validator. It does not
 claim that a read-time manifest can reconstruct input rows that were not stored.
-No candidate lifetime or post-migration source has been promoted to approved.
+The lifetime candidate was never promoted and DR-T0A retires it; no post-migration
+source has been promoted to approved.
 
 Content publication/reuse precedes a no-replace receipt. Post-link errors are not
 treated as absence: only a fully reopened matching file allows progress or a
@@ -361,44 +365,47 @@ lower-coverage substitute. The gate requires:
    observation window for all four initial modules fits frozen request/page/row/byte/
    attempt/deadline limits.
 
-Technical refresh has a separate DR-T0 Standard ten-year-history and effective-dated
-instrument-lifetime gate. The official listed-issue specification rechecked on
-2026-09-03 provides dated master snapshots but explicitly does not provide listing/
-delisting dates or code-change correspondence tables. The exact bounded proof of
-one continuous current listing segment remains unverified. DR-T0 must establish a
-documented proof method before a credentialed smoke and freeze that
-contract and fail closed for IPO, delist/relist, or code-reuse ambiguity before a
-production adapter or UI is exposed. Normal CI and Playwright use fixtures only and
-must not contact J-Quants.
+Technical refresh has a separate DR-T0 Standard maximum-ten-year history and current-
+code gate. The official listed-issue specification rechecked on 2026-09-04 provides
+dated master snapshots but explicitly does not provide listing/delisting dates or
+code-change correspondence tables. The user accepted that the Dashboard will not
+prove historical instrument identity. DR-T0A makes that limitation explicit before
+runtime work: current end-date master identity is verified, earlier bars remain
+`current_code_only`, any post-start missing official-session row fails closed, and
+the unverified-history warning is permanently visible. Normal CI and Playwright use
+fixtures only and must not contact J-Quants.
 
-## 6. DR-T0 hold and current DR-O1 review boundary
+## 6. Current-code amendment and next-step boundary
 
 Read-only investigation of the official J-Quants master specification did not
 establish a continuous listing-segment proof within the planned attempt/time bounds.
-A current master row or equal code is not sufficient. No credentialed smoke was run,
-no source contract was approved, and no lifetime source ID was frozen. The user
-explicitly accepted keeping DR-T0 on hold and proceeding with the independent DR-T1
-pure step allowed by the approved dependency graph.
+A current master row or equal code remains insufficient. No credentialed Technical
+smoke was run and no lifetime source ID was frozen. After DR-O1 merged, the user
+accepted the explicit product trade-off: retain maximum-ten-year current-code bars,
+but do not claim that the full period belongs to one instrument.
 
-The DR-A1 prerequisites were satisfied and DR-O1 started from its merged main. DR-O1
-must remain one independently reviewed foundation PR. A production module, source
-request, Technical route, Overview card, automatic refresh, or source-gate decision
-does not belong in this candidate.
+DR-T0A is docs-only. It retires the unused lifetime candidate, defines
+`CurrentCodeHistoryBoundaryV1`, replaces the Technical/ETF source roles and warning
+contract, prohibits current-code history from Phase 4/backtest/score/signal use, and
+adds DR-T1A plus DR-A2 before DR-T2. It changes no runtime, dependency, source request,
+artifact, route, UI, Usage, or setup.
 
-DR-T0 must still resolve the documented source/lifetime proof before any explicitly
-authorized credentialed smoke. Failure to prove continuity within the frozen bounds
-returns to design review, not a guessed adapter. DR-C1/DR-A1/DR-O1 can proceed by the
-dependency graph; production Technical I/O in DR-T2 remains blocked on both merged
-DR-O1 and the independently reviewed DR-T0 gate. Pure test success does not lift
-that gate.
+After DR-T0A review and merge, DR-T1A, DR-A2, and the revised DR-T0 gate are the next
+three independent branches. DR-T0 still requires separate authorization for its
+default-No credentialed smoke, but it now verifies bars/calendar/end-date master and
+post-start coverage rather than an unavailable lifetime source. DR-T2 remains
+blocked until all three predecessors and merged DR-O1 are independently reviewed and
+merged. Pure test success does not replace the live source/entitlement gate.
 
 Market Overview remains a placeholder until the corresponding data steps merge.
-The Technical source/lifetime gate belongs to DR-T0; shared session/coordinator
+The Technical source/current-code gate belongs to DR-T0; shared session/coordinator
 ownership, empty-start admission, and the cross-domain recovery guard belong to
 DR-C1; the content/receipt repository belongs to DR-A1. DR-O1 supplies the common
-Market Data job repository/recovery adapter and generic Overview API before DR-T2
-adds Technical source I/O. This dependency does not wait for DR-M0. Market source
-modules belong to DR-M1a-c/DR-E1, and user instructions belong to DR-X.
+Market Data job repository/recovery adapter and generic Overview API. DR-T1A changes
+the pure calculation window, DR-A2 changes the unused pre-production role/warning
+contracts, and DR-T0 freezes the current-code source gate before DR-T2 adds Technical
+source I/O. These dependencies do not wait for DR-M0. Market source modules belong
+to DR-M1a-c/DR-E1, and user instructions belong to DR-X.
 
 ## 7. Validation evidence
 
@@ -540,9 +547,9 @@ of these synthetic storage results.
 | `bun run test:dashboard-browser` | 80 passed, 0 failed; unchanged Dashboard journeys |
 | `git diff --check` | passed; only the checkout's LF-to-CRLF conversion warning |
 
-### 7.5 Current DR-O1 candidate
+### 7.5 Merged DR-O1 evidence
 
-The DR-O1 tests exercise the closed job schema and transitions, 65,536-byte native
+The merged DR-O1 tests exercise the closed job schema and transitions, 65,536-byte native
 record boundary, create/replace proof outcomes, strict inventory/temp cleanup,
 single and partial module completion, one root `checkedAt`, prior-observation
 retention, valid zero, both ETF persisted-unavailable reasons, job-wide deadline
@@ -552,7 +559,7 @@ record write after a committed receipt retains a validated in-memory completion,
 adds `job_record_write_failed`, and keeps the process-wide admission barrier latched.
 
 Independent review of the prior candidate found four MAJOR contract gaps. The
-current candidate derives and canonically orders every persisted module warning,
+merged implementation derives and canonically orders every persisted module warning,
 rejects missing or extra artifact-derived warning codes during startup recovery,
 treats proved receipt-free create-only publication failures as ordinary per-module
 `artifact_write_failed` results, preserves an earlier module-specific failure when a
@@ -562,7 +569,7 @@ EXDEV, and EPERM link failures cover no-receipt failure, partial completion, and
 prior-observation retention without performing external I/O.
 
 The next independent review confirmed those four fixes and found four additional
-whole-job adjudication gaps. The current candidate treats valid page, row, and byte
+whole-job adjudication gaps. The merged implementation treats valid page, row, and byte
 ceiling overruns as job-wide stops, records the first received overrun instead of
 understating progress, and publishes no previously prepared module. A real
 execution-budget abort is `source_timeout`, while cancellation and recovery retain
@@ -577,15 +584,44 @@ POST 400, shared Host/Origin/CSRF enforcement, strict/size-bounded JSON, exact
 methods, active/exact/cancel routes, and unchanged Analysis-domain public error
 codes. Default server composition shares one session and registers both native job
 adapters before initialization. All module/source behavior is synthetic; no test or
-runtime path in this candidate contacts J-Quants.
+runtime path in DR-O1 contacts J-Quants.
 
 | Validation | Result |
 | --- | --- |
-| new/extended DR-O1 tests | 46 passed, 0 failed |
-| `bun test` | 1151 passed, 0 failed, across 94 files |
+| new/extended DR-O1 tests | 56 passed, 0 failed |
+| `bun test` | 1162 passed, 0 failed, across 94 files |
 | `bun run typecheck` | same Windows Bun launcher failure before compiler execution |
 | `bun node_modules/typescript/bin/tsc --noEmit` | passed using the installed compiler |
 | `bun run test:dashboard-browser` | 80 passed, 0 failed; unchanged Dashboard journeys |
+| `git diff --check` | passed; only the checkout's LF-to-CRLF conversion warning |
+
+PR #101 received an independent `Mergeable` review for exact head
+`1a48177bf12987d7ecce82832f5068e64767a9bd`, with zero BLOCKING/MAJOR findings and
+canonical test/typecheck CI green. The remaining MINOR noted the stale validation
+counts in this handoff and PR text; this DR-T0A candidate corrects the handoff with
+the exact-head evidence. Following user authorization PR #101 merged on 2026-09-04
+as `6d9f5eda377fa1c474d77904ae111715599d5ac4`, and local `main` was fast-forwarded to
+that exact commit before creating:
+
+```text
+feat/dashboard-current-code-contract-step0
+```
+
+### 7.6 Current DR-T0A candidate
+
+DR-T0A synchronizes `docs/SPEC.md`, the normative Dashboard Refresh plan, and this
+handoff around the user-approved `current_code_only` boundary. It adds no source,
+runtime, dependency, fixture, credentialed smoke, artifact migration, route, UI,
+Usage, or setup change. Its required validation is document consistency, complete
+removal of operative lifetime claims, `git diff --check`, the unchanged canonical
+unit/typecheck suite, and confirmation that normal tests perform no external I/O.
+
+| Validation | Result |
+| --- | --- |
+| source-of-truth consistency search | passed; remaining lifetime terms describe only the retired/superseded contract |
+| `bun test` | 1162 passed, 0 failed, across 94 files |
+| `bun run typecheck` | same Windows Bun launcher failure before compiler execution |
+| `bun node_modules/typescript/bin/tsc --noEmit` | passed using the installed compiler |
 | `git diff --check` | passed; only the checkout's LF-to-CRLF conversion warning |
 
 ## 8. Remaining risks
@@ -615,9 +651,11 @@ runtime path in this candidate contacts J-Quants.
   artifact after repeated references to corrupt content. These are explicit local-
   use limitations, not solved by `latest.json`; sharding/indexing/group skipping
   require a separate reviewed storage/order contract.
-- The exact individual-Standard request shape needed to prove a continuous current
-  instrument lifetime is unresolved until DR-T0; bars or a latest master row alone
-  are insufficient.
+- Current-code history deliberately cannot detect a code reuse, relisting, or
+  instrument change that leaves no missing official-session row. End-date master
+  identity and complete post-start coverage reduce malformed/incomplete-source risk
+  but do not prove historical identity. The warning is permanent, and these artifacts
+  cannot feed Phase 4 validation, backtests, scores, signals, or recommendations.
 - A whole-Dashboard visual migration can regress focus, overflow, or semantic states;
   the staged V1-V3 split and required width matrix are merge gates.
 

@@ -1,10 +1,10 @@
 # Dexter JP Dashboard Refresh & Market Context Implementation Plan
 
-**Plan version:** `dashboard_refresh_plan_v1`
+**Plan version:** `dashboard_refresh_plan_v2`
 
-**Status:** Approved DR-0 contract — PR #94 merged; each runtime step still requires independent review and merge
+**Status:** User-approved current-code-only amendment to the merged DR-0 contract; this version and each runtime step still require independent review and merge
 
-**Last Updated:** 2026-09-03
+**Last Updated:** 2026-09-04
 
 ## 1. Purpose and authority
 
@@ -114,9 +114,8 @@ UI until the named gate replaces the unknown contract with verified facts.
 | Source ID | Module / role | Primary endpoint / definition | Registry status | Product gate |
 | --- | --- | --- | --- | --- |
 | `jquants_v2_equities_bars_daily` | Technical and 1321/2633 EOD bars | J-Quants `/v2/equities/bars/daily` | approved, reverified in DR-T0/DR-E1 | configured Standard-or-higher account |
-| `jquants_v2_markets_calendar` | Technical session envelope | J-Quants `/v2/markets/calendar` | approved inherited source, reverified in DR-T0 | configured Standard-or-higher account |
-| `jquants_v2_equities_master` | current ticker/security identity and instrument basis | J-Quants `/v2/equities/master` at the eligible end date | approved inherited source, reverified in DR-T0/DR-E1 | configured Standard-or-higher account |
-| `jquants_v2_instrument_lifetime_candidate` | effective-dated current-instrument listing segment for Technical and 1321/2633 | individual J-Quants listed-issue history; exact bounded continuity proof is frozen by DR-T0 | **candidate; DR-T0 gate only** | individual Standard coverage and request shape are unverified until DR-T0 |
+| `jquants_v2_markets_calendar` | Technical and ETF session envelope | J-Quants `/v2/markets/calendar` | approved inherited source, reverified in DR-T0/DR-E1 | configured Standard-or-higher account |
+| `jquants_v2_equities_master` | current ticker/security identity and instrument basis at one eligible end date | J-Quants `/v2/equities/master` at the eligible end date | approved inherited source, reverified in DR-T0/DR-E1; it does not prove historical identity | configured Standard-or-higher account |
 | `jquants_v2_margin_tse_aggregate_candidate` | TSE aggregate and 1570 margin quantities | post-migration individual J-Quants margin-outstanding contract | **candidate; DR-M0 only** | individual Standard entitlement is unverified until DR-M0 |
 | `jquants_v2_market_short_ratio` | TSE short-selling turnover ratio | J-Quants `/v2/markets/short-ratio` | approved inherited source, exact coverage frozen in DR-M0 | configured Standard-or-higher account |
 | `jquants_v2_tokyo_nagoya_foreign_flow` | foreign-investor flow | J-Quants `/v2/equities/investor-types`, `TokyoNagoya` | approved inherited source | configured Standard-or-higher account |
@@ -134,6 +133,14 @@ Source descriptions and adapters pin the accessed API version, field mapping, un
 eligibility rule, and source-document revision. Endpoint names, fields, primary keys,
 issue-type enums, coverage, or entitlement must not be guessed from a press release
 or from J-Quants Pro documentation.
+
+DR-T0A retires `jquants_v2_instrument_lifetime_candidate` without replacing it with
+a fabricated source. It was never approved or used by a production codec, artifact,
+receipt, route, or UI, so no persisted-data migration or backfill exists. Technical
+and ETF history instead use the explicit calculation boundary
+`current_code_history_v1`: the eligible-end-date master proves only the current code
+and instrument label, while the historical rows remain code-addressed observations
+whose instrument identity is not verified across the full range.
 
 Every artifact carries an ordered `sourceInputs: SourceInputV1[]`. It is a strict
 union; provider-only fields are never filled with `N/A` for a static registry:
@@ -193,13 +200,15 @@ invalid. A date-only source publication is stored in `publishedDate`; it is neve
 converted to midnight and stored as `publishedAt`. `publishedAt` is non-null only
 when the source directly proves an instant.
 
-Technical has exactly the roles `security_master`, `instrument_lifetime`,
-`trading_calendar`, and `daily_bars`. The 1321 EOD module has exactly
-`security_master_1321`, `instrument_lifetime_1321`, `daily_bars_1321`, and
-`corporate_action_registry_1321`. The relative ETF module has exactly those four
-roles plus `security_master_2633`, `instrument_lifetime_2633`, `daily_bars_2633`, and
-`corporate_action_registry_2633`. A correction to any input therefore changes the
-root source digest even if the bar or margin rows are unchanged.
+Technical has exactly the roles `security_master`, `trading_calendar`, and
+`daily_bars`. The 1321 EOD module has exactly `security_master_1321`,
+`trading_calendar`, `daily_bars_1321`, and `corporate_action_registry_1321`. The
+relative ETF module has exactly that one shared `trading_calendar` role plus
+`security_master_1321`, `daily_bars_1321`, `corporate_action_registry_1321`,
+`security_master_2633`, `daily_bars_2633`, and
+`corporate_action_registry_2633`. No role claims historical instrument identity. A
+correction to any actual input therefore changes the root source digest even if the
+bar or margin rows are unchanged.
 
 After DR-M0 replaces the candidate mapping, the TSE aggregate uses
 `security_master_population`, `trading_calendar`, `margin_cadence_registry`, and
@@ -293,51 +302,93 @@ references:
 - the issuer's 2633 1:10 beneficial-interest split, effective 2023-12-08:
   <https://nextfunds.jp/en/data/2023/td_en_231031a.pdf>.
 
-### 3.3 DR-T0 Technical source and lifetime gate
+### 3.3 DR-T0 Technical source and current-code gate
+
+The product accepts that J-Quants does not prove one instrument identity across the
+full historical range. DR-T0 therefore verifies source availability and the current
+eligible-end-date master identity only. It must not describe returned bars, equal
+codes, company names, or absence of rows as a listing/lifetime proof.
 
 Before Technical refresh is exposed, a manual bounded smoke must prove with the
 configured credential that:
 
-1. `/v2/equities/bars/daily` accepts the intended ten-year range on the actual plan;
+1. `/v2/equities/bars/daily` accepts the intended maximum ten-year range on the
+   actual Standard-or-higher plan;
 2. the inherited `/v2/markets/calendar` mapper supplies the exact calendar envelope
    needed to distinguish an elapsed from an in-progress week/month;
-3. the end-date security-master mapper proves the current ticker/code/instrument
-   identity;
-4. the individual Standard listed-issue history can prove one effective-dated,
-   continuous listing segment for that current instrument across the calculation
-   envelope, including its exact listing boundary and any delisting, relisting, or
-   code-reuse boundary, using a bounded request shape;
-5. pagination for all four inputs is complete and bounded;
-6. the strict mapper recognizes the current V2 fields and adjustment semantics;
-7. the documented update-time/source revision still supports the exact
+3. `/v2/equities/master` returns exactly one eligible-end-date row whose code,
+   product category, market, and non-empty current instrument name match the request;
+4. pagination for all three inputs is complete and bounded;
+5. the strict mapper recognizes the current V2 fields and adjustment semantics;
+6. the documented update-time/source revision still supports the exact
    `jquants_daily_bars_eligibility_v1` cutoff;
-8. data dates are EOD dates and no future row is accepted; and
+7. data dates are EOD dates, every returned bar has the requested code, and no future
+   row is accepted;
+8. after the earliest returned daily source row, every official session through
+   `eligibleThrough` has an explicit source row; an all-null source row is a gap, but
+   an absent row fails closed rather than being synthesized; and
 9. logs, errors, fixtures, artifacts, and PR text contain no credential, request
-   header, request ID, or raw response body.
+   header, request ID, raw response body, or absolute path.
 
-As rechecked on 2026-09-03, the official listed-issue specification explicitly does
-not provide listing/delisting dates or code-change history/correspondence tables.
-It describes dated master snapshots, not a bounded lifetime endpoint. DR-T0 must
-first establish a documented, bounded continuity-proof method before requesting a
-credentialed smoke; the current candidate is not a claim that such a method exists.
-If that cannot be established, the gate fails without spending quota on a guessed
-query and a reviewed source/scope amendment is required.
+The current-code boundary is deliberately weaker than historical identity proof:
 
-DR-T0 freezes the exact lifetime endpoint/query, response fields, effective-date
-semantics, coverage proof, and measured request/page/row/byte bounds in the plan and
-source registry, replacing the candidate ID with
-`jquants_v2_instrument_lifetime_v1`. A latest master row, returned price bars, or
-absence of rows alone is not continuity proof. If the configured individual Standard
-source cannot prove the current instrument's continuous segment inside the
-production caps, DR-T0 stops and returns to design review; it does not publish a
-shortened or identity-ambiguous chart.
+```text
+CurrentCodeHistoryBoundaryV1 =
+  { state: "available",
+    contractVersion: "current_code_history_v1",
+    mode: "current_code_only", jquantsCode,
+    currentMasterDate: eligibleThrough,
+    sourceCoverageFrom,
+    sourceCoverageThrough: eligibleThrough,
+    historicalIdentity: "not_verified" }
+| { state: "unavailable",
+    contractVersion: "current_code_history_v1",
+    mode: "current_code_only", jquantsCode,
+    currentMasterDate: eligibleThrough,
+    historicalIdentity: "not_verified",
+    reason: "source_no_observation" }
+```
+
+`sourceCoverageFrom` is the earliest strictly mapped daily source row inside the
+requested range. Sessions before it are outside the retrieved series and are not
+called pre-listing, missing, delisted, or part of another instrument. From that date
+through `sourceCoverageThrough`, a missing official-session row, pagination
+uncertainty, code mismatch, or current-master mismatch fails the job. This detects a
+visible internal coverage break but cannot detect a code reuse or instrument change
+that leaves no missing session. The artifact and UI therefore always carry
+`historical_identity_unverified`, even when the complete maximum range is returned.
+An empty complete bars response has no invented coverage dates and may only produce
+the unavailable boundary in an ETF module artifact; a Technical refresh publishes no
+artifact and follows its existing `source_no_observation` retention/404 contract.
+
+The exact Japanese warning displayed persistently next to the Technical chart and in
+each affected ETF module is:
+
+```text
+履歴は現在の銘柄コードに紐づくJ-Quants調整後価格です。表示期間全体が同一銘柄であることは確認していません。
+```
+
+When `sourceCoverageFrom > queryFrom`, the artifact also carries
+`history_coverage_clipped`, and the UI states the exact first date without calling it
+an IPO or listing date. Its exact Japanese message is:
+
+```text
+取得できた履歴は {sourceCoverageFrom} からです。この日付は上場日を示しません。
+```
+
+For Technical both warnings have `moduleId: null`; for ETF artifacts they use the
+owning module ID. Persisted warnings have `artifactIdentity: null` under the existing
+non-cyclic digest rule. Current-code-only artifacts are presentation inputs only.
+They must not feed Phase 4 validation, a backtest, score, signal, recommendation, or
+historical Snapshot reconstruction.
 
 The smoke is manual, default-No, writes no canonical artifact, observation receipt,
 or job record, and is not a substitute for fixture tests. Its durable output is only
-the secret-safe reviewed gate evidence required by DR-T0.
-It allows at most 20 actual HTTP attempts and 180 seconds, with one 30-second attempt
-per page and no retry. DR-T0 may freeze a lower production bound after measurement;
-it may not silently raise the 20-attempt gate to make continuity proof fit.
+the secret-safe reviewed gate evidence required by DR-T0. It allows at most 20 actual
+HTTP attempts and 180 seconds, with one 30-second attempt per page and no retry.
+DR-T0 may freeze a lower production bound after measurement; it may not silently
+raise the 20-attempt gate or shorten the requested maximum range to make the smoke
+pass.
 
 ### 3.4 DR-M0 margin migration gate
 
@@ -766,8 +817,7 @@ The strict wire shape is conceptually:
 ```text
 TechnicalDailyObservationV1 =
   { kind: "bar", date, open, high, low, close, volume }
-| { kind: "gap", date,
-    reason: "source_all_null" | "missing_in_complete_envelope" }
+| { kind: "gap", date, reason: "source_all_null" }
 
 IndicatorValueV1 =
   { state: "available", value }
@@ -791,13 +841,9 @@ TechnicalUnavailablePeriodV1 = {
   identity, periodStart, periodEnd, reason: "source_gap"
 }
 
-InstrumentLifetimeV1 = {
-  sourceId: "jquants_v2_instrument_lifetime_v1",
-  jquantsCode, instrumentIdentity,
-  segmentStart, segmentEnd: date | null,
-  proofFrom, proofThrough,
-  continuity: "continuous"
-}
+CurrentCodeHistoryBoundaryAvailableV1 = Extract<
+  CurrentCodeHistoryBoundaryV1, { state: "available" }
+>
 
 TechnicalChartDatasetV1 = {
   schemaVersion: "technical_chart_dataset_v1",
@@ -805,9 +851,9 @@ TechnicalChartDatasetV1 = {
   ticker, jquantsCode, instrumentName, priceUnit: "JPY", volumeUnit,
   acceptedAt, asOfCutoff, calculationDate, queryFrom, queryTo,
   calculationFrom, calculationTo, eligibleThrough,
-  instrumentLifetime: InstrumentLifetimeV1,
+  historyBoundary: CurrentCodeHistoryBoundaryAvailableV1,
   dataDate, fetchedAt, adjustmentBasis,
-  sourceInputs: SourceInputV1[4], sourcePayloadDigest, artifactDigest,
+  sourceInputs: SourceInputV1[3], sourcePayloadDigest, artifactDigest,
   indicatorMethods: {
     rsi: "rsi_wilder_14_v1", macd: "macd_ema_12_26_9_v1"
   },
@@ -823,28 +869,23 @@ open object. Dates are strict ISO calendar dates; instants are UTC ISO instants;
 numbers are finite; ticker/code/source/digest/unit values use closed validators.
 Warning and unavailable-reason enums are closed and versioned.
 
-The `instrumentLifetime` is the one continuous listing segment for the exact
-instrument proved active by the end-date security master at `eligibleThrough`.
-`segmentStart` and nullable `segmentEnd` are effective dates from the frozen DR-T0
-lifetime contract; `proofFrom <= calculationFrom`, `proofThrough >= eligibleThrough`,
-and the segment must contain `eligibleThrough`. A current-master row, a matching
-five-digit code, or returned OHLCV does not prove this continuity. Missing,
-conflicting, or incomplete lifetime evidence fails the job with
-`instrument_identity_unverified`; it never joins two listing segments. The proof
-covers the calculation envelope; it need not request daily master snapshots back
-to the original listing date of an instrument already listed before `queryFrom`.
-The exact `segmentStart` still requires the DR-T0-pinned authoritative evidence.
+`historyBoundary` records the accepted current-code-only limitation; it is not a
+listing or lifetime assertion. The eligible-end-date master must match the requested
+code, product category, market, and current instrument name. Its absence, duplicate,
+or mismatch fails `instrument_identity_unverified`, but a valid current row does not
+upgrade `historicalIdentity` from `not_verified`.
 
 The mapper accepts strictly positive adjusted open/high/low/close values with
 `low <= open/close <= high`, finite non-negative adjusted volume, a valid official-
 session date, and one row per `(code,date)`. Valid volume zero is retained. A source
 row whose entire adjusted OHLCV set is null becomes `source_all_null`; a partially
-null row is invalid. An absent instrument row may become
-`missing_in_complete_envelope` only when the pinned endpoint contract plus completed
-pagination proves the queried code/date envelope is complete. Otherwise it is
-`source_pagination_incomplete` or `source_invalid_response`, not a gap. Duplicate
-rows, a future date, zero/negative price, negative volume, impossible price ordering,
-or incomplete source/calendar coverage fails the whole refresh before publication.
+null row is invalid. An absent official-session row on or after
+`sourceCoverageFrom` is never synthesized as a gap. Incomplete pagination is
+`source_pagination_incomplete`; with complete pagination, absence at
+`eligibleThrough` is `source_not_yet_updated` and any earlier absence is
+`source_invalid_response`. Duplicate rows, a future date, zero/negative price,
+negative volume, impossible price ordering, or incomplete source/calendar coverage
+fails the whole refresh before publication.
 
 `acceptedAt` and `asOfCutoff` are frozen at successful job admission. The source-
 eligibility rule is `jquants_daily_bars_eligibility_v1`: when the Tokyo calendar date
@@ -852,26 +893,30 @@ is an official TSE session and admission is at or after 16:30:00 JST,
 `eligibleThrough` is that date; otherwise it is the latest official session strictly
 before the Tokyo calendar date. This boundary is based on the documented target
 update time, not a guarantee of completion, and is reverified in DR-T0. If the latest
-eligible session is neither a proved gap under the pinned contract nor a valid bar,
+eligible session is neither an explicit all-null source row nor a valid bar,
 the job fails `source_not_yet_updated` and retains the previous authoritative
 observation.
 
-`queryTo = eligibleThrough`. `queryFrom` is the same calendar date ten Gregorian
-years earlier, inclusive, with February 29 clamped to February 28. The daily-bars
-query remains exactly the inclusive range `[queryFrom, queryTo]`.
-`calculationFrom = max(queryFrom, instrumentLifetime.segmentStart)` and
-`calculationTo = min(queryTo, instrumentLifetime.segmentEnd ?? queryTo)`. The
-current segment must overlap the requested range. Within that query range, official
-sessions outside the selected segment are outside the instrument's lifetime: they
-are neither `missing_in_complete_envelope` nor `source_gap`, are not
-persisted as daily observations, and do not enter aggregation or indicators. If
-`calculationFrom > queryFrom`, the artifact carries the
-`instrument_lifetime_clipped` warning with the exact start date.
+`queryFrom` is the same calendar date ten Gregorian years before `calculationDate`,
+inclusive, with February 29 clamped to February 28. It is fixed before source
+dispatch rather than derived from `eligibleThrough`; this avoids a circular calendar
+request while keeping the bars window at no more than ten years. After the calendar
+selects `eligibleThrough`, `queryTo = eligibleThrough`, and the daily-bars query is
+exactly the inclusive range `[queryFrom, queryTo]`.
+`calculationFrom = sourceCoverageFrom` and `calculationTo = queryTo`. Official
+sessions before `sourceCoverageFrom` are not persisted, do not enter aggregation or
+indicators, and receive no inferred listing or missing-data meaning. If
+`calculationFrom > queryFrom`, the artifact carries the `history_coverage_clipped`
+warning with the exact start date. Every artifact also carries
+`historical_identity_unverified`.
 `calendarCoverageFrom` is the earlier of the Gregorian Monday containing
-`calculationFrom` and the first day of `calculationFrom`'s Gregorian month;
-`calendarCoverageTo` is the later of the Gregorian Sunday containing `queryTo` and
-the last day of `queryTo`'s Gregorian month. The calendar input covers that exact
-inclusive range so both leading and trailing partial status can be proved.
+`queryFrom` and the first day of `queryFrom`'s Gregorian month;
+`calendarCoverageTo` is the later of the Gregorian Sunday containing
+`calculationDate` and the last day of `calculationDate`'s Gregorian month. These
+bounds are known before source dispatch. The calendar input covers that exact
+inclusive range in one request; `eligibleThrough` must fall inside it, so eligibility,
+source coverage, and both leading and trailing partial status can be proved without
+a second calendar query.
 
 `dataDate` is the last actual renderable bar date inside
 `[calculationFrom, calculationTo]`, never the request end, fetch date,
@@ -884,11 +929,12 @@ one renderable bar exists
 elsewhere in the dataset. If the provider cannot satisfy the exact requested ranges
 within the DR-T0-frozen bounds, the job fails rather than shortening them.
 
-For the chart engine, fewer than 251 valid bars after an IPO/current-segment start
-remain legitimate input and indicator-specific warm-up rules apply. This preserves
-Phase 2 section 7.0's existing listing-history behavior for
+For the chart engine, fewer than 251 valid bars after `sourceCoverageFrom` remain
+legitimate input and indicator-specific warm-up rules apply. This preserves Phase 2
+section 7.0's existing short-history behavior for
 `AdvancedTechnicalResult`; Dashboard Refresh neither relabels pre-listing sessions
-as missing data nor changes the production 251-bar selector.
+as missing data nor changes the production 251-bar selector. It also does not claim
+that `sourceCoverageFrom` is an IPO or listing date.
 
 J-Quants adjusted OHLCV is described as corporate-action-adjusted market price data,
 not total return. Source eligibility and the adjustment basis are stored explicitly.
@@ -930,14 +976,13 @@ A week/month is complete only when its Gregorian period has ended before
 `calculationDate`, the calendar envelope contains every official session
 in the period, and its final session is no later than `eligibleThrough`. If the
 calendar proves that the first weekly/monthly period contains a session inside the
-current listing segment but before `queryFrom`, the candle formed only from
-in-range bars is deliberately
+same Gregorian period but before `sourceCoverageFrom`, the candle formed only from
+retrieved rows is deliberately
 `partial: true`; every indicator and cross field is `unavailable/partial_period`, and
 that candle is excluded from indicator inputs. This leading-range truncation is not
 a source/calendar coverage failure. If no earlier official session exists, the
-normal completeness rules apply. Pre-listing sessions in an IPO's first week/month
-do not make it a leading-range partial or a gap; once that period has elapsed, its
-in-lifetime bars form a complete candle. A trailing in-progress candle is likewise
+normal completeness rules apply. No omitted session is called pre-listing or used to
+infer an IPO date. A trailing in-progress candle is likewise
 `partial: true`, displayed, and excluded from every RSI, MACD, signal, histogram,
 and cross calculation. A proved instrument-level gap does not by itself invalidate
 a period with another valid bar. Source-envelope or calendar coverage incompleteness
@@ -1092,7 +1137,7 @@ MarketOverviewModuleArtifactV1 = {
   reason: PersistedModuleUnavailableReasonV1 | null,
   moduleId, sourceId, asOfCutoff, calculationDate,
   dataDate, fetchedAt, cadence, displayUnit,
-  instrumentLifetimes: InstrumentLifetimeV1[],
+  historyBoundaries: CurrentCodeHistoryBoundaryV1[],
   sourceInputs, sourcePayloadDigest, artifactDigest,
   observations, warnings
 }
@@ -1108,10 +1153,11 @@ PersistedObservationStateV1 =
             "duplicate_identity" | "ambiguous_vintage" }
 ```
 
-`instrumentLifetimes` is exactly empty for modules 1-4, exactly the current `13210`
-segment for module 5, and exactly the current `13210`, `26330` segments in that order
-for module 6. Each agrees with its corresponding lifetime source input and the
-DR-T0-frozen calculation-envelope checks; arbitrary extra lifetimes are invalid.
+`historyBoundaries` is exactly empty for modules 1-4, exactly the `13210`
+current-code boundary for module 5, and exactly the `13210`, `26330` boundaries in
+that order for module 6. Each agrees with its end-date master and daily-bars source
+inputs. Every entry has `historicalIdentity: "not_verified"`; arbitrary extra
+boundaries and any continuity claim are invalid.
 
 `observations` is exactly one of the following module-owned arrays; every numeric
 field uses the field-level `MarketDataValueV1<number>` union in section 8.1:
@@ -1328,11 +1374,14 @@ change rate  = change / previous adjusted close * 100
 
 Fewer than two valid rows or a zero previous close makes change fields unavailable.
 The values exclude distribution reinvestment and must not be called total return.
-The 1321 payload also persists the DR-T0-frozen `InstrumentLifetimeV1` for the
-current 1321 segment. Bars and official sessions before that segment are outside the
-instrument lifetime, not missing observations. If continuity over the requested
-range cannot be proved, DR-E1 fails `instrument_identity_unverified` and publishes
-no module revision or receipt.
+The 1321 payload persists its `CurrentCodeHistoryBoundaryV1`. The end-date master
+must identify current code `13210`; historical identity remains unverified. Sessions
+before `sourceCoverageFrom` are outside the retrieved series without an inferred
+listing meaning. A missing row after that boundary, a current-master/code mismatch,
+or incomplete pagination fails before publication. Every available or unavailable
+1321 artifact carries `historical_identity_unverified`. Its one shared-calendar
+input applies the same `jquants_daily_bars_eligibility_v1` end-date and post-start
+official-session coverage checks as Technical.
 
 ### 7.8 1321/2633 relative ETF price proxy
 
@@ -1341,21 +1390,23 @@ no module revision or receipt.
 includes USD/JPY, Tokyo/US trading-hour, tracking, fee, and market-price effects.
 Although the issuers define their target indices using total-return index concepts,
 this module compares only distribution-excluding, adjusted TSE market prices and is
-not ETF/index total return. The adapter verifies both security-master identities and
-their effective-dated `InstrumentLifetimeV1` and corporate-action-registry inputs
-before accepting bars. Each series begins at the later of the ten-year query start
-and its proved current listing-segment start. Pre-segment sessions are excluded as
-outside lifetime, and a discontinuous/unproved identity fails the module rather than
-joining an earlier instrument that used the same code.
+not ETF/index total return. The adapter verifies both eligible-end-date master rows,
+their current codes, and their corporate-action-registry inputs before accepting
+bars. Each series begins at its `sourceCoverageFrom` within the maximum ten-year
+query. Earlier sessions are excluded without an inferred listing meaning. Historical
+identity is not guaranteed; both module artifacts and UI retain the exact
+`historical_identity_unverified` warning. One `trading_calendar` input is shared by
+the two code series within this module; both must use the same `eligibleThrough` and
+each must independently pass the post-start official-session coverage check.
 
 For `3M | 6M | 1Y | 3Y | Max`, with `1Y` default:
 
 1. derive `rangeEnd` as the latest exact common trading date;
 2. for 3M/6M subtract exactly 3/6 Gregorian calendar months from `rangeEnd`; for
    1Y/3Y subtract exactly 1/3 Gregorian calendar years, clamping an invalid day to the
-   last day of that month; `Max` has no lower bound within the artifact's verified
-   ten-year source range and is labelled with its actual first/last dates, not as
-   fund inception history;
+   last day of that month; `Max` has no lower bound within the artifact's retrieved
+   current-code source range and is labelled with its actual first/last dates, not as
+   fund inception history or verified continuous identity;
 3. select each instrument's valid adjusted close rows on or after that inclusive
    lower bound and through `rangeEnd`;
 4. inner join exact common trading dates;
@@ -1433,8 +1484,8 @@ Success and read envelopes are closed and versioned:
 ```text
 MarketDataWarningCodeV1 =
   artifact_corrupt_fallback | artifact_corrupt_no_fallback | cadence_changed |
-  basis_break | source_gap | source_refresh_failed | instrument_lifetime_clipped |
-  job_record_write_failed
+  basis_break | source_gap | source_refresh_failed | history_coverage_clipped |
+  historical_identity_unverified | job_record_write_failed
 
 MarketDataWarningV1 = {
   code: MarketDataWarningCodeV1, message,
@@ -1541,8 +1592,9 @@ MarketDataJobViewV1 = {
 
 Variant `payload` objects are closed discriminated objects owned by their module ID;
 they never accept arbitrary properties. Persisted artifact warnings use only
-`cadence_changed`, `basis_break`, `source_gap`, or `instrument_lifetime_clipped`,
-with deterministic allowlisted messages and `artifactIdentity: null`; an artifact
+`cadence_changed`, `basis_break`, `source_gap`, `history_coverage_clipped`, or
+`historical_identity_unverified`, with deterministic allowlisted messages and
+`artifactIdentity: null`; an artifact
 must not contain a reference to its own future digest. Corruption/refresh-failure
 warnings are view/job metadata, not stored content. A completed Technical job has the
 `technical` result and can therefore distinguish a new publication from
@@ -1908,9 +1960,8 @@ failures are not retried. Every initial, pagination, and retry attempt consumes 
 shared Dashboard-process rate budget and its job cap.
 
 Technical refresh is exactly one logical ticker/range bars query, one calendar-
-envelope query, one end-date security-master identity query, and the bounded
-effective-dated lifetime request set frozen by the DR-T0 gate. The whole job allows
-at most 20 actual HTTP attempts including lifetime requests, cursors, and retries,
+envelope query, and one end-date security-master current-identity query. The whole
+job allows at most 20 actual HTTP attempts including cursors and retries,
 8,000 accepted rows, 32 MiB response bytes, and a 600-second deadline.
 If ten years cannot fit those bounds, it fails pre-dispatch or on the first exceeded
 bound with `external_schedule_infeasible` / `source_response_too_large`; it never
@@ -1923,13 +1974,13 @@ ones. Entitlement
 failures are never retried; an HTTP 429 that remains after the inherited bounded
 retry policy terminates with a typed rate-limit failure.
 
-When DR-E1 adds modules 5-6, their shared source work is exactly two ten-year bars
-queries, two end-date security-master queries, and two bounded lifetime request sets
-under the DR-T0-frozen contract; the local corporate-action registries make no HTTP
-request. The ETF increment is capped at 40 actual attempts, 16,000 accepted rows,
-64 MiB, and 600 seconds. Before any DR-M1 module is registered, that increment is the
-whole Overview-job ceiling and DR-E1 has no DR-M0 dependency. After one or more
-DR-M1 modules are registered, the Overview ceilings are the merged limits for exactly
+When DR-E1 adds modules 5-6, their shared source work is exactly two maximum-ten-year
+bars queries, two end-date security-master queries, and one shared calendar-envelope
+query; the local corporate-action registries make no HTTP request. The ETF increment
+is capped at 40 actual attempts, 16,000 accepted rows, 64 MiB, and 600 seconds. Before
+any DR-M1 module is registered, that increment is the whole Overview-job ceiling and
+DR-E1 has no DR-M0 dependency. After one or more DR-M1 modules are registered, the
+Overview ceilings are the merged limits for exactly
 the registered DR-M1 modules plus those ETF increments; the whole-job deadline is at
 most the corresponding DR-M0-frozen deadline plus 600 seconds. DR-E1 must prove the
 increment with fixtures and the bounded Standard source gate; failure never shortens
@@ -2126,16 +2177,10 @@ visual list order alone, controls admission; Phase 5 still waits for DR-X.
 4. **DR-V3 — detail shell and complex surfaces**
    - migrate Card/Table/Dialog/Comparison/Radar/Validation/chart theme;
    - enact the exact seven-tab shell without moving existing Snapshot sections.
-5. **DR-T0 — Technical source and lifetime gate**
-   - verify the exact individual-Standard bars/calendar/master/lifetime contracts,
-     entitlement, identity continuity proof, and production bounds with strict
-     fixtures plus the default-No bounded live smoke;
-   - replace the lifetime candidate in this plan/source registry before merge; add no
-     canonical artifact, public mutation/read route, or UI.
-6. **DR-T1 — pure Technical chart series**
+5. **DR-T1 — pure Technical chart series**
    - implement strict daily input, interval aggregation, partial-period rules,
      RSI/MACD series, cross state, and pure tests only.
-7. **DR-C1 — shared Dashboard session and empty-start coordinator**
+6. **DR-C1 — shared Dashboard session and empty-start coordinator**
    - extract the existing Dashboard session/security owner and one Dashboard-process
      J-Quants admission/rate coordinator;
    - implement `dashboard_empty_start_admission_v1`, including immediate cooldown
@@ -2148,51 +2193,78 @@ visual list order alone, controls admission; Phase 5 still waits for DR-X.
      financial semantics, status-specific run recovery, and CLI behavior. Reuse
      existing Browser error surfaces with the explicit cross-domain/recovery flow;
      add no layout, styling, or persisted job-status variant.
-8. **DR-A1 — market-data artifact and observation repository**
+7. **DR-A1 — market-data artifact and observation repository**
    - implement `MarketDataSourcePayloadEnvelopeV1`, calculation versions, canonical
      artifact create/reuse, immutable observation receipts, authoritative latest
      resolution, rebuildable cache, collision/recovery, and pure repository tests;
    - add no source request, mutation route, or UI.
-9. **DR-O1 — generic Overview job and read API foundation**
+8. **DR-O1 — generic Overview job and read API foundation**
    - implement the one common Market Data job repository and native recovery
      adapter for both refresh kinds, replacing DR-C1's absence probe before startup;
    - implement the strict module registry, per-module atomic artifact/receipt
      orchestration, root result semantics, and read/job routes over DR-C1/DR-A1;
    - with zero registered source modules, GET remains 404 and POST returns 400
      `source_configuration_missing` without a job, lease, or external request.
-10. **DR-T2 — Technical source and job API**
+9. **DR-T0A — current-code-only docs amendment**
+   - retire the unprovable lifetime candidate and replace every Technical/ETF
+     continuity claim with the explicit `current_code_history_v1` boundary;
+   - freeze the persistent warning, non-use boundary, revised prerequisites, and
+     migration sequence in `SPEC.md`, this plan, and the handoff; change no runtime.
+10. **DR-T1A — current-code Technical series boundary**
+   - replace the merged structural `listingWindow` with `historyBoundary`, remove
+     synthetic missing-row gaps, and implement exact first-source-row, leading
+     partial, internal-missing failure, warning-input, and non-mutation tests;
+   - change no source request, artifact repository, route, or UI.
+11. **DR-A2 — current-code artifact and warning contract**
+   - replace the unused pre-production lifetime roles/fields with the three-input
+     Technical and four/seven-input ETF role sets; replace
+     `instrument_lifetime_clipped` with `history_coverage_clipped` and
+     `historical_identity_unverified` in generic job/artifact contracts and golden
+     vectors;
+   - no production Technical/ETF codec or receipt exists, so add no migration,
+     backfill, source request, route, or UI.
+12. **DR-T0 — Technical source and current-code gate**
+   - verify the exact individual-Standard bars/calendar/end-date-master contracts,
+     entitlement, current identity, complete post-start coverage, and production
+     bounds with strict fixtures plus the default-No bounded live smoke;
+   - freeze the source revisions and measured caps before merge; add no canonical
+     artifact, public mutation/read route, or UI.
+13. **DR-T2 — Technical source and job API**
    - implement the DR-T0-frozen strict J-Quants mappers, manual Technical refresh,
-     and GET/job routes over DR-C1/DR-A1/DR-O1; reuse DR-O1's job repository and
-     registered recovery adapter rather than owning a separate job store.
-11. **DR-T3 — Technical UI**
+     current-code warning/artifact codec, and GET/job routes over
+     DR-C1/DR-A1/DR-O1; reuse DR-O1's job repository and registered recovery adapter
+     rather than owning a separate job store.
+14. **DR-T3 — Technical UI**
    - implement source precedence, day/week/month, four panes, crosshair OHLCV,
-     exact table, URL/race/focus, and Comparison separation.
-12. **DR-M0 — margin-source migration gate**
+     exact table, URL/race/focus, Comparison separation, and the persistent
+     current-code-only warning.
+15. **DR-M0 — margin-source migration gate**
    - verify the official migration, individual Standard entitlement, exact schema,
      cadence boundary, primary key/coverage/unit contract, one-date reconciliation,
      and bounded exact-26-observation production-shape smoke;
    - add no public value when the gate is unresolved.
-13. **DR-M1a — shared margin source plus aggregate/1570 modules**
+16. **DR-M1a — shared margin source plus aggregate/1570 modules**
    - implement the one verified complete margin input and the pure module 1/3
      mappers/engines/artifact builders, then register both modules with DR-O1; add no
      UI.
-14. **DR-M1b — market short-ratio module**
+17. **DR-M1b — market short-ratio module**
    - implement the verified source mapper, schedule resolver, engine, and artifact
      builder for module 2, then register it with DR-O1; add no UI.
-15. **DR-M1c — foreign-flow module**
+18. **DR-M1c — foreign-flow module**
    - implement the series correction-vintage selector, mapper, engine, and artifact
      builder for module 4, then register it with DR-O1; add no UI. The implemented
      module set remains per-module atomic rather than one transaction.
-16. **DR-M2 — four supply/demand UI modules**
+19. **DR-M2 — four supply/demand UI modules**
    - implement cards, latest 26-observation charts/tables, cadence/basis breaks,
      metadata, fallback, and warnings.
-17. **DR-E1 — 1321/2633 sources and relative-performance engine**
+20. **DR-E1 — 1321/2633 sources and relative-performance engine**
    - implement strict EOD input, 1321 change, common-date normalization, range,
-     direction, lifetime continuity, proxy caveats, and immutable module artifacts/
-     receipts.
-18. **DR-E2 — two ETF UI modules**
-   - add the 1321 EOD and 1321/2633 proxy cards/chart/table and range URL/UI state.
-19. **DR-X — usage, setup, handoff, and closeout**
+     direction, current-code history boundaries, proxy caveats, and immutable module
+     artifacts/receipts.
+21. **DR-E2 — two ETF UI modules**
+   - add the 1321 EOD and 1321/2633 proxy cards/chart/table, persistent
+     current-code-only warning, and range URL/UI state.
+22. **DR-X — usage, setup, handoff, and closeout**
    - update `Usage.md`, `docs/USER_SETUP.md`, and environment guidance only for
      merged behavior;
    - run complete validation and update the handoff from candidate to closeout.
@@ -2201,10 +2273,11 @@ The exact direct dependencies are:
 
 ```text
 DR-0 -> DR-V1 -> DR-V2 -> DR-V3
-DR-V3 -> { DR-T0, DR-T1 }
+DR-V3 -> DR-T1
 DR-T1 -> DR-C1 -> DR-A1
-DR-A1 -> DR-O1
-{ DR-O1, DR-T0 } -> DR-T2
+DR-A1 -> DR-O1 -> DR-T0A
+DR-T0A -> { DR-T1A, DR-A2, DR-T0 }
+{ DR-O1, DR-T0, DR-T1A, DR-A2 } -> DR-T2
 DR-T2 -> DR-T3
 { DR-O1, DR-T2 } -> DR-E1 -> DR-E2
 DR-O1 -> DR-M0 -> { DR-M1a, DR-M1b, DR-M1c } -> DR-M2
@@ -2214,10 +2287,10 @@ DR-O1 -> DR-M0 -> { DR-M1a, DR-M1b, DR-M1c } -> DR-M2
 DR-M1a, DR-M1b, and DR-M1c are independent after DR-M0 and may merge in any order;
 DR-M2 waits for all three. A delayed DR-M0 does not block DR-T3 or the independent
 ETF path. No step opportunistically implements a later step. DR-V1-V3 do not fetch
-market data; DR-T0 exposes no public route and persists no market-data artifact;
-DR-T1 and DR-A1 expose no new route; DR-O1 cannot dispatch without a registered
-module. DR-O1 precedes DR-T2 to establish the common job repository/recovery owner;
-it has no margin-source dependency. DR-C1 changes shared ownership and the explicit
+market data; DR-T0A changes docs only; DR-T0 exposes no public route and persists no
+market-data artifact; DR-T1/DR-T1A and DR-A1/DR-A2 expose no new route; DR-O1 cannot
+dispatch without a registered module. DR-O1 precedes DR-T0A and DR-T2 to establish
+the common job repository/recovery owner; it has no margin-source dependency. DR-C1 changes shared ownership and the explicit
 admission/recovery/copy contract while preserving accepted-job calculation/timing
 and Phase 4's native recovery outcomes. DR-M0 is a gate rather than a UI/source
 implementation; DR-X adds no new runtime behavior.
@@ -2230,20 +2303,23 @@ implementation; DR-X adds no new runtime behavior.
 | DR-V1 | exact tokens, measured contrast, focus-visible, status not color-only, existing behavior regression |
 | DR-V2 | Watchlist/loading/error/empty, global deep link/conflict, Back/Forward/reload, inherited unknown-tab canonicalization, dormant/new-key matrix, unknown-query preservation |
 | DR-V3 | exact seven IDs/labels/order, Home/End/arrows/roving focus, all existing complex surfaces, availability ownership, token contrast at every required surface |
-| DR-T0 | exact official endpoint/query/field/effective-date/entitlement registry; bounded four-input source proof; no-publication smoke; current identity and continuous segment fixtures; IPO/later listing, current-master absence, delisting/relisting, code reuse, conflicting/incomplete continuity; request/page/row/byte/deadline ceilings; secret non-exposure |
-| DR-T1 | strict bar/gap union, positive OHLC/non-negative volume and valid zero, lifetime-clipped calculation envelope without pre-listing gaps, fewer-than-251 current-segment bars, daily `partial:false`, gap-only period, OHLCV aggregation, week/month/calendar/holiday boundaries, week-mid/month-mid `queryFrom` leading partials, partial current week/month, all-null/partial-null, RSI index 14, MACD bundle index 33, first cross index 34/equality, 34-month boundary, same-window Engine parity, input immutability |
+| DR-T1 | merged predecessor only: strict bar/gap union, positive OHLC/non-negative volume and valid zero, the superseded structural lifetime window, fewer-than-251 bars, daily `partial:false`, gap-only period, OHLCV aggregation, week/month/calendar/holiday boundaries, leading/trailing partials, all-null/partial-null, RSI index 14, MACD bundle index 33, first cross index 34/equality, 34-month boundary, same-window Engine parity, input immutability; DR-T1A replaces the window before production use |
 | DR-C1 | one Dashboard session token and one three-kind process coordinator; unchanged Phase 4 routes/public code enums/schemas/accepted-job controls/CLI; empty-start admission and exact cooldown 409/Retry-After; typed create/replace publication outcomes; all-domain inventory/release/startup proofs; sticky recovery blocker; retained attempt log across failure/cancel/runtime construction; preflight preservation and atomic admission; cross-domain active/read/recovery Browser flow; two runtime instances cannot bypass the shared Dashboard limiter |
 | DR-A1 | literal `MarketDataSourcePayloadEnvelopeV1` golden vectors; target/role/calculation-version mismatch; volatile/derived-field exclusion; exact digest-to-path-to-artifactDigest derivation; persisted calculation version and maximum-provider `fetchedAt`; create/reuse/collision; receipt no-replace and digest/identity; A(t1)->B(t2)->A(t3); delayed older-admission completion; two-process inverse completion; equal-millisecond equal-artifact equivalence and conflicting-artifact `latest_resolution_failed`; stale/backwards/corrupt/missing cache reconstruction; orphan artifact exclusion; interrupted after-receipt visibility; bounded corrupt-receipt/artifact fallback; containment |
 | DR-O1 | common two-kind job repository/native recovery adapter; strict 65,536-byte job record and filename identity; create/replace fault injection and cross-domain admission/restart; zero-module GET 404 and POST 400 `source_configuration_missing` in a healthy process with no job/lease/dispatch; strict module registration/order; one root Overview `checkedAt`; success receipt versus retained-previous/failed identities; per-module artifact/receipt atomicity; partial success/all-modules-failed root; terminal-write recovery latch; GET persisted-vs-uncollected/corrupt identity |
-| DR-T2 | strict frozen-source mappers, acceptedAt/16:30/query-range gate, exact four-input manifest, current identity/lifetime agreement, all-gap `source_no_observation` with prior-receipt retention and initial GET 404; Technical `published` versus `idempotent_reuse` result/`checkedAt`/receipt schema; GET 404/500/no-fetch; shared CSRF/coordinator/DR-O1 job repository and recovery adapter; cross-kind create/terminal-write faults, timeout/cancel/startup |
+| DR-T0A | `SPEC`/plan/handoff agreement; retired candidate and no fabricated replacement; exact `current_code_only` warning/non-use boundary; revised graph; no runtime/dependency/Usage/setup diff |
+| DR-T1A | `historyBoundary` strictness; first source row; pre-start omission without listing inference; post-start missing-session failure; all-null explicit gap; leading partial; 251-bar short history; removal of `missing_in_complete_envelope`; input immutability and merged indicator parity |
+| DR-A2 | exact three-input Technical, four-input 1321, and seven-input relative-ETF roles; golden envelope/digest changes; warning enum/order/message; old lifetime role/warning rejection; zero production-artifact migration proof; repository/job regressions |
+| DR-T0 | exact official bars/calendar/end-date-master endpoint/query/field/entitlement registry; bounded three-input no-publication smoke; current code/name/product/market identity; earliest source row and complete post-start official-session coverage; Standard maximum-ten-year history, pagination and request/page/row/byte/deadline ceilings; secret/path non-exposure |
+| DR-T2 | strict frozen-source mappers, acceptedAt/16:30/query-range gate, exact three-input manifest, current end-date identity, current-code history boundary, permanent history warning, post-start missing-session failure, all-gap `source_no_observation` with prior-receipt retention and initial GET 404; Technical `published` versus `idempotent_reuse` result/`checkedAt`/receipt schema; GET 404/500/no-fetch; shared CSRF/coordinator/DR-O1 job repository and recovery adapter; cross-kind create/terminal-write faults, timeout/cancel/startup |
 | DR-T3 | auto/snapshot/latest precedence, absent latest, refresh adoption, URL/Back/Forward/reload, latest-request-wins, collapse, keyboard crosshair, exact table, Comparison isolation |
 | DR-M0 | old/new fixtures, official migration evidence, individual-Standard entitlement, exact source primary key/fields/issue and sector allowlists/units/vintages, schedule/calendar and short-week/boundary resolver, one-date reconciliation smoke, exact 26-window bootstrap caps, secret-safe record |
 | DR-M1a | complete issue aggregation, shared margin-input reuse, field-level valid zero/ratio denominator, verified primary key/unit, canonical expected-date unavailable artifact, proved-missing/duplicate versus malformed/incomplete no-publish, 1570 identity/unit/old-transition-new official basis break, two registered module results |
 | DR-M1b | short-ratio exact coverage allowlist/formula, valid zero/zero denominator, schedule identity, proved-missing/duplicate versus malformed/incomplete no-publish |
 | DR-M1c | 26-point correction-vintage/eligibility resolver, ambiguous/missing identity, date-only publication, valid zero, no repeated latest-only selection, no future use |
 | DR-M2 | latest 26 expected identities including unavailable rows, weekly/daily boundary, no interpolation, fallback warnings, source/date/cadence/elapsed metadata, keyboard/mobile tables |
-| DR-E1 | exact four-input 1321 EOD and eight-input relative-ETF manifests, current 1321/2633 lifetime continuity and code-reuse rejection, pre-lifetime exclusion, EOD insufficient-history fields, common-date inner join, no forward fill, positive base, base 100, range boundaries, unavailable range without direction, return/difference/direction, exact tie, distribution exclusion, 1321/2633 announced-split adjusted-price regressions, corporate-action price basis |
-| DR-E2 | 3M/6M/1Y/3Y/Max, 1Y default, exact proxy labels/caveats, URL/race/focus, table/chart agreement |
+| DR-E1 | exact four-input 1321 EOD and seven-input relative-ETF manifests, one shared calendar, current 1321/2633 end-date identities, per-code source coverage boundaries, permanent unverified-history warning, post-start missing-session failure, EOD insufficient-history fields, common-date inner join, no forward fill, positive base, base 100, range boundaries, unavailable range without direction, return/difference/direction, exact tie, distribution exclusion, 1321/2633 announced-split adjusted-price regressions, corporate-action price basis |
+| DR-E2 | 3M/6M/1Y/3Y/Max, 1Y default, exact proxy/current-code caveats, persistent warning, URL/race/focus, table/chart agreement |
 | DR-X | full unit/integration/Playwright/visual QA, source gates, one-external-J-Quants-process operating restriction, Usage/setup accuracy, no-score/no-signal/Snapshot regression |
 
 The review regressions also require these exact boundary cases:
@@ -2310,10 +2386,11 @@ Market Data repository. DR-C1 does not pre-implement a Market Data source or job
   receipt can fall back within 256; 256 such references plus an older valid receipt
   return `artifact_recovery_bound_exceeded`. Duplicate artifact identity does not
   excuse validation of a malformed receipt or a same-instant conflict.
-- DR-T0/T1: prove lifetime only over the calculation envelope, without extending
-  ten-year history back to an old instrument's inception. A completed IPO week/month
-  is not a pre-listing gap or leading partial; true in-lifetime `queryFrom`
-  truncation is partial. A code-reuse/relisting boundary never joins instruments.
+- DR-T0/T1A/T2: verify only the eligible-end-date current master. The first returned
+  source row establishes retrieval coverage, not listing. Omit earlier sessions,
+  mark a first partial week/month accurately, fail any later absent official-session
+  row, and always persist the historical-identity warning. Fixtures must show that
+  a gapless code reuse cannot be detected or described as rejected.
 - DR-O1/T2: enumerate result/failure nullability for every status; copy the one
   Overview `checkedAt` to every result, including failed/unattempted modules. A
   receipt failure differs from a successful receipt followed by a terminal-job
@@ -2324,8 +2401,9 @@ Market Data repository. DR-C1 does not pre-implement a Market Data source or job
 - DR-T3/M2/E2: one authoritative GET after job completion precedes adoption; an
   older completed job cannot install its result over a newer admitted receipt. A
   failed adoption read preserves the previous display with a warning.
-- DR-E1: the strict module schema persists exactly zero, one, or two lifetime
-  entries according to module ID, with exact 13210/26330 ordering and source agreement.
+- DR-E1: the strict module schema persists exactly zero, one, or two current-code
+  history boundaries according to module ID, with exact 13210/26330 ordering, source
+  agreement, and `historicalIdentity: "not_verified"`.
 
 Responsive visual QA covers 320, 390, 680, 768, 980, 1024, and 1280 px with no
 document-level horizontal overflow. It covers Watchlist, all seven tabs, dialogs,
@@ -2362,11 +2440,13 @@ Dashboard Refresh is Done only when:
 5. DR-M0 recorded the post-migration official result plus both exact individual-
    Standard schema/reconciliation and 26-observation production-shape smokes;
 6. all UI values retain source, date, unit, cadence, unavailable, and proxy semantics;
-7. Snapshot V1-V9, Comparison, Radar, Strategy Validation, no-score, and no-signal
+7. every Technical/ETF artifact and surface retains the exact current-code-only
+   historical-identity warning and none feeds validation/backtest/score/signal logic;
+8. Snapshot V1-V9, Comparison, Radar, Strategy Validation, no-score, and no-signal
    regression tests remain green; and
-8. Usage, setup, and handoff describe only the exact merged behavior.
+9. Usage, setup, and handoff describe only the exact merged behavior.
 
-Phase 5 begins only after all eight conditions are satisfied. A delayed or failed
+Phase 5 begins only after all nine conditions are satisfied. A delayed or failed
 margin migration gate delays DR-M1a-c, DR-M2, DR-X, and Phase 5; it does not
 authorize a weaker source or block the independent Technical/ETF path.
 
