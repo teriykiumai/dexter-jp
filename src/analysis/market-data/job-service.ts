@@ -84,6 +84,7 @@ type Attempt =
 class MarketDataJobStopV1 extends Error {
   constructor(readonly code: 'source_timeout' | 'source_response_too_large') { super(code); }
 }
+class MarketDataJobCancelledV1 extends Error {}
 
 function same(left: unknown, right: unknown): boolean {
   return canonicalJsonV1(left as CanonicalJsonValue) === canonicalJsonV1(right as CanonicalJsonValue);
@@ -401,14 +402,16 @@ export class MarketDataJobServiceV1 {
         try {
           const prepared = await module.collect({ jobId: current.jobId, acceptedAt: current.acceptedAt, signal,
             dispatch: async <T>(start: (signal: AbortSignal) => Promise<T>, extra?: AbortSignal) => {
-              if (signal.aborted || extra?.aborted) throw new MarketDataJobStopV1('source_timeout');
+              if (signal.aborted || extra?.aborted) {
+                throw this.#dispatchAbort(lease, controller, budget, extra);
+              }
               this.#checkExecution(lease, current, actualAttempts, 0, true);
               const attempt = new AbortController();
               let attemptTimer: ReturnType<typeof setTimeout> | undefined;
               const combined = AbortSignal.any(extra ? [signal, extra, attempt.signal] : [signal, attempt.signal]);
               let rejectAbort!: () => void;
               const aborted = new Promise<never>((_, reject) => {
-                rejectAbort = () => reject(new Error('Market Data dispatch aborted.'));
+                rejectAbort = () => reject(this.#dispatchAbort(lease, controller, budget, extra, attempt));
                 if (combined.aborted) rejectAbort();
                 else combined.addEventListener('abort', rejectAbort, { once: true });
               });
@@ -424,8 +427,9 @@ export class MarketDataJobServiceV1 {
                 }, extra ? AbortSignal.any([signal, extra]) : signal);
                 return await Promise.race([dispatched, aborted]);
               } catch (error) {
-                if (attempt.signal.aborted && !signal.aborted && !extra?.aborted) {
-                  throw new MarketDataSourceFailureV1('source_timeout');
+                if (lease.signal.aborted || controller.signal.aborted || budget.signal.aborted
+                  || attempt.signal.aborted || extra?.aborted) {
+                  throw this.#dispatchAbort(lease, controller, budget, extra, attempt);
                 }
                 throw error;
               } finally {
@@ -434,9 +438,10 @@ export class MarketDataJobServiceV1 {
               }
             },
             shareSource: <T>(sourceKey: string, load: () => Promise<T>) => {
-              if (!/^[a-z0-9_.:-]{1,160}$/.test(sourceKey) || signal.aborted) {
+              if (!/^[a-z0-9_.:-]{1,160}$/.test(sourceKey)) {
                 throw new MarketDataSourceFailureV1('source_invalid_response');
               }
+              if (signal.aborted) throw this.#dispatchAbort(lease, controller, budget);
               const existing = sharedSources.get(sourceKey);
               if (existing) return existing as Promise<T>;
               const pending = Promise.resolve().then(load);
@@ -444,9 +449,15 @@ export class MarketDataJobServiceV1 {
               return pending;
             },
             recordProgress: progress => {
-              this.#checkProgress(current, actualPages + progress.pages, actualRows + progress.acceptedRows,
-                actualBytes + progress.responseBytes, actualAttempts);
-              actualPages += progress.pages; actualRows += progress.acceptedRows; actualBytes += progress.responseBytes;
+              const nextPages = actualPages + progress.pages;
+              const nextRows = actualRows + progress.acceptedRows;
+              const nextBytes = actualBytes + progress.responseBytes;
+              if ([progress.pages, progress.acceptedRows, progress.responseBytes,
+                nextPages, nextRows, nextBytes].some(value => !Number.isSafeInteger(value) || value < 0)) {
+                throw new MarketDataSourceFailureV1('source_invalid_response');
+              }
+              actualPages = nextPages; actualRows = nextRows; actualBytes = nextBytes;
+              this.#checkProgress(current, actualPages, actualRows, actualBytes, actualAttempts);
             } });
           if (prepared.attempts !== actualAttempts || prepared.pages !== actualPages
             || prepared.acceptedRows !== actualRows || prepared.responseBytes !== actualBytes) {
@@ -457,8 +468,10 @@ export class MarketDataJobServiceV1 {
         } catch (error) {
           if (error instanceof DashboardJobCoordinatorErrorV1
             || error instanceof MarketDataJobServiceErrorV1) throw error;
-          if (error instanceof MarketDataJobStopV1) jobWideFailure = error.code;
-          attempts.push({ state: 'failed', module, code: this.#failureCode(error) });
+          if (!(error instanceof MarketDataJobCancelledV1)) {
+            if (error instanceof MarketDataJobStopV1) jobWideFailure = error.code;
+            attempts.push({ state: 'failed', module, code: this.#failureCode(error) });
+          }
         }
         current = await this.coordinator.exclusive(() => this.#updateProgress(current, {
           attempts: beforeAttempts + actualAttempts,
@@ -537,6 +550,10 @@ export class MarketDataJobServiceV1 {
       }
       moduleResults.sort((a, b) => moduleOrderV1(a.moduleId) - moduleOrderV1(b.moduleId));
       const successful = moduleResults.filter(result => result.state === 'published' || result.state === 'idempotent_reuse').length;
+      if (!successful && current.status === 'running') {
+        await this.#finishFailedWithoutReceipt(current, checkedAt, moduleResults);
+        return;
+      }
       const terminal = MarketDataJobViewV1Schema.parse({ ...current,
         status: successful ? 'completed' : 'failed', completedAt: this.#nowAtLeast(Date.parse(checkedAt)),
         progress: { ...current.progress, completedModules: current.progress.totalModules },
@@ -574,18 +591,9 @@ export class MarketDataJobServiceV1 {
 
   async #finishScheduleInfeasible(current: MarketDataJobViewV1): Promise<void> {
     const checkedAt = this.#nowAtLeast(Date.parse(current.acceptedAt));
-    const moduleResults: MarketDataModuleResultV1[] = this.overviewRegistry.implemented().map(module => ({
-      moduleId: module.moduleId, state: 'failed', checkedAt,
-      artifactIdentity: null, observationReceiptIdentity: null,
-      failureCode: 'external_schedule_infeasible', warningCodes: [],
-    }));
-    const terminal = MarketDataJobViewV1Schema.parse({ ...current,
-      status: 'failed', completedAt: checkedAt,
-      progress: { ...current.progress, completedModules: current.progress.totalModules },
-      failure: marketDataJobFailureV1('all_modules_failed'),
-      result: { kind: 'overview', checkedAt, moduleResults },
-    });
-    await this.coordinator.exclusive(() => this.#terminalReplace(current, terminal, false));
+    const moduleResults = await Promise.all(this.overviewRegistry.implemented().map(module =>
+      this.#failedModule(module, 'external_schedule_infeasible', checkedAt, current.jobId)));
+    await this.#finishFailedWithoutReceipt(current, checkedAt, moduleResults);
   }
 
   #artifactWarningCodes(module: OverviewModuleAdapterV1,
@@ -596,14 +604,42 @@ export class MarketDataJobServiceV1 {
   async #finishCancellation(current: MarketDataJobViewV1): Promise<void> {
     if (!this.coordinator.owns(projection(current))) return;
     await this.coordinator.exclusive(async () => {
-      let durable = await this.jobRepository.load(current.jobId);
-      if (durable.status === 'accepted' || durable.status === 'running') {
-        durable = await this.#replace(durable, { ...durable, status: 'cancel_requested' });
-      }
-      if (durable.status === 'cancel_requested') await this.#replace(durable, { ...durable,
-        status: 'cancelled', completedAt: this.#nowAtLeast(Date.parse(durable.acceptedAt)) });
-      this.#leases.delete(current.jobId);
+      await this.#finishCancellationLocked(await this.jobRepository.load(current.jobId));
     });
+  }
+
+  async #finishFailedWithoutReceipt(current: MarketDataJobViewV1, checkedAt: string,
+    moduleResults: readonly MarketDataModuleResultV1[]): Promise<void> {
+    await this.coordinator.exclusive(async () => {
+      const durable = await this.jobRepository.load(current.jobId);
+      if (durable.status === 'cancel_requested') {
+        await this.#finishCancellationLocked(durable);
+        return;
+      }
+      if (durable.status !== 'running' || !same(durable.progress, current.progress)) {
+        throw new MarketDataJobServiceErrorV1('invariant_failure');
+      }
+      const terminal = MarketDataJobViewV1Schema.parse({ ...durable,
+        status: 'failed', completedAt: this.#nowAtLeast(Date.parse(checkedAt)),
+        progress: { ...durable.progress, completedModules: durable.progress.totalModules },
+        failure: marketDataJobFailureV1('all_modules_failed'),
+        result: { kind: 'overview', checkedAt, moduleResults },
+      });
+      await this.#terminalReplace(durable, terminal, false);
+    });
+  }
+
+  async #finishCancellationLocked(current: MarketDataJobViewV1): Promise<void> {
+    let durable = current;
+    if (durable.status === 'accepted' || durable.status === 'running') {
+      durable = await this.#replace(durable, { ...durable, status: 'cancel_requested' });
+    }
+    if (durable.status !== 'cancel_requested') {
+      throw new MarketDataJobServiceErrorV1('invariant_failure');
+    }
+    await this.#replace(durable, { ...durable,
+      status: 'cancelled', completedAt: this.#nowAtLeast(Date.parse(durable.acceptedAt)) });
+    this.#leases.delete(durable.jobId);
   }
 
   async #updateProgress(current: MarketDataJobViewV1,
@@ -723,9 +759,18 @@ export class MarketDataJobServiceV1 {
   #nowAtLeast(minimum: number): string {
     return safeInstant(Math.max(minimum, this.#environment.wallNowMs()));
   }
+  #dispatchAbort(lease: DashboardJobLeaseV1, controller: AbortController,
+    budget: AbortController, extra?: AbortSignal, attempt?: AbortController): Error {
+    if (lease.signal.aborted) return new DashboardJobCoordinatorErrorV1('recovery_required');
+    if (controller.signal.aborted) return new MarketDataJobCancelledV1();
+    if (budget.signal.aborted) return new MarketDataJobStopV1('source_timeout');
+    if (attempt?.signal.aborted || extra?.aborted) return new MarketDataSourceFailureV1('source_timeout');
+    return new MarketDataSourceFailureV1('source_invalid_response');
+  }
   #checkExecution(lease: DashboardJobLeaseV1, current: MarketDataJobViewV1,
     pendingAttempts: number, pendingWait: number, starting: boolean): void {
-    if (!this.#limits || lease.signal.aborted) throw new MarketDataJobStopV1('source_timeout');
+    if (!this.#limits) throw new MarketDataJobServiceErrorV1('invariant_failure');
+    if (lease.signal.aborted) throw new DashboardJobCoordinatorErrorV1('recovery_required');
     const elapsed = this.#environment.monotonicNowMs() - lease.monotonicOriginMs;
     if (!Number.isFinite(elapsed) || elapsed < 0) throw new MarketDataJobServiceErrorV1('invariant_failure');
     if (elapsed + pendingWait >= this.#limits.executionBudgetMs) throw new MarketDataJobStopV1('source_timeout');
@@ -735,11 +780,14 @@ export class MarketDataJobServiceV1 {
     }
   }
   #checkProgress(current: MarketDataJobViewV1, pages: number, rows: number, bytes: number, attempts: number): void {
-    if (!this.#limits || [pages, rows, bytes, attempts].some(value => !Number.isSafeInteger(value) || value < 0)
-      || current.progress.pages + pages > this.#limits.maximumPages
-      || current.progress.acceptedRows + rows > this.#limits.maximumRows
-      || current.progress.responseBytes + bytes > this.#limits.maximumResponseBytes) {
-      throw new MarketDataSourceFailureV1('source_response_too_large');
+    if (!this.#limits) throw new MarketDataJobServiceErrorV1('invariant_failure');
+    if ([pages, rows, bytes, attempts].some(value => !Number.isSafeInteger(value) || value < 0)) {
+      throw new MarketDataSourceFailureV1('source_invalid_response');
+    }
+    if (pages > this.#limits.maximumPages - current.progress.pages
+      || rows > this.#limits.maximumRows - current.progress.acceptedRows
+      || bytes > this.#limits.maximumResponseBytes - current.progress.responseBytes) {
+      throw new MarketDataJobStopV1('source_response_too_large');
     }
   }
   #failureCode(error: unknown): MarketDataModuleFailureCodeV1 {

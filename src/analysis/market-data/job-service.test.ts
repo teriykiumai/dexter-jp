@@ -14,7 +14,8 @@ import { MarketDataJobViewV1Schema, type MarketDataModuleFailureCodeV1,
   type MarketDataWarningV1 } from './job-schema.js';
 import { MarketDataSourceFailureV1 } from './job-schema.js';
 import { MarketDataJobServiceV1, type MarketDataJobLimitsV1 } from './job-service.js';
-import { OverviewModuleRegistryV1, createOverviewModuleAdapterV1 } from './overview-registry.js';
+import { OverviewModuleRegistryV1, createOverviewModuleAdapterV1,
+  type OverviewModuleAdapterV1 } from './overview-registry.js';
 import type { MarketDataModuleIdV1 } from './contracts.js';
 
 const roots: string[] = [];
@@ -36,10 +37,17 @@ function environment() {
 const limits: MarketDataJobLimitsV1 = { estimatedMinimumAttempts: 1, maximumAttempts: 3,
   maximumPages: 3, maximumRows: 10, maximumResponseBytes: 1024, executionBudgetMs: 120_000 };
 
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>(done => { resolve = done; });
+  return { promise, resolve };
+}
+
 async function harness(options: { configured?: boolean; fail?: () => boolean;
   sourceFailure?: () => MarketDataModuleFailureCodeV1 | null; dispatches?: number;
   enqueue?: (work: () => void) => void; ambiguousTerminalWrite?: boolean;
   partial?: boolean; shared?: boolean; exhaustBudget?: boolean;
+  pendingDispatch?: boolean; dispatchStarted?: () => void; latestGate?: () => Promise<void>;
   warnings?: readonly MarketDataWarningV1[]; limits?: MarketDataJobLimitsV1;
   linkFailure?: { moduleId: MarketDataModuleIdV1; active: () => boolean; code: 'ENOSYS' | 'EXDEV' | 'EPERM' } } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'dexter-market-service-')); roots.push(root);
@@ -64,8 +72,15 @@ async function harness(options: { configured?: boolean; fail?: () => boolean;
       const load = async () => {
         let result = { synthetic: true };
         for (let attempt = 0; attempt < (options.dispatches ?? 1); attempt++) {
-          result = await context.dispatch(async () => {
+          result = await context.dispatch(async signal => {
             if (options.exhaustBudget) clock.advance((options.limits ?? limits).executionBudgetMs);
+            if (options.pendingDispatch) {
+              options.dispatchStarted?.();
+              return new Promise<never>((_resolve, reject) => {
+                const abort = () => reject(new Error('synthetic source observed abort'));
+                if (signal.aborted) abort(); else signal.addEventListener('abort', abort, { once: true });
+              });
+            }
             return { synthetic: true };
           });
         }
@@ -80,10 +95,15 @@ async function harness(options: { configured?: boolean; fail?: () => boolean;
       warnings: options.warnings ?? [] }),
     environment: {},
   });
+  const registeredModule: OverviewModuleAdapterV1 = options.latestGate
+    ? Object.freeze({ ...module, latest: async () => { await options.latestGate!(); return module.latest(); } })
+    : module;
   const secondCodec = fixtureOverviewCodec('margin_1570', {});
+  let secondCollects = 0;
   const second = createOverviewModuleAdapterV1({ repository: new MarketDataRepositoryV1(secondCodec, root,
     { linkFile: moduleLink('margin_1570') }),
     collect: async context => {
+      secondCollects++;
       if (options.shared) {
         await context.shareSource('synthetic_shared_source_v1', async () => { throw new Error('must reuse'); });
         return { artifact: secondCodec.build(fixtureOverviewDraft('margin_1570', context.acceptedAt, 1)),
@@ -95,7 +115,7 @@ async function harness(options: { configured?: boolean; fail?: () => boolean;
     environment: {},
   });
   const registry = new OverviewModuleRegistryV1(options.configured === false ? []
-    : options.partial || options.shared ? [module, second] : [module]);
+    : options.partial || options.shared ? [registeredModule, second] : [registeredModule]);
   let renameCount = 0;
   const jobRepository = new MarketDataJobRepositoryV1(root, options.ambiguousTerminalWrite ? { io: {
     rename: async (source, destination) => {
@@ -107,11 +127,12 @@ async function harness(options: { configured?: boolean; fail?: () => boolean;
     jobRepository, overviewRegistry: registry,
     limits: options.configured === false ? undefined : options.limits ?? limits, enqueue: options.enqueue });
   await service.initialize();
-  return { root, clock, coordinator, repository, module, service };
+  return { root, clock, coordinator, repository, module: registeredModule,
+    secondCollects: () => secondCollects, service };
 }
 
 async function terminal(service: MarketDataJobServiceV1, jobId: string) {
-  for (let count = 0; count < 100; count++) {
+  for (let count = 0; count < 1000; count++) {
     const job = await service.getJob(jobId);
     if (['completed', 'failed', 'cancelled', 'interrupted'].includes(job.status)) return job;
     await new Promise(resolve => setTimeout(resolve, 1));
@@ -318,6 +339,73 @@ describe('Market Data Overview job service', () => {
     await expect(h.repository.latest()).rejects.toMatchObject({ code: 'artifact_not_found' });
   });
 
+  for (const boundary of [
+    { name: 'pages', key: 'pages', delta: { pages: 2, acceptedRows: 0, responseBytes: 0 } },
+    { name: 'rows', key: 'acceptedRows', delta: { pages: 0, acceptedRows: 2, responseBytes: 0 } },
+    { name: 'response bytes', key: 'responseBytes', delta: { pages: 0, acceptedRows: 0, responseBytes: 2 } },
+  ] as const) {
+    test(`stops the whole job and records the first exceeded ${boundary.name} ceiling`, async () => {
+      const root = await mkdtemp(join(tmpdir(), 'dexter-market-progress-bound-')); roots.push(root);
+      const clock = environment(); const coordinator = new DashboardJobCoordinatorV1(clock.value, 5);
+      coordinator.register({ domain: 'strategy_validation', inventory: async () => [], isAbsent: async () => true,
+        cleanup: async () => {}, reconcile: async () => { throw new Error('unexpected'); } });
+      const latestReads: (() => Promise<unknown>)[] = [];
+      let finalCollects = 0;
+      const moduleIds = ['tse_margin_quantities', 'market_short_ratio', 'margin_1570'] as const;
+      const modules = moduleIds.map((moduleId, index) => {
+        const codec = fixtureOverviewCodec(moduleId, {});
+        const repository = new MarketDataRepositoryV1(codec, root);
+        latestReads.push(() => repository.latest());
+        return createOverviewModuleAdapterV1({ repository,
+          collect: async context => {
+            if (index === 2) finalCollects++;
+            const progress = index === 0
+              ? { pages: 1, acceptedRows: 1, responseBytes: 1 }
+              : boundary.delta;
+            context.recordProgress(progress);
+            return { artifact: codec.build(fixtureOverviewDraft(moduleId, context.acceptedAt, index)),
+              attempts: 0, ...progress };
+          },
+          project: artifact => ({ state: 'available', payload: artifact.syntheticResult, warnings: [] }),
+          environment: {},
+        });
+      });
+      const service = new MarketDataJobServiceV1({ coordinator,
+        jobRepository: new MarketDataJobRepositoryV1(root),
+        overviewRegistry: new OverviewModuleRegistryV1(modules),
+        limits: { estimatedMinimumAttempts: 1, maximumAttempts: 3,
+          maximumPages: 2, maximumRows: 2, maximumResponseBytes: 2, executionBudgetMs: 120_000 } });
+      await service.initialize();
+      const accepted = await service.acceptOverview(); const job = await terminal(service, accepted.jobId);
+      expect(job.status).toBe('failed');
+      expect(job.progress[boundary.key]).toBe(3);
+      expect(finalCollects).toBe(0);
+      if (job.result?.kind !== 'overview') throw new Error('Expected Overview result.');
+      expect(job.result.moduleResults.map(result => 'failureCode' in result ? result.failureCode : null))
+        .toEqual(['source_response_too_large', 'source_response_too_large', 'source_response_too_large']);
+      for (const latest of latestReads) {
+        await expect(latest()).rejects.toMatchObject({ code: 'artifact_not_found' });
+      }
+    });
+  }
+
+  test('classifies a real execution-budget abort as a whole-job timeout', async () => {
+    const started = deferred();
+    const h = await harness({ partial: true, pendingDispatch: true,
+      dispatchStarted: started.resolve,
+      limits: { ...limits, executionBudgetMs: 100 } });
+    const accepted = await h.service.acceptOverview();
+    await started.promise;
+    const job = await terminal(h.service, accepted.jobId);
+    expect(job.status).toBe('failed');
+    expect(job.progress.attempts).toBe(1);
+    expect(h.secondCollects()).toBe(0);
+    if (job.result?.kind !== 'overview') throw new Error('Expected Overview result.');
+    expect(job.result.moduleResults.map(result => 'failureCode' in result ? result.failureCode : null))
+      .toEqual(['source_timeout', 'source_timeout']);
+    await expect(h.repository.latest()).rejects.toMatchObject({ code: 'artifact_not_found' });
+  });
+
   test('preserves an earlier module failure when a later timeout stops remaining modules', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dexter-market-failure-order-')); roots.push(root);
     const clock = environment();
@@ -371,6 +459,54 @@ describe('Market Data Overview job service', () => {
       failureCode: 'external_schedule_infeasible' });
     await expect(h.repository.latest()).rejects.toMatchObject({ code: 'artifact_not_found' });
   });
+
+  test('an infeasible schedule retains the prior fallback observation and warnings', async () => {
+    const h = await harness();
+    const first = await h.service.acceptOverview(); await terminal(h.service, first.jobId);
+    const newerArtifact = fixtureCodec(false, {}).build(fixtureDraft('2026-09-04T00:01:00.000Z', 1));
+    const newer = await h.repository.publish(newerArtifact, {
+      jobId: randomUUID(), acceptedAt: newerArtifact.asOfCutoff,
+      checkedAt: new Date(Date.parse(newerArtifact.fetchedAt) + 1000).toISOString(),
+    });
+    await writeFile(join(h.root, newer.observationReceiptIdentity.rootRelativeIdentity), '{broken');
+
+    const clock = environment(); clock.advance(120_000);
+    const coordinator = new DashboardJobCoordinatorV1(clock.value, 5);
+    coordinator.register({ domain: 'strategy_validation', inventory: async () => [], isAbsent: async () => true,
+      cleanup: async () => {}, reconcile: async () => { throw new Error('unexpected'); } });
+    const service = new MarketDataJobServiceV1({ coordinator,
+      jobRepository: new MarketDataJobRepositoryV1(h.root),
+      overviewRegistry: new OverviewModuleRegistryV1([h.module]),
+      limits: { ...limits, estimatedMinimumAttempts: 11, maximumAttempts: 11 } });
+    await service.initialize();
+    const accepted = await service.acceptOverview(); const job = await terminal(service, accepted.jobId);
+    expect(job.status).toBe('failed');
+    if (job.result?.kind !== 'overview') throw new Error('Expected Overview result.');
+    expect(job.result.moduleResults[0]).toMatchObject({ state: 'retained_previous',
+      failureCode: 'external_schedule_infeasible',
+      observationReceiptIdentity: { jobId: first.jobId },
+      warningCodes: ['artifact_corrupt_fallback', 'source_refresh_failed'] });
+  });
+
+  for (const race of ['schedule infeasible', 'all-source-failed'] as const) {
+    test(`${race} terminalization serializes safely with cancellation`, async () => {
+      const entered = deferred(); const release = deferred();
+      const h = await harness({
+        ...(race === 'schedule infeasible'
+          ? { limits: { ...limits, estimatedMinimumAttempts: 11, maximumAttempts: 11 } }
+          : { sourceFailure: () => 'source_entitlement_required' as const }),
+        latestGate: async () => { entered.resolve(); await release.promise; },
+      });
+      const accepted = await h.service.acceptOverview();
+      await entered.promise;
+      expect((await h.service.cancelJob(accepted.jobId)).status).toBe(202);
+      release.resolve();
+      expect((await terminal(h.service, accepted.jobId)).status).toBe('cancelled');
+      expect(await h.service.activeJob()).toEqual({ schemaVersion: 'market_data_active_job_v1',
+        marketJob: null, blockingKind: null });
+      await expect(h.repository.latest()).rejects.toMatchObject({ code: 'artifact_not_found' });
+    });
+  }
 
   test('keeps provider rate limiting distinct from the local attempt ceiling', async () => {
     const provider = await harness({ sourceFailure: () => 'source_rate_limited' });

@@ -561,6 +561,16 @@ a local attempt ceiling, and a provider-reported rate limit. Synthetic ENOSYS,
 EXDEV, and EPERM link failures cover no-receipt failure, partial completion, and
 prior-observation retention without performing external I/O.
 
+The next independent review confirmed those four fixes and found four additional
+whole-job adjudication gaps. The current candidate treats valid page, row, and byte
+ceiling overruns as job-wide stops, records the first received overrun instead of
+understating progress, and publishes no previously prepared module. A real
+execution-budget abort is `source_timeout`, while cancellation and recovery retain
+their separate paths. Schedule infeasibility now retains any prior authoritative
+observation and fallback warning. Schedule-infeasible and all-source-failed terminal
+writes reread the durable state under the coordinator lock, so a concurrent DELETE
+finishes cancellation rather than becoming a false storage-recovery latch.
+
 Read/API coverage verifies the fixed six-module ordering, `not_implemented` and
 `not_collected` distinction, configured-secret rejection, empty-registry GET 404 and
 POST 400, shared Host/Origin/CSRF enforcement, strict/size-bounded JSON, exact
@@ -571,8 +581,8 @@ runtime path in this candidate contacts J-Quants.
 
 | Validation | Result |
 | --- | --- |
-| new/extended DR-O1 tests | 39 passed, 0 failed |
-| `bun test` | 1144 passed, 0 failed, across 94 files |
+| new/extended DR-O1 tests | 46 passed, 0 failed |
+| `bun test` | 1151 passed, 0 failed, across 94 files |
 | `bun run typecheck` | same Windows Bun launcher failure before compiler execution |
 | `bun node_modules/typescript/bin/tsc --noEmit` | passed using the installed compiler |
 | `bun run test:dashboard-browser` | 80 passed, 0 failed; unchanged Dashboard journeys |
