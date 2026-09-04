@@ -493,6 +493,11 @@ Phase 1.5〜4の完了条件を再度開くものではなく、Phase 5 Portfoli
   trading/decision signalの入力に使用しない。最初のsource rowより前を上場前と
   推測せず、取得開始後のofficial session欠落、code不一致、schema/pagination不整合は
   fail closedする
+- `history_coverage_clipped`は単なる暦日差ではなく、`queryFrom`以上かつ
+  `sourceCoverageFrom`未満にofficial sessionが存在するときだけ付与する。週末・休場日
+  から次の最初のofficial sessionまでの差は欠落としない。1321/2633相対ETFでは1件の
+  warningに1321、2633の順で双方の取得開始日を記録し、unavailable boundaryは
+  `観測なし`とする。exact predicateと文面は`docs/DASHBOARD_REFRESH_PLAN.md`に従う
 - ETFのcompleteな取得でrenderable barが0件の場合は、`eligibleThrough`を観測値では
   なく照会済みexpected identityの`dataDate`とするcanonical unavailable artifactを
   保存する。この成功receiptをlatestとして採用し、過去のavailable artifactへfallback

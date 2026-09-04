@@ -635,6 +635,18 @@ one-sided/no-common-date artifact and receipt behavior, and moving a February-29
 ten-year `queryFrom` to March 1 rather than February 28. It also distinguishes the
 prohibited trading/decision signal use from the Technical MACD `signal` series.
 
+The second independent review at exact head
+`1a68a1fe5af82174140e9af81395c48563fd6135` confirmed all three earlier fixes and
+found one MAJOR warning-digest ambiguity plus one MINOR false-positive boundary. The
+relative ETF had two independently available `sourceCoverageFrom` values but only
+one singular warning template, and a raw date comparison mislabeled an ordinary
+weekend/holiday start as clipped. This candidate resolves both without changing the
+warning schema: clipping now requires a proved official session in
+`[queryFrom, sourceCoverageFrom)`, and the relative module has one exact fixed-order
+message containing both 1321/2633 dates or the exact `観測なし` token. Literal
+golden cases cover unequal starts, either side clipped, one side unavailable, neither
+side clipped, and non-session query starts so artifact bytes and digests are unique.
+
 | Validation | Result |
 | --- | --- |
 | source-of-truth consistency search | passed; remaining lifetime terms describe only the retired/superseded contract |

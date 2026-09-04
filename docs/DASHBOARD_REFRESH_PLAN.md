@@ -435,13 +435,44 @@ each affected ETF module is:
 履歴は現在の銘柄コードに紐づくJ-Quants調整後価格です。表示期間全体が同一銘柄であることは確認していません。
 ```
 
-When `sourceCoverageFrom > queryFrom`, the artifact also carries
-`history_coverage_clipped`, and the UI states the exact first date without calling it
-an IPO or listing date. Its exact Japanese message is:
+Coverage clipping is defined by the strict shared official-session calendar, not by
+a raw calendar-date comparison. For any available boundary:
+
+```text
+historyCoverageClipped(boundary) =
+  exists official session s such that
+    queryFrom <= s < boundary.sourceCoverageFrom
+```
+
+An unavailable boundary never makes this predicate true by itself. Consequently, a
+Saturday, Sunday, or exchange holiday at `queryFrom` followed by the first complete
+official session is not clipped. If the calendar input cannot prove the sessions in
+this interval, the source input is invalid and no artifact or receipt is published.
+
+Technical and the single-boundary 1321 EOD module carry
+`history_coverage_clipped` exactly when their one available boundary satisfies the
+predicate. Their exact Japanese message is:
 
 ```text
 取得できた履歴は {sourceCoverageFrom} からです。この日付は上場日を示しません。
 ```
+
+The relative 1321/2633 module carries exactly one `history_coverage_clipped` warning
+when either fixed boundary satisfies the predicate. It never selects one boundary's
+date for the single-boundary message. Its exact Japanese message is:
+
+```text
+取得できた履歴の開始日は1321が{coverage1321}、2633が{coverage2633}です。これらの日付は上場日を示しません。
+```
+
+The token order is always 1321 then 2633. For an available boundary its token is the
+canonical `sourceCoverageFrom` date in `YYYY-MM-DD`; for an unavailable boundary it
+is exactly `観測なし`. Both tokens are rendered even when only one available
+boundary is clipped. This rule also covers an all-null input whose boundary is
+available from its earliest mapped row. When neither available boundary is clipped,
+the warning is absent. These closed templates and selectors are part of artifact
+derivation, so the same source inputs cannot choose a different warning payload or
+`artifactDigest`.
 
 For Technical both warnings have `moduleId: null`; for ETF artifacts they use the
 owning module ID. Persisted warnings have `artifactIdentity: null` under the existing
@@ -976,9 +1007,10 @@ years. After the calendar selects `eligibleThrough`, `queryTo = eligibleThrough`
 the daily-bars query is exactly the inclusive range `[queryFrom, queryTo]`.
 `calculationFrom = sourceCoverageFrom` and `calculationTo = queryTo`. Official
 sessions before `sourceCoverageFrom` are not persisted, do not enter aggregation or
-indicators, and receive no inferred listing or missing-data meaning. If
-`calculationFrom > queryFrom`, the artifact carries the `history_coverage_clipped`
-warning with the exact start date. Every artifact also carries
+indicators, and receive no inferred listing or missing-data meaning. If the section
+3.3 `historyCoverageClipped(historyBoundary)` predicate is true, the artifact carries
+the single-boundary `history_coverage_clipped` warning with the exact start date.
+Every artifact also carries
 `historical_identity_unverified`.
 `calendarCoverageFrom` is the earlier of the Gregorian Monday containing
 `queryFrom` and the first day of `queryFrom`'s Gregorian month;
@@ -1317,11 +1349,15 @@ bar observations hash as `[]`; explicit all-null rows remain sanitized gap rows 
 their input digest.
 
 Every canonical ETF artifact requires `historical_identity_unverified`.
-`history_coverage_clipped` is additionally required for each module when at least one
-available boundary begins after `queryFrom`, and `source_gap` is required when an
-input contains at least one explicit `source_all_null` row. No source-failure warning
-is added to a successfully observed unavailable artifact. Required codes occur once
-and are sorted by the closed `MarketDataWarningCodeV1` order. A proved-complete
+`history_coverage_clipped` is additionally required exactly under the calendar-based
+section 3.3 predicate: module 5 tests its one available 13210 boundary, while module
+6 tests both fixed boundaries and emits the one relative-module template with both
+tokens. An unavailable boundary does not trigger it, and a non-session gap between
+`queryFrom` and the first official session does not trigger it. `source_gap` is
+required when an input contains at least one explicit `source_all_null` row. No
+source-failure warning is added to a successfully observed unavailable artifact.
+Required codes occur once and are sorted by the closed
+`MarketDataWarningCodeV1` order. A proved-complete
 no-observation artifact is a successful `published` or `idempotent_reuse` module
 result and commits a new observation receipt. That receipt becomes authoritative
 even when an older available receipt exists; the older artifact is not presented as
@@ -2417,18 +2453,18 @@ implementation; DR-X adds no new runtime behavior.
 | DR-C1 | one Dashboard session token and one three-kind process coordinator; unchanged Phase 4 routes/public code enums/schemas/accepted-job controls/CLI; empty-start admission and exact cooldown 409/Retry-After; typed create/replace publication outcomes; all-domain inventory/release/startup proofs; sticky recovery blocker; retained attempt log across failure/cancel/runtime construction; preflight preservation and atomic admission; cross-domain active/read/recovery Browser flow; two runtime instances cannot bypass the shared Dashboard limiter |
 | DR-A1 | literal `MarketDataSourcePayloadEnvelopeV1` golden vectors; target/role/calculation-version mismatch; volatile/derived-field exclusion; exact digest-to-path-to-artifactDigest derivation; persisted calculation version and maximum-provider `fetchedAt`; create/reuse/collision; receipt no-replace and digest/identity; A(t1)->B(t2)->A(t3); delayed older-admission completion; two-process inverse completion; equal-millisecond equal-artifact equivalence and conflicting-artifact `latest_resolution_failed`; stale/backwards/corrupt/missing cache reconstruction; orphan artifact exclusion; interrupted after-receipt visibility; bounded corrupt-receipt/artifact fallback; containment |
 | DR-O1 | common two-kind job repository/native recovery adapter; strict 65,536-byte job record and filename identity; create/replace fault injection and cross-domain admission/restart; zero-module GET 404 and POST 400 `source_configuration_missing` in a healthy process with no job/lease/dispatch; strict module registration/order; one root Overview `checkedAt`; success receipt versus retained-previous/failed identities; per-module artifact/receipt atomicity; partial success/all-modules-failed root; terminal-write recovery latch; GET persisted-vs-uncollected/corrupt identity |
-| DR-T0A | `SPEC`/plan/handoff agreement; retired candidate and no fabricated replacement; exact `current_code_only` warning/non-use boundary; closed master predicates/rejection precedence; ETF no-observation state table; March-1 leap rule; revised graph; no runtime/dependency/Usage/setup diff |
+| DR-T0A | `SPEC`/plan/handoff agreement; retired candidate and no fabricated replacement; exact `current_code_only` warning/non-use boundary; calendar-defined coverage clipping; deterministic single-boundary and two-boundary warning templates/selectors; closed master predicates/rejection precedence; ETF no-observation state table; March-1 leap rule; revised graph; no runtime/dependency/Usage/setup diff |
 | DR-T1A | `historyBoundary` strictness; first source row; pre-start omission without listing inference; post-start missing-session failure; all-null explicit gap; leading partial; 251-bar short history; removal of `missing_in_complete_envelope`; input immutability and merged indicator parity |
-| DR-A2 | exact three-input Technical, four-input 1321, and seven-input relative-ETF roles; golden envelope/digest changes; warning enum/order/message; old lifetime role/warning rejection; zero production-artifact migration proof; repository/job regressions |
-| DR-T0 | exact official bars/calendar/end-date-master endpoint/query/field/entitlement registry; bounded three-input no-publication smoke; `current_master_expectation_v1` code/product/market/name evidence; wrong date/code/product/market, blank/invalid name, missing/duplicate rows in exact precedence; company-name change and allowed-market transfer acceptance; earliest source row and complete post-start official-session coverage; Standard maximum-ten-year history including February-29/March-1 boundary, pagination and request/page/row/byte/deadline ceilings; secret/path non-exposure |
-| DR-T2 | strict frozen-source mappers, acceptedAt/16:30/query-range gate, exact three-input manifest, closed Technical end-date identity predicate/rejection precedence, current-code history boundary, permanent history warning, post-start missing-session failure, all-gap `source_no_observation` with prior-receipt retention and initial GET 404; Technical `published` versus `idempotent_reuse` result/`checkedAt`/receipt schema; GET 404/500/no-fetch; shared CSRF/coordinator/DR-O1 job repository and recovery adapter; cross-kind create/terminal-write faults, timeout/cancel/startup |
+| DR-A2 | exact three-input Technical, four-input 1321, and seven-input relative-ETF roles; golden envelope/digest changes; warning enum/order plus exact single-boundary and fixed-order relative templates; old lifetime role/warning rejection; zero production-artifact migration proof; repository/job regressions |
+| DR-T0 | exact official bars/calendar/end-date-master endpoint/query/field/entitlement registry; bounded three-input no-publication smoke; `current_master_expectation_v1` code/product/market/name evidence; wrong date/code/product/market, blank/invalid name, missing/duplicate rows in exact precedence; company-name change and allowed-market transfer acceptance; earliest source row and complete post-start official-session coverage; calendar-based clipping including weekend/holiday non-trigger; Standard maximum-ten-year history including February-29/March-1 boundary, pagination and request/page/row/byte/deadline ceilings; secret/path non-exposure |
+| DR-T2 | strict frozen-source mappers, acceptedAt/16:30/query-range gate, exact three-input manifest, closed Technical end-date identity predicate/rejection precedence, current-code history boundary, permanent history warning, calendar-proved clipping, post-start missing-session failure, all-gap `source_no_observation` with prior-receipt retention and initial GET 404; Technical `published` versus `idempotent_reuse` result/`checkedAt`/receipt schema; GET 404/500/no-fetch; shared CSRF/coordinator/DR-O1 job repository and recovery adapter; cross-kind create/terminal-write faults, timeout/cancel/startup |
 | DR-T3 | auto/snapshot/latest precedence, absent latest, refresh adoption, URL/Back/Forward/reload, latest-request-wins, collapse, keyboard crosshair, exact table, Comparison isolation |
 | DR-M0 | old/new fixtures, official migration evidence, individual-Standard entitlement, exact source primary key/fields/issue and sector allowlists/units/vintages, schedule/calendar and short-week/boundary resolver, one-date reconciliation smoke, exact 26-window bootstrap caps, secret-safe record |
 | DR-M1a | complete issue aggregation, shared margin-input reuse, field-level valid zero/ratio denominator, verified primary key/unit, canonical expected-date unavailable artifact, proved-missing/duplicate versus malformed/incomplete no-publish, 1570 identity/unit/old-transition-new official basis break, two registered module results |
 | DR-M1b | short-ratio exact coverage allowlist/formula, valid zero/zero denominator, schedule identity, proved-missing/duplicate versus malformed/incomplete no-publish |
 | DR-M1c | 26-point correction-vintage/eligibility resolver, ambiguous/missing identity, date-only publication, valid zero, no repeated latest-only selection, no future use |
 | DR-M2 | latest 26 expected identities including unavailable rows, weekly/daily boundary, no interpolation, fallback warnings, source/date/cadence/elapsed metadata, keyboard/mobile tables |
-| DR-E1 | exact four-input 1321 EOD and seven-input relative-ETF manifests, one shared calendar; exact 1321/2633 code/`ProdCat=014`/`Mkt=0109`/source-label predicates and rejection precedence; company-name change acceptance; per-code source coverage boundaries and permanent unverified-history warning; post-start missing-session failure; empty/all-null 1321, 1321-only empty, 2633-only empty, both empty, zero/one common date, all five unavailable, mixed range availability, and prior-available receipt replacement; exact `dataDate`, payload, history-boundary combination, input range/digest, warning set, and successful receipt for each; EOD insufficient-history fields, common-date inner join, no forward fill, positive base, base 100, range boundaries, unavailable range without direction, return/difference/direction, exact tie, distribution exclusion, 1321/2633 announced-split adjusted-price regressions, corporate-action price basis |
+| DR-E1 | exact four-input 1321 EOD and seven-input relative-ETF manifests, one shared calendar; exact 1321/2633 code/`ProdCat=014`/`Mkt=0109`/source-label predicates and rejection precedence; company-name change acceptance; per-code source coverage boundaries, permanent unverified-history warning, calendar-based clip predicate, and one fixed-order two-token relative clip warning; post-start missing-session failure; empty/all-null 1321, 1321-only empty, 2633-only empty, both empty, zero/one common date, all five unavailable, mixed range availability, and prior-available receipt replacement; exact `dataDate`, payload, history-boundary combination, input range/digest, warning set, and successful receipt for each; EOD insufficient-history fields, common-date inner join, no forward fill, positive base, base 100, range boundaries, unavailable range without direction, return/difference/direction, exact tie, distribution exclusion, 1321/2633 announced-split adjusted-price regressions, corporate-action price basis |
 | DR-E2 | 3M/6M/1Y/3Y/Max, 1Y default, exact proxy/current-code caveats, persistent warning, URL/race/focus, table/chart agreement |
 | DR-X | full unit/integration/Playwright/visual QA, source gates, one-external-J-Quants-process operating restriction, Usage/setup accuracy, no-score/no-signal/Snapshot regression |
 
@@ -2507,6 +2543,11 @@ Market Data repository. DR-C1 does not pre-implement a Market Data source or job
   name, an accepted company-name change, and a Technical transfer between allowed
   markets. Query-range fixtures include `calculationDate=2028-02-29`,
   `queryFrom=2018-03-01`, and no February-28 row.
+- DR-T0/T2/E1: coverage-warning fixtures use the shared official calendar. A weekend
+  or exchange-holiday `queryFrom` followed by the first official session emits no
+  `history_coverage_clipped`; omitting one or more official sessions before an
+  available `sourceCoverageFrom` emits it. An unavailable boundary alone never
+  emits it, and an unprovable calendar interval publishes no artifact or receipt.
 - DR-O1/T2: enumerate result/failure nullability for every status; copy the one
   Overview `checkedAt` to every result, including failed/unattempted modules. A
   receipt failure differs from a successful receipt followed by a terminal-job
@@ -2524,6 +2565,12 @@ Market Data repository. DR-C1 does not pre-implement a Market Data source or job
   exact section 7.1 table, envelope/path `dataDate`, input ranges/digests, warning
   codes, and receipt adoption. An existing available receipt does not turn a newly
   proved no-observation artifact into fallback or `retained_previous`.
+- DR-E1: freeze literal warning/artifact golden vectors where both relative
+  boundaries are available and clipped with unequal starts, only 1321 is clipped,
+  only 2633 is clipped, one side is unavailable, and neither side is clipped. The
+  message always contains 1321 then 2633, uses each available canonical start date
+  or exact `観測なし`, stores the warning code once, and produces one deterministic
+  artifact digest for the source inputs.
 
 Responsive visual QA covers 320, 390, 680, 768, 980, 1024, and 1280 px with no
 document-level horizontal overflow. It covers Watchlist, all seven tabs, dialogs,
