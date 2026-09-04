@@ -551,6 +551,16 @@ recovery boundaries without source replay. An ambiguous terminal
 record write after a committed receipt retains a validated in-memory completion,
 adds `job_record_write_failed`, and keeps the process-wide admission barrier latched.
 
+Independent review of the prior candidate found four MAJOR contract gaps. The
+current candidate derives and canonically orders every persisted module warning,
+rejects missing or extra artifact-derived warning codes during startup recovery,
+treats proved receipt-free create-only publication failures as ordinary per-module
+`artifact_write_failed` results, preserves an earlier module-specific failure when a
+later job-wide stop occurs, and distinguishes a deterministic infeasible schedule,
+a local attempt ceiling, and a provider-reported rate limit. Synthetic ENOSYS,
+EXDEV, and EPERM link failures cover no-receipt failure, partial completion, and
+prior-observation retention without performing external I/O.
+
 Read/API coverage verifies the fixed six-module ordering, `not_implemented` and
 `not_collected` distinction, configured-secret rejection, empty-registry GET 404 and
 POST 400, shared Host/Origin/CSRF enforcement, strict/size-bounded JSON, exact
@@ -561,8 +571,8 @@ runtime path in this candidate contacts J-Quants.
 
 | Validation | Result |
 | --- | --- |
-| new/extended DR-O1 tests | 27 passed, 0 failed |
-| `bun test` | 1132 passed, 0 failed, across 94 files |
+| new/extended DR-O1 tests | 39 passed, 0 failed |
+| `bun test` | 1144 passed, 0 failed, across 94 files |
 | `bun run typecheck` | same Windows Bun launcher failure before compiler execution |
 | `bun node_modules/typescript/bin/tsc --noEmit` | passed using the installed compiler |
 | `bun run test:dashboard-browser` | 80 passed, 0 failed; unchanged Dashboard journeys |

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { MarketDataJobViewV1Schema, assertMarketDataJobReplacementV1,
-  marketDataJobFailureV1 } from './job-schema.js';
+  marketDataJobFailureV1, marketDataWarningCodesV1 } from './job-schema.js';
 
 function accepted() {
   return MarketDataJobViewV1Schema.parse({
@@ -40,6 +40,14 @@ describe('Market Data job schema', () => {
     expect(MarketDataJobViewV1Schema.safeParse({ ...terminal,
       result: { ...terminal.result, moduleResults: [failed, failed] },
       progress: { ...terminal.progress, totalModules: 2, completedModules: 2 } }).success).toBeFalse();
+    expect(MarketDataJobViewV1Schema.safeParse({ ...terminal,
+      result: { ...terminal.result, moduleResults: [{ ...failed, warningCodes: ['source_refresh_failed'] }] } }).success).toBeFalse();
+  });
+
+  test('normalizes warning codes to one canonical order', () => {
+    expect(marketDataWarningCodesV1([
+      'source_refresh_failed', 'basis_break', 'artifact_corrupt_fallback', 'basis_break',
+    ])).toEqual(['artifact_corrupt_fallback', 'basis_break', 'source_refresh_failed']);
   });
 
   test('replacement accepts monotonic lifecycle updates and rejects identity or progress rollback', () => {

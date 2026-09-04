@@ -12,6 +12,11 @@ export const MARKET_DATA_WARNING_CODES_V1 = [
   'artifact_corrupt_fallback', 'artifact_corrupt_no_fallback', 'cadence_changed', 'basis_break',
   'source_gap', 'source_refresh_failed', 'instrument_lifetime_clipped', 'job_record_write_failed',
 ] as const;
+export type MarketDataWarningCodeV1 = typeof MARKET_DATA_WARNING_CODES_V1[number];
+export function marketDataWarningCodesV1(values: readonly MarketDataWarningCodeV1[]): MarketDataWarningCodeV1[] {
+  const selected = new Set(values);
+  return MARKET_DATA_WARNING_CODES_V1.filter(code => selected.has(code));
+}
 export const MARKET_DATA_JOB_FAILURE_CODES_V1 = [
   'source_unauthorized', 'source_entitlement_required', 'source_rate_limited', 'source_timeout',
   'source_not_yet_updated', 'source_no_observation', 'instrument_identity_unverified',
@@ -52,7 +57,9 @@ export const MarketDataWarningV1Schema = z.object({
 }).strict();
 export type MarketDataWarningV1 = z.infer<typeof MarketDataWarningV1Schema>;
 const warningCodes = z.array(z.enum(MARKET_DATA_WARNING_CODES_V1)).max(MARKET_DATA_WARNING_CODES_V1.length)
-  .refine(values => new Set(values).size === values.length);
+  .refine(values => new Set(values).size === values.length
+    && values.every((value, index) => index === 0
+      || MARKET_DATA_WARNING_CODES_V1.indexOf(values[index - 1]!) < MARKET_DATA_WARNING_CODES_V1.indexOf(value)));
 const moduleFailure = z.enum(MARKET_DATA_JOB_FAILURE_CODES_V1)
   .refine(code => code !== 'all_modules_failed' && code !== 'source_no_observation');
 const association = { artifactIdentity: MarketDataArtifactIdentityV1Schema,
@@ -123,7 +130,8 @@ export const MarketDataJobViewV1Schema = z.object({
     for (const result of results) {
       if (result.checkedAt !== job.result.checkedAt) invalid();
       if (result.state === 'published' || result.state === 'idempotent_reuse') successes.push(result);
-      else if (result.warningCodes.includes('job_record_write_failed')) invalid();
+      else if (result.warningCodes.includes('job_record_write_failed')
+        || (result.state === 'failed' && result.warningCodes.length > 0)) invalid();
     }
     if ((job.status === 'completed') !== (successes.length > 0)) invalid();
   } else {

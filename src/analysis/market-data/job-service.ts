@@ -18,11 +18,13 @@ import {
   MarketDataSourceFailureV1,
   isMarketDataJobTerminalV1,
   marketDataJobFailureV1,
+  marketDataWarningCodesV1,
   moduleOrderV1,
   type MarketDataJobFailureCodeV1,
   type MarketDataJobViewV1,
   type MarketDataModuleFailureCodeV1,
   type MarketDataModuleResultV1,
+  type MarketDataWarningCodeV1,
 } from './job-schema.js';
 import {
   OverviewModuleRegistryV1,
@@ -80,7 +82,7 @@ type Attempt =
   | { state: 'prepared'; module: OverviewModuleAdapterV1; artifact: ReturnType<OverviewModuleAdapterV1['validate']> }
   | { state: 'failed'; module: OverviewModuleAdapterV1; code: MarketDataModuleFailureCodeV1 };
 class MarketDataJobStopV1 extends Error {
-  constructor(readonly code: 'source_timeout' | 'source_rate_limited') { super(code); }
+  constructor(readonly code: 'source_timeout' | 'source_response_too_large') { super(code); }
 }
 
 function same(left: unknown, right: unknown): boolean {
@@ -110,16 +112,19 @@ function mapRepository(error: unknown): MarketDataJobServiceErrorV1 {
   return new MarketDataJobServiceErrorV1('invariant_failure');
 }
 
-function validateLimits(limits: MarketDataJobLimitsV1 | undefined, rate: number): MarketDataJobLimitsV1 | null {
-  if (!limits) return null;
+function validateLimits(limits: MarketDataJobLimitsV1 | undefined, rate: number): Readonly<{
+  limits: MarketDataJobLimitsV1 | null;
+  scheduleInfeasible: boolean;
+}> {
+  if (!limits) return { limits: null, scheduleInfeasible: false };
   const values = Object.values(limits);
-  if (values.some(value => !Number.isSafeInteger(value) || value <= 0)
-    || limits.estimatedMinimumAttempts > limits.maximumAttempts) {
+  if (values.some(value => !Number.isSafeInteger(value) || value <= 0)) {
     throw new TypeError('Invalid Market Data job limits.');
   }
   const minimumDuration = Math.floor((limits.estimatedMinimumAttempts - 1) / rate) * 60_000;
-  if (minimumDuration >= limits.executionBudgetMs) return null;
-  return Object.freeze({ ...limits });
+  return Object.freeze({ limits: Object.freeze({ ...limits }),
+    scheduleInfeasible: limits.estimatedMinimumAttempts > limits.maximumAttempts
+      || minimumDuration >= limits.executionBudgetMs });
 }
 
 /** Common durable owner for both Market Data job kinds. DR-O1 exposes only
@@ -131,6 +136,7 @@ export class MarketDataJobServiceV1 {
   readonly overviewRegistry: OverviewModuleRegistryV1;
   readonly #environment: JQuantsExecutionEnvironmentV1;
   readonly #limits: MarketDataJobLimitsV1 | null;
+  readonly #scheduleInfeasible: boolean;
   readonly #technical?: TechnicalObservationPortV1;
   readonly #enqueue: (work: () => void) => void;
   readonly #leases = new Map<string, DashboardJobLeaseV1>();
@@ -144,7 +150,12 @@ export class MarketDataJobServiceV1 {
     this.overviewRegistry = options.overviewRegistry ?? new OverviewModuleRegistryV1();
     this.#technical = options.technicalObservation;
     this.#environment = options.coordinator.environment;
-    this.#limits = validateLimits(options.limits, options.coordinator.requestsPerMinute);
+    const validatedLimits = validateLimits(options.limits, options.coordinator.requestsPerMinute);
+    this.#limits = validatedLimits.limits;
+    this.#scheduleInfeasible = validatedLimits.scheduleInfeasible;
+    if (this.overviewRegistry.size && !this.#limits) {
+      throw new TypeError('Registered Overview modules require fixed job limits.');
+    }
     this.#enqueue = options.enqueue ?? queueMicrotask;
     this.coordinator.register({
       domain: 'market_data',
@@ -375,6 +386,10 @@ export class MarketDataJobServiceV1 {
           startedAt: this.#nowAtLeast(Date.parse(durable.acceptedAt)) });
       });
       if (current.status === 'cancel_requested') { await this.#finishCancellation(current); return; }
+      if (this.#scheduleInfeasible) {
+        await this.#finishScheduleInfeasible(current);
+        return;
+      }
       const attempts: Attempt[] = [];
       const sharedSources = new Map<string, Promise<unknown>>();
       let jobWideFailure: MarketDataJobStopV1['code'] | null = null;
@@ -461,7 +476,9 @@ export class MarketDataJobServiceV1 {
       if (lease.signal.aborted) return;
       if (budget.signal.aborted) jobWideFailure = 'source_timeout';
       const byId = new Map(attempts.map(attempt => [attempt.module.moduleId,
-        jobWideFailure ? { state: 'failed' as const, module: attempt.module, code: jobWideFailure } : attempt]));
+        jobWideFailure && attempt.state === 'prepared'
+          ? { state: 'failed' as const, module: attempt.module, code: jobWideFailure }
+          : attempt]));
       for (const module of this.overviewRegistry.implemented()) {
         if (!byId.has(module.moduleId)) byId.set(module.moduleId, { state: 'failed', module,
           code: jobWideFailure ?? 'source_timeout' });
@@ -502,9 +519,11 @@ export class MarketDataJobServiceV1 {
           moduleResults.push({ moduleId: module.moduleId,
             state: publicationState, checkedAt,
             artifactIdentity: observed.artifactIdentity,
-            observationReceiptIdentity: observed.observationReceiptIdentity, warningCodes: [] });
+            observationReceiptIdentity: observed.observationReceiptIdentity,
+            warningCodes: this.#artifactWarningCodes(module, observed.artifact) });
         } catch (error) {
-          if (error instanceof MarketDataRepositoryErrorV1 && error.code === 'artifact_write_failed') {
+          if (error instanceof MarketDataRepositoryErrorV1
+            && (error.code === 'artifact_write_failed' || error.code === 'create_only_publish_unsupported')) {
             moduleResults.push(await this.#failedModule(module, 'artifact_write_failed', checkedAt,
               current.jobId));
           } else if (error instanceof MarketDataRepositoryErrorV1 && error.code === 'artifact_collision') {
@@ -536,21 +555,42 @@ export class MarketDataJobServiceV1 {
 
   async #failedModule(module: OverviewModuleAdapterV1, code: MarketDataModuleFailureCodeV1,
     checkedAt: string, jobId: string): Promise<MarketDataModuleResultV1> {
+    let latest: LatestMarketDataV1<ReturnType<OverviewModuleAdapterV1['validate']>>;
     try {
-      const latest = await module.latest();
-      if (latest.receipt.jobId === jobId) {
-        throw new MarketDataJobServiceErrorV1('invariant_failure');
-      }
-      return { moduleId: module.moduleId, state: 'retained_previous', checkedAt,
-        artifactIdentity: latest.artifactIdentity, observationReceiptIdentity: latest.observationReceiptIdentity,
-        failureCode: code, warningCodes: [...new Set([
-          ...latest.warnings.map(warning => warning.code), 'source_refresh_failed' as const,
-        ])] };
+      latest = await module.latest();
     } catch (error) {
       if (error instanceof MarketDataJobServiceErrorV1) throw error;
       return { moduleId: module.moduleId, state: 'failed', checkedAt,
         artifactIdentity: null, observationReceiptIdentity: null, failureCode: code, warningCodes: [] };
     }
+    if (latest.receipt.jobId === jobId) throw new MarketDataJobServiceErrorV1('invariant_failure');
+    return { moduleId: module.moduleId, state: 'retained_previous', checkedAt,
+      artifactIdentity: latest.artifactIdentity, observationReceiptIdentity: latest.observationReceiptIdentity,
+      failureCode: code, warningCodes: marketDataWarningCodesV1([
+        ...this.#artifactWarningCodes(module, latest.artifact),
+        ...latest.warnings.map(warning => warning.code), 'source_refresh_failed',
+      ]) };
+  }
+
+  async #finishScheduleInfeasible(current: MarketDataJobViewV1): Promise<void> {
+    const checkedAt = this.#nowAtLeast(Date.parse(current.acceptedAt));
+    const moduleResults: MarketDataModuleResultV1[] = this.overviewRegistry.implemented().map(module => ({
+      moduleId: module.moduleId, state: 'failed', checkedAt,
+      artifactIdentity: null, observationReceiptIdentity: null,
+      failureCode: 'external_schedule_infeasible', warningCodes: [],
+    }));
+    const terminal = MarketDataJobViewV1Schema.parse({ ...current,
+      status: 'failed', completedAt: checkedAt,
+      progress: { ...current.progress, completedModules: current.progress.totalModules },
+      failure: marketDataJobFailureV1('all_modules_failed'),
+      result: { kind: 'overview', checkedAt, moduleResults },
+    });
+    await this.coordinator.exclusive(() => this.#terminalReplace(current, terminal, false));
+  }
+
+  #artifactWarningCodes(module: OverviewModuleAdapterV1,
+    artifact: ReturnType<OverviewModuleAdapterV1['validate']>): MarketDataWarningCodeV1[] {
+    return marketDataWarningCodesV1(module.project(artifact).warnings.map(warning => warning.code));
   }
 
   async #finishCancellation(current: MarketDataJobViewV1): Promise<void> {
@@ -593,7 +633,9 @@ export class MarketDataJobServiceV1 {
       const memory = MarketDataJobViewV1Schema.parse({ ...terminal, result: { ...terminal.result,
         moduleResults: terminal.result.moduleResults.map(result =>
           result.state === 'published' || result.state === 'idempotent_reuse'
-            ? { ...result, warningCodes: [...new Set([...result.warningCodes, 'job_record_write_failed'])] }
+            ? { ...result, warningCodes: marketDataWarningCodesV1([
+              ...result.warningCodes, 'job_record_write_failed',
+            ]) }
             : result) } });
       await this.#validateTerminalJob(memory, true);
       this.#memoryCompletions.set(memory.jobId, memory);
@@ -656,7 +698,16 @@ export class MarketDataJobServiceV1 {
       if (result.state === 'retained_previous' && observed.receipt.jobId === job.jobId) {
         throw new Error('Retained observation is not prior.');
       }
-      module.project(observed.artifact);
+      const transient: MarketDataWarningCodeV1[] = result.state === 'retained_previous'
+        ? [
+          ...(result.warningCodes.includes('artifact_corrupt_fallback') ? ['artifact_corrupt_fallback' as const] : []),
+          'source_refresh_failed',
+        ]
+        : allowMemoryWarning ? ['job_record_write_failed'] : [];
+      const expectedWarnings = marketDataWarningCodesV1([
+        ...this.#artifactWarningCodes(module, observed.artifact), ...transient,
+      ]);
+      if (!same(result.warningCodes, expectedWarnings)) throw new Error('Invalid module warning association.');
     }
   }
 
@@ -680,7 +731,7 @@ export class MarketDataJobServiceV1 {
     if (elapsed + pendingWait >= this.#limits.executionBudgetMs) throw new MarketDataJobStopV1('source_timeout');
     if (starting ? current.progress.attempts + pendingAttempts >= this.#limits.maximumAttempts
       : current.progress.attempts + pendingAttempts > this.#limits.maximumAttempts) {
-      throw new MarketDataJobStopV1('source_rate_limited');
+      throw new MarketDataJobStopV1('source_response_too_large');
     }
   }
   #checkProgress(current: MarketDataJobViewV1, pages: number, rows: number, bytes: number, attempts: number): void {

@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { DashboardJobCoordinatorV1 } from '../analysis/dashboard-jobs/coordinator.js';
 import type { JQuantsExecutionEnvironmentV1 } from '../analysis/strategy-validation/jquants-execution.js';
 import { MarketDataJobRepositoryV1 } from '../analysis/market-data/job-repository.js';
-import { MarketDataJobServiceV1 } from '../analysis/market-data/job-service.js';
+import { MarketDataJobServiceV1, type MarketDataJobLimitsV1 } from '../analysis/market-data/job-service.js';
 import { MarketDataRepositoryV1 } from '../analysis/market-data/repository.js';
 import { fixtureCodec, fixtureDraft, type FixtureArtifact } from '../analysis/market-data/repository-test-fixtures.js';
 import { OverviewModuleRegistryV1, createOverviewModuleAdapterV1 } from '../analysis/market-data/overview-registry.js';
@@ -21,7 +21,7 @@ afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, {
 const snapshots: AnalysisSnapshotReader = { listLatest: async () => [], listHistory: async () => [],
   loadLatest: async () => { throw new Error('missing'); }, loadHistory: async () => { throw new Error('missing'); } };
 
-async function api(configured = false) {
+async function api(configured = false, limitOverride?: MarketDataJobLimitsV1) {
   const root = await mkdtemp(join(tmpdir(), 'dexter-market-api-')); roots.push(root);
   const environment: JQuantsExecutionEnvironmentV1 = { monotonicNowMs: () => 0,
     wallNowMs: () => Date.parse('2026-09-04T00:00:00.000Z'), apiKey: () => 'synthetic',
@@ -40,7 +40,7 @@ async function api(configured = false) {
     }, project: artifact => ({ state: 'available', payload: artifact.syntheticResult, warnings: [] }), environment: {} });
   const service = new MarketDataJobServiceV1({ coordinator, jobRepository: new MarketDataJobRepositoryV1(root),
     overviewRegistry: new OverviewModuleRegistryV1(configured ? [module] : []),
-    limits: configured ? { estimatedMinimumAttempts: 1, maximumAttempts: 2, maximumPages: 2,
+    limits: configured ? limitOverride ?? { estimatedMinimumAttempts: 1, maximumAttempts: 2, maximumPages: 2,
       maximumRows: 2, maximumResponseBytes: 128, executionBudgetMs: 120_000 } : undefined,
     enqueue: work => { queued = work; } });
   const session = new DashboardSessionV1('a'.repeat(43));
@@ -68,6 +68,29 @@ describe('Market Data Dashboard API', () => {
 
     const query = await handleDashboardRequest(request('/api/market-data/overview?extra=1'), snapshots, undefined, h.value);
     expect(query.status).toBe(400); expect((await body(query)).error?.code).toBe('invalid_query');
+  });
+
+  test('accepts configured but infeasible limits and records the typed terminal result', async () => {
+    const h = await api(true, { estimatedMinimumAttempts: 11, maximumAttempts: 11,
+      maximumPages: 2, maximumRows: 2, maximumResponseBytes: 128, executionBudgetMs: 120_000 });
+    const headers = { host: '127.0.0.1', origin: 'http://127.0.0.1',
+      'x-dexter-csrf': h.session.csrfToken, 'content-type': 'application/json' };
+    const response = await handleDashboardRequest(request('/api/market-data/overview/jobs',
+      { method: 'POST', headers, body: '{}' }), snapshots, undefined, h.value);
+    expect(response.status).toBe(202);
+    const accepted = await response.json() as { jobId: string };
+    h.queued();
+    for (let i = 0; i < 50; i++) {
+      const job = await h.value.service.getJob(accepted.jobId);
+      if (job.status === 'failed') {
+        if (job.result?.kind !== 'overview') throw new Error('Expected Overview result.');
+        expect(job.result.moduleResults[0]).toMatchObject({ failureCode: 'external_schedule_infeasible' });
+        expect(job.progress.attempts).toBe(0);
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 1));
+    }
+    throw new Error('Infeasible job did not finish.');
   });
 
   test('preserves method, security, strict JSON, and streaming body precedence', async () => {
