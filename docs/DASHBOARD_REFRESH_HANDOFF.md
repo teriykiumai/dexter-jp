@@ -385,10 +385,19 @@ accepted the explicit product trade-off: retain maximum-ten-year current-code ba
 but do not claim that the full period belongs to one instrument.
 
 DR-T0A is docs-only. It retires the unused lifetime candidate, defines
-`CurrentCodeHistoryBoundaryV1`, replaces the Technical/ETF source roles and warning
-contract, prohibits current-code history from Phase 4/backtest/score/signal use, and
-adds DR-T1A plus DR-A2 before DR-T2. It changes no runtime, dependency, source request,
-artifact, route, UI, Usage, or setup.
+`CurrentCodeHistoryBoundaryV1`, freezes family-specific current-master predicates and
+ETF no-observation artifacts, replaces the Technical/ETF source roles and warning
+contract, prohibits current-code history from Phase 4/backtest/score/trading-signal
+use, and adds DR-T1A plus DR-A2 before DR-T2. It changes no runtime, dependency,
+source request, artifact, route, UI, Usage, or setup.
+
+The normative predicate is in plan section 3.3: Technical accepts `ProdCat=011`
+with `Mkt` in `0105/0111/0112/0113`; fixed 1321/2633 accept `ProdCat=014` with
+`Mkt=0109`. Codes are exact five-character values. `CoName` is validated and hashed
+as the current source label but is not compared with Snapshot or hard-coded text.
+For a proved-complete ETF response with no renderable bar, `dataDate` is the expected
+`eligibleThrough`; the canonical unavailable artifact commits an authoritative
+receipt and does not fall back to an older available value.
 
 After DR-T0A review and merge, DR-T1A, DR-A2, and the revised DR-T0 gate are the next
 three independent branches. DR-T0 still requires separate authorization for its
@@ -616,6 +625,16 @@ Usage, or setup change. Its required validation is document consistency, complet
 removal of operative lifetime claims, `git diff --check`, the unchanged canonical
 unit/typecheck suite, and confirmation that normal tests perform no external I/O.
 
+The first independent review of PR #102 at exact head
+`9d6e63896a5ed4e140e45cacd26d8cb5692d9783` found two MAJOR ambiguities and one
+MINOR boundary error. The amended candidate resolves them by freezing
+`current_master_expectation_v1` with exact Technical/1321/2633 code-product-market
+rules, defining `CoName` as a validated source label rather than an equality
+predicate, ordering every master rejection, defining the exact ETF empty/all-null/
+one-sided/no-common-date artifact and receipt behavior, and moving a February-29
+ten-year `queryFrom` to March 1 rather than February 28. It also distinguishes the
+prohibited trading/decision signal use from the Technical MACD `signal` series.
+
 | Validation | Result |
 | --- | --- |
 | source-of-truth consistency search | passed; remaining lifetime terms describe only the retired/superseded contract |
@@ -655,7 +674,8 @@ unit/typecheck suite, and confirmation that normal tests perform no external I/O
   instrument change that leaves no missing official-session row. End-date master
   identity and complete post-start coverage reduce malformed/incomplete-source risk
   but do not prove historical identity. The warning is permanent, and these artifacts
-  cannot feed Phase 4 validation, backtests, scores, signals, or recommendations.
+  cannot feed Phase 4 validation, backtests, scores, trading/decision signals, or
+  recommendations.
 - A whole-Dashboard visual migration can regress focus, overflow, or semantic states;
   the staged V1-V3 split and required width matrix are merge gates.
 

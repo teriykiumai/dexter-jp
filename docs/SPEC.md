@@ -484,11 +484,20 @@ Phase 1.5〜4の完了条件を再度開くものではなく、Phase 5 Portfoli
   Market Dataの確定済みreceiptを維持する。追加する受付・復旧・error表示の
   契約はDashboardに限定し、既存Phase 4のjob/run schemaとpublic error code集合は維持する
 - Technical/ETFは最大10年のJ-Quants調整後価格を取得できるが、eligible end dateの
-  masterで現在のcode・商品区分を確認するだけで、期間全体が同一instrumentである
-  ことは保証しない。artifactとDashboardに`current_code_only`および
-  `historical_identity_unverified`を常設し、Phase 4検証、backtest、score、signalの
-  入力に使用しない。最初のsource rowより前を上場前と推測せず、取得開始後の
-  official session欠落、code不一致、schema/pagination不整合はfail closedする
+  masterで現在のcode・商品区分・市場区分・表示labelを確認するだけで、期間全体が
+  同一instrumentであることは保証しない。Technicalは内国株券`ProdCat=011`かつ現在の東証
+  `Mkt in {0105,0111,0112,0113}`、1321/2633はETF`ProdCat=014`かつ
+  `Mkt=0109`に限定する。`CoName`は正規化・固定値照合を行わず、検証済みの非空な
+  現在表示labelとしてだけ保存する。artifactとDashboardに`current_code_only`および
+  `historical_identity_unverified`を常設し、Phase 4検証、backtest、score、
+  trading/decision signalの入力に使用しない。最初のsource rowより前を上場前と
+  推測せず、取得開始後のofficial session欠落、code不一致、schema/pagination不整合は
+  fail closedする
+- ETFのcompleteな取得でrenderable barが0件の場合は、`eligibleThrough`を観測値では
+  なく照会済みexpected identityの`dataDate`とするcanonical unavailable artifactを
+  保存する。この成功receiptをlatestとして採用し、過去のavailable artifactへfallback
+  しない。片側empty、両側empty、all-null、共通日不足の厳密なpayloadと理由は
+  `docs/DASHBOARD_REFRESH_PLAN.md`に従う
 - raw response、credential、request header、request ID、絶対pathをartifactや
   Browserへ保存・返却しない
 - realtime、automatic market-data refresh/polling（active jobのstatus確認を除く）、
