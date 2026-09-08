@@ -52,7 +52,9 @@ export type TechnicalCandleV1 = Period & {
   rsi: IndicatorValueV1; macd: IndicatorValueV1; signal: IndicatorValueV1;
   histogram: IndicatorValueV1; cross: TechnicalCrossStateV1;
 };
-export type TechnicalUnavailablePeriodV1 = Period & { reason: 'source_gap' };
+export type TechnicalUnavailablePeriodV1 =
+  | (Period & { reason: 'source_gap' })
+  | (Period & { interval: 'week' | 'month'; reason: 'partial_period' });
 
 const jquantsCodeSchema = z.string().refine((value) => {
   try {
@@ -160,13 +162,11 @@ function resolveWindow(value: unknown) {
     return fail('instrument_identity_unverified');
   }
   const calculationFrom = historyBoundary.sourceCoverageFrom;
-  const fromWeek = periodFor(queryFrom, 'week').periodStart;
-  const fromMonth = periodFor(queryFrom, 'month').periodStart;
   const toWeek = periodFor(calculationDate, 'week').periodEnd;
   const toMonth = periodFor(calculationDate, 'month').periodEnd;
   return {
     window, calculationFrom, calculationTo: eligibleThrough,
-    calendarCoverageFrom: fromWeek < fromMonth ? fromWeek : fromMonth,
+    calendarCoverageFrom: queryFrom,
     calendarCoverageTo: toWeek > toMonth ? toWeek : toMonth,
   };
 }
@@ -249,15 +249,19 @@ export function calculateTechnicalSeriesV1(input: {
       groups.set(period.identity, group);
     }
     for (const { period, bars } of groups.values()) {
-      if (bars.length === 0) {
-        unavailablePeriods.push({ ...period, reason: 'source_gap' });
-        continue;
-      }
       const periodSessions = interval === 'day' ? [] : calendar.sessions
         .filter(date => date >= period.periodStart && date <= period.periodEnd);
-      const leadingPartial = periodSessions.some(date => date < range.calculationFrom);
+      // An unobserved pre-query prefix is not evidence of closed sessions.
+      const leadingPartial = period.periodStart < window.queryFrom
+        || periodSessions.some(date => date < range.calculationFrom);
       const partial = interval !== 'day' && (leadingPartial || period.periodEnd >= window.calculationDate
         || periodSessions.some(date => date > window.eligibleThrough));
+      if (bars.length === 0) {
+        unavailablePeriods.push(partial
+          ? { ...period, interval, reason: 'partial_period' }
+          : { ...period, reason: 'source_gap' });
+        continue;
+      }
       const first = bars[0];
       const last = bars[bars.length - 1];
       const volume = bars.reduce((sum, bar) => sum + bar.volume, 0);

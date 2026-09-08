@@ -10,12 +10,20 @@ describe('Market Data source identity and strict codec', () => {
   test('literal root envelope golden bytes and digest; no cyclic artifact/path preimage', () => {
     const envelope = { kind: 'dexter_market_data_source_payload', version: 1,
       target: { kind: 'technical', ticker: '7203', jquantsCode: '72030' },
-      dataDate: '2026-09-03', calculationDate: '2026-09-03', calculationVersion: 'technical_chart_calculation_v1',
+      dataDate: '2026-09-03', calculationDate: '2026-09-03', calculationVersion: 'technical_chart_calculation_v2',
       sourceInputs: ['daily_bars', 'security_master', 'trading_calendar']
         .map(role => ({ role, inputDigest: `sha256:${'a'.repeat(64)}` })) };
-    const golden = '{"calculationDate":"2026-09-03","calculationVersion":"technical_chart_calculation_v1","dataDate":"2026-09-03","kind":"dexter_market_data_source_payload","sourceInputs":[{"inputDigest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","role":"daily_bars"},{"inputDigest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","role":"security_master"},{"inputDigest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","role":"trading_calendar"}],"target":{"jquantsCode":"72030","kind":"technical","ticker":"7203"},"version":1}';
+    const golden = '{"calculationDate":"2026-09-03","calculationVersion":"technical_chart_calculation_v2","dataDate":"2026-09-03","kind":"dexter_market_data_source_payload","sourceInputs":[{"inputDigest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","role":"daily_bars"},{"inputDigest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","role":"security_master"},{"inputDigest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","role":"trading_calendar"}],"target":{"jquantsCode":"72030","kind":"technical","ticker":"7203"},"version":1}';
     expect(canonicalJsonV1(envelope)).toBe(golden);
-    expect(digestMarketDataSourcePayloadV1(envelope)).toBe('sha256:80e5713de4d2a5a36010b86c33568c1304cf932a1b0efc5bd8fc8bac1236d035');
+    expect(digestMarketDataSourcePayloadV1(envelope)).toBe('sha256:e8308608209a0693e48c6d03a90a025b1048cd624b7fbe6904fb8d598b42c7ea');
+    expect(() => digestMarketDataSourcePayloadV1({ ...envelope,
+      calculationVersion: 'technical_chart_calculation_v1' })).toThrow();
+    const codec = fixtureCodec(true);
+    expect(codec.build(fixtureDraft(undefined, 0, true)).calculationVersion).toBe('technical_chart_calculation_v2');
+    expect(() => codec.build({ ...fixtureDraft(undefined, 0, true),
+      calculationVersion: 'technical_chart_calculation_v1' })).toThrow();
+    expect(() => codec.parse({ ...fixtureArtifact(undefined, 0, true),
+      calculationVersion: 'technical_chart_calculation_v1' })).toThrow();
     for (const key of ['sourcePayloadDigest', 'artifactDigest', 'acceptedAt', 'checkedAt', 'fetchedAt',
       'entitlementVerifiedAt', 'rootRelativeIdentity', 'raw', 'derivedValue']) {
       expect(() => digestMarketDataSourcePayloadV1({ ...envelope, [key]: 'unexpected' })).toThrow();
@@ -52,7 +60,7 @@ describe('Market Data source identity and strict codec', () => {
     ]);
     const technical = { kind: 'dexter_market_data_source_payload', version: 1,
       target: { ...technicalTarget, jquantsCode: '72030' }, dataDate: '2026-09-03',
-      calculationDate: '2026-09-03', calculationVersion: 'technical_chart_calculation_v1',
+      calculationDate: '2026-09-03', calculationVersion: 'technical_chart_calculation_v2',
       sourceInputs: marketDataRolesV1(technicalTarget)
         .map(role => ({ role, inputDigest: `sha256:${'a'.repeat(64)}` })) };
     expect(MarketDataSourcePayloadEnvelopeV1Schema.safeParse(technical).success).toBe(true);
@@ -71,7 +79,7 @@ describe('Market Data source identity and strict codec', () => {
         dataDate: '2026-09-03', calculationDate: '2026-09-03', calculationVersion: `${moduleId}_calculation_v1`,
         sourceInputs: marketDataRolesV1(target).map(role => ({ role, inputDigest: `sha256:${'a'.repeat(64)}` })) };
       expect(MarketDataSourcePayloadEnvelopeV1Schema.safeParse(value).success).toBe(true);
-      expect(MarketDataSourcePayloadEnvelopeV1Schema.safeParse({ ...value, calculationVersion: 'technical_chart_calculation_v1' }).success).toBe(false);
+      expect(MarketDataSourcePayloadEnvelopeV1Schema.safeParse({ ...value, calculationVersion: 'technical_chart_calculation_v2' }).success).toBe(false);
       expect(MarketDataSourcePayloadEnvelopeV1Schema.safeParse({ ...value, target: { ...target, sourceId: 'margin_1570_v1' === target.sourceId ? 'market_short_ratio_v1' : 'margin_1570_v1' } }).success).toBe(false);
       for (const roles of [value.sourceInputs.slice(1), [...value.sourceInputs].reverse(),
         [...value.sourceInputs, value.sourceInputs[0]], value.sourceInputs.map(i => ({ ...i, role: 'unknown' }))]) {
