@@ -506,6 +506,11 @@ Phase 1.5〜4の完了条件を再度開くものではなく、Phase 5 Portfoli
   後端calendar範囲、16:30 JST cutoff、calendar内欠落のfail-closed、取得範囲内の
   sessionによるcoverage warning判定は維持する。変更は独立review/merge後に
   適用し、Phase 4のcalendarやSnapshot契約へ波及させない
+- Technicalの週・月で取得部分が全欠損でも、先頭または後端がpartialなら
+  unavailable periodを`partial_period`とし、期間全体が欠損だったとは断定しない。
+  経過済みの全期間を確認でき、全official sessionが明示的なgapの場合だけ
+  `source_gap`とする。日足の明示gapは`source_gap`。いずれもcandleやindicatorを
+  作らず、dataset全体に有効なbarがない場合の取得失敗契約は維持する
 - ETFのcompleteな取得でrenderable barが0件の場合は、`eligibleThrough`を観測値では
   なく照会済みexpected identityの`dataDate`とするcanonical unavailable artifactを
   保存する。この成功receiptをlatestとして採用し、過去のavailable artifactへfallback

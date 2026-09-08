@@ -685,6 +685,21 @@ in-range source-start omission test, complete daily values, trailing closure rul
 all-gap period handling, and session-based coverage warning. Partial periods are
 displayed but excluded from RSI/MACD/signal/histogram/cross inputs and warm-up counts.
 
+The review of head `816e981a21e183c6e2cdfda9d58ecf66f6bb0396` identified one MAJOR:
+an all-gap observed prefix/suffix could be labelled as a full-period `source_gap`.
+This candidate fixes the normative representation before runtime implementation.
+DR-T1B must evaluate the same partial predicates for every observed week/month
+group before the zero-bar branch. One or more explicit gaps with zero bars produce
+one `partial_period` row if any partial predicate is true, otherwise one
+`source_gap` row. Both retain full Gregorian identity/bounds and have no candle or
+indicator values; daily gaps remain `source_gap`. A period with no observations has
+no row, while missing required post-start observations still fail validation.
+The union extension belongs to `technical_chart_calculation_v2`, not a new root
+warning. DR-T2 validates the derivation; DR-T3 shows the distinct exact-table labels
+from plan section 6.2. Dataset-wide all-gap input still cannot publish a Technical
+artifact. The acceptance matrix now names midweek, midmonth, delayed source start,
+trailing partial, and fully covered elapsed all-gap cases explicitly.
+
 Next sequence after independent review/merge and main fast-forward:
 
 1. DR-T1B updates the merged pure calendar/series logic and tests, plus the generic
