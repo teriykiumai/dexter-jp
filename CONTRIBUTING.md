@@ -47,8 +47,8 @@ src/
 
 1. フォークしてブランチを作成
 2. 変更を実装
-3. `bun run typecheck` と `bun test` が通ることを確認
-4. PRを作成（日本語・英語どちらでもOK）
+3. `AGENTS.md` の「Tests and validation」と対象計画に従い、変更リスクに応じた検証を実施する。対象計画の必須検証とCIは省略しない
+4. 公開の承認を得てDraft PRを作成（日本語・英語どちらでもOK）。レビューとMerge Gateは `docs/REVIEW_POLICY.md` に従う
 
 ## ツールの追加方法
 
