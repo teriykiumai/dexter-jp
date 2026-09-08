@@ -1,13 +1,13 @@
 # Dexter JP Dashboard Refresh Handoff
 
-**Status:** DR-0, DR-V1-V3, DR-T1, DR-C1, DR-A1, and DR-O1 merged. DR-T0A is the
-current docs-only candidate that replaces the unprovable ten-year lifetime contract
-with an explicit `current_code_only` history boundary.
-No production Technical/source-module codec, source adapter, external Market Data
-request, or new chart controls exist yet. With zero registered Overview modules,
+**Status:** DR-0, DR-V1-V3, DR-T1, DR-C1, DR-A1, DR-O1, DR-T0A, DR-T1A, and DR-A2
+are merged. DR-T0B is the current docs-only candidate defining Standard-compatible
+calendar bounds and conservative leading-period handling. DR-T0 has not passed.
+No production Technical/source-module codec, source adapter, or new chart controls
+exist in the merged runtime yet. With zero registered Overview modules,
 the read remains 404 and refresh admission is refused before creating a job.
 
-**Last Updated:** 2026-09-04
+**Last Updated:** 2026-09-08
 
 ## 1. How to use this file
 
@@ -45,7 +45,10 @@ The implemented baseline includes:
 No Dashboard Refresh Technical artifact, Market Overview artifact, refresh route,
 new visual token system, or seventh tab exists at this baseline.
 
-## 3. Merged predecessor steps and current DR-T0A boundary
+## 3. Historical predecessor steps and DR-T0A boundary
+
+The candidate descriptions below are historical records of their respective PRs.
+Section 7.7 records the current DR-T0B handoff; use the normative plan for ordering.
 
 The DR-0 branch was:
 
@@ -655,7 +658,70 @@ side clipped, and non-session query starts so artifact bytes and digests are uni
 | `bun node_modules/typescript/bin/tsc --noEmit` | passed using the installed compiler |
 | `git diff --check` | passed; only the checkout's LF-to-CRLF conversion warning |
 
+### 7.7 Current DR-T0B candidate and next implementation boundary
+
+The checkout and `origin/main` were verified at
+`cfbdccf8265c3741cb22b3b06d6a079548f9f127`, the merge of PR #104 (DR-A2).
+The current-source/series work already merged does not expose a production
+Technical codec or refresh adapter. The separate DR-T0 implementation remains
+uncommitted on `feat/dashboard-technical-source-gate-step0`; this document PR does
+not include or approve it.
+
+The user-authorized 2026-09-08 external diagnostic failed at
+`/v2/markets/calendar` with HTTP 400, safely classified as
+`source_plan_unavailable / request_from_before_coverage`. Querying calendar from
+exactly the unchanged ten-year `queryFrom` to the unchanged trailing bound
+succeeded: one attempt/page, 3,675 rows, 143,335 bytes. This proves only that calendar
+query's availability. The full bars/calendar/master smoke has not succeeded, and
+neither Standard ten-year OHLCV readiness nor DR-T0 completion is claimed. Raw
+responses and credentials were not recorded; no canonical artifact, observation
+receipt, or job was written. See plan section 3.3.1 for the reviewed evidence scope.
+
+The user approved preserving the full bars range while setting calendar start to
+`queryFrom`. Under the proposed `standard_calendar_boundary_v2`, a week/month
+starting before the requested calendar is conservatively partial even if its
+unobserved prefix might have been holidays. The plan also preserves the separate
+in-range source-start omission test, complete daily values, trailing closure rule,
+all-gap period handling, and session-based coverage warning. Partial periods are
+displayed but excluded from RSI/MACD/signal/histogram/cross inputs and warm-up counts.
+
+The review of head `816e981a21e183c6e2cdfda9d58ecf66f6bb0396` identified one MAJOR:
+an all-gap observed prefix/suffix could be labelled as a full-period `source_gap`.
+This candidate fixes the normative representation before runtime implementation.
+DR-T1B must evaluate the same partial predicates for every observed week/month
+group before the zero-bar branch. One or more explicit gaps with zero bars produce
+one `partial_period` row if any partial predicate is true, otherwise one
+`source_gap` row. Both retain full Gregorian identity/bounds and have no candle or
+indicator values; daily gaps remain `source_gap`. A period with no observations has
+no row, while missing required post-start observations still fail validation.
+The union extension belongs to `technical_chart_calculation_v2`, not a new root
+warning. DR-T2 validates the derivation; DR-T3 shows the distinct exact-table labels
+from plan section 6.2. Dataset-wide all-gap input still cannot publish a Technical
+artifact. The acceptance matrix now names midweek, midmonth, delayed source start,
+trailing partial, and fully covered elapsed all-gap cases explicitly.
+
+Next sequence after independent review/merge and main fast-forward:
+
+1. DR-T1B updates the merged pure calendar/series logic and tests, plus the generic
+   Technical calculation binding and digest fixtures to
+   `technical_chart_calculation_v2`. The old pre-production value is rejected; no
+   production artifact migration or backfill is needed.
+2. DR-T0 resumes after DR-T1B review/merge. Reconcile the preserved source-gate work
+   with the new policy, then run the bounded, confirmation-gated full three-input
+   smoke and record its actual outcome before claiming gate completion.
+3. DR-T2 adds the production codec and API only after all prerequisites merge.
+   DR-E1 inherits the same calendar query bounds and keeps its independent source
+   gate. Phase 4 calendar behavior remains outside this amendment.
+
+DR-T0B is docs-only: SPEC, plan, and handoff. It requires no new live request,
+runtime change, UI, dependency, Usage/setup change, or historical-plan rewrite.
+
 ## 8. Remaining risks
+
+- Calendar-only success leaves the complete Technical source gate unresolved.
+  Conservative leading partials can omit an otherwise complete historical weekly
+  or monthly candle from indicator warm-up; this is the accepted trade-off for
+  staying inside the configured Standard calendar range without inventing holidays.
 
 - The 2026-09 margin migration or individual Standard availability can be delayed,
   changed, or fail the bounded smoke.

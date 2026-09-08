@@ -1,10 +1,10 @@
 # Dexter JP Dashboard Refresh & Market Context Implementation Plan
 
-**Plan version:** `dashboard_refresh_plan_v2`
+**Plan version:** `dashboard_refresh_plan_v3`
 
-**Status:** User-approved current-code-only amendment to the merged DR-0 contract; this version and each runtime step still require independent review and merge
+**Status:** User-approved Standard calendar-boundary amendment (DR-T0B); this docs-only candidate and each runtime step still require independent review and merge
 
-**Last Updated:** 2026-09-04
+**Last Updated:** 2026-09-08
 
 ## 1. Purpose and authority
 
@@ -223,7 +223,7 @@ Every artifact persists exactly one calculation version from this closed union:
 
 ```text
 MarketDataCalculationVersionV1 =
-  technical_chart_calculation_v1 |
+  technical_chart_calculation_v2 |
   tse_margin_quantities_calculation_v1 |
   market_short_ratio_calculation_v1 |
   margin_1570_calculation_v1 |
@@ -317,8 +317,9 @@ configured credential that:
 
 1. `/v2/equities/bars/daily` accepts the intended maximum ten-year range on the
    actual Standard-or-higher plan;
-2. the inherited `/v2/markets/calendar` mapper supplies the exact calendar envelope
-   needed to distinguish an elapsed from an in-progress week/month;
+2. the inherited `/v2/markets/calendar` mapper supplies the exact section 6.1
+   envelope starting at `queryFrom`; section 6.2 conservatively marks a period that
+   starts before that envelope as partial;
 3. `/v2/equities/master` returns exactly one eligible-end-date row that satisfies
    the applicable closed `current_master_expectation_v1` predicate;
 4. pagination for all three inputs is complete and bounded;
@@ -488,6 +489,40 @@ HTTP attempts and 180 seconds, with one 30-second attempt per page and no retry.
 DR-T0 may freeze a lower production bound after measurement; it may not silently
 raise the 20-attempt gate or shorten the requested maximum range to make the smoke
 pass.
+
+### 3.3.1 DR-T0B Standard calendar-boundary amendment
+
+The authorized diagnostic on 2026-09-08 found HTTP 400 with a sanitized
+`source_plan_unavailable / request_from_before_coverage` classification for the
+previous calendar envelope. A separate calendar query starting exactly at the
+ten-year `queryFrom`, with the same trailing bound, succeeded in one attempt and
+one page (3,675 rows, 143,335 response bytes). This is calendar-only feasibility
+evidence: it does not prove bars, current master, all-three-input pagination, or the
+complete DR-T0 gate. No canonical artifact, observation receipt, or job was written.
+
+`standard_calendar_boundary_v2` replaces the pre-`queryFrom` calendar requirement
+only for Dashboard Refresh Technical and ETF inputs. It retains the maximum
+ten-year bars range, March-1 leap rule, trailing calendar bound, and 16:30 JST
+eligibility. It never infers a session or holiday outside the returned calendar.
+The exact bounds and conservative leading-period rule are in sections 6.1-6.2.
+Phase 4 calendars, Snapshot readers/writer, and existing Engine formulas are unchanged.
+
+DR-T0B changes only `SPEC.md`, this plan, and the handoff. DR-T1B then updates the
+merged pure series calendar requirements, partial-period tests, and the generic
+Technical calculation-version binding before DR-T0 resumes its full live gate.
+`technical_chart_calculation_v2` replaces the unused pre-production
+`technical_chart_calculation_v1` in the closed registry, envelope target validation,
+Technical test codec, and canonical golden vectors. No production Technical codec
+or receipt has been enabled; there is no backfill, overwrite, legacy alias, or
+automatic conversion. Reject the retired value rather than reinterpret its bytes.
+The outer dataset/envelope schema versions stay V1; the changed calculation version
+enters `sourcePayloadDigest`, so the new semantics cannot reuse an old identity.
+ETF calculation versions remain V1 because their production derivations have not
+been implemented; DR-E1 inherits this new calendar policy explicitly.
+
+The bounded source smoke implementation in progress is not approved or passed by
+this amendment. Its source registry must name this policy and its new calendar
+range, and a complete three-input smoke is still required after DR-T1B merges.
 
 ### 3.4 DR-M0 margin migration gate
 
@@ -935,10 +970,10 @@ TechnicalCandleV1 = {
   rsi, macd, signal, histogram, cross
 }
 
-TechnicalUnavailablePeriodV1 = {
-  interval: "day" | "week" | "month",
-  identity, periodStart, periodEnd, reason: "source_gap"
-}
+TechnicalUnavailablePeriodV1 =
+  { interval: "day", identity, periodStart, periodEnd, reason: "source_gap" }
+| { interval: "week" | "month", identity, periodStart, periodEnd,
+    reason: "source_gap" | "partial_period" }
 
 CurrentCodeHistoryBoundaryAvailableV1 = Extract<
   CurrentCodeHistoryBoundaryV1, { state: "available" }
@@ -946,7 +981,7 @@ CurrentCodeHistoryBoundaryAvailableV1 = Extract<
 
 TechnicalChartDatasetV1 = {
   schemaVersion: "technical_chart_dataset_v1",
-  calculationVersion: "technical_chart_calculation_v1",
+  calculationVersion: "technical_chart_calculation_v2",
   ticker, jquantsCode, instrumentName, priceUnit: "JPY", volumeUnit,
   acceptedAt, asOfCutoff, calculationDate, queryFrom, queryTo,
   calculationFrom, calculationTo, eligibleThrough,
@@ -967,6 +1002,10 @@ Every omitted ellipsis above means the same closed `TechnicalCandleV1[]` type, n
 open object. Dates are strict ISO calendar dates; instants are UTC ISO instants;
 numbers are finite; ticker/code/source/digest/unit values use closed validators.
 Warning and unavailable-reason enums are closed and versioned.
+The `partial_period` unavailable-period variant is introduced only with
+`technical_chart_calculation_v2`; DR-T1B updates the pure type and DR-T2 validates
+the same closed union and section 6.2 derivation in the production codec. It adds no
+new root warning code. A daily unavailable period cannot carry `partial_period`.
 
 `historyBoundary` records the accepted current-code-only limitation; it is not a
 listing or lifetime assertion. The eligible-end-date master must satisfy the exact
@@ -1012,14 +1051,19 @@ indicators, and receive no inferred listing or missing-data meaning. If the sect
 the single-boundary `history_coverage_clipped` warning with the exact start date.
 Every artifact also carries
 `historical_identity_unverified`.
-`calendarCoverageFrom` is the earlier of the Gregorian Monday containing
-`queryFrom` and the first day of `queryFrom`'s Gregorian month;
+Under `standard_calendar_boundary_v2`, `calendarCoverageFrom = queryFrom`;
 `calendarCoverageTo` is the later of the Gregorian Sunday containing
 `calculationDate` and the last day of `calculationDate`'s Gregorian month. These
 bounds are known before source dispatch. The calendar input covers that exact
-inclusive range in one request; `eligibleThrough` must fall inside it, so eligibility,
-source coverage, and both leading and trailing partial status can be proved without
-a second calendar query.
+inclusive range in one logical query (plus bounded pagination); `eligibleThrough`
+must fall inside it. Every Gregorian date in this envelope must be supplied and
+validated by the strict calendar mapper. A missing date inside the envelope fails
+closed. No request for dates before `queryFrom`, local holiday reconstruction, or
+assumption that unobserved dates were closed is allowed. Eligibility, post-start
+source coverage, and trailing completeness use the returned calendar; leading
+periods use the conservative section 6.2 rule. The same bounds apply to the shared
+ETF calendar and its source-input range/digest. Daily bars still request exactly
+`[queryFrom, eligibleThrough]`; this amendment does not shorten their history.
 
 `dataDate` is the last actual renderable bar date inside
 `[calculationFrom, calculationTo]`, never the request end, fetch date,
@@ -1070,26 +1114,75 @@ volume = sum of finite volume values
 
 No calendar-day bar, forward fill, or zero-price/zero-volume placeholder is inserted.
 A period with at least one valid bar produces one candle from only its bars; gaps do
-not enter OHLCV or indicators. A day or week/month containing only proved gaps
-produces no candle and instead adds one exact `unavailablePeriods` row with
-`source_gap`. This keeps a suspension/no-trade interval visible in the exact table
-without fabricating a chart point.
+not enter OHLCV or indicators. A group with at least one explicit gap but zero bars
+produces no candle and instead adds exactly one `unavailablePeriods` row, with its
+reason determined below. A period with no source observations has no group and
+creates neither a candle nor an unavailable-period row. This does not excuse a
+missing required post-start session: source/calendar validation runs first and
+fails the entire input in that case.
 
-A week/month is complete only when its Gregorian period has ended before
-`calculationDate`, the calendar envelope contains every official session
-in the period, and its final session is no later than `eligibleThrough`. If the
-calendar proves that the first weekly/monthly period contains a session inside the
-same Gregorian period but before `sourceCoverageFrom`, the candle formed only from
-retrieved rows is deliberately
-`partial: true`; every indicator and cross field is `unavailable/partial_period`, and
-that candle is excluded from indicator inputs. This leading-range truncation is not
-a source/calendar coverage failure. If no earlier official session exists, the
-normal completeness rules apply. No omitted session is called pre-listing or used to
-infer an IPO date. A trailing in-progress candle is likewise
-`partial: true`, displayed, and excluded from every RSI, MACD, signal, histogram,
-and cross calculation. A proved instrument-level gap does not by itself invalidate
-a period with another valid bar. Source-envelope or calendar coverage incompleteness
-is invalid and is distinct from a proved gap.
+For every observed week/month group `P`, including zero-bar groups, evaluate these
+exact predicates before selecting the candle or unavailable-period branch:
+
+```text
+unprovedLeading(P) = P.periodStart < queryFrom
+observedLeadingOmission(P) = exists official session s in the returned calendar:
+  P.periodStart <= s <= P.periodEnd and s < sourceCoverageFrom
+trailingPartial(P) = P.periodEnd >= calculationDate
+  or exists official session s in P: s > eligibleThrough
+partial(P) = unprovedLeading(P) or observedLeadingOmission(P) or trailingPartial(P)
+```
+
+Thus a query starting after Monday makes its containing week partial, and a query
+starting after the first of the month makes its containing month partial, even if
+the unknown earlier days might all have been holidays. A Monday or month-first
+start removes only `unprovedLeading` for that interval; the other predicates still
+apply. Period identity always remains the actual Gregorian Monday or `YYYY-MM`,
+never a shortened identity starting at `queryFrom`.
+
+Evaluate this per period, not by array index: if source rows begin in a later
+period, do not blindly mark its first candle partial. Instead use the observed
+calendar sessions before `sourceCoverageFrom` in that same period. If the
+query-containing period has only explicit gaps, apply the same partial predicates
+to its unavailable row; do not transfer its partial status to the next period.
+Sessions before `sourceCoverageFrom` still create no synthetic rows.
+
+The canonical zero-bar selector is exhaustive after successful source validation:
+
+| Observed group | Exact unavailable-period reason |
+| --- | --- |
+| day with its explicit `source_all_null` observation | `source_gap` |
+| week/month with one or more explicit gaps, zero bars, and `partial(P) = true` | `partial_period` |
+| week/month with one or more explicit gaps, zero bars, and `partial(P) = false` | `source_gap` |
+
+For week/month, `source_gap` therefore asserts only that every official session in
+the fully covered, elapsed Gregorian period has an explicit gap. If any leading or
+trailing predicate is true, `partial_period` takes precedence: it states that the
+observed portion contains no valid bar, while the whole period cannot be asserted
+gap-only. Keep the full Gregorian identity/start/end in both variants; do not
+shorten the period, omit its row, add a second reason, or infer suspension/no-trade
+from unknown days. Neither variant has OHLCV, indicator, or cross fields or enters
+warm-up. Retain interval order `day, week, month`, then ascending period identity,
+with exactly one row per observed zero-bar group.
+
+DR-T3 renders `source_gap` as `対象期間の全営業日が欠損` and `partial_period` as
+`期間の一部のみ観測（取得部分はすべて欠損）` in the exact table. It reads the
+stored reason rather than deriving completeness in the Browser. The dataset-wide
+no-renderable-bar failure in section 6.1 still takes precedence; these rows do not
+allow an all-gap Technical dataset to be published.
+Zero-bar period fixtures must include a renderable bar in another period to reach
+this selector; separately test the dataset-wide all-gap rejection.
+
+Every partial candle remains visible with OHLCV and `partial: true`, but every
+RSI, MACD, signal, histogram, and cross field is `unavailable/partial_period`; the
+candle is excluded from all indicator inputs and warm-up counts. Daily bars stay
+`partial: false`. A proved gap in a period with a valid bar does not itself make
+that candle partial. Incomplete dates inside the required calendar envelope remain
+a failure, distinct from both a proved gap and the deliberately unobserved prefix.
+
+This conservative partial flag is not a `history_coverage_clipped` warning: that
+warning still requires a proved session in `[queryFrom, sourceCoverageFrom)` under
+section 3.3. No omitted date is called pre-listing or used to infer an IPO date.
 
 ### 6.3 RSI and MACD series
 
@@ -2368,49 +2461,62 @@ visual list order alone, controls admission; Phase 5 still waits for DR-X.
      vectors;
    - no production Technical/ETF codec or receipt exists, so add no migration,
      backfill, source request, route, or UI.
-12. **DR-T0 — Technical source and current-code gate**
+12. **DR-T0B — Standard calendar-boundary docs amendment**
+   - record calendar-only diagnostic evidence, exact `standard_calendar_boundary_v2`
+     bounds/partial predicates, calculation-version transition, tests, and ordering;
+   - change only `SPEC.md`, this plan, and the handoff; no runtime or further smoke.
+13. **DR-T1B — Standard calendar and conservative leading-period calculation**
+   - update `getTechnicalCalendarCoverageV1` and `calculateTechnicalSeriesV1` to the
+     section 6.1-6.2 calendar and partial rules; keep existing function/schema names;
+   - bind the Technical calculation registry, envelope validator, test codec, and
+     digest golden vectors to `technical_chart_calculation_v2`; reject retired V1;
+   - extend the closed unavailable-period type and evaluate partial predicates
+     before zero-bar selection, using the exact section 6.2 reason precedence;
+   - update focused series/contract/repository regressions; add no source request,
+     route, production codec, artifact migration, or UI.
+14. **DR-T0 — Technical source and current-code gate**
    - verify the exact individual-Standard bars/calendar/end-date-master contracts,
      entitlement, `current_master_expectation_v1`, complete post-start coverage, and
      production bounds with strict fixtures plus the default-No bounded live smoke;
    - freeze the source revisions and measured caps before merge; add no canonical
      artifact, public mutation/read route, or UI.
-13. **DR-T2 — Technical source and job API**
+15. **DR-T2 — Technical source and job API**
    - implement the DR-T0-frozen strict J-Quants mappers, manual Technical refresh,
      current-code warning/artifact codec, and GET/job routes over
      DR-C1/DR-A1/DR-O1; reuse DR-O1's job repository and registered recovery adapter
      rather than owning a separate job store.
-14. **DR-T3 — Technical UI**
+16. **DR-T3 — Technical UI**
    - implement source precedence, day/week/month, four panes, crosshair OHLCV,
      exact table, URL/race/focus, Comparison separation, and the persistent
      current-code-only warning.
-15. **DR-M0 — margin-source migration gate**
+17. **DR-M0 — margin-source migration gate**
    - verify the official migration, individual Standard entitlement, exact schema,
      cadence boundary, primary key/coverage/unit contract, one-date reconciliation,
      and bounded exact-26-observation production-shape smoke;
    - add no public value when the gate is unresolved.
-16. **DR-M1a — shared margin source plus aggregate/1570 modules**
+18. **DR-M1a — shared margin source plus aggregate/1570 modules**
    - implement the one verified complete margin input and the pure module 1/3
      mappers/engines/artifact builders, then register both modules with DR-O1; add no
      UI.
-17. **DR-M1b — market short-ratio module**
+19. **DR-M1b — market short-ratio module**
    - implement the verified source mapper, schedule resolver, engine, and artifact
      builder for module 2, then register it with DR-O1; add no UI.
-18. **DR-M1c — foreign-flow module**
+20. **DR-M1c — foreign-flow module**
    - implement the series correction-vintage selector, mapper, engine, and artifact
      builder for module 4, then register it with DR-O1; add no UI. The implemented
      module set remains per-module atomic rather than one transaction.
-19. **DR-M2 — four supply/demand UI modules**
+21. **DR-M2 — four supply/demand UI modules**
    - implement cards, latest 26-observation charts/tables, cadence/basis breaks,
      metadata, fallback, and warnings.
-20. **DR-E1 — 1321/2633 sources and relative-performance engine**
+22. **DR-E1 — 1321/2633 sources and relative-performance engine**
    - implement strict EOD input, 1321 change, common-date normalization, range,
      direction, fixed ETF master predicates, current-code history boundaries, the
      closed no-observation matrix, proxy caveats, and immutable module artifacts/
      receipts.
-21. **DR-E2 — two ETF UI modules**
+23. **DR-E2 — two ETF UI modules**
    - add the 1321 EOD and 1321/2633 proxy cards/chart/table, persistent
      current-code-only warning, and range URL/UI state.
-22. **DR-X — usage, setup, handoff, and closeout**
+24. **DR-X — usage, setup, handoff, and closeout**
    - update `Usage.md`, `docs/USER_SETUP.md`, and environment guidance only for
      merged behavior;
    - run complete validation and update the handoff from candidate to closeout.
@@ -2422,8 +2528,9 @@ DR-0 -> DR-V1 -> DR-V2 -> DR-V3
 DR-V3 -> DR-T1
 DR-T1 -> DR-C1 -> DR-A1
 DR-A1 -> DR-O1 -> DR-T0A
-DR-T0A -> { DR-T1A, DR-A2, DR-T0 }
-{ DR-O1, DR-T0, DR-T1A, DR-A2 } -> DR-T2
+DR-T0A -> { DR-T1A, DR-A2 }
+{ DR-T1A, DR-A2 } -> DR-T0B -> DR-T1B -> DR-T0
+{ DR-O1, DR-T0, DR-T1B, DR-A2 } -> DR-T2
 DR-T2 -> DR-T3
 { DR-O1, DR-T2 } -> DR-E1 -> DR-E2
 DR-O1 -> DR-M0 -> { DR-M1a, DR-M1b, DR-M1c } -> DR-M2
@@ -2433,8 +2540,8 @@ DR-O1 -> DR-M0 -> { DR-M1a, DR-M1b, DR-M1c } -> DR-M2
 DR-M1a, DR-M1b, and DR-M1c are independent after DR-M0 and may merge in any order;
 DR-M2 waits for all three. A delayed DR-M0 does not block DR-T3 or the independent
 ETF path. No step opportunistically implements a later step. DR-V1-V3 do not fetch
-market data; DR-T0A changes docs only; DR-T0 exposes no public route and persists no
-market-data artifact; DR-T1/DR-T1A and DR-A1/DR-A2 expose no new route; DR-O1 cannot
+market data; DR-T0A/DR-T0B change docs only; DR-T0 exposes no public route and persists no
+market-data artifact; DR-T1/DR-T1A/DR-T1B and DR-A1/DR-A2 expose no new route; DR-O1 cannot
 dispatch without a registered module. DR-O1 precedes DR-T0A and DR-T2 to establish
 the common job repository/recovery owner; it has no margin-source dependency. DR-C1 changes shared ownership and the explicit
 admission/recovery/copy contract while preserving accepted-job calculation/timing
@@ -2454,7 +2561,11 @@ implementation; DR-X adds no new runtime behavior.
 | DR-A1 | literal `MarketDataSourcePayloadEnvelopeV1` golden vectors; target/role/calculation-version mismatch; volatile/derived-field exclusion; exact digest-to-path-to-artifactDigest derivation; persisted calculation version and maximum-provider `fetchedAt`; create/reuse/collision; receipt no-replace and digest/identity; A(t1)->B(t2)->A(t3); delayed older-admission completion; two-process inverse completion; equal-millisecond equal-artifact equivalence and conflicting-artifact `latest_resolution_failed`; stale/backwards/corrupt/missing cache reconstruction; orphan artifact exclusion; interrupted after-receipt visibility; bounded corrupt-receipt/artifact fallback; containment |
 | DR-O1 | common two-kind job repository/native recovery adapter; strict 65,536-byte job record and filename identity; create/replace fault injection and cross-domain admission/restart; zero-module GET 404 and POST 400 `source_configuration_missing` in a healthy process with no job/lease/dispatch; strict module registration/order; one root Overview `checkedAt`; success receipt versus retained-previous/failed identities; per-module artifact/receipt atomicity; partial success/all-modules-failed root; terminal-write recovery latch; GET persisted-vs-uncollected/corrupt identity |
 | DR-T0A | `SPEC`/plan/handoff agreement; retired candidate and no fabricated replacement; exact `current_code_only` warning/non-use boundary; calendar-defined coverage clipping; deterministic single-boundary and two-boundary warning templates/selectors; closed master predicates/rejection precedence; ETF no-observation state table; March-1 leap rule; revised graph; no runtime/dependency/Usage/setup diff |
-| DR-T1A | `historyBoundary` strictness; first source row; pre-start omission without listing inference; post-start missing-session failure; all-null explicit gap; leading partial; 251-bar short history; removal of `missing_in_complete_envelope`; input immutability and merged indicator parity |
+| DR-T1A | merged predecessor: `historyBoundary` strictness; first source row; pre-start omission without listing inference; post-start missing-session failure; all-null explicit gap; leading partial; 251-bar short history; removal of `missing_in_complete_envelope`; input immutability and merged indicator parity; DR-T1B supersedes the pre-query calendar/leading rule |
+| DR-T0B | SPEC/plan/handoff agreement; calendar-only evidence never described as DR-T0 success; explicit supersession/version transition and dependency graph; no code/dependency/Usage/setup diff |
+| DR-T1B | exact `calendarCoverageFrom=queryFrom`; unchanged trailing bounds; Monday/non-Monday and month-first/non-first starts independently; unknown pre-query holidays still partial; delayed `sourceCoverageFrom` in same/later period; all-gap leading period does not taint next candle; daily zero/OHLCV unchanged; all five indicator/cross fields excluded for partials; completed-only warm-up/34-month boundary and same-window Engine parity; in-envelope missing-calendar failure; coverage warning uses only proved in-range sessions; leap-day/March-1; V2 envelope binding/retired V1 rejection/new digest golden vectors and repository reuse/collision; input immutability |
+| DR-T1B zero-bar periods | midweek query + all-gap suffix + unknown prefix -> week `partial_period`; midmonth query + all-gap suffix + unknown prefix -> month `partial_period`; mid-period source start with earlier proved session + all-gap suffix -> `partial_period`; trailing partial with all-gap observed prefix -> `partial_period`; fully covered elapsed period with every session explicit gap -> `source_gap`; daily gap -> `source_gap`; no-observation/no-session period -> no row; exact full Gregorian identity, one row, ordering, no candle/indicator/warm-up, no partial transfer; dataset-wide all-gap still fails |
+| DR-T2/DR-T3 zero-bar integration | production codec accepts the closed unavailable union and rejects day/partial or reason/derived-completeness mismatch; exact table renders both reasons without Browser recomputation or a full-period gap claim for partial periods |
 | DR-A2 | exact three-input Technical, four-input 1321, and seven-input relative-ETF roles; golden envelope/digest changes; warning enum/order plus exact single-boundary and fixed-order relative templates; old lifetime role/warning rejection; zero production-artifact migration proof; repository/job regressions |
 | DR-T0 | exact official bars/calendar/end-date-master endpoint/query/field/entitlement registry; bounded three-input no-publication smoke; `current_master_expectation_v1` code/product/market/name evidence; wrong date/code/product/market, blank/invalid name, missing/duplicate rows in exact precedence; company-name change and allowed-market transfer acceptance; earliest source row and complete post-start official-session coverage; calendar-based clipping including weekend/holiday non-trigger; Standard maximum-ten-year history including February-29/March-1 boundary, pagination and request/page/row/byte/deadline ceilings; secret/path non-exposure |
 | DR-T2 | strict frozen-source mappers, acceptedAt/16:30/query-range gate, exact three-input manifest, closed Technical end-date identity predicate/rejection precedence, current-code history boundary, permanent history warning, calendar-proved clipping, post-start missing-session failure, all-gap `source_no_observation` with prior-receipt retention and initial GET 404; Technical `published` versus `idempotent_reuse` result/`checkedAt`/receipt schema; GET 404/500/no-fetch; shared CSRF/coordinator/DR-O1 job repository and recovery adapter; cross-kind create/terminal-write faults, timeout/cancel/startup |
