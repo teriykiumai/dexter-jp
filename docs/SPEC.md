@@ -498,6 +498,14 @@ Phase 1.5〜4の完了条件を再度開くものではなく、Phase 5 Portfoli
   から次の最初のofficial sessionまでの差は欠落としない。1321/2633相対ETFでは1件の
   warningに1321、2633の順で双方の取得開始日を記録し、unavailable boundaryは
   `観測なし`とする。exact predicateと文面は`docs/DASHBOARD_REFRESH_PLAN.md`に従う
+- Technical/ETFの`standard_calendar_boundary_v2`では、最大10年の価格照会開始日
+  `queryFrom`からcalendarを取得し、それ以前の休場日を推測しない。開始日を含む
+  週・月のGregorian期間先頭が`queryFrom`より前なら、取得できたcandleを保守的に
+  partialとし、全indicator/crossの計算入力から除く。取得開始が後の期間になった
+  場合は、同じ期間内の実際に照会したofficial sessionから別途判定する。日足、
+  後端calendar範囲、16:30 JST cutoff、calendar内欠落のfail-closed、取得範囲内の
+  sessionによるcoverage warning判定は維持する。変更は独立review/merge後に
+  適用し、Phase 4のcalendarやSnapshot契約へ波及させない
 - ETFのcompleteな取得でrenderable barが0件の場合は、`eligibleThrough`を観測値では
   なく照会済みexpected identityの`dataDate`とするcanonical unavailable artifactを
   保存する。この成功receiptをlatestとして採用し、過去のavailable artifactへfallback
