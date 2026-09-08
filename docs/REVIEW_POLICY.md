@@ -141,9 +141,15 @@ The Reviewer independently evaluates whether the pull request is safe and approp
 
 The review should consider the pull request as a whole rather than only individual lines of code.
 
-Review-only work returns findings and does not modify files, branches, or the PR.
-Fixes require an implementation request. Distinguish defects introduced or exposed
-by this change from unrelated baseline issues; do not silently expand the PR to fix
+Review-only work returns findings. When recording the review on GitHub is explicitly
+requested or already authorized for that task, it may submit review findings/comments
+and the Merge Gate result to the target PR. Otherwise return them in chat; a generic
+review request alone does not authorize external posting. Review recording does not
+authorize repository edits, branch updates/pushes, changes to PR content/base/state,
+marking Ready, closing, merging, or implementation fixes. Those actions require
+separate authorization under `AGENTS.md`.
+Distinguish defects introduced or exposed by this change from unrelated baseline
+issues; do not silently expand the PR to fix
 the latter. A relevant pre-existing safety issue still belongs in the risk assessment.
 
 At minimum, the following areas should be considered when relevant.
