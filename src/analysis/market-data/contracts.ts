@@ -87,7 +87,7 @@ export const MARKET_DATA_MODULE_IDS_V1 = [
   'tokyo_nagoya_foreign_flow', 'etf_1321_eod', 'etf_1321_2633_relative',
 ] as const;
 export const MARKET_DATA_CALCULATION_VERSIONS_V1 = [
-  'technical_chart_calculation_v1', 'tse_margin_quantities_calculation_v1',
+  'technical_chart_calculation_v2', 'tse_margin_quantities_calculation_v1',
   'market_short_ratio_calculation_v1', 'margin_1570_calculation_v1',
   'tokyo_nagoya_foreign_flow_calculation_v1', 'etf_1321_eod_calculation_v1',
   'etf_1321_2633_relative_calculation_v1',
@@ -129,7 +129,7 @@ export const MarketDataSourcePayloadEnvelopeV1Schema = z.object({
   const target = value.target;
   if (target.kind === 'technical' ? target.jquantsCode !== `${target.ticker}0`
     : target.sourceId !== `${target.moduleId}_v1`) return false;
-  const calculation = target.kind === 'technical' ? 'technical_chart_calculation_v1'
+  const calculation = target.kind === 'technical' ? 'technical_chart_calculation_v2'
     : `${target.moduleId}_calculation_v1`;
   return value.calculationVersion === calculation && value.dataDate <= value.calculationDate
     && canonicalJsonV1(value.sourceInputs.map(input => input.role)) === canonicalJsonV1(marketDataRolesV1(target));

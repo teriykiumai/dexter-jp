@@ -12,7 +12,7 @@ const result = z.object({ identity: z.literal('synthetic'), value: z.number().fi
 const common = { ...MarketDataArtifactCommonFieldsV1, syntheticResult: result,
   warnings: z.array(MarketDataWarningV1Schema) };
 export const technicalFixtureSchema = z.object({ ...common,
-  schemaVersion: z.literal('technical_chart_dataset_v1'), calculationVersion: z.literal('technical_chart_calculation_v1'),
+  schemaVersion: z.literal('technical_chart_dataset_v1'), calculationVersion: z.literal('technical_chart_calculation_v2'),
   ticker: z.literal('7203'), jquantsCode: z.literal('72030'), acceptedAt: z.string(),
 }).strict();
 export const overviewFixtureSchema = z.object({ ...common,
@@ -93,7 +93,7 @@ export function fixtureDraft(acceptedAt = '2026-09-03T07:30:00.000Z', value = 0,
     fetchedAt: sourceInputs.filter(i => i.kind === 'provider').map(i => i.fetchedAt).sort().at(-1)!,
     sourceInputs, syntheticResult: { identity: 'synthetic', value }, warnings: [...warnings] };
   return technical ? { ...metadata, schemaVersion: 'technical_chart_dataset_v1',
-    calculationVersion: 'technical_chart_calculation_v1', ticker: '7203', jquantsCode: '72030', acceptedAt }
+    calculationVersion: 'technical_chart_calculation_v2', ticker: '7203', jquantsCode: '72030', acceptedAt }
     : { ...metadata, schemaVersion: 'market_overview_module_v1',
       calculationVersion: 'market_short_ratio_calculation_v1', moduleId: 'market_short_ratio',
       sourceId: 'market_short_ratio_v1', syntheticCurrentCodeWarningInput: null };

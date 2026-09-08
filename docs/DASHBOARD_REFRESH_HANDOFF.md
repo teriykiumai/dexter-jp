@@ -1,8 +1,9 @@
 # Dexter JP Dashboard Refresh Handoff
 
 **Status:** DR-0, DR-V1-V3, DR-T1, DR-C1, DR-A1, DR-O1, DR-T0A, DR-T1A, and DR-A2
-are merged. DR-T0B is the current docs-only candidate defining Standard-compatible
-calendar bounds and conservative leading-period handling. DR-T0 has not passed.
+are merged. DR-T0B merged in PR #105. DR-T1B is the current local implementation
+candidate for Standard-compatible calendar bounds and conservative partial periods.
+PR #106 merged the development-agent operating policy. DR-T0 has not passed.
 No production Technical/source-module codec, source adapter, or new chart controls
 exist in the merged runtime yet. With zero registered Overview modules,
 the read remains 404 and refresh admission is refused before creating a job.
@@ -48,7 +49,8 @@ new visual token system, or seventh tab exists at this baseline.
 ## 3. Historical predecessor steps and DR-T0A boundary
 
 The candidate descriptions below are historical records of their respective PRs.
-Section 7.7 records the current DR-T0B handoff; use the normative plan for ordering.
+Section 7.7 records the DR-T0B handoff and section 7.8 the current DR-T1B candidate;
+use the normative plan for ordering.
 
 The DR-0 branch was:
 
@@ -715,6 +717,33 @@ Next sequence after independent review/merge and main fast-forward:
 
 DR-T0B is docs-only: SPEC, plan, and handoff. It requires no new live request,
 runtime change, UI, dependency, Usage/setup change, or historical-plan rewrite.
+
+### 7.8 DR-T1B local implementation candidate
+
+Started from fast-forwarded main `0318eea30b4eed29c8c6323747d5d913a021d41d`
+(PR #106), after PR #105's reviewed calendar contract. The candidate changes only
+pure Technical series, the generic calculation binding, synthetic codec/digest and
+repository tests, and this handoff. Function/schema names remain unchanged.
+
+- Calendar coverage starts exactly at `queryFrom`; trailing bounds are unchanged.
+- Leading and trailing partial predicates run before zero-bar selection. Gap-only
+  partial weeks/months have one `partial_period` row with full Gregorian identity;
+  complete gap-only periods and daily gaps retain `source_gap`.
+- The Technical binding is `technical_chart_calculation_v2`; the retired pre-production
+  V1 value is rejected. No production codec, artifact migration, or backfill is added.
+- Regression coverage includes independent week/month starts, leap boundaries,
+  delayed first source rows, zero-bar partials, no partial transfer, completed-only
+  indicator warm-up, V2 digest/rejection, and Technical repository reuse/collision.
+
+Local full `bun test`: 1,194 pass / 0 fail across 94 files. After removing a redundant
+type-narrowed condition, the final focused series/contract/repository run passed
+114 tests, and direct TypeScript invocation through Bun passed. Normal
+`bun run typecheck` cannot start because Bun reports a node_modules bin remap error;
+do not treat a direct TypeScript check as success of that command. No browser code,
+source request, API, dependency, or Snapshot/Phase 4 contract was changed.
+Independent review and merge are still required. DR-T0 resumes only after DR-T1B
+merges, with the preserved source-gate work reconciled and a separately authorized
+bounded three-input smoke; this candidate proves no live-source readiness.
 
 ## 8. Remaining risks
 

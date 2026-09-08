@@ -98,11 +98,11 @@ describe('Market Data immutable repository', () => {
     await writeReceipt(root, receipt);
     expect((await repository.latest()).receipt).toEqual(receipt);
   });
-  test('deterministic result mismatch collides without replacing content; same receipt cannot change', async () => {
-    const { root, codec, repository } = await context();
-    const a = fixtureArtifact(), id = randomUUID();
+  for (const technical of [false, true]) test(`deterministic result mismatch collides without replacing content (${technical ? 'technical V2' : 'overview'})`, async () => {
+    const { root, codec, repository } = await context({}, technical);
+    const a = fixtureArtifact(undefined, 0, technical), id = randomUUID();
     const original = await repository.publish(a, observationFor(a, id));
-    const draft = fixtureDraft(); draft.syntheticResult.value = 123; // Same source digest, different calculation result.
+    const draft = fixtureDraft(undefined, 0, technical); draft.syntheticResult.value = 123; // Same source digest, different calculation result.
     const mismatch = codec.build(draft);
     await expectCode(repository.publish(mismatch, observationFor(mismatch, randomUUID())), 'artifact_collision');
     await expectCode(repository.publish(a, { ...observationFor(a, id), checkedAt: at(30) }), 'artifact_collision');

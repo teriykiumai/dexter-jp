@@ -264,11 +264,87 @@ describe('interval aggregation and completeness', () => {
     expect(result.intervals.day[0].partial).toBe(false);
   });
 
-  test('no earlier official session means no leading partial, even if query starts midweek', () => {
+  test('unobserved pre-query holidays cannot prove a complete leading week or month', () => {
     const result = calculateTechnicalSeriesV1(fixture({ queryFrom: '2024-01-03' }, ['2024-01-01', '2024-01-02']));
-    expect(result.intervals.week[0].partial).toBe(false);
-    expect(result.intervals.month[0].partial).toBe(false);
+    expect(result.intervals.week[0].partial).toBe(true);
+    expect(result.intervals.month[0].partial).toBe(true);
     expect(result.historyCoverageClipped).toBe(false);
+  });
+
+  test.each([
+    ['2024-01-01', false, false], // Monday and month-first
+    ['2024-01-08', false, true],  // Monday only
+    ['2024-02-01', true, false],  // month-first only
+    ['2024-02-06', true, true],
+    ['2024-02-29', true, true],
+    ['2024-03-01', true, false],
+  ] as const)('independent Gregorian start predicates at %s', (queryFrom, week, month) => {
+    const input = fixture({ queryFrom });
+    const result = calculateTechnicalSeriesV1(input);
+    expect(result.calendarCoverageFrom).toBe(queryFrom);
+    expect(result.calendarCoverageTo).toBe('2024-04-30');
+    expect(result.intervals.week[0].partial).toBe(week);
+    expect(result.intervals.month[0].partial).toBe(month);
+    expect(result.intervals.day.every(row => !row.partial)).toBe(true);
+    expect(result.historyCoverageClipped).toBe(false);
+  });
+
+  test.each([
+    ['2024-02-01', true, false],
+    ['2024-02-05', false, true],
+    ['2024-02-06', true, true],
+  ] as const)('delayed first source %s is judged by its own period', (sourceCoverageFrom, week, month) => {
+    const result = calculateTechnicalSeriesV1(fixture({
+      queryFrom: '2024-01-03', historyBoundary: { sourceCoverageFrom },
+    }));
+    expect(result.intervals.week[0].partial).toBe(week);
+    expect(result.intervals.month[0].partial).toBe(month);
+    expect(result.historyCoverageClipped).toBe(true);
+    expect(result.unavailablePeriods).toEqual([]);
+  });
+
+  test.each([
+    { queryFrom: '2024-01-03', source: '2024-01-03', gapFrom: '2024-01-03', gapTo: '2024-01-05',
+      interval: 'week', identity: '2024-01-01', start: '2024-01-01', end: '2024-01-07', reason: 'partial_period' },
+    { queryFrom: '2024-01-03', source: '2024-01-03', gapFrom: '2024-01-03', gapTo: '2024-01-31',
+      interval: 'month', identity: '2024-01', start: '2024-01-01', end: '2024-01-31', reason: 'partial_period' },
+    { queryFrom: '2024-01-01', source: '2024-02-06', gapFrom: '2024-02-06', gapTo: '2024-02-09',
+      interval: 'week', identity: '2024-02-05', start: '2024-02-05', end: '2024-02-11', reason: 'partial_period' },
+    { queryFrom: '2024-01-01', source: '2024-02-06', gapFrom: '2024-02-06', gapTo: '2024-02-29',
+      interval: 'month', identity: '2024-02', start: '2024-02-01', end: '2024-02-29', reason: 'partial_period' },
+    { queryFrom: '2024-01-01', source: '2024-01-01', gapFrom: '2024-03-25', gapTo: '2024-03-29',
+      interval: 'week', identity: '2024-03-25', start: '2024-03-25', end: '2024-03-31', reason: 'partial_period', calculationDate: '2024-03-29' },
+    { queryFrom: '2024-01-01', source: '2024-01-01', gapFrom: '2024-03-01', gapTo: '2024-03-29',
+      interval: 'month', identity: '2024-03', start: '2024-03-01', end: '2024-03-31', reason: 'partial_period', calculationDate: '2024-03-29' },
+    { queryFrom: '2024-01-01', source: '2024-01-01', gapFrom: '2024-02-01', gapTo: '2024-02-29',
+      interval: 'month', identity: '2024-02', start: '2024-02-01', end: '2024-02-29', reason: 'source_gap' },
+  ] as const)('zero-bar selector preserves exact identity: %j', scenario => {
+    const input = fixture({ queryFrom: scenario.queryFrom,
+      calculationDate: 'calculationDate' in scenario ? scenario.calculationDate : '2024-04-01',
+      historyBoundary: { sourceCoverageFrom: scenario.source } });
+    input.observations = input.observations.map(row => row.date >= scenario.gapFrom && row.date <= scenario.gapTo
+      ? { kind: 'gap', date: row.date, reason: 'source_all_null' } : row);
+    const before = JSON.stringify(input);
+    const result = calculateTechnicalSeriesV1(input);
+    expect(result.unavailablePeriods.filter(row => row.interval === scenario.interval && row.identity === scenario.identity))
+      .toEqual([{ interval: scenario.interval, identity: scenario.identity,
+        periodStart: scenario.start, periodEnd: scenario.end, reason: scenario.reason }]);
+    expect(result.intervals[scenario.interval].some(row => row.identity === scenario.identity)).toBe(false);
+    expect(result.unavailablePeriods.filter(row => row.interval === 'day').every(row => row.reason === 'source_gap')).toBe(true);
+    const completed = result.intervals[scenario.interval].filter(row => !row.partial);
+    expect(completed.slice(0, 14).every(row => row.rsi.state === 'unavailable' && row.rsi.reason === 'warmup')).toBe(true);
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  test('all-gap leading periods do not transfer partial status to the next candle', () => {
+    const input = fixture({ queryFrom: '2024-01-03' });
+    input.observations = input.observations.map(row => row.date < '2024-02-01'
+      ? { kind: 'gap', date: row.date, reason: 'source_all_null' } : row);
+    const result = calculateTechnicalSeriesV1(input);
+    expect(result.intervals.month[0]).toMatchObject({ identity: '2024-02', partial: false });
+    expect(result.intervals.week.find(row => row.identity === '2024-02-05')?.partial).toBe(false);
+    expect(result.unavailablePeriods.map(row => `${['day', 'week', 'month'].indexOf(row.interval)}:${row.identity}`))
+      .toEqual(result.unavailablePeriods.map(row => `${['day', 'week', 'month'].indexOf(row.interval)}:${row.identity}`).sort());
   });
 
   test('derives the coverage-warning input from official sessions rather than calendar-day distance', () => {
@@ -332,6 +408,20 @@ describe('interval aggregation and completeness', () => {
       }
       expect(result.intervals.day.every(row => !row.partial)).toBe(true);
     }
+  });
+
+  test('calendar upper bound keeps the containing Sunday when it extends beyond month-end', () => {
+    const input = fixture({ queryFrom: '2024-03-01', eligibleThrough: '2024-05-31', calculationDate: '2024-05-31' });
+    expect(getTechnicalCalendarCoverageV1(input.window)).toEqual({
+      calendarCoverageFrom: '2024-03-01', calendarCoverageTo: '2024-06-02',
+    });
+    expect(calculateTechnicalSeriesV1(input).intervals.month.at(-1)?.partial).toBe(true);
+  });
+
+  test('an observed month with no official sessions produces no candle or unavailable row', () => {
+    const result = calculateTechnicalSeriesV1(fixture({}, dates('2024-02-01', '2024-02-29')));
+    expect(result.intervals.month.map(row => row.identity)).toEqual(['2024-01', '2024-03']);
+    expect(result.unavailablePeriods).toEqual([]);
   });
 
   test('overflow in volume or indicator arithmetic fails closed', () => {
@@ -406,6 +496,21 @@ describe('dated RSI/MACD and cross', () => {
       expect(result.intervals[interval][0].partial).toBe(true);
       expect(result.intervals[interval].at(-1)!.partial).toBe(true);
     }
+  });
+
+  test('a conservatively partial first month cannot seed the 34-complete-month MACD', () => {
+    const input = fixture({ queryFrom: '2021-01-04', eligibleThrough: '2023-10-31', calculationDate: '2023-11-01' });
+    const rows = calculateTechnicalSeriesV1(input).intervals.month;
+    expect(rows).toHaveLength(34);
+    expect(rows[0].partial).toBe(true);
+    expect(rows.filter(row => !row.partial)).toHaveLength(33);
+    for (const field of ['macd', 'signal', 'histogram', 'cross'] as const) {
+      expect(rows.at(-1)![field]).toEqual({ state: 'unavailable', reason: 'warmup' });
+    }
+    const next = calculateTechnicalSeriesV1(fixture({ queryFrom: '2021-01-04',
+      eligibleThrough: '2023-11-30', calculationDate: '2023-12-01' })).intervals.month;
+    expect(next.at(-1)!.macd).toEqual({ state: 'available',
+      value: calculateMacd(next.filter(row => !row.partial).map(row => row.close)).macd!.value });
   });
 
   test('same explicit 251-row suffix gives exact legacy Engine parity; earlier candles cannot look ahead', () => {
