@@ -141,6 +141,11 @@ The Reviewer independently evaluates whether the pull request is safe and approp
 
 The review should consider the pull request as a whole rather than only individual lines of code.
 
+Review-only work returns findings and does not modify files, branches, or the PR.
+Fixes require an implementation request. Distinguish defects introduced or exposed
+by this change from unrelated baseline issues; do not silently expand the PR to fix
+the latter. A relevant pre-existing safety issue still belongs in the risk assessment.
+
 At minimum, the following areas should be considered when relevant.
 
 ### Requirements
@@ -361,6 +366,10 @@ During re-review, the Reviewer should verify:
 
 Re-review should not be limited mechanically to the previously commented lines when the correction may affect other behavior.
 
+Use the validation scope and evidence-reuse rules in `AGENTS.md`. A new review round
+alone does not require repeating unchanged exploration or all local tests. Required
+CI, plan-specific checks, and the final whole-PR Merge Gate remain unchanged.
+
 ---
 
 ## 9. Pull Request Scope
@@ -417,6 +426,10 @@ This principle applies regardless of whether either role is performed by:
 The relevant distinction is responsibility, not identity or implementation technology.
 
 > **Implementation responsibility and final Merge Gate responsibility should be separated whenever practicable.**
+
+Independence does not mandate a subagent or a fixed number of reviewers. Additional
+reviewers should address a distinct risk or unresolved question, such as financial
+correctness or security, rather than form an automatic review chain.
 
 ---
 
