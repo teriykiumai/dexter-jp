@@ -100,6 +100,9 @@ button, input, select, textarea, table { font: inherit; }
 .dashboard-design .chart-presentation { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, calc(10 * var(--space-8))); align-items: start; gap: var(--space-6); }
 .dashboard-design .chart-visual { min-width: 0; }
 .dashboard-design .price-chart { width: 100%; height: calc(var(--space-8) * 15); overflow: hidden; }
+.dashboard-design .price-chart td, .dashboard-design .price-chart th {
+  height: auto; min-height: 0; padding: 0; border: 0;
+}
 .dashboard-design .chart-context { display: grid; gap: var(--space-4); }
 .dashboard-design :is(.chart-description, .chart-credit) { margin-top: var(--space-3); color: var(--color-text-muted); font: var(--type-small); }
 .dashboard-design .chart-credit { display: grid; gap: var(--space-1); }

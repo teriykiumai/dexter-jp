@@ -4,6 +4,7 @@ import {
   ColorType,
   HistogramSeries,
   LineStyle,
+  LineSeries,
   createChart,
   type BusinessDay,
   type CandlestickData,
@@ -11,6 +12,7 @@ import {
   type ISeriesApi,
 } from 'lightweight-charts';
 import type { ChartBar, ChartPriceLine } from './presentation.js';
+import type { TechnicalCandle, TechnicalInterval } from './technical.js';
 
 export const LIGHTWEIGHT_CHARTS_NOTICE = [
   'TradingView Lightweight Charts™',
@@ -21,6 +23,9 @@ interface PriceChartProps {
   bars: ChartBar[];
   priceLines: ChartPriceLine[];
   describedBy: string;
+  technical?: { candles: readonly TechnicalCandle[]; interval: TechnicalInterval;
+    unavailableDates: readonly string[];
+    collapsed: readonly string[]; selectedDate: string | null; onSelect: (date: string) => void };
 }
 
 export const CHART_PANE_STRETCH = {
@@ -37,10 +42,17 @@ function toBusinessDay(date: string): BusinessDay | null {
     day: Number(match[3]),
   };
 }
+function chronological<T extends { time: BusinessDay }>(rows: T[]): T[] {
+  const key = (day: BusinessDay) => day.year * 10000 + day.month * 100 + day.day;
+  return rows.sort((a, b) => key(a.time) - key(b.time));
+}
 
-export function PriceChart({ bars, priceLines, describedBy }: PriceChartProps) {
+export function PriceChart({ bars, priceLines, describedBy, technical }: PriceChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const chartRef = useRef<ReturnType<typeof createChart> | null>(null);
+  const selectRef = useRef(technical?.onSelect);
+  selectRef.current = technical?.onSelect;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -87,14 +99,15 @@ export function PriceChart({ bars, priceLines, describedBy }: PriceChartProps) {
       wickDownColor: color('--color-chart-down'),
       priceLineVisible: false,
     });
-    const volume = chart.addSeries(HistogramSeries, {
+    chartRef.current = chart;
+    const volume = !technical?.collapsed.includes('volume') ? chart.addSeries(HistogramSeries, {
       priceFormat: { type: 'volume' },
       priceScaleId: 'right',
       priceLineVisible: false,
       lastValueVisible: false,
-      title: '日次出来高',
-    }, 1);
-    volume.priceScale().applyOptions({
+      title: '出来高',
+    }, 1) : null;
+    volume?.priceScale().applyOptions({
       scaleMargins: { top: 0.1, bottom: 0.05 },
     });
     candleSeriesRef.current = candles;
@@ -122,10 +135,41 @@ export function PriceChart({ bars, priceLines, describedBy }: PriceChartProps) {
         });
       }
     }
-    candles.setData(candleData);
-    volume.setData(volumeData);
+    const gaps = technical?.unavailableDates.map(date => ({ time: toBusinessDay(date)! })) ?? [];
+    candles.setData(chronological([...candleData, ...gaps]));
+    volume?.setData(volumeData);
+
+    if (technical) {
+      let pane = volume ? 2 : 1;
+      const addIndicator = (field: 'rsi' | 'macd' | 'signal' | 'histogram', paneIndex: number, token: string) => {
+        const series = field === 'histogram'
+          ? chart.addSeries(HistogramSeries, { color: color(token), title: field, priceLineVisible: false }, paneIndex)
+          : chart.addSeries(LineSeries, { color: color(token), title: field, priceLineVisible: false,
+            lineStyle: field === 'signal' ? LineStyle.Dashed : LineStyle.Solid }, paneIndex);
+        series.setData(chronological([...technical.candles.map(row => ({ time: toBusinessDay(row.displayDate)!,
+          ...(row[field].state === 'available' ? { value: row[field].value } : {}) })), ...gaps]));
+      };
+      if (!technical.collapsed.includes('rsi')) addIndicator('rsi', pane++, '--color-chart-rsi');
+      if (!technical.collapsed.includes('macd')) {
+        addIndicator('macd', pane, '--color-chart-macd');
+        addIndicator('signal', pane, '--color-chart-signal');
+        addIndicator('histogram', pane, '--color-chart-volume');
+      }
+      chart.panes().forEach((item, index) => item.setStretchFactor(index === 0 ? 4 : 1));
+      chart.subscribeCrosshairMove(event => {
+        if (!event.time) return;
+        const time = event.time;
+        const date = typeof time === 'object' ? `${time.year}-${String(time.month).padStart(2, '0')}-${String(time.day).padStart(2, '0')}` : String(time);
+        selectRef.current?.(date);
+      });
+    }
 
     chart.timeScale().fitContent();
+    if (technical && bars.length) {
+      const end = bars.at(-1)!.date, from = new Date(`${end}T00:00:00Z`);
+      from.setUTCFullYear(from.getUTCFullYear() - (technical.interval === 'day' ? 1 : technical.interval === 'week' ? 3 : 5));
+      chart.timeScale().setVisibleRange({ from: toBusinessDay(from.toISOString().slice(0, 10))!, to: toBusinessDay(end)! });
+    }
     const resizeObserver = new ResizeObserver(entries => {
       const size = entries[0]?.contentRect;
       if (size?.width && size.height) {
@@ -136,10 +180,17 @@ export function PriceChart({ bars, priceLines, describedBy }: PriceChartProps) {
 
     return () => {
       candleSeriesRef.current = null;
+      chartRef.current = null;
       resizeObserver.disconnect();
       chart.remove();
     };
-  }, [bars]);
+  }, [bars, technical?.candles, technical?.interval, technical?.collapsed, technical?.unavailableDates]);
+
+  useEffect(() => {
+    const selected = technical?.candles.find(row => row.displayDate === technical.selectedDate);
+    if (selected && candleSeriesRef.current) chartRef.current?.setCrosshairPosition(
+      selected.close, toBusinessDay(selected.displayDate)!, candleSeriesRef.current);
+  }, [technical?.selectedDate, technical?.candles, technical?.collapsed]);
 
   useEffect(() => {
     const candles = candleSeriesRef.current;
@@ -171,7 +222,7 @@ export function PriceChart({ bars, priceLines, describedBy }: PriceChartProps) {
   return (
     <div
       aria-describedby={describedBy}
-      aria-label="調整後日足ローソク足と日次出来高の同期チャート"
+      aria-label={technical ? '調整後OHLCV・RSI・MACDの同期チャート。正確な値は隣接する表で確認できます。' : '調整後日足ローソク足と日次出来高の同期チャート'}
       className="price-chart"
       ref={containerRef}
       role="img"

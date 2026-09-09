@@ -480,6 +480,16 @@ whitespace and escaping; IDs/financial data never cause document overflow.
 
 ## 9. Change checklist
 
+DR-T3's refreshed Technical chart reuses the same 480px/384px chart geometry and
+tokens. Its shared-time-scale panes allocate stretch factors 4:1:1:1 to price,
+volume, RSI and MACD; collapsed panes are removed without hiding price. Native
+labelled selects and existing Buttons provide source/interval, shared cursor and
+pane controls. Snapshot charts retain their inherited 70/30 layout. Exact tables
+remain permanently available inside the existing labelled scroll containers.
+The chart library's internal layout table is not a semantic data table. Reset its
+cell padding, borders and minimum row height inside `.price-chart`; the library
+owns its pixel geometry so data-table touch sizing cannot crop lower panes.
+
 For every user-facing UI task:
 
 1. Read `DESIGN.md`, `docs/SPEC.md`, and the applicable plan before deciding the
