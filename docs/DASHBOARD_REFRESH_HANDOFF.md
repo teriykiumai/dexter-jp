@@ -798,6 +798,16 @@ loaded without printing its value. One invocation completed with exit 0:
 - `historyCoverageClipped=false`; `historicalIdentity=not_verified` remains
   permanent. This is evidence for this ticker/account/window, not all instruments.
 
+PR #108 review follow-up explicitly freezes `standard_calendar_boundary_v2` and
+both range bounds in the calendar registry, and adds `calendarBoundaryPolicy` to
+sanitized smoke evidence. Request/mapping logic is unchanged. The live evidence
+above was produced before this metadata addition and is reused only for the
+unchanged source behavior; it did not contain the new field. The new field is
+verified with synthetic smoke tests, without another quota-consuming live run.
+The focused 24 tests and direct TypeScript check passed after this change; the
+canonical local typecheck still fails to start with the existing bin-remap error.
+The full post-fix test run also passed: 1,218 tests, 0 failures across 96 files.
+
 Normalized observation digests (not raw source data):
 
 | Source | Digest |

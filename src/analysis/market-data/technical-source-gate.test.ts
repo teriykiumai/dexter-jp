@@ -108,6 +108,11 @@ describe('DR-T0 Technical source registry and request window', () => {
   });
 
   test('pins exact endpoints and lexically ordered official source revision IDs', () => {
+    expect(TECHNICAL_SOURCE_REGISTRY_V1.find(source => source.role === 'trading_calendar')).toMatchObject({
+      boundaryPolicy: 'standard_calendar_boundary_v2',
+      calendarCoverageFrom: 'queryFrom',
+      calendarCoverageTo: 'max(containingSunday(calculationDate),lastDayOfMonth(calculationDate))',
+    });
     expect(TECHNICAL_SOURCE_ENDPOINTS_V1).toEqual({
       tradingCalendar: '/v2/markets/calendar',
       securityMaster: '/v2/equities/master',

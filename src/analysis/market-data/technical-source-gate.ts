@@ -9,6 +9,7 @@ import { isStrictGregorianDate, parseAsOfCutoff, tokyoDateFromUtcInstantV1,
 import { toJQuantsSecuritiesCode } from '../../utils/japanese-securities-code.js';
 
 export const TECHNICAL_SOURCE_CONTRACT_VERSION_V1 = 'jquants_technical_source_contract_v1' as const;
+export const TECHNICAL_CALENDAR_BOUNDARY_POLICY_V2 = 'standard_calendar_boundary_v2' as const;
 export const JQUANTS_CURRENT_MASTER_MAPPING_VERSION_V1 = 'jquants_current_master_mapping_v1' as const;
 export const JQUANTS_TECHNICAL_CALENDAR_MAPPING_VERSION_V1 = 'jquants_technical_calendar_mapping_v1' as const;
 export const JQUANTS_TECHNICAL_DAILY_BARS_MAPPING_VERSION_V1 = 'jquants_technical_daily_bars_mapping_v1' as const;
@@ -93,6 +94,9 @@ export const TECHNICAL_SOURCE_REGISTRY_V1 = Object.freeze([
     sourceRevisionIds: Object.freeze(TECHNICAL_SOURCE_REVISIONS_V1.calendar.map(item => item.id)),
     entitlementClass: 'configured_standard_or_higher',
     coverage: 'complete_calendar_date_envelope',
+    boundaryPolicy: TECHNICAL_CALENDAR_BOUNDARY_POLICY_V2,
+    calendarCoverageFrom: 'queryFrom',
+    calendarCoverageTo: 'max(containingSunday(calculationDate),lastDayOfMonth(calculationDate))',
   }),
 ] as const);
 

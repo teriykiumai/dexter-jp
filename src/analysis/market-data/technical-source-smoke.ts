@@ -12,6 +12,7 @@ import {
   JQUANTS_TECHNICAL_CALENDAR_MAPPING_VERSION_V1,
   JQUANTS_TECHNICAL_DAILY_BARS_MAPPING_VERSION_V1,
   TECHNICAL_SOURCE_CONTRACT_VERSION_V1,
+  TECHNICAL_CALENDAR_BOUNDARY_POLICY_V2,
   TECHNICAL_SOURCE_ENDPOINTS_V1,
   TECHNICAL_SOURCE_REGISTRY_V1,
   TECHNICAL_SOURCE_REVISIONS_V1,
@@ -403,6 +404,7 @@ export type TechnicalSourceGateEvidenceV1 = Readonly<{
   schemaVersion: 'technical_source_gate_evidence_v1';
   result: 'passed';
   sourceContractVersion: typeof TECHNICAL_SOURCE_CONTRACT_VERSION_V1;
+  calendarBoundaryPolicy: typeof TECHNICAL_CALENDAR_BOUNDARY_POLICY_V2;
   checkedAt: AsOfCutoff;
   acceptedAt: AsOfCutoff;
   entitlementClass: 'configured_standard_or_higher';
@@ -513,6 +515,7 @@ export async function proveTechnicalSourceGateV1(
     schemaVersion: 'technical_source_gate_evidence_v1',
     result: 'passed',
     sourceContractVersion: TECHNICAL_SOURCE_CONTRACT_VERSION_V1,
+    calendarBoundaryPolicy: TECHNICAL_CALENDAR_BOUNDARY_POLICY_V2,
     checkedAt: client.now(),
     acceptedAt: client.acceptedAt,
     entitlementClass: 'configured_standard_or_higher',

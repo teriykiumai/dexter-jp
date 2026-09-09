@@ -117,6 +117,7 @@ describe('DR-T0 bounded Technical source smoke', () => {
 
     expect(evidence).toMatchObject({
       schemaVersion: 'technical_source_gate_evidence_v1', result: 'passed',
+      calendarBoundaryPolicy: 'standard_calendar_boundary_v2',
       entitlementClass: 'configured_standard_or_higher', ticker: '7203', jquantsCode: '72030',
       calculationDate: '2026-09-04', queryFrom: '2016-09-04', queryTo: '2026-09-04',
       currentMaster: { Date: '2026-09-04', Code: '72030', CoName: '現在の会社名', Mkt: '0111', ProdCat: '011' },
