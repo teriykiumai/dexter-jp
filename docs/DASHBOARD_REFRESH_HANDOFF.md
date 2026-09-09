@@ -1,14 +1,15 @@
 # Dexter JP Dashboard Refresh Handoff
 
 **Status:** DR-0, DR-V1-V3, DR-T1, DR-C1, DR-A1, DR-O1, DR-T0A, DR-T1A, and DR-A2
-are merged. DR-T0B merged in PR #105. DR-T1B is the current local implementation
-candidate for Standard-compatible calendar bounds and conservative partial periods.
-PR #106 merged the development-agent operating policy. DR-T0 has not passed.
+are merged. DR-T0B merged in PR #105, the operating policy in PR #106, and DR-T1B
+in PR #107 (`e3ec3baf1234d4c1577b49a4c55ce0647f1dc2b3`). DR-T0 is now the local
+implementation candidate. Its authorized 7203 live three-input smoke passed on
+2026-09-09 JST; independent review, CI, and merge remain required.
 No production Technical/source-module codec, source adapter, or new chart controls
 exist in the merged runtime yet. With zero registered Overview modules,
 the read remains 404 and refresh admission is refused before creating a job.
 
-**Last Updated:** 2026-09-08
+**Last Updated:** 2026-09-09
 
 ## 1. How to use this file
 
@@ -49,7 +50,8 @@ new visual token system, or seventh tab exists at this baseline.
 ## 3. Historical predecessor steps and DR-T0A boundary
 
 The candidate descriptions below are historical records of their respective PRs.
-Section 7.7 records the DR-T0B handoff and section 7.8 the current DR-T1B candidate;
+Section 7.7 records DR-T0B, section 7.8 the historical DR-T1B candidate, and section
+7.9 the current DR-T0 candidate;
 use the normative plan for ordering.
 
 The DR-0 branch was:
@@ -745,9 +747,82 @@ Independent review and merge are still required. DR-T0 resumes only after DR-T1B
 merges, with the preserved source-gate work reconciled and a separately authorized
 bounded three-input smoke; this candidate proves no live-source readiness.
 
+## 7.9 DR-T0 candidate with authorized live smoke (review/merge pending)
+
+The clean implementation worktree was fast-forwarded to PR #107's merge before
+creating `feat/dashboard-technical-source-resume-step0`. Pre-existing edits in the
+original checkout were preserved. The candidate restores the source registry,
+strict calendar/master/adjusted-bars mappers, bounded smoke client and synthetic
+tests, plus `bun run smoke:technical-source --ticker 7203`.
+
+Calendar requests now start exactly at `queryFrom` under
+`standard_calendar_boundary_v2`, retaining the entire ten-year bars query and
+the prescribed trailing envelope. Source-to-series tests exercise both a leading
+bar and explicit all-null gap, partial week/month handling, unchanged daily input
+coverage, and rejection of missing post-start sessions. Historical identity remains
+`not_verified`; no lifetime identity proof is asserted.
+
+Smoke limits are three logical queries, 20 attempts/pages, 8,000 rows, 32 MiB,
+30 seconds per request, 180 seconds overall, and zero retries. A non-interactive
+invocation without `--confirm-external-fetch` stops before credential configuration
+or network access. The command emits sanitized evidence only; it creates no
+artifact, receipt, job, public API, or UI. Run it only while no other J-Quants
+process is active; cross-process quota coordination is not implemented.
+
+Local source/CLI/integration tests: 24 pass, 0 fail. Full `bun test`: 1,218 pass,
+0 fail across 96 files. Direct TypeScript invocation through Bun passed.
+`bun run typecheck` still fails before compilation with the
+existing node_modules bin-remap error; the direct check does not replace that result.
+These local test/compiler results are reused from the preceding implementation
+turn: executable files, dependencies, and environment are unchanged (only a trailing
+blank line was removed). Required CI must independently pass for the published head.
+The closed registry retains its original 2026-09-04 source revisions. The relevant
+official bars, entitlement, master, calendar, adjustment, update-time, pagination,
+holiday, market and product-category contracts were rechecked on 2026-09-09.
+Official Markdown endpoints resolved the HTML-reader failures; no mapping change
+was required and no newly published provider revision is claimed.
+
+The user authorized the bounded 7203 smoke and PR publication. No other local
+Dexter/Bun source process was found before dispatch. The existing credential was
+loaded without printing its value. One invocation completed with exit 0:
+
+- `acceptedAt`: `2026-09-08T23:59:04.414Z`;
+  `checkedAt`: `2026-09-08T23:59:06.883Z` (2026-09-09 JST).
+- Bars query: `2016-09-09` through `2026-09-08`; calendar:
+  `2016-09-09` through `2026-09-30`. No price-range shortening.
+- Three requests/pages, 6,116 total rows, 857,930 decoded response bytes,
+  zero retries. Bars: 2,441 rows / 714,303 bytes; master: 1 / 331;
+  calendar: 3,674 / 143,296. Every source finished without a continuation cursor.
+- End-date master: code `72030`, date `2026-09-08`, market `0111`, product `011`;
+  current-master predicate and complete post-start sessions passed.
+- `historyCoverageClipped=false`; `historicalIdentity=not_verified` remains
+  permanent. This is evidence for this ticker/account/window, not all instruments.
+
+PR #108 review follow-up explicitly freezes `standard_calendar_boundary_v2` and
+both range bounds in the calendar registry, and adds `calendarBoundaryPolicy` to
+sanitized smoke evidence. Request/mapping logic is unchanged. The live evidence
+above was produced before this metadata addition and is reused only for the
+unchanged source behavior; it did not contain the new field. The new field is
+verified with synthetic smoke tests, without another quota-consuming live run.
+The focused 24 tests and direct TypeScript check passed after this change; the
+canonical local typecheck still fails to start with the existing bin-remap error.
+The full post-fix test run also passed: 1,218 tests, 0 failures across 96 files.
+
+Normalized observation digests (not raw source data):
+
+| Source | Digest |
+| --- | --- |
+| bars | `sha256:fe77e276fa5aba6d7f96ade8ba58dcd7cfb00a9dc7e5d206a6417a9d778de08a` |
+| master | `sha256:6041aa93a08c88ebc8c14ee292fb7f338d24e07a88693f4e9e02c4dc1ad105a7` |
+| calendar | `sha256:4e1c6610b5ef264b94adff3a623399af077f9fca8ad0c7d906eafab8234cb0d3` |
+
+Pending: required CI, independent review and merge. DR-T2 must not start before
+the DR-T0 PR is merged and local main is fast-forwarded.
+
 ## 8. Remaining risks
 
-- Calendar-only success leaves the complete Technical source gate unresolved.
+- The live three-input result is limited to the tested account/ticker/window;
+  it does not prove universal source availability or historical identity.
   Conservative leading partials can omit an otherwise complete historical weekly
   or monthly candle from indicator warm-up; this is the accepted trade-off for
   staying inside the configured Standard calendar range without inventing holidays.
