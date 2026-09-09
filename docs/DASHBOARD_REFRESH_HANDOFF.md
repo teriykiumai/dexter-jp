@@ -916,6 +916,18 @@ fast-forwarding local main. This step adds only the Technical UI, not DR-M0 sour
   worktree Bun bin remapping issue. Direct TypeScript compilation is supplementary,
   not a claim that the canonical command passed. Independent review and head CI
   remain required before merge.
+- PR #110 review follow-up: recovered in-flight Technical jobs bind adoption only
+  for the same ticker/current scope. Exact-job polling runs every 1,000 ms while
+  visible, suspends/aborts while hidden, resumes on visibility return, and stays
+  stopped after terminal state or a latched read failure. The required pre-action
+  cooldown/admission notice is displayed beside the refresh quota explanation.
+  Focused browser validation: 8 pass, including reload -> completion -> one latest
+  GET -> History replace and hidden/visible/terminal/read-failure lifecycles.
+  Full Playwright after these fixes: 88 pass / 0 fail (Tier 2 UI lifecycle scope).
+  Technical unit tests: 2 pass. Direct TypeScript compilation passes; canonical
+  local typecheck retains the bin-remapping failure above. The prior full Bun
+  result belongs to head `9d0e66f`; it is reused for unchanged backend contracts,
+  not reported as a new local full-suite run. No external provider calls were made.
 
 The next planned source step is DR-M0 and remains subject to its dated migration
 and explicitly authorized external-smoke gate; DR-T3 does not satisfy that gate.

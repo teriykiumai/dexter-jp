@@ -1371,6 +1371,71 @@ function technicalBrowserFixture() {
 }
 
 test.describe('DR-T3 Technical', () => {
+  test('reload recovers the matching running job and adopts one authoritative read with History replace', async ({ page }) => {
+    await guardRefreshRequests(page); await mockSnapshotApi(page);
+    await page.clock.install({ time: new Date('2026-09-10T00:00:00Z') });
+    await page.clock.pauseAt(new Date('2026-09-10T00:00:00Z'));
+    let running = false, completed = false, posts = 0, latestReads = 0;
+    const jobId = '11111111-1111-4111-8111-111111111111';
+    const job = () => ({ jobId, kind: 'technical_refresh', target: { kind: 'technical', ticker: '1010' },
+      status: completed ? 'completed' : 'running', failure: null });
+    await page.route('**/api/market-data/jobs/active', route => route.fulfill({ json: { marketJob: running ? job() : null, blockingKind: null } }));
+    await page.route('**/api/market-data/technical/1010/latest', route => { latestReads++; return route.fulfill({ json: technicalBrowserFixture() }); });
+    await page.route('**/api/session', route => route.fulfill({ json: { csrfHeader: 'X-Dexter-CSRF', csrfToken: 'fixture' } }));
+    await page.route('**/api/market-data/technical/jobs', route => { posts++; running = true; return route.fulfill({ status: 202, json: { jobId } }); });
+    await page.route(`**/api/market-data/jobs/${jobId}`, route => route.fulfill({ json: job() }));
+    await page.goto(`${baseUrl}/?ticker=1010&tab=technical&chartSource=snapshot&future=keep`);
+    await expect(page.getByText('最小dispatch時間とExecution budgetは受付成立後の時間です。直前の通信から最大60秒は受付できず、手動再試行が必要です。', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '最新EODを取得' }).click();
+    await expect(page.getByRole('status').filter({ hasText: 'technical_refresh / 対象 1010 / running' })).toBeVisible();
+    await page.reload();
+    await expect(page.getByRole('status').filter({ hasText: 'technical_refresh / 対象 1010 / running' })).toBeVisible();
+    await expect(page.getByText('保存済み最新データを確認中です。')).toHaveCount(0);
+    const before = latestReads, historyLength = await page.evaluate(() => history.length);
+    completed = true;
+    await page.clock.runFor(1000);
+    await expect(page).toHaveURL(/chartSource=latest&future=keep/);
+    expect(latestReads).toBe(before + 1); expect(posts).toBe(1);
+    expect(await page.evaluate(() => history.length)).toBe(historyLength);
+  });
+
+  for (const fails of [false, true]) {
+    test(`visible-only 1s polling stops while hidden and after ${fails ? 'read failure' : 'terminal state'}`, async ({ page }) => {
+      await guardRefreshRequests(page); await mockSnapshotApi(page);
+      await page.clock.install({ time: new Date('2026-09-10T00:00:00Z') });
+      await page.clock.pauseAt(new Date('2026-09-10T00:00:00Z'));
+      const jobId = '11111111-1111-4111-8111-111111111111';
+      const job = { jobId, kind: 'technical_refresh', target: { kind: 'technical', ticker: '1010' }, status: 'running', failure: null };
+      let polls = 0;
+      await page.route('**/api/market-data/jobs/active', route => route.fulfill({ json: { marketJob: job, blockingKind: null } }));
+      await page.route('**/api/market-data/technical/1010/latest', route => route.fulfill({ json: technicalBrowserFixture() }));
+      await page.route(`**/api/market-data/jobs/${jobId}`, route => { polls++; return fails
+        ? route.fulfill({ status: 500, json: { error: { code: 'repository_failure' } } })
+        : route.fulfill({ json: { ...job, status: 'completed' } }); });
+      const visibility = async (value: 'visible' | 'hidden') => page.evaluate(state => {
+        Object.defineProperty(document, 'visibilityState', { configurable: true, value: state });
+        document.dispatchEvent(new Event('visibilitychange'));
+      }, value);
+      await page.goto(`${baseUrl}/?ticker=1010&tab=technical&chartSource=snapshot`);
+      await expect(page.getByRole('status').filter({ hasText: 'technical_refresh / 対象 1010 / running' })).toBeVisible();
+      await visibility('hidden'); await page.clock.runFor(5000); expect(polls).toBe(0);
+      await visibility('visible'); await page.clock.runFor(999); expect(polls).toBe(0);
+      await page.clock.runFor(1);
+      if (fails) await expect(page.getByRole('alert')).toContainText('ジョブ状態を確認できません');
+      else await expect(page).toHaveURL(/chartSource=latest/);
+      expect(polls).toBe(1);
+      await visibility('hidden'); await page.clock.runFor(3000);
+      await visibility('visible'); await page.clock.runFor(5000); expect(polls).toBe(1);
+      if (fails) {
+        await page.locator('#dashboard-tab-report').click(); await page.locator('#dashboard-tab-technical').click();
+        await page.clock.runFor(5000); expect(polls).toBe(1);
+        await page.reload();
+        await expect(page.getByRole('status').filter({ hasText: 'technical_refresh / 対象 1010 / running' })).toBeVisible();
+        await page.clock.runFor(1000); await expect.poll(() => polls).toBe(2);
+      }
+    });
+  }
+
   test('source/interval, shared cursor, collapse, URL history, reload and all responsive widths', async ({ page }) => {
     const requests = await guardRefreshRequests(page); await mockSnapshotApi(page);
     await page.route('**/api/market-data/technical/1010/latest', route => route.fulfill({ json: technicalBrowserFixture() }));

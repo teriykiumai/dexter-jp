@@ -72,9 +72,14 @@ export function TechnicalPanel({ snapshot, comparison, navigationRevision, child
   }, [ticker, comparison]);
   useEffect(() => {
     if (pageReadFailure) return;
-    const controller = new AbortController();
+    const controller = new AbortController(), captured = scope.current;
     void json<MarketDataActiveJobV1>('/api/market-data/jobs/active', { signal: controller.signal }).then(value => {
       if (controller.signal.aborted) return;
+      const recovered = value.marketJob;
+      if (captured === scope.current && !comparison && recovered?.kind === 'technical_refresh'
+        && recovered.target.kind === 'technical' && recovered.target.ticker === ticker && !terminal(recovered)) {
+        adoption.current = captured;
+      }
       setJob(value.marketJob);
       setActiveReady(true);
       setBlocked(value.blockingKind ? '戦略検証ジョブが実行中です。完了後にこのタブへ戻ってください。' : null);
@@ -84,14 +89,24 @@ export function TechnicalPanel({ snapshot, comparison, navigationRevision, child
 
   useEffect(() => {
     if (!job || terminal(job) || busy || pageReadFailure) return;
-    const controller = new AbortController();
-    const timer = window.setTimeout(() => {
-      void json<MarketDataJobViewV1>(`/api/market-data/jobs/${job.jobId}`, { signal: controller.signal }).then(next => {
-        if (controller.signal.aborted) return;
-        setJob(next);
-      }).catch(() => { if (!controller.signal.aborted) { pageReadFailure = true; setBlocked('ジョブ状態を確認できません。再試行せずページ全体を再読み込みしてください。'); } });
-    }, 2000);
-    return () => { clearTimeout(timer); controller.abort(); };
+    let timer: number | undefined, controller: AbortController | null = null;
+    const suspend = () => { clearTimeout(timer); controller?.abort(); controller = null; };
+    const schedule = () => {
+      suspend();
+      if (document.visibilityState !== 'visible' || pageReadFailure) return;
+      timer = window.setTimeout(() => {
+        if (document.visibilityState !== 'visible' || pageReadFailure) return;
+        const request = new AbortController();
+        controller = request;
+        void json<MarketDataJobViewV1>(`/api/market-data/jobs/${job.jobId}`, { signal: request.signal }).then(next => {
+          if (request.signal.aborted || document.visibilityState !== 'visible') return;
+          setJob(next);
+        }).catch(() => { if (!request.signal.aborted) { pageReadFailure = true; setBlocked('ジョブ状態を確認できません。再試行せずページ全体を再読み込みしてください。'); } });
+      }, 1000);
+    };
+    document.addEventListener('visibilitychange', schedule);
+    schedule();
+    return () => { document.removeEventListener('visibilitychange', schedule); suspend(); };
   }, [job, busy, ticker, comparison]);
 
   function choose(key: 'chartSource' | 'interval', value: string) {
@@ -148,6 +163,7 @@ export function TechnicalPanel({ snapshot, comparison, navigationRevision, child
         {job && !terminal(job) ? <Button disabled={busy || !!blocked || comparison} onClick={() => void mutate(true)}>更新をキャンセル</Button> : null}
       </div>
       <p>J-Quants Standard以上が必要です。取得ボタンは外部通信を開始し、API quotaを消費します。最大20 HTTP試行・600秒。Dashboard内の戦略検証と通信枠を共有します。CLI・別processとのアカウント全体の通信調整は行いません。</p>
+      <p>最小dispatch時間とExecution budgetは受付成立後の時間です。直前の通信から最大60秒は受付できず、手動再試行が必要です。</p>
       {comparison ? <p>Snapshot比較中：選択中の保存済みSnapshotだけを表示します。外部更新は無効です。</p> : null}
       {loading ? <p role="status">保存済み最新データを確認中です。</p> : null}
       {warning ? <p role="status">警告: {warning}</p> : null}
