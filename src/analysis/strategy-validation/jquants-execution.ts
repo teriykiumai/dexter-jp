@@ -277,7 +277,7 @@ function planRestriction(status: number, body: unknown): boolean {
     && /not available on your subscription|subscription covers the following dates/i.test(detail);
 }
 
-function parseRetryAfterMs(value: string | null, wallNowMs: number): number | null {
+export function parseRetryAfterMs(value: string | null, wallNowMs: number): number | null {
   if (value === null) return null;
   if (/^\d+$/.test(value)) {
     const seconds = Number(value);

@@ -1051,6 +1051,14 @@ indicators, and receive no inferred listing or missing-data meaning. If the sect
 the single-boundary `history_coverage_clipped` warning with the exact start date.
 Every artifact also carries
 `historical_identity_unverified`.
+
+DR-T2 validates calendar-dependent eligibility, completeness, clipping and derived
+series at construction time using the fetched official calendar. Read-time codec
+validation checks the stored closed structures, relationships and digests without
+refetching or reconstructing holidays. It does not independently re-prove omitted
+calendar rows or the source observation digest. This boundary was approved before
+DR-T2 implementation; normalized calendar rows are not added to the artifact.
+
 Under `standard_calendar_boundary_v2`, `calendarCoverageFrom = queryFrom`;
 `calendarCoverageTo` is the later of the Gregorian Sunday containing
 `calculationDate` and the last day of `calculationDate`'s Gregorian month. These

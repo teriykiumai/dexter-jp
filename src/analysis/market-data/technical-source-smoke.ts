@@ -178,7 +178,7 @@ async function readBoundedResponse(response: Response, remainingBytes: number): 
   return output;
 }
 
-function classifyPlanRestrictionResponse(
+export function classifyPlanRestrictionResponse(
   status: number,
   bytes: Uint8Array,
   query: Query,

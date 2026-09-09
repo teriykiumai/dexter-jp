@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { CanonicalTickerSchema } from '../snapshot/schema.js';
+import { TechnicalAdapterV1 } from './technical-adapter.js';
+import { TECHNICAL_JOB_LIMITS_V1, TechnicalSourceFailureV1 } from './technical-source.js';
 import { canonicalJsonV1, type CanonicalJsonValue } from '../snapshot/canonical-json.js';
 import {
   DashboardJobCoordinatorErrorV1,
@@ -36,7 +39,7 @@ import type { LatestMarketDataV1 } from './repository.js';
 
 export type MarketDataJobAcceptedV1 = Readonly<{
   schemaVersion: 'market_data_job_accepted_v1'; jobId: string;
-  kind: 'overview_refresh'; acceptedAt: string; statusUrl: string;
+  kind: 'overview_refresh' | 'technical_refresh'; acceptedAt: string; statusUrl: string;
 }>;
 export type MarketDataActiveJobV1 = Readonly<{
   schemaVersion: 'market_data_active_job_v1';
@@ -74,6 +77,7 @@ export interface MarketDataJobServiceOptionsV1 {
   jobRepository?: MarketDataJobRepositoryV1;
   overviewRegistry?: OverviewModuleRegistryV1;
   technicalObservation?: TechnicalObservationPortV1;
+  technicalSource?: TechnicalAdapterV1;
   limits?: MarketDataJobLimitsV1;
   enqueue?: (work: () => void) => void;
 }
@@ -139,6 +143,7 @@ export class MarketDataJobServiceV1 {
   readonly #limits: MarketDataJobLimitsV1 | null;
   readonly #scheduleInfeasible: boolean;
   readonly #technical?: TechnicalObservationPortV1;
+  readonly #technicalSource?: TechnicalAdapterV1;
   readonly #enqueue: (work: () => void) => void;
   readonly #leases = new Map<string, DashboardJobLeaseV1>();
   readonly #controllers = new Map<string, AbortController>();
@@ -149,7 +154,8 @@ export class MarketDataJobServiceV1 {
     this.coordinator = options.coordinator;
     this.jobRepository = options.jobRepository ?? new MarketDataJobRepositoryV1();
     this.overviewRegistry = options.overviewRegistry ?? new OverviewModuleRegistryV1();
-    this.#technical = options.technicalObservation;
+    this.#technical = options.technicalObservation ?? options.technicalSource;
+    this.#technicalSource = options.technicalSource;
     this.#environment = options.coordinator.environment;
     const validatedLimits = validateLimits(options.limits, options.coordinator.requestsPerMinute);
     this.#limits = validatedLimits.limits;
@@ -236,6 +242,159 @@ export class MarketDataJobServiceV1 {
     return Object.freeze({ schemaVersion: 'market_overview_response_v1',
       modules: Object.freeze(MARKET_DATA_MODULE_IDS_V1.map(moduleId => byId.get(moduleId)
         ?? Object.freeze({ moduleId, state: 'not_implemented' as const }))) });
+  }
+
+  async readTechnical(ticker: string) {
+    if (!this.#technicalSource) throw new MarketDataJobServiceErrorV1('artifact_not_found');
+    try {
+      const latest = await this.#technicalSource.repository(ticker).latest();
+      return { schemaVersion: 'technical_latest_response_v1' as const, state: latest.state,
+        artifact: latest.artifact, observationReceiptIdentity: latest.observationReceiptIdentity,
+        checkedAt: latest.checkedAt, warnings: [...latest.artifact.warnings, ...latest.warnings] };
+    } catch (error) { throw mapRepository(error); }
+  }
+
+  async acceptTechnical(ticker: string): Promise<MarketDataJobAcceptedV1> {
+    CanonicalTickerSchema.parse(ticker);
+    const revalidate = () => {
+      if (!this.#technicalSource?.configured()) throw new MarketDataJobServiceErrorV1('source_configuration_missing');
+    };
+    revalidate();
+    await this.initialize();
+    const jobId = randomUUID();
+    let created!: MarketDataJobViewV1;
+    await this.coordinator.admit({ kind: 'technical_refresh', jobId, revalidate,
+      create: async lease => {
+        created = MarketDataJobViewV1Schema.parse({ schemaVersion: 'market_data_job_view_v1', jobId,
+          kind: 'technical_refresh', target: { kind: 'technical', ticker }, status: 'accepted',
+          acceptedAt: safeInstant(lease.acceptedAtMs), startedAt: null, completedAt: null,
+          progress: { attempts: 0, pages: 0, acceptedRows: 0, responseBytes: 0, completedModules: 0, totalModules: 1 },
+          failure: null, result: null });
+        return projected(await this.jobRepository.create(created));
+      },
+      adopt: lease => {
+        this.#leases.set(jobId, lease);
+        this.#controllers.set(jobId, new AbortController());
+        this.#enqueue(() => { void this.#executeTechnical(created).catch(() => this.coordinator.latchRecovery()); });
+      },
+    });
+    return { schemaVersion: 'market_data_job_accepted_v1', jobId, kind: 'technical_refresh',
+      acceptedAt: created.acceptedAt, statusUrl: `/api/market-data/jobs/${jobId}` };
+  }
+
+  async #executeTechnical(initial: MarketDataJobViewV1): Promise<void> {
+    const lease = this.#requireLease(initial.jobId), controller = this.#controllers.get(initial.jobId)!;
+    const source = this.#technicalSource!;
+    if (initial.target.kind !== 'technical') throw new Error('Invalid Technical target.');
+    const repository = source.repository(initial.target.ticker), limits = TECHNICAL_JOB_LIMITS_V1;
+    const budget = new AbortController();
+    const remaining = limits.executionBudgetMs - (this.#environment.monotonicNowMs() - lease.monotonicOriginMs);
+    if (remaining <= 0) budget.abort();
+    const timer = remaining > 0 ? setTimeout(() => budget.abort(), remaining) : undefined;
+    timer?.unref?.();
+    const signal = AbortSignal.any([lease.signal, controller.signal, budget.signal]);
+    let current = initial, committed = false;
+    const counts = { attempts: 0, pages: 0, acceptedRows: 0, responseBytes: 0 };
+    try {
+      current = await this.coordinator.exclusive(async () => {
+        const durable = await this.jobRepository.load(initial.jobId);
+        if (durable.status === 'cancel_requested') return durable;
+        if (durable.status !== 'accepted') throw new Error('Invalid admission state.');
+        return this.#replace(durable, { ...durable, status: 'running', startedAt: this.#nowAtLeast(Date.parse(durable.acceptedAt)) });
+      });
+      if (controller.signal.aborted || current.status === 'cancel_requested') { await this.#finishCancellation(current); return; }
+      if (Math.floor((limits.estimatedMinimumAttempts - 1) / this.coordinator.requestsPerMinute) * 60000 >= remaining) {
+        throw new TechnicalSourceFailureV1('external_schedule_infeasible');
+      }
+      const check = (wait = 0) => {
+        if (signal.aborted) throw new TechnicalSourceFailureV1('source_timeout');
+        if (this.#environment.monotonicNowMs() - lease.monotonicOriginMs + wait >= limits.executionBudgetMs) {
+          throw new TechnicalSourceFailureV1('source_timeout');
+        }
+        if (counts.attempts >= limits.maximumAttempts) throw new TechnicalSourceFailureV1('source_response_too_large');
+      };
+      const prepared = await source.collect(initial.target.ticker, {
+        jobId: initial.jobId, acceptedAt: initial.acceptedAt, signal,
+        waitBeforeRetry: async delayMs => {
+          check(delayMs);
+          try { await this.#environment.sleep(delayMs, signal); }
+          catch { throw new TechnicalSourceFailureV1('source_timeout'); }
+          check();
+        },
+        shareSource: async <T>(_key: string, load: () => Promise<T>) => load(),
+        recordProgress: progress => {
+          counts.pages += progress.pages; counts.acceptedRows += progress.acceptedRows; counts.responseBytes += progress.responseBytes;
+          if (counts.pages > limits.maximumPages || counts.acceptedRows > limits.maximumRows
+            || counts.responseBytes > limits.maximumResponseBytes) throw new TechnicalSourceFailureV1('source_response_too_large');
+        },
+        dispatch: async <T>(start: (signal: AbortSignal) => Promise<T>) => {
+          check();
+          const request = new AbortController();
+          const combined = AbortSignal.any([signal, request.signal]);
+          let requestTimer: ReturnType<typeof setTimeout> | undefined;
+          let onAbort!: () => void;
+          const aborted = new Promise<never>((_, reject) => {
+            onAbort = () => reject(new TechnicalSourceFailureV1('source_timeout'));
+            if (combined.aborted) onAbort(); else combined.addEventListener('abort', onAbort, { once: true });
+          });
+          try {
+            return await Promise.race([this.coordinator.dispatch(lease, check, () => {
+              counts.attempts++;
+              requestTimer = setTimeout(() => request.abort(), 30000); requestTimer.unref?.();
+              return start(combined);
+            }, combined), aborted]);
+          } finally { if (requestTimer) clearTimeout(requestTimer); combined.removeEventListener('abort', onAbort); }
+        },
+      });
+      if (!same(counts, { attempts: prepared.attempts, pages: prepared.pages,
+        acceptedRows: prepared.acceptedRows, responseBytes: prepared.responseBytes })) throw new Error('Invalid collection accounting.');
+      if (signal.aborted || this.#environment.monotonicNowMs() - lease.monotonicOriginMs >= limits.executionBudgetMs) {
+        throw new TechnicalSourceFailureV1('source_timeout');
+      }
+      current = await this.coordinator.exclusive(async () => {
+        const updated = await this.#updateProgress(current, counts);
+        if (updated.status === 'cancel_requested') return updated;
+        return this.#replace(updated, { ...updated, status: 'publishing' });
+      });
+      if (current.status === 'cancel_requested') { await this.#finishCancellation(current); return; }
+      this.coordinator.assertOwner(lease);
+      const checkedAt = this.#nowAtLeast(Date.parse(prepared.artifact.fetchedAt));
+      let observed, state: 'published' | 'idempotent_reuse';
+      try { observed = await repository.publish(prepared.artifact, { jobId: initial.jobId, acceptedAt: initial.acceptedAt, checkedAt }); state = observed.state; }
+      catch (error) {
+        if (!(error instanceof MarketDataReceiptPublicationErrorV1) || error.proof.receiptState !== 'ambiguous') throw error;
+        observed = await repository.findObservation(initial.jobId, initial.acceptedAt);
+        if (!observed) throw new MarketDataReceiptPublicationErrorV1('artifact_write_failed', { receiptState: 'definitely_absent' });
+        if (observed.checkedAt !== checkedAt) throw new Error('Invalid committed receipt.');
+        state = error.proof.contentPublicationState;
+      }
+      committed = true;
+      const terminal = MarketDataJobViewV1Schema.parse({ ...current, status: 'completed',
+        completedAt: this.#nowAtLeast(Date.parse(checkedAt)), progress: { ...current.progress, completedModules: 1 },
+        result: { kind: 'technical', state, checkedAt, artifactIdentity: observed.artifactIdentity,
+          observationReceiptIdentity: observed.observationReceiptIdentity,
+          warningCodes: marketDataWarningCodesV1(observed.artifact.warnings.map(warning => warning.code)) } });
+      await this.coordinator.exclusive(() => this.#terminalReplace(current, terminal, true));
+    } catch (error) {
+      if (committed || lease.signal.aborted) { this.coordinator.latchRecovery(); return; }
+      if (controller.signal.aborted) { await this.#finishCancellation(current); return; }
+      const safePublicationFailure = error instanceof MarketDataReceiptPublicationErrorV1 && error.proof.receiptState === 'definitely_absent';
+      if (current.status === 'publishing' && !safePublicationFailure
+        && !(error instanceof MarketDataRepositoryErrorV1 && error.code === 'artifact_collision')) {
+        this.coordinator.latchRecovery(); return;
+      }
+      const code = error instanceof TechnicalSourceFailureV1 ? error.code
+        : safePublicationFailure ? 'artifact_write_failed'
+          : error instanceof MarketDataRepositoryErrorV1 && error.code === 'artifact_collision' ? 'artifact_collision' : 'invariant_failure';
+      await this.coordinator.exclusive(async () => {
+        const durable = await this.jobRepository.load(initial.jobId);
+        if (durable.status === 'cancel_requested') { await this.#finishCancellationLocked(durable); return; }
+        const terminal = MarketDataJobViewV1Schema.parse({ ...durable, status: 'failed',
+          progress: { ...durable.progress, ...counts }, completedAt: this.#nowAtLeast(Date.parse(durable.acceptedAt)),
+          failure: marketDataJobFailureV1(code), result: null });
+        await this.#terminalReplace(durable, terminal, false);
+      });
+    } finally { if (timer) clearTimeout(timer); this.#controllers.delete(initial.jobId); }
   }
 
   async acceptOverview(): Promise<MarketDataJobAcceptedV1> {
@@ -695,6 +854,15 @@ export class MarketDataJobServiceV1 {
     try { outcome = await this.jobRepository.replace(terminal); }
     catch { outcome = { state: 'ambiguous' }; }
     if (outcome.state !== 'published' && hasCommittedReceipt && terminal.status === 'completed'
+      && terminal.result?.kind === 'technical') {
+      const memory = MarketDataJobViewV1Schema.parse({ ...terminal, result: { ...terminal.result,
+        warningCodes: marketDataWarningCodesV1([...terminal.result.warningCodes, 'job_record_write_failed']) } });
+      await this.#validateTerminalJob(memory, true);
+      this.#memoryCompletions.set(memory.jobId, memory);
+      this.coordinator.latchRecovery();
+      return;
+    }
+    if (outcome.state !== 'published' && hasCommittedReceipt && terminal.status === 'completed'
       && terminal.result?.kind === 'overview') {
       const memory = MarketDataJobViewV1Schema.parse({ ...terminal, result: { ...terminal.result,
         moduleResults: terminal.result.moduleResults.map(result =>
@@ -736,6 +904,14 @@ export class MarketDataJobServiceV1 {
       if (!same(observed.artifactIdentity, job.result.artifactIdentity)
         || !same(observed.observationReceiptIdentity, job.result.observationReceiptIdentity)
         || observed.checkedAt !== job.result.checkedAt) throw new Error('Invalid Technical association.');
+      if (this.#technicalSource) {
+        const full = await this.#technicalSource.loadObservation(job.result.observationReceiptIdentity);
+        const expected = marketDataWarningCodesV1([
+          ...full.artifact.warnings.map(warning => warning.code),
+          ...(allowMemoryWarning ? ['job_record_write_failed' as const] : []),
+        ]);
+        if (!same(expected, job.result.warningCodes)) throw new Error('Invalid Technical warning association.');
+      }
       return;
     }
     for (const result of job.result.moduleResults) {

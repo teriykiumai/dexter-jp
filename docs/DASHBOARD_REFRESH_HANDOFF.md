@@ -2,11 +2,11 @@
 
 **Status:** DR-0, DR-V1-V3, DR-T1, DR-C1, DR-A1, DR-O1, DR-T0A, DR-T1A, and DR-A2
 are merged. DR-T0B merged in PR #105, the operating policy in PR #106, and DR-T1B
-in PR #107 (`e3ec3baf1234d4c1577b49a4c55ce0647f1dc2b3`). DR-T0 is now the local
-implementation candidate. Its authorized 7203 live three-input smoke passed on
-2026-09-09 JST; independent review, CI, and merge remain required.
-No production Technical/source-module codec, source adapter, or new chart controls
-exist in the merged runtime yet. With zero registered Overview modules,
+in PR #107. DR-T0 merged in PR #108 (`07594c702615f7168959d455389b57cf4f00a2ee`)
+after independent re-review. DR-T2 is the current local implementation candidate;
+no new live fetch, publication, review or merge is implied by this status.
+Technical artifact/source/job API code is present only in the DR-T2 candidate;
+new chart controls remain DR-T3 scope. With zero registered Overview modules,
 the read remains 404 and refresh admission is refused before creating a job.
 
 **Last Updated:** 2026-09-09
@@ -818,6 +818,69 @@ Normalized observation digests (not raw source data):
 
 Pending: required CI, independent review and merge. DR-T2 must not start before
 the DR-T0 PR is merged and local main is fast-forwarded.
+
+## 7.10 DR-T2 local implementation candidate
+
+Branch `feat/dashboard-technical-api-step2` starts from PR #108's merged main.
+The user approved the validation boundary before implementation: construction uses
+the fetched official calendar for eligibility, missing-session checks, clipping,
+partial periods and calculation. Read-time validation checks stored strict schema,
+range/identity/OHLCV relationships, unavailable groups, warning contracts, source
+manifest and digests without fetching or inventing a calendar. It cannot re-prove
+unpersisted source observations or calendar-dependent decisions. Section 6.1 of the
+plan records that boundary; no new calendar field or Snapshot version is introduced.
+
+The candidate adds the Technical production codec, three-input source collector,
+repository adapter and native `technical_refresh` admission/execution using the
+existing Market Data job repository and process-wide coordinator. The default
+Dashboard composition registers the adapter for reads/recovery even without a key;
+mutation admission requires the existing configured J-Quants credential. Collection
+uses the DR-T0-frozen bounds, zero retries, shared dispatch and bounded responses.
+`entitlementClass=standard` denotes the minimum capability verified by the complete
+requested range, not a claim about the customer's billing tier.
+
+New routes are `GET /api/market-data/technical/:ticker/latest` and
+`POST /api/market-data/technical/jobs` with exactly `{ticker}`. Existing exact job,
+active-job and cancellation routes serve both Market Data kinds. Mutation retains
+Host/Origin/CSRF protection. There is no extra confirmation property, new button,
+polling loop, source read on GET, or live API call in tests.
+
+Tests cover source cutoff/closed inputs, identity/null/missing/zero handling,
+partial-gap semantics, digest and schema corruption, publish/idempotent receipt
+reuse, retained observations, fallback/no-fallback reads, API validation,
+cross-kind admission conflict, cancellation/deadline, ambiguous create, terminal
+write failure after receipt publication, and restart interruption without replay.
+The initial implementation full test run passed 1,231 tests across 97 files
+(0 failures); the initial focused Technical run passed 13 tests. Stored
+indicator values are also checked against the existing pure series engine using
+stored completed candles; this does not re-prove calendar completeness.
+Canonical local `bun run typecheck` still fails before compilation with the
+existing worktree bin-remap error. Diff whitespace checks passed for tracked and
+new files. This is a Tier 3 persistence/financial/API change; no external API was
+called during implementation or validation.
+
+PR #109's first review identified a production/manual-smoke transport mismatch.
+The correction separates production limits (20 actual attempts, 8,000 rows,
+32 MiB, 600 seconds) from the unchanged DR-T0 no-retry/180-second smoke. Production
+retries only network errors, HTTP 429 and 5xx, at most twice per page, using the
+existing Phase 4 Retry-After parser and deterministic 1/2-second fallback delays.
+Every retry dispatches through the shared coordinator; retry waits respect the
+admission-origin deadline, cancellation and attempt ceiling. Body/schema/pagination
+failures and other 4xx remain non-retryable. Regression coverage includes retry
+success/exhaustion, exact delays, low-rate pagination past the old deadline,
+600-second boundaries, wait cancellation, the 20-attempt cap and no publication
+after terminal retry failure. No external API calls were made for this correction.
+The first correction-wide run had 1,236 passes, one 30-second timeout in the
+unchanged Strategy Validation preflight-capacity test, and one associated teardown
+error. That module then passed independently (12 tests; capacity test about 20s).
+A second full run passed all 1,237 tests across 97 files (0 failures, 81.77s),
+including the 19 Technical tests. No executable changes occurred between runs.
+Direct TypeScript compilation passed; canonical local typecheck still has the
+same pre-compilation Bun bin-remap failure noted above.
+
+Independent re-review and required updated-head CI remain pending. No UI changed, so browser
+journeys are reserved for DR-T3 rather than claiming API tests prove chart UX.
+Do not start DR-T3 before this step is reviewed/merged and main is fast-forwarded.
 
 ## 8. Remaining risks
 
