@@ -1,4 +1,5 @@
 import { StrategyValidationUuidV4Schema } from '../analysis/strategy-validation/artifacts.js';
+import { CanonicalTickerSchema } from '../analysis/snapshot/schema.js';
 import { parseStrictJsonBytesV1 } from '../analysis/strategy-validation/strict-json.js';
 import { DashboardJobCoordinatorErrorV1, dashboardCoordinatorFailureV1 } from '../analysis/dashboard-jobs/coordinator.js';
 import { MarketDataJobRepositoryErrorV1 } from '../analysis/market-data/job-repository.js';
@@ -73,6 +74,32 @@ export class MarketDataDashboardApiV1 {
     if (segments[0] !== 'api' || segments[1] !== 'market-data') return null;
     try {
       if (!isAllowedDashboardHost(request.headers.get('host'))) throw new DashboardSecurityErrorV1('forbidden_host');
+
+      if (segments.length === 5 && segments[2] === 'technical' && segments[4] === 'latest') {
+        if (request.method !== 'GET') return methodNotAllowed('GET');
+        this.#requireNoQuery(url);
+        const ticker = CanonicalTickerSchema.safeParse(segments[3]);
+        if (!ticker.success) throw new MarketDataApiErrorV1('invalid_request');
+        return jsonResponse(await this.service.readTechnical(ticker.data));
+      }
+      if (segments.length === 4 && segments[2] === 'technical' && segments[3] === 'jobs') {
+        if (request.method !== 'POST') return methodNotAllowed('POST');
+        this.session.requireMutation(request, url);
+        this.#requireNoQuery(url);
+        requireDashboardJsonMediaType(request);
+        let body: unknown;
+        try { body = parseStrictJsonBytesV1(await readDashboardBody(request, POST_LIMIT), POST_LIMIT); }
+        catch (error) {
+          if (error instanceof DashboardSecurityErrorV1) throw error;
+          throw new MarketDataApiErrorV1('invalid_request');
+        }
+        if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).join() !== 'ticker') {
+          throw new MarketDataApiErrorV1('invalid_request');
+        }
+        const ticker = CanonicalTickerSchema.safeParse((body as { ticker: unknown }).ticker);
+        if (!ticker.success) throw new MarketDataApiErrorV1('invalid_request');
+        return jsonResponse(await this.service.acceptTechnical(ticker.data), 202);
+      }
 
       if (segments.length === 3 && segments[2] === 'overview') {
         if (request.method !== 'GET') return methodNotAllowed('GET');

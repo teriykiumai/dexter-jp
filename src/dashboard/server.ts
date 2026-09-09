@@ -4,6 +4,7 @@ import { StrategyValidationJobServiceV1 } from '../analysis/strategy-validation/
 import { DEFAULT_JQUANTS_EXECUTION_ENVIRONMENT_V1, resolveJQuantsRequestsPerMinuteV1 } from '../analysis/strategy-validation/jquants-execution.js';
 import { DashboardJobCoordinatorV1 } from '../analysis/dashboard-jobs/coordinator.js';
 import { MarketDataJobServiceV1 } from '../analysis/market-data/job-service.js';
+import { TechnicalAdapterV1 } from '../analysis/market-data/technical-adapter.js';
 import {
   handleDashboardRequest,
   internalServerErrorResponse,
@@ -28,7 +29,8 @@ export function createDefaultDashboardApisV1(): Readonly<{
   const strategyService = new StrategyValidationJobServiceV1({
     snapshotRepository: new AnalysisSnapshotRepository(), coordinator,
   });
-  const marketService = new MarketDataJobServiceV1({ coordinator });
+  const marketService = new MarketDataJobServiceV1({ coordinator,
+    technicalSource: new TechnicalAdapterV1(DEFAULT_JQUANTS_EXECUTION_ENVIRONMENT_V1) });
   return Object.freeze({
     strategyValidationApi: new StrategyValidationDashboardApiV1(strategyService, session),
     marketDataApi: new MarketDataDashboardApiV1(marketService, session),
