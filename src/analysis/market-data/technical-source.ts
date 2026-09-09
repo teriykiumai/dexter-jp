@@ -1,7 +1,7 @@
 import { CanonicalTickerSchema } from '../snapshot/schema.js';
 import { type CanonicalJsonValue } from '../snapshot/canonical-json.js';
 import { parseStrictJsonBytesV1 } from '../strategy-validation/strict-json.js';
-import type { JQuantsExecutionEnvironmentV1 } from '../strategy-validation/jquants-execution.js';
+import { parseRetryAfterMs, type JQuantsExecutionEnvironmentV1 } from '../strategy-validation/jquants-execution.js';
 import { digestMarketSourceInputV1, type SourceInputV1 } from './contracts.js';
 import { currentCodeWarningsV1, marketDataJobFailureV1, type MarketDataJobFailureCodeV1 } from './job-schema.js';
 import { createTechnicalArtifactCodecV1, technicalSourceIdentityV1 } from './technical-artifact.js';
@@ -9,12 +9,22 @@ import { calculateTechnicalSeriesV1, TECHNICAL_INDICATOR_METHODS_V1, TechnicalSe
 import { createTechnicalSourceRequestWindowV1, mapTechnicalCalendarV1, mapTechnicalDailyBarsV1,
   resolveTechnicalEligibleThroughV1, validateCurrentTechnicalMasterV1, TechnicalSourceGateErrorV1,
   TECHNICAL_SOURCE_ENDPOINTS_V1 } from './technical-source-gate.js';
-import { TECHNICAL_SOURCE_SMOKE_LIMITS_V1 as bounds, classifyPlanRestrictionResponse } from './technical-source-smoke.js';
+import { classifyPlanRestrictionResponse } from './technical-source-smoke.js';
 import type { OverviewCollectionContextV1 } from './overview-registry.js';
 
 export const TECHNICAL_JOB_LIMITS_V1 = Object.freeze({ estimatedMinimumAttempts: 3,
-  maximumAttempts: bounds.attempts, maximumPages: bounds.pages, maximumRows: bounds.rows,
-  maximumResponseBytes: bounds.responseBytes, executionBudgetMs: bounds.deadlineMs });
+  maximumAttempts: 20, maximumPages: 20, maximumRows: 8000,
+  maximumResponseBytes: 32 * 1024 * 1024, executionBudgetMs: 600_000 });
+const bounds = { pages: TECHNICAL_JOB_LIMITS_V1.maximumPages, rows: TECHNICAL_JOB_LIMITS_V1.maximumRows,
+  responseBytes: TECHNICAL_JOB_LIMITS_V1.maximumResponseBytes };
+export type TechnicalCollectionContextV1 = OverviewCollectionContextV1 & Readonly<{
+  waitBeforeRetry(delayMs: number): Promise<void>;
+}>;
+class RetryableTechnicalFailure extends Error {
+  constructor(readonly code: 'source_rate_limited' | 'source_invalid_response', readonly delayMs: number | null) {
+    super(code);
+  }
+}
 export class TechnicalSourceFailureV1 extends Error {
   constructor(readonly code: Exclude<MarketDataJobFailureCodeV1, 'all_modules_failed'>) {
     super(marketDataJobFailureV1(code).message);
@@ -23,7 +33,7 @@ export class TechnicalSourceFailureV1 extends Error {
 const fail = (code: TechnicalSourceFailureV1['code']): never => { throw new TechnicalSourceFailureV1(code); };
 
 /** All network dispatches go through the admitted Dashboard lease, not the CLI limiter. */
-export async function collectTechnicalV1(ticker: string, context: OverviewCollectionContextV1,
+export async function collectTechnicalV1(ticker: string, context: TechnicalCollectionContextV1,
   environment: JQuantsExecutionEnvironmentV1, secrets: NodeJS.ProcessEnv = process.env) {
   CanonicalTickerSchema.parse(ticker);
   const key = environment.apiKey();
@@ -31,6 +41,17 @@ export async function collectTechnicalV1(ticker: string, context: OverviewCollec
   const window = createTechnicalSourceRequestWindowV1(context.acceptedAt);
   let pages = 0, rowCount = 0, bytes = 0, attempts = 0;
   const fetched = new Map<string, { rows: readonly unknown[]; fetchedAt: string; pageCount: number }>();
+  async function dispatchWithRetry<T>(start: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    for (let retry = 0; ; retry++) {
+      try { return await context.dispatch(start); }
+      catch (error) {
+        if (context.signal.aborted) return fail('source_timeout');
+        if (!(error instanceof RetryableTechnicalFailure)) throw error;
+        if (retry === 2) return fail(error.code);
+        await context.waitBeforeRetry(error.delayMs ?? (retry + 1) * 1000);
+      }
+    }
+  }
   async function fetchRows(role: string, endpoint: string, query: Record<string, string>) {
     const rows: unknown[] = [], cursors = new Set<string>();
     let cursor: string | undefined, sourcePages = 0;
@@ -39,12 +60,20 @@ export async function collectTechnicalV1(ticker: string, context: OverviewCollec
       const url = new URL(`https://api.jquants.com${endpoint}`);
       Object.entries(query).forEach(([name, value]) => url.searchParams.set(name, value));
       if (cursor !== undefined) url.searchParams.set('pagination_key', cursor);
-      const payload = await context.dispatch(async signal => {
+      const payload = await dispatchWithRetry(async signal => {
         attempts++;
         let response: Response;
         try { response = await environment.fetch(url, { method: 'GET', redirect: 'error',
           headers: { 'x-api-key': key! }, signal }); }
-        catch { return fail(signal.aborted ? 'source_timeout' : 'source_invalid_response'); }
+        catch {
+          if (signal.aborted) return fail('source_timeout');
+          throw new RetryableTechnicalFailure('source_invalid_response', null);
+        }
+        if (response.status === 429 || response.status >= 500 && response.status <= 599) {
+          const delay = parseRetryAfterMs(response.headers.get('retry-after'), environment.wallNowMs());
+          await response.body?.cancel();
+          throw new RetryableTechnicalFailure(response.status === 429 ? 'source_rate_limited' : 'source_invalid_response', delay);
+        }
         if (!response.ok && response.status !== 400) {
           await response.body?.cancel();
           return fail(response.status === 401 ? 'source_unauthorized' : response.status === 403

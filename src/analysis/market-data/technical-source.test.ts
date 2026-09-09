@@ -11,9 +11,8 @@ import { DashboardSessionV1 } from '../../dashboard/session.js';
 import type { MarketDataJobViewV1 } from './job-schema.js';
 import type { JobWriteOutcomeV1 } from '../dashboard-jobs/coordinator.js';
 import type { JQuantsExecutionEnvironmentV1 } from '../strategy-validation/jquants-execution.js';
-import { collectTechnicalV1 } from './technical-source.js';
+import { collectTechnicalV1, type TechnicalCollectionContextV1 } from './technical-source.js';
 import { createTechnicalArtifactCodecV1 } from './technical-artifact.js';
-import type { OverviewCollectionContextV1 } from './overview-registry.js';
 
 export function technicalFixtureV1(options: { allGap?: boolean; missing?: boolean; master?: Record<string, unknown>;
   status?: number; partialGap?: boolean; close?: number; acceptedAt?: string } = {}) {
@@ -44,7 +43,8 @@ export function technicalFixtureV1(options: { allGap?: boolean; missing?: boolea
       return Response.json({ data: rows });
     } };
   const counts = { attempts: 0, pages: 0, acceptedRows: 0, responseBytes: 0 };
-  const context: OverviewCollectionContextV1 = { jobId: '11111111-1111-4111-8111-111111111111',
+  const context: TechnicalCollectionContextV1 = { jobId: '11111111-1111-4111-8111-111111111111',
+    waitBeforeRetry: async () => {},
     acceptedAt, signal: new AbortController().signal, shareSource: async (_key, load) => load(),
     dispatch: async start => { counts.attempts++; return start(new AbortController().signal); },
     recordProgress: p => { counts.pages += p.pages; counts.acceptedRows += p.acceptedRows; counts.responseBytes += p.responseBytes; } };
@@ -102,6 +102,20 @@ describe('DR-T2 Technical production artifact/source', () => {
     expect(() => createTechnicalArtifactCodecV1('6758', {}).parse(artifact)).toThrow();
   });
 
+  test('schema, body and invalid first-page cursor failures are never retried', async () => {
+    for (const response of [
+      () => new Response('{invalid'),
+      () => Response.json({ data: [], unexpected: true }),
+      () => Response.json({ data: [], pagination_key: '' }),
+      () => new Response(new ReadableStream({ start(controller) { controller.error(new Error('body failure')); } })),
+    ]) {
+      const h = technicalFixtureV1(); let waits = 0;
+      await expect(collectTechnicalV1('7203', { ...h.context, waitBeforeRetry: async () => { waits++; } },
+        { ...h.env, fetch: async () => response() }, {})).rejects.toBeDefined();
+      expect(h.counts.attempts).toBe(1); expect(waits).toBe(0);
+    }
+  });
+
   test('retains exact partial-period gap reasons and does not convert all-gap input into an artifact', async () => {
     const h = technicalFixtureV1({ partialGap: true });
     const { artifact } = await collectTechnicalV1('7203', h.context, h.env, {});
@@ -115,13 +129,14 @@ describe('DR-T2 Technical production artifact/source', () => {
     await expect(collectTechnicalV1('7203', gap.context, gap.env, {})).rejects.toMatchObject({ code: 'source_no_observation' });
   });
 
-  test('fails closed on identity/missing-session/provider failures without retries', async () => {
+  test('fails closed on identity/missing-session and non-retryable provider failures', async () => {
     for (const [options, code, attempts] of [
       [{ missing: true }, 'source_invalid_response', 3],
       [{ master: { Mkt: '0109' } }, 'instrument_identity_unverified', 2],
       [{ status: 403 }, 'source_entitlement_required', 1],
       [{ status: 401 }, 'source_unauthorized', 1],
-      [{ status: 429 }, 'source_rate_limited', 1],
+      [{ status: 404 }, 'source_invalid_response', 1],
+      [{ status: 429 }, 'source_rate_limited', 3],
     ] as const) {
       const h = technicalFixtureV1(options);
       await expect(collectTechnicalV1('7203', h.context, h.env, {})).rejects.toMatchObject({ code });
@@ -132,12 +147,13 @@ describe('DR-T2 Technical production artifact/source', () => {
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
-async function harness(options: Parameters<typeof technicalFixtureV1>[0] = {}, fault: 'terminal' | 'create' | null = null) {
+async function harness(options: Parameters<typeof technicalFixtureV1>[0] = {}, fault: 'terminal' | 'create' | null = null, rate = 500) {
   const fixture = technicalFixtureV1(options);
   const root = await mkdtemp(join(tmpdir(), 'dexter-technical-')); roots.push(root);
   let now = Date.parse(fixture.context.acceptedAt);
-  const env = { ...fixture.env, wallNowMs: () => now, monotonicNowMs: () => now - Date.parse(fixture.context.acceptedAt) };
-  const coordinator = new DashboardJobCoordinatorV1(env, 500);
+  const env = { ...fixture.env, wallNowMs: () => now, monotonicNowMs: () => now - Date.parse(fixture.context.acceptedAt),
+    sleep: async (ms: number, signal?: AbortSignal) => { if (signal?.aborted) throw new Error('Cancelled'); now += ms; } };
+  const coordinator = new DashboardJobCoordinatorV1(env, rate);
   coordinator.register({ domain: 'strategy_validation', inventory: async () => [], cleanup: async () => {},
     isAbsent: async () => true, reconcile: async () => {} });
   const adapter = new TechnicalAdapterV1(env, root, {});
@@ -156,7 +172,7 @@ async function harness(options: Parameters<typeof technicalFixtureV1>[0] = {}, f
     jobRepository: new FaultRepository(root), enqueue: work => { queued = work; } });
   await service.initialize();
   return { ...fixture, root, env, adapter, service, coordinator,
-    start: () => queued?.(), advance: () => { now += 60001; } };
+    start: () => queued?.(), advance: (ms = 60001) => { now += ms; } };
 }
 async function terminal(service: MarketDataJobServiceV1, id: string) {
   for (let i = 0; i < 300; i++) {
@@ -168,6 +184,98 @@ async function terminal(service: MarketDataJobServiceV1, id: string) {
 }
 
 describe('DR-T2 shared service and GET/POST boundary', () => {
+  test('retries network/429/5xx through the shared attempt log with exact delays', async () => {
+    for (const failure of ['network', '429', '503', 'http-date', 'invalid-header'] as const) {
+      const h = await harness();
+      const original = h.env.fetch, sleeps: number[] = [];
+      let attempts = 0;
+      h.env.sleep = async ms => { sleeps.push(ms); h.advance(ms); };
+      h.env.fetch = async (url, init) => {
+        if (++attempts === 1) {
+          if (failure === 'network') throw new TypeError('private network detail');
+          return new Response(null, { status: failure === '503' ? 503 : 429,
+            headers: { 'retry-after': failure === 'http-date'
+              ? new Date(h.env.wallNowMs() + 4000).toUTCString() : failure === 'invalid-header' ? 'invalid' : '3' } });
+        }
+        return original(url, init);
+      };
+      const accepted = await h.service.acceptTechnical('7203'); h.start();
+      const done = await terminal(h.service, accepted.jobId);
+      expect(done.status).toBe('completed');
+      expect(attempts).toBe(4);
+      expect(sleeps).toEqual([failure === 'network' || failure === 'invalid-header' ? 1000 : failure === 'http-date' ? 4000 : 3000]);
+      expect((await h.service.readTechnical('7203')).observationReceiptIdentity.jobId).toBe(accepted.jobId);
+    }
+  });
+
+  test('retry exhaustion is bounded and publishes neither artifact nor receipt', async () => {
+    for (const status of [429, 503, 0]) {
+      const h = await harness(); let attempts = 0;
+      const sleeps: number[] = [];
+      h.env.sleep = async ms => { sleeps.push(ms); h.advance(ms); };
+      h.env.fetch = async () => { attempts++; if (!status) throw new TypeError('network'); return new Response(null, { status }); };
+      const accepted = await h.service.acceptTechnical('7203'); h.start();
+      expect((await terminal(h.service, accepted.jobId)).failure?.code).toBe(status === 429 ? 'source_rate_limited' : 'source_invalid_response');
+      expect(attempts).toBe(3); expect(sleeps).toEqual([1000, 2000]);
+      await expect(h.service.readTechnical('7203')).rejects.toMatchObject({ code: 'artifact_not_found' });
+      expect(await h.adapter.repository('7203').findObservation(accepted.jobId, accepted.acceptedAt)).toBeNull();
+    }
+  });
+
+  test('R=1 paginated four-attempt execution completes at 180s within the 600s production budget', async () => {
+    const h = await harness({}, null, 1), original = h.env.fetch;
+    const dispatched: number[] = [];
+    h.env.fetch = async (url, init) => {
+      dispatched.push(h.env.monotonicNowMs());
+      const response = await original(url, init);
+      if (String(url).includes('/calendar') && !String(url).includes('pagination_key')) {
+        const payload = await response.json() as { data: unknown[] };
+        return Response.json({ data: payload.data, pagination_key: 'second' });
+      }
+      if (String(url).includes('pagination_key')) return Response.json({ data: [] });
+      return response;
+    };
+    const accepted = await h.service.acceptTechnical('7203'); h.start();
+    expect((await terminal(h.service, accepted.jobId)).status).toBe('completed');
+    expect(dispatched).toEqual([0, 60000, 120000, 180000]);
+  });
+
+  test('retry waits cannot reach the 600s boundary and cancellation interrupts a wait', async () => {
+    for (const delay of [600, 601]) {
+      const h = await harness(); let attempts = 0;
+      h.env.fetch = async () => { attempts++; return new Response(null, { status: 429, headers: { 'retry-after': String(delay) } }); };
+      const accepted = await h.service.acceptTechnical('7203'); h.start();
+      expect((await terminal(h.service, accepted.jobId)).failure?.code).toBe('source_timeout');
+      expect(attempts).toBe(1);
+      await expect(h.service.readTechnical('7203')).rejects.toMatchObject({ code: 'artifact_not_found' });
+    }
+    const h = await harness(); let attempts = 0, entered!: () => void;
+    const waiting = new Promise<void>(resolve => { entered = resolve; });
+    h.env.fetch = async () => { attempts++; return new Response(null, { status: 503 }); };
+    h.env.sleep = async (_ms, signal) => new Promise<void>((_resolve, reject) => {
+      entered(); signal!.addEventListener('abort', () => reject(new Error('cancelled')), { once: true });
+    });
+    const accepted = await h.service.acceptTechnical('7203'); h.start(); await waiting;
+    await h.service.cancelJob(accepted.jobId);
+    expect((await terminal(h.service, accepted.jobId)).status).toBe('cancelled');
+    expect(attempts).toBe(1);
+    await expect(h.service.readTechnical('7203')).rejects.toMatchObject({ code: 'artifact_not_found' });
+  });
+
+  test('pagination plus retries cannot exceed the 20 actual attempt ceiling', async () => {
+    const h = await harness(); let attempts = 0;
+    h.env.fetch = async () => {
+      attempts++;
+      return attempts % 3 ? new Response(null, { status: 503 })
+        : Response.json({ data: [], pagination_key: `page-${attempts}` });
+    };
+    const accepted = await h.service.acceptTechnical('7203'); h.start();
+    expect((await terminal(h.service, accepted.jobId)).failure?.code).toBe('source_response_too_large');
+    expect(attempts).toBe(20);
+    expect(await h.adapter.repository('7203').findObservation(accepted.jobId, accepted.acceptedAt)).toBeNull();
+    await expect(h.service.readTechnical('7203')).rejects.toMatchObject({ code: 'artifact_not_found' });
+  });
+
   test('a corrupt latest revision falls back explicitly to the prior valid receipt', async () => {
     const options = { close: 105 };
     const h = await harness(options);
@@ -196,7 +304,7 @@ describe('DR-T2 shared service and GET/POST boundary', () => {
     await expect(h.service.readTechnical('7203')).rejects.toMatchObject({ code: 'artifact_not_found' });
     const timeout = await harness();
     const original = timeout.env.fetch;
-    timeout.env.fetch = async (url, init) => { timeout.advance(); timeout.advance(); timeout.advance(); return original(url, init); };
+    timeout.env.fetch = async (url, init) => { timeout.advance(600000); return original(url, init); };
     const job = await timeout.service.acceptTechnical('7203'); timeout.start();
     expect((await terminal(timeout.service, job.jobId)).failure?.code).toBe('source_timeout');
     expect(timeout.calls()).toBe(1);

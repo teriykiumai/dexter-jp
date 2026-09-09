@@ -315,6 +315,12 @@ export class MarketDataJobServiceV1 {
       };
       const prepared = await source.collect(initial.target.ticker, {
         jobId: initial.jobId, acceptedAt: initial.acceptedAt, signal,
+        waitBeforeRetry: async delayMs => {
+          check(delayMs);
+          try { await this.#environment.sleep(delayMs, signal); }
+          catch { throw new TechnicalSourceFailureV1('source_timeout'); }
+          check();
+        },
         shareSource: async <T>(_key: string, load: () => Promise<T>) => load(),
         recordProgress: progress => {
           counts.pages += progress.pages; counts.acceptedRows += progress.acceptedRows; counts.responseBytes += progress.responseBytes;

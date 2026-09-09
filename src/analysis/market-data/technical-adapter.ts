@@ -2,9 +2,8 @@ import { CanonicalTickerSchema } from '../snapshot/schema.js';
 import type { JQuantsExecutionEnvironmentV1 } from '../strategy-validation/jquants-execution.js';
 import { MarketDataRepositoryV1 } from './repository.js';
 import { createTechnicalArtifactCodecV1 } from './technical-artifact.js';
-import { collectTechnicalV1 } from './technical-source.js';
+import { collectTechnicalV1, type TechnicalCollectionContextV1 } from './technical-source.js';
 import type { MarketDataObservationReceiptIdentityV1 } from './contracts.js';
-import type { OverviewCollectionContextV1 } from './overview-registry.js';
 
 export class TechnicalAdapterV1 {
   constructor(readonly environment: JQuantsExecutionEnvironmentV1,
@@ -14,7 +13,7 @@ export class TechnicalAdapterV1 {
     CanonicalTickerSchema.parse(ticker);
     return new MarketDataRepositoryV1(createTechnicalArtifactCodecV1(ticker, this.secrets), this.root);
   }
-  collect(ticker: string, context: OverviewCollectionContextV1) {
+  collect(ticker: string, context: TechnicalCollectionContextV1) {
     return collectTechnicalV1(ticker, context, this.environment, this.secrets);
   }
   async loadObservation(identity: MarketDataObservationReceiptIdentityV1) {

@@ -850,8 +850,8 @@ partial-gap semantics, digest and schema corruption, publish/idempotent receipt
 reuse, retained observations, fallback/no-fallback reads, API validation,
 cross-kind admission conflict, cancellation/deadline, ambiguous create, terminal
 write failure after receipt publication, and restart interruption without replay.
-The final full test run passed 1,231 tests across 97 files (0 failures); the focused
-Technical run passed 13 tests. Final direct TypeScript validation passed. Stored
+The initial implementation full test run passed 1,231 tests across 97 files
+(0 failures); the initial focused Technical run passed 13 tests. Stored
 indicator values are also checked against the existing pure series engine using
 stored completed candles; this does not re-prove calendar completeness.
 Canonical local `bun run typecheck` still fails before compilation with the
@@ -859,7 +859,26 @@ existing worktree bin-remap error. Diff whitespace checks passed for tracked and
 new files. This is a Tier 3 persistence/financial/API change; no external API was
 called during implementation or validation.
 
-Independent review and required head CI remain pending. No UI changed, so browser
+PR #109's first review identified a production/manual-smoke transport mismatch.
+The correction separates production limits (20 actual attempts, 8,000 rows,
+32 MiB, 600 seconds) from the unchanged DR-T0 no-retry/180-second smoke. Production
+retries only network errors, HTTP 429 and 5xx, at most twice per page, using the
+existing Phase 4 Retry-After parser and deterministic 1/2-second fallback delays.
+Every retry dispatches through the shared coordinator; retry waits respect the
+admission-origin deadline, cancellation and attempt ceiling. Body/schema/pagination
+failures and other 4xx remain non-retryable. Regression coverage includes retry
+success/exhaustion, exact delays, low-rate pagination past the old deadline,
+600-second boundaries, wait cancellation, the 20-attempt cap and no publication
+after terminal retry failure. No external API calls were made for this correction.
+The first correction-wide run had 1,236 passes, one 30-second timeout in the
+unchanged Strategy Validation preflight-capacity test, and one associated teardown
+error. That module then passed independently (12 tests; capacity test about 20s).
+A second full run passed all 1,237 tests across 97 files (0 failures, 81.77s),
+including the 19 Technical tests. No executable changes occurred between runs.
+Direct TypeScript compilation passed; canonical local typecheck still has the
+same pre-compilation Bun bin-remap failure noted above.
+
+Independent re-review and required updated-head CI remain pending. No UI changed, so browser
 journeys are reserved for DR-T3 rather than claiming API tests prove chart UX.
 Do not start DR-T3 before this step is reviewed/merged and main is fast-forwarded.
 
