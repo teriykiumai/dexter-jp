@@ -1287,6 +1287,12 @@ async function guardRefreshRequests(page: Page): Promise<{ api: string[]; unexpe
   });
   await page.route('**/*', async route => {
     const url = new URL(route.request().url());
+    if (url.origin === baseUrl && route.request().method() === 'GET' && url.pathname === '/api/market-data/jobs/active') {
+      await route.fulfill({ json: { schemaVersion: 'market_data_active_job_v1', marketJob: null, blockingKind: null } }); return;
+    }
+    if (url.origin === baseUrl && route.request().method() === 'GET' && /^\/api\/market-data\/technical\/[^/]+\/latest$/.test(url.pathname)) {
+      await route.fulfill({ status: 404, json: { error: { code: 'artifact_not_found' } } }); return;
+    }
     if (url.origin !== baseUrl || url.pathname.startsWith('/api/')) {
       unexpected.push(route.request().url());
       await route.abort();
@@ -1348,6 +1354,179 @@ test.beforeAll(async () => {
 
 test.afterAll(() => {
   dashboardProcess.kill();
+});
+
+function technicalBrowserFixture() {
+  const available = (value: number) => ({ state: 'available', value });
+  const candle = (date: string, interval = 'day') => ({ interval, identity: date, displayDate: date,
+    periodStart: date, periodEnd: date, firstSessionDate: date, lastSessionDate: date,
+    open: 100, high: 110, low: 90, close: 105, volume: 0, partial: false,
+    rsi: available(0), macd: available(0), signal: available(0), histogram: available(0), cross: { state: 'available', value: 'none' } });
+  return { schemaVersion: 'technical_latest_response_v1', state: 'available', checkedAt: '2026-09-09T09:00:00Z',
+    warnings: [{ code: 'historical_identity_unverified', message: '過去の銘柄同一性は未検証です。' }],
+    artifact: { ticker: '1010', dataDate: '2026-09-09', fetchedAt: '2026-09-09T08:00:00Z',
+      series: { day: [candle('2026-09-08'), candle('2026-09-09')],
+        week: [candle('2026-09-09', 'week')], month: [candle('2026-09-09', 'month')] },
+      unavailablePeriods: [{ interval: 'week', identity: '2026-08-31', periodStart: '2026-08-31', periodEnd: '2026-09-06', reason: 'partial_period' }] } };
+}
+
+test.describe('DR-T3 Technical', () => {
+  test('reload recovers the matching running job and adopts one authoritative read with History replace', async ({ page }) => {
+    await guardRefreshRequests(page); await mockSnapshotApi(page);
+    await page.clock.install({ time: new Date('2026-09-10T00:00:00Z') });
+    await page.clock.pauseAt(new Date('2026-09-10T00:00:00Z'));
+    let running = false, completed = false, posts = 0, latestReads = 0;
+    const jobId = '11111111-1111-4111-8111-111111111111';
+    const job = () => ({ jobId, kind: 'technical_refresh', target: { kind: 'technical', ticker: '1010' },
+      status: completed ? 'completed' : 'running', failure: null });
+    await page.route('**/api/market-data/jobs/active', route => route.fulfill({ json: { marketJob: running ? job() : null, blockingKind: null } }));
+    await page.route('**/api/market-data/technical/1010/latest', route => { latestReads++; return route.fulfill({ json: technicalBrowserFixture() }); });
+    await page.route('**/api/session', route => route.fulfill({ json: { csrfHeader: 'X-Dexter-CSRF', csrfToken: 'fixture' } }));
+    await page.route('**/api/market-data/technical/jobs', route => { posts++; running = true; return route.fulfill({ status: 202, json: { jobId } }); });
+    await page.route(`**/api/market-data/jobs/${jobId}`, route => route.fulfill({ json: job() }));
+    await page.goto(`${baseUrl}/?ticker=1010&tab=technical&chartSource=snapshot&future=keep`);
+    await expect(page.getByText('最小dispatch時間とExecution budgetは受付成立後の時間です。直前の通信から最大60秒は受付できず、手動再試行が必要です。', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '最新EODを取得' }).click();
+    await expect(page.getByRole('status').filter({ hasText: 'technical_refresh / 対象 1010 / running' })).toBeVisible();
+    await page.reload();
+    await expect(page.getByRole('status').filter({ hasText: 'technical_refresh / 対象 1010 / running' })).toBeVisible();
+    await expect(page.getByText('保存済み最新データを確認中です。')).toHaveCount(0);
+    const before = latestReads, historyLength = await page.evaluate(() => history.length);
+    completed = true;
+    await page.clock.runFor(1000);
+    await expect(page).toHaveURL(/chartSource=latest&future=keep/);
+    expect(latestReads).toBe(before + 1); expect(posts).toBe(1);
+    expect(await page.evaluate(() => history.length)).toBe(historyLength);
+  });
+
+  for (const fails of [false, true]) {
+    test(`visible-only 1s polling stops while hidden and after ${fails ? 'read failure' : 'terminal state'}`, async ({ page }) => {
+      await guardRefreshRequests(page); await mockSnapshotApi(page);
+      await page.clock.install({ time: new Date('2026-09-10T00:00:00Z') });
+      await page.clock.pauseAt(new Date('2026-09-10T00:00:00Z'));
+      const jobId = '11111111-1111-4111-8111-111111111111';
+      const job = { jobId, kind: 'technical_refresh', target: { kind: 'technical', ticker: '1010' }, status: 'running', failure: null };
+      let polls = 0;
+      await page.route('**/api/market-data/jobs/active', route => route.fulfill({ json: { marketJob: job, blockingKind: null } }));
+      await page.route('**/api/market-data/technical/1010/latest', route => route.fulfill({ json: technicalBrowserFixture() }));
+      await page.route(`**/api/market-data/jobs/${jobId}`, route => { polls++; return fails
+        ? route.fulfill({ status: 500, json: { error: { code: 'repository_failure' } } })
+        : route.fulfill({ json: { ...job, status: 'completed' } }); });
+      const visibility = async (value: 'visible' | 'hidden') => page.evaluate(state => {
+        Object.defineProperty(document, 'visibilityState', { configurable: true, value: state });
+        document.dispatchEvent(new Event('visibilitychange'));
+      }, value);
+      await page.goto(`${baseUrl}/?ticker=1010&tab=technical&chartSource=snapshot`);
+      await expect(page.getByRole('status').filter({ hasText: 'technical_refresh / 対象 1010 / running' })).toBeVisible();
+      await visibility('hidden'); await page.clock.runFor(5000); expect(polls).toBe(0);
+      await visibility('visible'); await page.clock.runFor(999); expect(polls).toBe(0);
+      await page.clock.runFor(1);
+      if (fails) await expect(page.getByRole('alert')).toContainText('ジョブ状態を確認できません');
+      else await expect(page).toHaveURL(/chartSource=latest/);
+      expect(polls).toBe(1);
+      await visibility('hidden'); await page.clock.runFor(3000);
+      await visibility('visible'); await page.clock.runFor(5000); expect(polls).toBe(1);
+      if (fails) {
+        await page.locator('#dashboard-tab-report').click(); await page.locator('#dashboard-tab-technical').click();
+        await page.clock.runFor(5000); expect(polls).toBe(1);
+        await page.reload();
+        await expect(page.getByRole('status').filter({ hasText: 'technical_refresh / 対象 1010 / running' })).toBeVisible();
+        await page.clock.runFor(1000); await expect.poll(() => polls).toBe(2);
+      }
+    });
+  }
+
+  test('source/interval, shared cursor, collapse, URL history, reload and all responsive widths', async ({ page }) => {
+    const requests = await guardRefreshRequests(page); await mockSnapshotApi(page);
+    await page.route('**/api/market-data/technical/1010/latest', route => route.fulfill({ json: technicalBrowserFixture() }));
+    await page.goto(`${baseUrl}/?ticker=1010&tab=technical&future=keep`);
+    await expect(page.getByText('J-Quants 保存済みTechnical artifact', { exact: false })).toBeVisible();
+    await expect(page.getByRole('table', { name: '調整後OHLCV・RSI・MACD（全保存期間）' })).toBeVisible();
+    await page.getByLabel('共有カーソル（矢印キーで選択）').selectOption('2026-09-08');
+    await expect(page.getByLabel('共有カーソル（矢印キーで選択）')).toHaveValue('2026-09-08');
+    await page.getByRole('button', { name: 'RSI 折り畳む' }).click();
+    await expect(page.getByRole('button', { name: 'RSI 展開' })).toHaveAttribute('aria-pressed', 'false');
+    await page.getByRole('combobox', { name: '足種', exact: true }).selectOption('week');
+    await expect(page.getByText('期間の一部のみ観測（取得部分はすべて欠損）')).toBeVisible();
+    await expect(page).toHaveURL(/future=keep&interval=week/);
+    await page.goBack(); await expect(page.getByRole('combobox', { name: '足種', exact: true })).toHaveValue('day');
+    await page.goForward(); await expect(page.getByRole('combobox', { name: '足種', exact: true })).toHaveValue('week');
+    await page.reload(); await expect(page.getByRole('combobox', { name: '足種', exact: true })).toHaveValue('week');
+    for (const width of [320, 390, 680, 768, 980, 1024, 1280]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    }
+    await page.getByRole('heading', { name: 'チャートのデータと更新' }).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: test.info().outputPath('technical-desktop.png') });
+    await page.locator('.price-chart').screenshot({ path: test.info().outputPath('technical-chart.png') });
+    await page.getByRole('combobox', { name: 'データソース', exact: true }).selectOption('snapshot');
+    await expect(page.getByText('source_interval_unavailable', { exact: false })).toBeVisible();
+    expect(requests.api.filter(value => value.startsWith('POST'))).toEqual([]);
+    expect(requests.unexpected).toEqual([]);
+  });
+
+  test('explicit latest missing never substitutes; auto corruption preserves Snapshot with warning', async ({ page }) => {
+    await guardRefreshRequests(page); await mockSnapshotApi(page);
+    await page.goto(`${baseUrl}/?ticker=1010&tab=technical&chartSource=latest`);
+    await expect(page.getByText('選択したソースは未収集、または検証できません。', { exact: false })).toBeVisible();
+    await page.route('**/api/market-data/technical/1010/latest', route => route.fulfill({ status: 500, json: { error: { code: 'artifact_corrupt' } } }));
+    await page.goto(`${baseUrl}/?ticker=1010&tab=technical`);
+    await expect(page.getByText('警告: 保存済み最新データを検証できませんでした。', { exact: false })).toBeVisible();
+    await expect(page.getByRole('table', { name: '保存済み調整後OHLCV', exact: false })).toBeVisible();
+  });
+
+  test('refresh adopts one authoritative latest read even when the first job read is already completed', async ({ page }) => {
+    await guardRefreshRequests(page); await mockSnapshotApi(page);
+    let latestReads = 0, posts = 0;
+    await page.route('**/api/market-data/technical/1010/latest', route => { latestReads++; return route.fulfill({ json: technicalBrowserFixture() }); });
+    await page.route('**/api/session', route => route.fulfill({ json: { csrfHeader: 'X-Dexter-CSRF', csrfToken: 'fixture' } }));
+    await page.route('**/api/market-data/technical/jobs', route => { posts++; expect(route.request().postDataJSON()).toEqual({ ticker: '1010' }); expect(route.request().headers()['x-dexter-csrf']).toBe('fixture'); return route.fulfill({ status: 202, json: { jobId: '11111111-1111-4111-8111-111111111111' } }); });
+    await page.route('**/api/market-data/jobs/11111111-1111-4111-8111-111111111111', route => route.fulfill({ json: { jobId: '11111111-1111-4111-8111-111111111111', kind: 'technical_refresh', status: 'completed', failure: null } }));
+    await page.goto(`${baseUrl}/?ticker=1010&tab=technical&chartSource=snapshot`);
+    await expect(page.getByRole('button', { name: '最新EODを取得' })).toBeEnabled();
+    const before = latestReads;
+    await page.getByRole('button', { name: '最新EODを取得' }).click();
+    await expect(page).toHaveURL(/chartSource=latest/);
+    expect(latestReads).toBe(before + 1); expect(posts).toBe(1);
+  });
+
+  test('failed adoption keeps the displayed Snapshot and stale completion cannot change interval/source/focus', async ({ page }) => {
+    await guardRefreshRequests(page); await mockSnapshotApi(page);
+    let reads = 0, hold = false, release!: () => void;
+    await page.route('**/api/market-data/technical/1010/latest', route => { reads++; return reads === 1
+      ? route.fulfill({ json: technicalBrowserFixture() }) : route.fulfill({ status: 500, json: { error: { code: 'artifact_corrupt' } } }); });
+    await page.route('**/api/session', route => route.fulfill({ json: { csrfHeader: 'X-Dexter-CSRF', csrfToken: 'fixture' } }));
+    await page.route('**/api/market-data/technical/jobs', async route => {
+      if (hold) await new Promise<void>(resolve => { release = resolve; });
+      await route.fulfill({ status: 202, json: { jobId: '11111111-1111-4111-8111-111111111111' } });
+    });
+    await page.route('**/api/market-data/jobs/11111111-1111-4111-8111-111111111111', route => route.fulfill({ json: { kind: 'technical_refresh', status: 'completed', failure: null } }));
+    await page.goto(`${baseUrl}/?ticker=1010&tab=technical&chartSource=snapshot`);
+    await page.getByRole('button', { name: '最新EODを取得' }).click();
+    await expect(page.getByText('更新後の読み込みに失敗しました。直前の表示を維持しています。', { exact: false })).toBeVisible();
+    await expect(page).toHaveURL(/chartSource=snapshot/);
+    await expect(page.getByRole('table', { name: '保存済み調整後OHLCV', exact: false })).toBeVisible();
+    const beforeStaleJob = reads;
+    hold = true;
+    await page.getByRole('button', { name: '最新EODを取得' }).click();
+    await expect.poll(() => typeof release).toBe('function');
+    const interval = page.getByRole('combobox', { name: '足種', exact: true });
+    await interval.selectOption('week'); await interval.focus(); release();
+    await expect(page.getByRole('button', { name: '最新EODを取得' })).toBeEnabled();
+    await expect(page).toHaveURL(/chartSource=snapshot&interval=week/);
+    await expect(interval).toBeFocused(); expect(reads).toBe(beforeStaleJob);
+  });
+
+  test('Comparison remains bound to its target Snapshot and cannot fetch current Technical data', async ({ page }) => {
+    const requests = await guardRefreshRequests(page);
+    const base = snapshotWithIdentity('1010', '2026-08-21T00:00:00Z');
+    const target = snapshotWithIdentity('1010', '2026-08-23T00:00:00Z');
+    await mockComparisonApi(page, [base, target]);
+    await page.goto(`${baseUrl}/?ticker=1010&tab=technical&chartSource=latest&base=${createSnapshotId(base.generatedAt)}&target=${createSnapshotId(target.generatedAt)}`);
+    await expect(page.getByRole('button', { name: '最新EODを取得' })).toBeDisabled();
+    await expect(page.getByRole('table', { name: '保存済み調整後OHLCV', exact: false })).toBeVisible();
+    expect(requests.api.some(value => value.includes('/technical/'))).toBe(false);
+  });
 });
 
 test.describe('DR-V2 Watchlist and global navigation', () => {
@@ -1569,7 +1748,8 @@ test.describe('DR-V2 Watchlist and global navigation', () => {
       expect(query.get('future')).toBe('keep');
       expect(await page.evaluate(() => history.length)).toBe(historyLength);
     }
-    expect(requests.api).toEqual(initialReads);
+    // DR-T3 adds persisted-data GETs, not Snapshot reloads or external refreshes.
+    expect(requests.api.filter(value => !value.startsWith('GET /api/market-data/'))).toEqual(initialReads);
     expect(requests.unexpected).toEqual([]);
   });
 
@@ -3066,7 +3246,7 @@ test.describe('Dashboard detail tab browser interaction', () => {
       await expect(bins).toHaveAttribute('open', '');
       await expect(smaToggle).toHaveAttribute('aria-pressed', 'false');
       await expect(page.getByRole('dialog', { name: '用語集', exact: true })).toBeVisible();
-      expect(requests).toEqual([
+      expect(requests.filter(item => !(item.method === 'GET' && item.pathname.startsWith('/api/market-data/')))).toEqual([
         { method: 'GET', pathname: '/api/analyses/1010' },
         { method: 'GET', pathname: '/api/analyses/1010/history' },
       ]);

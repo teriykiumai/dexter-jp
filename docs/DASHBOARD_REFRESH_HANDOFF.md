@@ -3,10 +3,11 @@
 **Status:** DR-0, DR-V1-V3, DR-T1, DR-C1, DR-A1, DR-O1, DR-T0A, DR-T1A, and DR-A2
 are merged. DR-T0B merged in PR #105, the operating policy in PR #106, and DR-T1B
 in PR #107. DR-T0 merged in PR #108 (`07594c702615f7168959d455389b57cf4f00a2ee`)
-after independent re-review. DR-T2 is the current local implementation candidate;
-no new live fetch, publication, review or merge is implied by this status.
-Technical artifact/source/job API code is present only in the DR-T2 candidate;
-new chart controls remain DR-T3 scope. With zero registered Overview modules,
+after independent re-review. DR-T2 merged in PR #109
+(`027bb919bfc6c84f73ae99f313d588e29575290f`) after a zero-finding Mergeable re-review
+and green test/typecheck CI at head `15b9fbf`. DR-T3 is the current local candidate.
+Technical artifact/source/job APIs are merged; new chart controls are in DR-T3.
+No new live fetch or DR-T3 review/merge is implied. With zero registered Overview modules,
 the read remains 404 and refresh admission is refused before creating a job.
 
 **Last Updated:** 2026-09-09
@@ -883,6 +884,53 @@ journeys are reserved for DR-T3 rather than claiming API tests prove chart UX.
 Do not start DR-T3 before this step is reviewed/merged and main is fast-forwarded.
 
 ## 8. Remaining risks
+
+### DR-T3 implementation candidate
+
+Branch: `feat/dashboard-technical-ui-step3`, based on the PR #109 merge above after
+fast-forwarding local main. This step adds only the Technical UI, not DR-M0 sources.
+
+- Explicit auto/snapshot/latest source selection follows dataDate before interval
+  availability; an explicit missing latest never substitutes Snapshot. Corrupt
+  auto reads retain a valid Snapshot with a warning. Invalid Snapshot chart dates
+  suppress drawing but preserve the existing raw OHLCV table, including incomplete
+  rows and zero values.
+- The installed Lightweight Charts integration renders server-produced day/week/
+  month candles, volume, RSI and MACD/signal/histogram on one scale. Pane toggles,
+  labelled keyboard cursor and exact tables never calculate indicators. Missing
+  period reasons use the exact plan labels and whitespace points, not interpolation.
+- Manual authenticated refresh/cancel uses DR-T2 APIs and the shared active-job
+  owner; only a matching completion followed by one authoritative latest GET may
+  adopt data/replace the URL. Failed adoption retains the previous chart; stale
+  work cannot change a different interval/source/tab or steal focus. Comparison
+  disables refresh and binds the stored target Snapshot.
+- DESIGN.md records the 4:1:1:1 pane allocation using existing chart geometry and
+  tokens. Library layout cells are exempt from semantic-table row sizing; visual
+  inspection found and corrected the old CSS interference that cropped lower panes.
+- Validation: full Bun suite 1,239 pass / 0 fail (98 files); full Playwright 85 pass.
+  Browser coverage includes 320/390/680/768/980/1024/1280px, URL/history/reload,
+  current and stale completion, failed adoption, explicit absent latest, corrupted
+  auto fallback, Comparison isolation and inherited Dashboard journeys. Test-only
+  API responses are synthetic; no J-Quants requests were made.
+- Canonical local typecheck still fails before compilation due to the existing
+  worktree Bun bin remapping issue. Direct TypeScript compilation is supplementary,
+  not a claim that the canonical command passed. Independent review and head CI
+  remain required before merge.
+- PR #110 review follow-up: recovered in-flight Technical jobs bind adoption only
+  for the same ticker/current scope. Exact-job polling runs every 1,000 ms while
+  visible, suspends/aborts while hidden, resumes on visibility return, and stays
+  stopped after terminal state or a latched read failure. The required pre-action
+  cooldown/admission notice is displayed beside the refresh quota explanation.
+  Focused browser validation: 8 pass, including reload -> completion -> one latest
+  GET -> History replace and hidden/visible/terminal/read-failure lifecycles.
+  Full Playwright after these fixes: 88 pass / 0 fail (Tier 2 UI lifecycle scope).
+  Technical unit tests: 2 pass. Direct TypeScript compilation passes; canonical
+  local typecheck retains the bin-remapping failure above. The prior full Bun
+  result belongs to head `9d0e66f`; it is reused for unchanged backend contracts,
+  not reported as a new local full-suite run. No external provider calls were made.
+
+The next planned source step is DR-M0 and remains subject to its dated migration
+and explicitly authorized external-smoke gate; DR-T3 does not satisfy that gate.
 
 - The live three-input result is limited to the tested account/ticker/window;
   it does not prove universal source availability or historical identity.

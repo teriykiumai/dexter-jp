@@ -22,6 +22,8 @@ import {
   type AnalysisSnapshotComparisonResponseV1,
 } from '../../analysis/comparison/schema.js';
 import { LIGHTWEIGHT_CHARTS_NOTICE, PriceChart } from './chart.js';
+import { TechnicalPanel } from './technical-panel.js';
+import { snapshotChartDate } from './technical.js';
 import {
   ComparisonPanel,
   type ComparisonPanelIssue,
@@ -745,11 +747,13 @@ function Dashboard({
         <DashboardTabPanel key={tab.id} selectedTab={selectedTab} tab={tab.id}>
           {tab.id === 'technical' ? (
             <>
+      <TechnicalPanel key={snapshot.canonicalTicker} snapshot={snapshot} comparison={comparisonSelectionPresent}
+        navigationRevision={navigationRevision}>
       <Card title="株価チャート" eyebrow="調整後OHLCV" className="chart-panel">
         <div className="chart-presentation">
           <div className="chart-visual">
             <PriceChart
-              bars={view.chart.bars}
+              bars={snapshotChartDate(snapshot) ? view.chart.bars : []}
               describedBy={chartDescriptionId}
               priceLines={visiblePriceLines}
             />
@@ -836,6 +840,7 @@ function Dashboard({
         </p>
       </Card>
 
+      </TechnicalPanel>
       <Card title="出来高価格分布（Volume Profile）" eyebrow="日足OHLCVによる推定分布">
         <p className="disclosure-note">{VOLUME_PROFILE_CONTEXT_NOTE}</p>
         {view.volumeProfile.state !== 'not_collected' ? (
