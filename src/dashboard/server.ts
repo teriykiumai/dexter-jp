@@ -5,6 +5,8 @@ import { DEFAULT_JQUANTS_EXECUTION_ENVIRONMENT_V1, resolveJQuantsRequestsPerMinu
 import { DashboardJobCoordinatorV1 } from '../analysis/dashboard-jobs/coordinator.js';
 import { MarketDataJobServiceV1 } from '../analysis/market-data/job-service.js';
 import { TechnicalAdapterV1 } from '../analysis/market-data/technical-adapter.js';
+import { createEtfOverviewRegistryV1 } from '../analysis/market-data/etf-adapter.js';
+import { ETF_JOB_LIMITS_V1 } from '../analysis/market-data/etf-source.js';
 import {
   handleDashboardRequest,
   internalServerErrorResponse,
@@ -30,6 +32,7 @@ export function createDefaultDashboardApisV1(): Readonly<{
     snapshotRepository: new AnalysisSnapshotRepository(), coordinator,
   });
   const marketService = new MarketDataJobServiceV1({ coordinator,
+    overviewRegistry: createEtfOverviewRegistryV1(DEFAULT_JQUANTS_EXECUTION_ENVIRONMENT_V1), limits: ETF_JOB_LIMITS_V1,
     technicalSource: new TechnicalAdapterV1(DEFAULT_JQUANTS_EXECUTION_ENVIRONMENT_V1) });
   return Object.freeze({
     strategyValidationApi: new StrategyValidationDashboardApiV1(strategyService, session),

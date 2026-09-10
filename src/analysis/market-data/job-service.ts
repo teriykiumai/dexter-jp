@@ -955,6 +955,8 @@ export class MarketDataJobServiceV1 {
 
   #requireRunnableConfiguration(): void {
     if (!this.overviewRegistry.size || !this.#limits) throw new MarketDataJobServiceErrorV1('source_configuration_missing');
+    const key = this.#environment.apiKey();
+    if (!key || /[\r\n]/.test(key)) throw new MarketDataJobServiceErrorV1('source_configuration_missing');
   }
   #requireLease(jobId: string): DashboardJobLeaseV1 {
     const lease = this.#leases.get(jobId);
