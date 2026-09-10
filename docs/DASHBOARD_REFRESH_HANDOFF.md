@@ -5,12 +5,13 @@ are merged. DR-T0B merged in PR #105, the operating policy in PR #106, and DR-T1
 in PR #107. DR-T0 merged in PR #108 (`07594c702615f7168959d455389b57cf4f00a2ee`)
 after independent re-review. DR-T2 merged in PR #109
 (`027bb919bfc6c84f73ae99f313d588e29575290f`) after a zero-finding Mergeable re-review
-and green test/typecheck CI at head `15b9fbf`. DR-T3 is the current local candidate.
-Technical artifact/source/job APIs are merged; new chart controls are in DR-T3.
-No new live fetch or DR-T3 review/merge is implied. With zero registered Overview modules,
-the read remains 404 and refresh admission is refused before creating a job.
+and green test/typecheck CI at head `15b9fbf`. DR-T3 merged in PR #110
+(`db394e7fe99b28ca10fb557fd5a289cd75d21f37`) after the zero-finding re-review at
+`a6951cc` and green required CI. Local main was fast-forwarded before DR-E1.
+DR-E1 is the current local implementation candidate; its two ETF modules are
+registered in the candidate only. No DR-E1 review/merge or DR-M0 gate is implied.
 
-**Last Updated:** 2026-09-09
+**Last Updated:** 2026-09-10
 
 ## 1. How to use this file
 
@@ -929,8 +930,56 @@ fast-forwarding local main. This step adds only the Technical UI, not DR-M0 sour
   result belongs to head `9d0e66f`; it is reused for unchanged backend contracts,
   not reported as a new local full-suite run. No external provider calls were made.
 
-The next planned source step is DR-M0 and remains subject to its dated migration
-and explicitly authorized external-smoke gate; DR-T3 does not satisfy that gate.
+DR-M0 remains subject to its dated migration and explicitly authorized external-
+smoke gate; DR-T3 does not satisfy that gate. The independently authorized DR-E1
+path follows the plan's explicit DR-O1/DR-T2 dependency edge while DR-M0 is pending.
+
+### DR-E1 local implementation candidate
+
+Branch: `feat/dashboard-etf-source-step1`, based on the merged PR #110 above.
+Scope: 1321 EOD and the five precomputed 1321/2633 relative-price ranges, strict
+module codecs, shared five-query source collection, existing immutable repository/
+receipt publication, and Overview registration. No ETF UI, margin module, Snapshot
+change, distribution reinvestment, or investment signal is added.
+
+The manual source gate was explicitly authorized and executed once on 2026-09-10.
+`etf-source-smoke.ts --confirm-external-fetch` uses the existing stricter diagnostic
+caps: five logical queries, 20 actual attempts/pages, 8,000 rows, 32 MiB, 180 seconds,
+30 seconds per attempt, no retry. It publishes no artifact, receipt, or job.
+
+- Accepted: `2026-09-10T09:47:59.588Z`; checked: `2026-09-10T09:48:03.207Z`.
+- Exact query window: `2016-09-10` through eligible EOD `2026-09-10`; one calendar
+  envelope through `2026-09-30`. Actual: 5 requests/pages, 7,450 rows, 1,217,855 bytes.
+- Both current master rows matched their exact code, `ProdCat=014`, `Mkt=0109`.
+  1321: 2,442 rows from `2016-09-12`, not clipped under the calendar predicate.
+  2633: 1,333 rows from `2021-03-31`, clipped. These are coverage dates, not inferred
+  listing dates or historical-identity proof; `historicalIdentity=not_verified` stays.
+- Calendar normalized digest:
+  `sha256:d91d6b06ab75c709f3233e9a2dba1fd609dbcd59dc3b088811a91cc5404819a0`.
+- 1321 normalized bars digest:
+  `sha256:45548b1b8ec23520522dafbd422ff3affb39fc5843d5e6d9fd8702fec58fabca`.
+- 2633 normalized bars digest:
+  `sha256:a799ea47f03e2c3c5b88bbdcd4887c35baf025f442b87fbb4050555757475e8c`.
+- Official daily-bars/master and issuer pages were rechecked. The issuer registries
+  pin the 1321 announcement (2026-08-25; 1:100 effective 2026-10-07) and the 2633
+  announcement (2023-10-31; 1:10 effective 2023-12-08). The engine consumes already
+  adjusted prices; it does not apply these ratios again or claim total return.
+
+The production ETF increment retains the approved 40-attempt / 16,000-row / 64-MiB /
+600-second limits. The shared reader preserves Technical's existing narrower limits
+and retry rules; Overview's existing coordinator owns the whole-job limits and
+accounting. Source errors publish nothing; proved empty/all-null inputs publish
+unavailable content with a new authoritative receipt. Synthetic tests do not use
+external credentials or network. Independent review is still required.
+
+Validation (Tier 3: financial arithmetic, shared transport, persistence, registration):
+full `bun test` passed 1,258 tests / 0 failures across 100 files; full Playwright
+passed 88 tests. The final missing-credential admission guard and test assertion
+were followed by 58 passing ETF/Overview-service tests and direct TypeScript
+compilation. The unaffected full-suite/browser evidence is reused for that final
+guard. Canonical `bun run typecheck` still fails before compilation with the existing
+local Bun bin-remapping error; the direct compiler passing is supplementary only.
+`git diff --check` passes. No remote publication or new-head CI is implied.
 
 - The live three-input result is limited to the tested account/ticker/window;
   it does not prove universal source availability or historical identity.

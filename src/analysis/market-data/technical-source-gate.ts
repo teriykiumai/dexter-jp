@@ -291,6 +291,21 @@ export function validateCurrentTechnicalMasterV1(
   inputRows: unknown,
   input: Readonly<{ ticker: string; eligibleThrough: string; environment?: NodeJS.ProcessEnv }>,
 ): CurrentMasterValidationResultV1 {
+  return validateCurrentMaster(inputRows, input, CURRENT_TECHNICAL_MASTER_EXPECTATION_V1.productCategories,
+    CURRENT_TECHNICAL_MASTER_EXPECTATION_V1.marketCodes);
+}
+
+export function validateCurrentEtfMasterV1(
+  inputRows: unknown,
+  input: Readonly<{ ticker: '1321' | '2633'; eligibleThrough: string; environment?: NodeJS.ProcessEnv }>,
+): CurrentMasterValidationResultV1 {
+  if (input.ticker !== '1321' && input.ticker !== '2633') return fail('invalid_configuration');
+  return validateCurrentMaster(inputRows, input, ['014'], ['0109']);
+}
+
+function validateCurrentMaster(inputRows: unknown,
+  input: Readonly<{ ticker: string; eligibleThrough: string; environment?: NodeJS.ProcessEnv }>,
+  productCategories: readonly string[], marketCodes: readonly string[]): CurrentMasterValidationResultV1 {
   if (!Array.isArray(inputRows)) return fail('source_response_invalid');
   const tickerResult = CanonicalTickerSchema.safeParse(input.ticker);
   if (!tickerResult.success || !isStrictGregorianDate(input.eligibleThrough)) return fail('invalid_configuration');
@@ -300,10 +315,10 @@ export function validateCurrentTechnicalMasterV1(
   const jquantsCode = toJQuantsSecuritiesCode(tickerResult.data);
   if (source.Date !== input.eligibleThrough) return rejected('effective_date_mismatch');
   if (source.Code !== jquantsCode) return rejected('code_mismatch');
-  if (!CURRENT_TECHNICAL_MASTER_EXPECTATION_V1.productCategories.includes(source.ProdCat as '011')) {
+  if (!productCategories.includes(source.ProdCat as string)) {
     return rejected('product_category_mismatch');
   }
-  if (!CURRENT_TECHNICAL_MASTER_EXPECTATION_V1.marketCodes.includes(source.Mkt as '0105' | '0111' | '0112' | '0113')) {
+  if (!marketCodes.includes(source.Mkt as string)) {
     return rejected('market_code_mismatch');
   }
   if (typeof source.CoName === 'string' && source.CoName.trim().length === 0) return rejected('blank_name');
@@ -382,6 +397,17 @@ export function mapTechnicalDailyBarsV1(
     calendar: TseSessionCalendarV1;
   }>,
 ): TechnicalDailyBarsGateResultV1 {
+  const result = mapEtfDailyBarsV1(inputRows, input);
+  if (result.historyBoundary.state !== 'available' || !result.observations.some(row => row.kind === 'bar')) return fail('source_no_observation');
+  return { ...result, historyBoundary: result.historyBoundary };
+}
+
+export function mapEtfDailyBarsV1(inputRows: unknown, input: Readonly<{
+  ticker: string; queryFrom: string; eligibleThrough: string; calendar: TseSessionCalendarV1;
+}>): Omit<TechnicalDailyBarsGateResultV1, 'historyBoundary'> & { historyBoundary:
+  CurrentCodeHistoryBoundaryAvailableV1 | Readonly<{ state: 'unavailable'; contractVersion: 'current_code_history_v1';
+    mode: 'current_code_only'; jquantsCode: string; currentMasterDate: string;
+    historicalIdentity: 'not_verified'; reason: 'source_no_observation' }> } {
   if (!Array.isArray(inputRows)) return fail('source_response_invalid');
   const tickerResult = CanonicalTickerSchema.safeParse(input.ticker);
   if (!tickerResult.success || !isStrictGregorianDate(input.queryFrom)
@@ -393,7 +419,9 @@ export function mapTechnicalDailyBarsV1(
   const rows = inputRows.map(row => mapTechnicalDailyBarRow(
     row, jquantsCode, input.queryFrom, input.eligibleThrough,
   )).sort((left, right) => left.Date.localeCompare(right.Date));
-  if (rows.length === 0) return fail('source_no_observation');
+  if (rows.length === 0) return { rows: [], observations: [], historyCoverageClipped: false,
+    historyBoundary: { state: 'unavailable', contractVersion: 'current_code_history_v1', mode: 'current_code_only',
+      jquantsCode, currentMasterDate: input.eligibleThrough, historicalIdentity: 'not_verified', reason: 'source_no_observation' } };
   if (rows.some((row, index) => index > 0 && rows[index - 1]?.Date === row.Date)) {
     return fail('source_response_invalid');
   }
@@ -416,7 +444,6 @@ export function mapTechnicalDailyBarsV1(
   for (const row of rows) if (!input.calendar.isSession(row.Date)) return fail('source_response_invalid');
   const postStartSessions = input.calendar.sessions.filter(date => date >= sourceCoverageFrom && date <= input.eligibleThrough);
   if (postStartSessions.some(date => !rowDates.has(date))) return fail('source_response_invalid');
-  if (!observations.some(row => row.kind === 'bar')) return fail('source_no_observation');
   const historyBoundary: CurrentCodeHistoryBoundaryAvailableV1 = Object.freeze({
     state: 'available',
     contractVersion: 'current_code_history_v1',

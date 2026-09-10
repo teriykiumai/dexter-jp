@@ -32,13 +32,11 @@ export class TechnicalSourceFailureV1 extends Error {
 }
 const fail = (code: TechnicalSourceFailureV1['code']): never => { throw new TechnicalSourceFailureV1(code); };
 
-/** All network dispatches go through the admitted Dashboard lease, not the CLI limiter. */
-export async function collectTechnicalV1(ticker: string, context: TechnicalCollectionContextV1,
-  environment: JQuantsExecutionEnvironmentV1, secrets: NodeJS.ProcessEnv = process.env) {
-  CanonicalTickerSchema.parse(ticker);
+/** Shared bounded transport; callers own mapping and source identity. */
+export function createMarketDataReaderV1(context: TechnicalCollectionContextV1,
+  environment: JQuantsExecutionEnvironmentV1, bounds: { pages: number; rows: number; responseBytes: number }) {
   const key = environment.apiKey();
   if (!key || /[\r\n]/.test(key)) return fail('source_unauthorized');
-  const window = createTechnicalSourceRequestWindowV1(context.acceptedAt);
   let pages = 0, rowCount = 0, bytes = 0, attempts = 0;
   const fetched = new Map<string, { rows: readonly unknown[]; fetchedAt: string; pageCount: number }>();
   async function dispatchWithRetry<T>(start: (signal: AbortSignal) => Promise<T>): Promise<T> {
@@ -125,6 +123,16 @@ export async function collectTechnicalV1(ticker: string, context: TechnicalColle
     fetched.set(role, { rows, fetchedAt: new Date(environment.wallNowMs()).toISOString(), pageCount: sourcePages });
     return rows;
   }
+  return { fetchRows, fetched, metrics: () => ({ attempts, pages, acceptedRows: rowCount, responseBytes: bytes }) };
+}
+
+/** All network dispatches go through the admitted Dashboard lease, not the CLI limiter. */
+export async function collectTechnicalV1(ticker: string, context: TechnicalCollectionContextV1,
+  environment: JQuantsExecutionEnvironmentV1, secrets: NodeJS.ProcessEnv = process.env) {
+  CanonicalTickerSchema.parse(ticker);
+  const window = createTechnicalSourceRequestWindowV1(context.acceptedAt);
+  const reader = createMarketDataReaderV1(context, environment, bounds);
+  const { fetchRows, fetched } = reader;
   try {
     const calendarRows = await fetchRows('trading_calendar', TECHNICAL_SOURCE_ENDPOINTS_V1.tradingCalendar,
       { from: window.calendarCoverageFrom, to: window.calendarCoverageTo });
@@ -163,7 +171,7 @@ export async function collectTechnicalV1(ticker: string, context: TechnicalColle
       warnings: currentCodeWarningsV1({ kind: 'technical', boundary: { state: 'available',
         sourceCoverageFrom: result.calculationFrom, historyCoverageClipped: result.historyCoverageClipped } }),
     });
-    return { artifact, attempts, pages, acceptedRows: rowCount, responseBytes: bytes };
+    return { artifact, ...reader.metrics() };
   } catch (error) {
     if (error instanceof TechnicalSourceGateErrorV1 || error instanceof TechnicalSeriesErrorV1) {
       return fail(error.code === 'source_no_observation' ? 'source_no_observation'
