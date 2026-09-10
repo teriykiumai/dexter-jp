@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { createElement, type ComponentProps } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { parseHTML } from 'linkedom';
-import { DashboardRouteError, MarketOverviewPlaceholder, Watchlist } from './watchlist.js';
+import { DashboardRouteError, MarketOverviewPage, Watchlist } from './watchlist.js';
 import type { WatchlistItemView } from './presentation.js';
 
 const available = (text: string) => ({ text, available: true });
@@ -84,12 +84,13 @@ describe('complete Watchlist light surface', () => {
     expect([...document.querySelectorAll('h1, h2, h3')].map(heading => heading.tagName)).toEqual(['H1', 'H2', 'H3']);
   });
 
-  test('global placeholder and scoped errors expose no data or execution controls', () => {
-    const global = parseHTML(renderToStaticMarkup(createElement(MarketOverviewPlaceholder, navigation))).document;
+  test('global initial loading disables execution until job admission is known; scoped errors read nothing', () => {
+    const global = parseHTML(renderToStaticMarkup(createElement(MarketOverviewPage, { ...navigation, navigationRevision: 0 }))).document;
     expect(global.querySelector('h1')?.textContent).toBe('市場概況');
     expect(global.querySelector('.design-badge')?.textContent).toBe('全市場共通');
     expect(global.querySelector('a[aria-current="page"]')?.getAttribute('href')).toContain('view=market-overview');
-    expect(global.querySelectorAll('table, button, [role="tab"]').length).toBe(0);
+    expect(global.querySelectorAll('table, [role="tab"]').length).toBe(0);
+    expect(global.querySelector('button')?.hasAttribute('disabled')).toBe(true);
     const invalid = parseHTML(renderToStaticMarkup(createElement(DashboardRouteError, {
       ...navigation, reason: 'conflicting_owner',
     }))).document;

@@ -8,8 +8,10 @@ after independent re-review. DR-T2 merged in PR #109
 and green test/typecheck CI at head `15b9fbf`. DR-T3 merged in PR #110
 (`db394e7fe99b28ca10fb557fd5a289cd75d21f37`) after the zero-finding re-review at
 `a6951cc` and green required CI. Local main was fast-forwarded before DR-E1.
-DR-E1 is the current local implementation candidate; its two ETF modules are
-registered in the candidate only. No DR-E1 review/merge or DR-M0 gate is implied.
+DR-E1 merged in PR #111 (`c7e079e45a55aa02e7ac0937dbb4a3f42dcf20ad`) after the
+zero-finding Mergeable review at `5510233` and green required CI. Local main was
+fast-forwarded before DR-E2. DR-E2 is the current local implementation candidate.
+No DR-E2 review/merge or DR-M0 gate is implied.
 
 **Last Updated:** 2026-09-10
 
@@ -934,7 +936,7 @@ DR-M0 remains subject to its dated migration and explicitly authorized external-
 smoke gate; DR-T3 does not satisfy that gate. The independently authorized DR-E1
 path follows the plan's explicit DR-O1/DR-T2 dependency edge while DR-M0 is pending.
 
-### DR-E1 local implementation candidate
+### DR-E1 historical implementation candidate (now merged in PR #111)
 
 Branch: `feat/dashboard-etf-source-step1`, based on the merged PR #110 above.
 Scope: 1321 EOD and the five precomputed 1321/2633 relative-price ranges, strict
@@ -980,6 +982,49 @@ compilation. The unaffected full-suite/browser evidence is reused for that final
 guard. Canonical `bun run typecheck` still fails before compilation with the existing
 local Bun bin-remapping error; the direct compiler passing is supplementary only.
 `git diff --check` passes. No remote publication or new-head CI is implied.
+
+### DR-E2 local implementation candidate
+
+The candidate branch is `feat/dashboard-etf-ui-step2`, based on PR #111's merged
+main. Global `?view=market-overview` and detail `tab=market-overview` share one
+ticker-independent ETF surface. It renders 1321 latest acquired adjusted EOD and
+the five stored 1321/2633 relative-price ranges, with `marketRange` History state,
+exact tables, chart attribution, permanent current-code/proxy/distribution caveats,
+and source/schema/dataDate/fetchedAt/checkedAt/cadence/unit/elapsed-day metadata.
+No Browser financial calculation, Snapshot modification, or new provider access
+is added. The four unimplemented margin/flow modules are not presented as missing
+source data. Existing visual primitives and chart tokens are reused; `DESIGN.md`
+records the two series' solid/dashed token assignment.
+
+Manual Overview refresh uses the existing session/CSRF and job routes with the
+40-attempt/600-second quota notice. It recovers active jobs, polls only while visible,
+supports cooperative cancellation, and adopts one receipt-resolved Overview GET
+after matching completion. Range/navigation changes invalidate adoption. Read errors
+retain displayed values; proved unavailable publications replace old available data.
+Job-read uncertainty is shared with Technical and remains latched until full reload.
+Durable job-write warnings block mutation even if the subsequent Overview read fails.
+Initial background read errors do not steal keyboard tab focus; an explicit invalid
+operation focuses its scoped alert, matching completion focuses the updated heading,
+and cancellation returns focus to the initiating control.
+
+DR-E2 remains a review candidate, not a merged milestone. DR-M0's dated external
+gate and the subsequent margin/flow modules remain outstanding; this work neither
+executes nor waives that gate. Usage/setup and overall closeout remain DR-X-owned.
+
+Validation (Tier 2 UI/module boundary, with the plan's broader regressions):
+`bun test` passed 1,261 tests / 0 failures across 101 files on the standalone rerun.
+The first overlapping test run had three timeouts in existing Technical/strategy
+tests; no backend test or timeout was changed. Full Playwright passed 99 tests.
+After the final loading-state cleanup and chart crosshair-token alignment, all
+11 DR-E2 browser tests and direct TypeScript compilation passed; the unaffected
+remainder of the full browser result is reused. The browser tests cover the seven
+required widths, History/reload, cancel, cooldown, stale completion, permanent
+warnings, typed unavailable replacement, retained previous results, and the shared
+job-read latch. Desktop/mobile screenshots were inspected. `git diff --check`
+passes. Canonical local `bun run typecheck` still fails before compilation with
+the existing Windows Bun bin-remapping error; direct `tsc --noEmit` is supplementary,
+not a claim that the canonical command passed. Required PR-head CI must be checked
+separately. No external J-Quants request was made during DR-E2 implementation.
 
 - The live three-input result is limited to the tested account/ticker/window;
   it does not prove universal source availability or historical identity.

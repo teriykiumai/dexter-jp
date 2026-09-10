@@ -302,6 +302,10 @@ visible and has an accessible name and safe target.
 
 ### 5.8 Charts and exact tables
 
+ETF relative-price charts reuse `--color-chart-price` for the 1321 solid line and
+`--color-chart-rsi` for the 2633 dashed line. These are series identifiers, not
+investment-quality colors; show the ticker and line style in text beside the chart.
+
 - Reuse the installed chart implementation and the approved chart tokens.
 - Chart background is a primary surface; axes and grid are deliberately quieter than
   the data.

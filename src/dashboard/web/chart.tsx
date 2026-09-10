@@ -13,11 +13,41 @@ import {
 } from 'lightweight-charts';
 import type { ChartBar, ChartPriceLine } from './presentation.js';
 import type { TechnicalCandle, TechnicalInterval } from './technical.js';
+import type { EtfRelativeRangeV1 } from '../../analysis/market-data/etf-series.js';
 
 export const LIGHTWEIGHT_CHARTS_NOTICE = [
   'TradingView Lightweight Charts™',
   'Copyright (с) 2025 TradingView, Inc.',
 ] as const;
+
+export function EtfRelativeChart({ result, describedBy }: {
+  result: Extract<EtfRelativeRangeV1, { state: 'available' }>; describedBy: string;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const container = ref.current;
+    if (!container) return;
+    const style = getComputedStyle(container), color = (token: string) => style.getPropertyValue(token).trim();
+    const chart = createChart(container, { width: container.clientWidth, height: container.clientHeight,
+      layout: { background: { type: ColorType.Solid, color: color('--color-chart-background') }, textColor: color('--color-chart-axis'), fontFamily: color('--font-data'), fontSize: 12, attributionLogo: true },
+      grid: { vertLines: { color: color('--color-chart-grid') }, horzLines: { color: color('--color-chart-grid') } },
+      crosshair: { vertLine: { color: color('--color-chart-crosshair'), labelBackgroundColor: color('--color-chart-axis') },
+        horzLine: { color: color('--color-chart-crosshair'), labelBackgroundColor: color('--color-chart-axis') } },
+      rightPriceScale: { borderColor: color('--color-chart-grid') }, timeScale: { borderColor: color('--color-chart-grid') },
+    });
+    for (const ticker of ['1321', '2633'] as const) {
+      const line = chart.addSeries(LineSeries, { title: ticker, color: color(ticker === '1321' ? '--color-chart-price' : '--color-chart-rsi'),
+        lineStyle: ticker === '1321' ? LineStyle.Solid : LineStyle.Dashed, priceLineVisible: false,
+        priceFormat: { type: 'price', precision: 4, minMove: 0.0001 } });
+      line.setData(result.commonDates.map((time, index) => ({ time, value: result[`normalized${ticker}`][index]! })));
+    }
+    chart.timeScale().fitContent();
+    const observer = new ResizeObserver(() => chart.resize(container.clientWidth, container.clientHeight));
+    observer.observe(container);
+    return () => { observer.disconnect(); chart.remove(); };
+  }, [result]);
+  return <div ref={ref} className="price-chart" role="img" aria-label="1321と2633の正規化価格チャート" aria-describedby={describedBy} />;
+}
 
 interface PriceChartProps {
   bars: ChartBar[];
