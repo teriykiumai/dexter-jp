@@ -84,7 +84,10 @@ export function backupWorkspace(root: string, destination: string, codecs: Refer
   beginMaintenance(root, { version: 1, operation: 'backup', token: randomUUID(), pid: process.pid }, checkpoint);
   let db: WorkspaceDatabase | undefined;
   try {
-    db = new WorkspaceDatabase(root, { maintenance: true }); exclusive(db);
+    db = new WorkspaceDatabase(root, { maintenance: true, readonly: true });
+    const sourceVersion = db.sqlite.query<{ user_version: number }, []>('PRAGMA user_version').get()!.user_version;
+    if (sourceVersion < 1 || sourceVersion > WORKSPACE_SCHEMA_VERSION) fail('schema_unsupported');
+    if (sourceVersion === WORKSPACE_SCHEMA_VERSION) exclusive(db);
     const objects = validateReferences(db, codecs), roots = referenceRoots(db);
     mkdirSync(destination);
     const snapshot = resolve(destination, 'workspace.sqlite');
@@ -92,7 +95,7 @@ export function backupWorkspace(root: string, destination: string, codecs: Refer
     const check = new WorkspaceDatabase(destination, { readonly: true });
     check.close();
     for (const object of objects) writeExclusive(referencePath(destination, object.ref), object.bytes);
-    const manifest: Manifest = { version: 1, schemaVersion: WORKSPACE_SCHEMA_VERSION, schemaFingerprint: workspaceFingerprint(),
+    const manifest: Manifest = { version: 1, schemaVersion: sourceVersion as 1 | 2, schemaFingerprint: workspaceFingerprint(sourceVersion),
       databaseDigest: digest(readBytes(snapshot)), roots,
       objects: objects.map(({ ref, metadata }) => ({ ref, metadata })), omissions: [] };
     // Recheck copied bytes/closure before the completion manifest becomes visible.

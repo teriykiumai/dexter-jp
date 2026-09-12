@@ -124,3 +124,16 @@ test.each([false, true])('writer contention: background=%s preserves the foregro
     child.kill(); await child.exited; f.dispose();
   }
 }, 10_000);
+
+test('coordinator bookkeeping failure does not roll back a committed terminal job', async () => {
+  const f = await workspaceDataFixture();
+  try {
+    await f.jobs.wait(await f.jobs.start('catalog'));
+    const original = f.coordinator.afterReplace.bind(f.coordinator);
+    f.coordinator.afterReplace = async (..._args: Parameters<typeof original>) => { throw new Error('inventory probe'); };
+    const item = f.repository.search('7203')[0]!; f.advance();
+    const job = await f.jobs.wait(await f.jobs.start('technical', item.instrumentId));
+    expect(job.state).toBe('published');
+    expect(f.repository.current({ kind: 'instrument-owned', instrumentId: item.instrumentId }, 'technical')).not.toBeNull();
+  } finally { f.dispose(); }
+}, 30_000);

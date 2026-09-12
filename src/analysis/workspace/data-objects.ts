@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
+import { readdirSync, unlinkSync } from 'node:fs';
 import { z } from 'zod';
 import { validateReceiptV1, MarketDataObservationReceiptV1Schema } from '../market-data/contracts.js';
 import { validateCurrentTechnicalMasterV1, createTechnicalSourceRequestWindowV1, mapTechnicalCalendarV1,
@@ -78,6 +79,10 @@ export function stageWorkspaceObject(db: WorkspaceDatabase, codec: string, value
   const ref = { path, codec, digest: digest(bytes) };
   writeExclusive(resolve(root, path), bytes);
   return ref;
+}
+export function cleanupWorkspaceImports(db: WorkspaceDatabase): void {
+  const root = resolve(db.root, 'imports');
+  for (const name of readdirSync(root)) if (/^[a-f0-9-]{36}\.json$/.test(name)) unlinkSync(resolve(root, name));
 }
 
 /** Validate cross-object claims as well as each codec; also used by Backup/Restore. */

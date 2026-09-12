@@ -6,7 +6,7 @@ import { createTechnicalSourceRequestWindowV1, mapTechnicalCalendarV1, resolveTe
   validateCurrentTechnicalMasterV1, TECHNICAL_SOURCE_ENDPOINTS_V1 } from '../market-data/technical-source-gate.js';
 import type { JQuantsExecutionEnvironmentV1 } from '../strategy-validation/jquants-execution.js';
 import { fail, json, parse, type FrozenIdentity, type ObjectRef } from './contracts.js';
-import { EpisodeObjectSchema, stageWorkspaceObject } from './data-objects.js';
+import { EpisodeObjectSchema, stageWorkspaceObject, cleanupWorkspaceImports } from './data-objects.js';
 import { mapWorkspaceDailyRows, type TechnicalInput } from './technical-input.js';
 import { WorkspaceTechnicalCodec } from './technical-artifact.js';
 import { registerReferences, resolveReference, rowRef, objectRow } from './references.js';
@@ -82,6 +82,7 @@ export async function activateWorkspaceCatalog(repository: WorkspaceRepository, 
     if (rows.length % 16 === 0) await setImmediate();
   }
   await registerReferences(db, resolve(db.root, 'imports'), rows.map(row => row.evidence), workspaceDataCodecs);
+  cleanupWorkspaceImports(db);
   db.transaction(() => {
     if (db.sqlite.run("UPDATE catalog_generations SET effective_date=? WHERE generation=? AND state='pending'", [catalog.date, generation]).changes !== 1) fail('revision_conflict');
   });

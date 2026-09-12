@@ -2,8 +2,6 @@ import { resolve } from 'node:path';
 import { WorkspaceDatabase } from './database.js';
 import { WorkspaceRepository } from './repository.js';
 import { buildWorkspaceTechnical } from './data-source.js';
-import { retainWorkspaceObject, workspaceDataCodecs } from './data-objects.js';
-import { resolveReference } from './references.js';
 import { WorkspaceTechnicalCodec } from './technical-artifact.js';
 import { MarketDataRepositoryV1 } from '../market-data/repository.js';
 import { safeDirectory } from './files.js';
@@ -13,14 +11,15 @@ import type { EodWorkerRequest } from './eod-worker-client.js';
 self.onmessage = async (event: MessageEvent<EodWorkerRequest>) => {
   let db: WorkspaceDatabase | undefined;
   try {
-    const r = event.data; db = new WorkspaceDatabase(r.root, { backgroundWriter: true });
-    let ref = null;
+    const r = event.data;
+    let result: unknown = null;
     if (r.operation === 'prepare') {
+      db = new WorkspaceDatabase(r.root, { readonly: true });
       const artifact = buildWorkspaceTechnical(r.identity, r.master, new WorkspaceRepository(db), r.fetched);
-      ref = await retainWorkspaceObject(db, 'workspace_technical_v2', artifact);
+      result = { artifact, receipt: null };
     } else {
       const codec = new WorkspaceTechnicalCodec(r.identity.code.slice(0, 4));
-      const candidate = codec.parse(JSON.parse(new TextDecoder().decode(resolveReference(db, r.prepared, workspaceDataCodecs).bytes)));
+      const candidate = codec.parse(r.prepared);
       if (json(candidate.input.identity) !== json(r.identity)) fail('reference_conflict');
       safeDirectory(r.artifactRoot, true);
       const repository = new MarketDataRepositoryV1(codec, resolve(r.artifactRoot, 'workspace-v2'));
@@ -29,14 +28,13 @@ self.onmessage = async (event: MessageEvent<EodWorkerRequest>) => {
         : await repository.findObservation(r.jobId, r.acceptedAt);
       if (observed) {
         if (json(observed.artifact.input) !== json(candidate.input)) fail('reference_conflict');
-        const artifact = await retainWorkspaceObject(db, 'workspace_technical_v2', observed.artifact);
-        ref = await retainWorkspaceObject(db, 'workspace_receipt_v1', { version: 'workspace_receipt_v1', identity: r.identity, artifact, receipt: observed.receipt });
+        result = { artifact: observed.artifact, receipt: observed.receipt };
       }
     }
-    db.close(); db = undefined;
-    self.postMessage({ ok: true, ref });
+    db?.close(); db = undefined;
+    self.postMessage({ ok: true, result });
   } catch (error) {
-    try { db?.close(); } finally { self.postMessage({ ok: false, ref: null,
+    try { db?.close(); } finally { self.postMessage({ ok: false, result: null,
       code: error instanceof WorkspaceError ? error.code
         : error instanceof Error && 'code' in error && error.code === 'SQLITE_BUSY' ? 'database_busy' : 'reference_conflict' }); }
   }

@@ -6,9 +6,10 @@ import { createTechnicalSourceRequestWindowV1 } from '../market-data/technical-s
 import { WorkspaceRepository } from './repository.js';
 import { FrozenIdentitySchema, Id, json, parse, fail, objectKey, scopeKey, type FrozenIdentity, type ObjectRef, WorkspaceError } from './contracts.js';
 import { objectRow, rowRef, resolveReference } from './references.js';
-import { ReceiptObjectSchema, workspaceDataCodecs } from './data-objects.js';
+import { ReceiptObjectSchema, workspaceDataCodecs, retainWorkspaceObject, cleanupWorkspaceImports } from './data-objects.js';
 import { collectWorkspaceCatalog, activateWorkspaceCatalog } from './data-source.js';
 import { runEodWorker } from './eod-worker-client.js';
+import { WorkspaceTechnicalCodec } from './technical-artifact.js';
 
 type State = 'queued' | 'running' | 'publishing' | 'published' | 'failed' | 'interrupted' | 'identity_review_required';
 export type WorkspaceDataJob = { job_id: string; kind: 'catalog' | 'technical'; accepted_at: string; state: State;
@@ -107,24 +108,28 @@ export class WorkspaceDataJobs {
       } else {
         const identity = parse(FrozenIdentitySchema, JSON.parse(job.identity!));
         const fetched = await fetchTechnicalInputsV1(identity.code.slice(0, 4), context, this.coordinator.environment);
-        const input = await runEodWorker({ operation: 'prepare', root: this.repository.db.root, artifactRoot: this.artifactRoot, identity,
+        const prepared = await runEodWorker({ operation: 'prepare', root: this.repository.db.root, artifactRoot: this.artifactRoot, identity,
           master: rowRef(objectRow(this.repository.db, job.master_object!)), fetched }, context.signal) ?? fail('reference_missing');
+        const input = await retainWorkspaceObject(this.repository.db, 'workspace_technical_v2', prepared.artifact);
+        cleanupWorkspaceImports(this.repository.db);
         this.repository.db.transaction(() => { this.repository.db.sqlite.run('UPDATE workspace_data_jobs SET input_object=? WHERE job_id=?', [objectKey(input), job.job_id]); });
         await this.checkpoint?.('before_publish', this.get(job.job_id));
         if (context.signal.aborted) fail('invalid_input');
         if (!this.matches(job, identity)) fail('identity_review_required');
         this.coordinator.assertOwner(lease);
         this.repository.db.transaction(() => this.set(job.job_id, 'publishing'));
-        const receipt = await runEodWorker({ operation: 'publish', root: this.repository.db.root, artifactRoot: this.artifactRoot, identity,
-          prepared: input, jobId: job.job_id, acceptedAt: job.accepted_at, checkedAt: new Date(this.coordinator.environment.wallNowMs()).toISOString() }, context.signal);
+        const candidate = new WorkspaceTechnicalCodec(identity.code.slice(0, 4)).parse(JSON.parse(new TextDecoder().decode(resolveReference(this.repository.db, rowRef(objectRow(this.repository.db, objectKey(input))), workspaceDataCodecs).bytes)));
+        const published = await runEodWorker({ operation: 'publish', root: this.repository.db.root, artifactRoot: this.artifactRoot, identity,
+          prepared: candidate, jobId: job.job_id, acceptedAt: job.accepted_at, checkedAt: new Date(this.coordinator.environment.wallNowMs()).toISOString() }, context.signal);
         await this.checkpoint?.('after_publish', this.get(job.job_id));
-        await this.finalize(job.job_id, receipt ?? undefined);
+        await this.finalize(job.job_id, published ?? undefined);
       }
       await this.coordinator.exclusive(async () => this.coordinator.afterReplace(lease, { state: 'published', record: projection(this.get(lease.jobId)) }));
     } catch (error) {
       // Publishing may have committed a receipt. Leave its durable state for exact recovery.
       try {
-        if (this.get(lease.jobId).state === 'publishing') { this.coordinator.latchRecovery(); return; }
+        const current = this.get(lease.jobId);
+        if (current.state === 'publishing' || terminal(current.state)) { this.coordinator.latchRecovery(); return; }
         this.repository.db.transaction(() => {
           const job = this.get(lease.jobId); if (job.generation) this.repository.failCatalog(job.generation);
           this.set(lease.jobId, error instanceof WorkspaceError && error.code === 'identity_review_required' ? 'identity_review_required' : 'failed',
@@ -134,14 +139,18 @@ export class WorkspaceDataJobs {
       } catch { this.coordinator.latchRecovery(); }
     } finally { clearTimeout(timer); this.pending.delete(lease.jobId); this.controllers.delete(lease.jobId); }
   }
-  private async finalize(id: string, published?: ObjectRef) {
+  private async finalize(id: string, published?: { artifact: unknown; receipt: unknown }) {
     const job = this.get(id), identity = parse(FrozenIdentitySchema, JSON.parse(job.identity!));
     if (!job.input_object) fail('reference_missing');
+    const prepared = new WorkspaceTechnicalCodec(identity.code.slice(0, 4)).parse(JSON.parse(new TextDecoder().decode(resolveReference(this.repository.db, rowRef(objectRow(this.repository.db, job.input_object)), workspaceDataCodecs).bytes)));
     const receipt = published ?? await runEodWorker({ operation: 'recover', root: this.repository.db.root, artifactRoot: this.artifactRoot, identity,
-      prepared: rowRef(objectRow(this.repository.db, job.input_object)), jobId: id, acceptedAt: job.accepted_at,
+      prepared, jobId: id, acceptedAt: job.accepted_at,
       checkedAt: new Date(this.coordinator.environment.wallNowMs()).toISOString() });
     if (!receipt) { this.repository.db.transaction(() => this.set(id, 'interrupted')); return; }
-    const observed = parse(ReceiptObjectSchema, JSON.parse(new TextDecoder().decode(resolveReference(this.repository.db, receipt, workspaceDataCodecs).bytes)));
+    const artifactRef = await retainWorkspaceObject(this.repository.db, 'workspace_technical_v2', receipt.artifact);
+    const receiptRef = await retainWorkspaceObject(this.repository.db, 'workspace_receipt_v1', { version: 'workspace_receipt_v1', identity, artifact: artifactRef, receipt: receipt.receipt });
+    cleanupWorkspaceImports(this.repository.db);
+    const observed = parse(ReceiptObjectSchema, JSON.parse(new TextDecoder().decode(resolveReference(this.repository.db, receiptRef, workspaceDataCodecs).bytes)));
     if (json(observed.identity) !== json(identity) || observed.receipt.jobId !== id || observed.receipt.acceptedAt !== job.accepted_at) fail('reference_conflict');
     const artifact = observed.artifact;
     await this.checkpoint?.('before_binding', job);
@@ -158,12 +167,12 @@ export class WorkspaceDataJobs {
           if (previous.acceptedAt === observed.receipt.acceptedAt && previous.artifactIdentity.artifactDigest !== observed.receipt.artifactIdentity.artifactDigest) fail('reference_conflict');
           keepOld = previous.acceptedAt > observed.receipt.acceptedAt || previous.acceptedAt === observed.receipt.acceptedAt && previous.jobId < observed.receipt.jobId;
         }
-        this.repository.bind(identity, artifact, receipt, 'technical');
+        this.repository.bind(identity, artifactRef, receiptRef, 'technical');
         if (keepOld) this.repository.db.sqlite.run("UPDATE data_sync_state SET binding_id=? WHERE scope=? AND dataset='technical'", [old!.binding_id, scope]);
-        this.repository.db.sqlite.run('UPDATE workspace_data_jobs SET result_object=? WHERE job_id=?', [objectKey(receipt), id]); this.set(id, 'published');
+        this.repository.db.sqlite.run('UPDATE workspace_data_jobs SET result_object=? WHERE job_id=?', [objectKey(receiptRef), id]); this.set(id, 'published');
       } catch (error) {
         if (!(error instanceof WorkspaceError) || error.code !== 'identity_review_required') throw error;
-        this.repository.db.sqlite.run('UPDATE workspace_data_jobs SET result_object=? WHERE job_id=?', [objectKey(receipt), id]);
+        this.repository.db.sqlite.run('UPDATE workspace_data_jobs SET result_object=? WHERE job_id=?', [objectKey(receiptRef), id]);
         this.set(id, 'identity_review_required', error.code);
       }
     });
