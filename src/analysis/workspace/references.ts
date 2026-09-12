@@ -51,6 +51,43 @@ export function requireScope(db: WorkspaceDatabase, key: string, expected: Works
   if (scopeKey(metadata.scope) !== scopeKey(expected)) fail('reference_conflict');
   return metadata;
 }
+function publishObject(db: WorkspaceDatabase, object: VerifiedObject, checkpoint?: PublicationCheckpoint): void {
+  db.assertAvailable();
+  const path = referencePath(db.root, object.ref);
+  const temporary = stageFile(path, object.bytes, checkpoint);
+  try {
+    db.transaction(() => {
+      const registered = db.sqlite.query('SELECT object_key FROM immutable_objects WHERE object_key=?').get(objectKey(object.ref));
+      if (existsSync(path)) {
+        if (digest(readBytes(path)) === object.ref.digest) return;
+        if (registered) fail('reference_conflict');
+        renameSync(path, `${path}.quarantine-${randomUUID()}`);
+        syncDirectory(resolve(db.root, 'objects'));
+      } else if (registered) fail('reference_missing');
+      renameSync(temporary, path); syncDirectory(resolve(db.root, 'objects'));
+      checkpoint?.('published');
+    });
+  } finally { if (existsSync(temporary)) unlinkSync(temporary); }
+}
+function registerObjectRows(db: WorkspaceDatabase, objects: readonly VerifiedObject[]): void {
+  db.transaction(() => {
+    for (const { ref, metadata } of objects) {
+      const key = objectKey(ref), existing = db.sqlite.query<ObjectRow, [string]>(
+        'SELECT * FROM immutable_objects WHERE object_key=?').get(key);
+      if (existing) {
+        if (json(rowRef(existing)) !== json(ref) || existing.metadata !== json(metadata)) fail('reference_conflict');
+        continue;
+      }
+      db.sqlite.run('INSERT INTO immutable_objects VALUES (?,?,?,?,?)', [key, ref.path, ref.codec, ref.digest, json(metadata)]);
+      for (const child of metadata.dependencies) db.sqlite.run('INSERT INTO object_dependencies VALUES (?,?)', [key, objectKey(child)]);
+    }
+  });
+}
+/** Worker validation may avoid a second codec pass, but never the archive guard. */
+export function retainVerifiedObject(db: WorkspaceDatabase, object: VerifiedObject, checkpoint?: PublicationCheckpoint): void {
+  publishObject(db, object, checkpoint);
+  registerObjectRows(db, [object]);
+}
 function* collectSteps(roots: readonly ObjectRef[], read: (ref: ObjectRef) => VerifiedObject): Generator<void, VerifiedObject[]> {
   const found = new Map<string, VerifiedObject>(), visiting = new Set<string>();
   let totalBytes = 0;
@@ -104,39 +141,12 @@ export async function registerReferences(db: WorkspaceDatabase, sourceRoot: stri
   for (let offset = 0; offset < objects.length; offset += 16) {
     const batch = objects.slice(offset, offset + 16);
     for (const object of batch) {
-      const path = referencePath(db.root, object.ref);
-      const temporary = stageFile(path, object.bytes, publicationCheckpoint);
-      try {
-        // Every archive publisher uses the same SQLite writer lock. A concurrent
-        // importer cannot replace a winner between the registry check and rename.
-        db.transaction(() => {
-          const registered = db.sqlite.query('SELECT object_key FROM immutable_objects WHERE object_key=?').get(objectKey(object.ref));
-          if (existsSync(path)) {
-            if (digest(readBytes(path)) === object.ref.digest) return;
-            if (registered) fail('reference_conflict');
-            renameSync(path, `${path}.quarantine-${randomUUID()}`);
-            syncDirectory(resolve(db.root, 'objects'));
-          } else if (registered) fail('reference_missing');
-          renameSync(temporary, path); syncDirectory(resolve(db.root, 'objects'));
-          publicationCheckpoint?.('published');
-        });
-      } finally { if (existsSync(temporary)) unlinkSync(temporary); }
+      publishObject(db, object, publicationCheckpoint);
       await checkpoint();
     }
     // Dependencies precede parents; every committed row has durable bytes and a
     // complete FK closure, including when a later batch fails or the process exits.
-    db.transaction(() => {
-      for (const { ref, metadata } of batch) {
-        const key = objectKey(ref), existing = db.sqlite.query<ObjectRow, [string]>(
-          'SELECT * FROM immutable_objects WHERE object_key=?').get(key);
-        if (existing) {
-          if (json(rowRef(existing)) !== json(ref) || existing.metadata !== json(metadata)) fail('reference_conflict');
-          continue;
-        }
-        db.sqlite.run('INSERT INTO immutable_objects VALUES (?,?,?,?,?)', [key, ref.path, ref.codec, ref.digest, json(metadata)]);
-        for (const child of metadata.dependencies) db.sqlite.run('INSERT INTO object_dependencies VALUES (?,?)', [key, objectKey(child)]);
-      }
-    });
+    registerObjectRows(db, batch);
     await checkpoint();
   }
 }

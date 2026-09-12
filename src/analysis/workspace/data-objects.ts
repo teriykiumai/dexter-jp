@@ -7,9 +7,9 @@ import { validateCurrentTechnicalMasterV1, createTechnicalSourceRequestWindowV1,
   resolveTechnicalEligibleThroughV1 } from '../market-data/technical-source-gate.js';
 import { WorkspaceTechnicalCodec } from './technical-artifact.js';
 import { WorkspaceMasterSchema, TechnicalInputSchema, calculateWorkspaceTechnical } from './technical-input.js';
-import { DateValue, Id, ObjectRefSchema, FrozenIdentitySchema, ObjectMetadataSchema, digest, json, fail, parse, objectKey, type ReferenceCodecs, type ObjectRef, type ObjectMetadata } from './contracts.js';
-import { writeExclusive } from './files.js';
-import { registerReferences, referencePath, type VerifiedObject } from './references.js';
+import { DateValue, Id, ObjectRefSchema, FrozenIdentitySchema, ObjectMetadataSchema, digest, json, fail, parse, type ReferenceCodecs, type ObjectRef, type ObjectMetadata } from './contracts.js';
+import { writeExclusive, type PublicationCheckpoint } from './files.js';
+import { registerReferences, retainVerifiedObject, type VerifiedObject } from './references.js';
 import type { WorkspaceDatabase } from './database.js';
 
 const FetchEvidenceSchema = z.object({ fetchedAt: z.iso.datetime(), pageCount: z.number().int().positive().max(20),
@@ -26,8 +26,8 @@ export const EpisodeObjectSchema = z.object({ version: z.literal('workspace_epis
   previous: ObjectRefSchema.nullable() }).strict().refine(v => v.from <= v.observation.Date);
 export const ReceiptObjectSchema = z.object({ version: z.literal('workspace_receipt_v1'), identity: FrozenIdentitySchema,
   artifact: ObjectRefSchema, receipt: MarketDataObservationReceiptV1Schema }).strict();
-const sourceDefinition = 'workspace_jquants_eod_v1', calculationVersion = 'technical_chart_calculation_v2';
-const metadata = (scope: ObjectMetadata['scope'], effectiveDate: string, dependencies: ObjectRef[]): ObjectMetadata =>
+const metadata = (scope: ObjectMetadata['scope'], effectiveDate: string, dependencies: ObjectRef[],
+  sourceDefinition = 'workspace_jquants_eod_v1', calculationVersion = 'technical_chart_calculation_v2'): ObjectMetadata =>
   ({ scope, effectiveDate, dependencies, sourceDefinition, calculationVersion });
 export const workspaceDataCodecs: ReferenceCodecs = new Map([
   ['workspace_catalog_v1', value => {
@@ -43,12 +43,13 @@ export const workspaceDataCodecs: ReferenceCodecs = new Map([
     if (new Set(catalog.rows.map(r => r.Code)).size !== catalog.rows.length) fail('invalid_input');
     for (const row of catalog.rows) if (row.Date !== catalog.date || validateCurrentTechnicalMasterV1([row],
       { ticker: row.Code.slice(0, 4), eligibleThrough: catalog.date }).state !== 'accepted') fail('invalid_input');
-    return metadata({ kind: 'market-scoped', universe: 'ordinary_stock_catalog', definitionVersion: 'v1' }, catalog.date, []);
+    return metadata({ kind: 'market-scoped', universe: 'ordinary_stock_catalog', definitionVersion: 'v1' }, catalog.date, [],
+      catalog.sourceDefinition, catalog.version);
   }],
   ['workspace_episode_v1', value => {
     const episode = parse(EpisodeObjectSchema, value);
     return metadata({ kind: 'instrument-owned', instrumentId: episode.instrumentId }, episode.observation.Date,
-      [episode.catalog, ...(episode.previous ? [episode.previous] : [])]);
+      [episode.catalog, ...(episode.previous ? [episode.previous] : [])], 'jquants_dated_ordinary_master_v1', episode.version);
   }],
   ['workspace_technical_input_v1', value => {
     const input = calculateWorkspaceTechnical(value).input;
@@ -88,16 +89,12 @@ export function cleanupWorkspaceImports(db: WorkspaceDatabase): void {
 export function retainValidatedWorkspaceObject(db: WorkspaceDatabase, codec: string, value: unknown, metadata: ObjectMetadata): ObjectRef {
   return retainValidatedWorkspaceBytes(db, codec, json(value), metadata);
 }
-export function retainValidatedWorkspaceBytes(db: WorkspaceDatabase, codec: string, bytes: string, metadata: ObjectMetadata): ObjectRef {
+export function retainValidatedWorkspaceBytes(db: WorkspaceDatabase, codec: string, bytes: string, metadata: ObjectMetadata,
+  checkpoint?: PublicationCheckpoint): ObjectRef {
   if (!workspaceDataCodecs.has(codec)) fail('schema_unsupported');
   parse(ObjectMetadataSchema, metadata);
   const ref: ObjectRef = { path: `${randomUUID()}.json`, codec, digest: digest(bytes) };
-  const path = referencePath(db.root, ref); writeExclusive(path, bytes);
-  const key = objectKey(ref);
-  db.transaction(() => {
-    db.sqlite.run('INSERT INTO immutable_objects VALUES (?,?,?,?,?)', [key, ref.path, codec, ref.digest, json(metadata)]);
-    for (const child of metadata.dependencies) db.sqlite.run('INSERT INTO object_dependencies VALUES (?,?)', [key, objectKey(child)]);
-  });
+  retainVerifiedObject(db, { ref, metadata, bytes: new TextEncoder().encode(bytes) }, checkpoint);
   return ref;
 }
 

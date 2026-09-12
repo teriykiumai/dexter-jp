@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { resolve } from 'node:path';
 import { workspaceDataFixture } from './data-test-fixtures.js';
 import { workspaceDataCodecs } from './data-objects.js';
-import { resolveReference, validateReferences, rowRef, objectRow } from './references.js';
+import { resolveReference, validateReferences, rowRef, objectRow, metadataFor } from './references.js';
 import { backupWorkspace, restoreWorkspace } from './backup.js';
 import { WorkspaceDatabase } from './database.js';
 import { WorkspaceRepository } from './repository.js';
@@ -14,6 +14,10 @@ test('ordinary catalog -> frozen EOD -> exact binding -> backup/restore without 
     expect((await f.jobs.wait(await f.jobs.start('catalog'))).state).toBe('published');
     const catalogKey = f.db.sqlite.query<{ evidence: string }, []>('SELECT evidence FROM catalog_generations WHERE state=\'active\'').get()!.evidence;
     const catalog = JSON.parse(new TextDecoder().decode(resolveReference(f.db, rowRef(objectRow(f.db, catalogKey)), workspaceDataCodecs).bytes));
+    expect(metadataFor(f.db, catalogKey)).toMatchObject({ sourceDefinition: catalog.sourceDefinition, calculationVersion: catalog.version });
+    const episodeKey = f.db.sqlite.query<{ evidence: string }, []>('SELECT evidence FROM catalog_rows').get()!.evidence;
+    const episode = JSON.parse(new TextDecoder().decode(resolveReference(f.db, rowRef(objectRow(f.db, episodeKey)), workspaceDataCodecs).bytes));
+    expect(metadataFor(f.db, episodeKey)).toMatchObject({ sourceDefinition: catalog.sourceDefinition, calculationVersion: episode.version });
     const corruptCalendar = structuredClone(catalog); corruptCalendar.calendar.pop();
     expect(() => workspaceDataCodecs.get('workspace_catalog_v1')!(corruptCalendar)).toThrow();
     const corruptDate = structuredClone(catalog); corruptDate.date = '2026-09-10';
@@ -99,31 +103,6 @@ test('shared coordinator rejects competing jobs; legacy status does not latch re
     expect(f.repository.current({ kind: 'instrument-owned', instrumentId: item.instrumentId }, 'technical')).toBeNull();
   } finally { resume(); for (const job of f.jobs.inventory()) await f.jobs.wait(job.job_id); f.dispose(); }
 }, 30_000);
-
-test.each([false, true])('writer contention: background=%s preserves the foreground wait bound', async backgroundWriter => {
-  const f = await workspaceDataFixture();
-  const program = `const { WorkspaceDatabase } = await import(${JSON.stringify(new URL('./database.ts', import.meta.url).href)});
-    const db = new WorkspaceDatabase(${JSON.stringify(f.root)}, { backgroundWriter: ${backgroundWriter} });
-    process.stdout.write('ready');
-    try { db.transaction(() => db.sqlite.run("INSERT INTO workspace_meta VALUES ('contention_probe','committed')")); }
-    catch (error) { process.stderr.write(String(error.code)); process.exitCode = 1; }
-    finally { db.close(); }`;
-  f.db.sqlite.exec('BEGIN IMMEDIATE');
-  const child = Bun.spawn([process.execPath, '-e', program], { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
-  try {
-    const reader = child.stdout.getReader();
-    expect(new TextDecoder().decode((await reader.read()).value)).toBe('ready'); reader.releaseLock();
-    await Bun.sleep(350);
-    expect(f.db.sqlite.query('PRAGMA busy_timeout').get()).toEqual({ timeout: 100 });
-    f.db.sqlite.exec('COMMIT');
-    expect(await child.exited).toBe(backgroundWriter ? 0 : 1);
-    expect(await new Response(child.stderr).text()).toBe(backgroundWriter ? '' : 'SQLITE_BUSY');
-    expect(f.db.sqlite.query("SELECT value FROM workspace_meta WHERE key='contention_probe'").get()).toEqual(backgroundWriter ? { value: 'committed' } : null);
-  } finally {
-    if (f.db.sqlite.inTransaction) f.db.sqlite.exec('ROLLBACK');
-    child.kill(); await child.exited; f.dispose();
-  }
-}, 10_000);
 
 test('coordinator bookkeeping failure does not roll back a committed terminal job', async () => {
   const f = await workspaceDataFixture();

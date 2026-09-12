@@ -342,7 +342,7 @@ complete backup until exact publication reconciliation, never triggers a source 
 The initial ten-year EOD/10,000-Drawing experiment measured a 17,587.54 ms maximum
 server event-loop wait, failing the <1s acceptance. Accordingly the implementation
 uses one sequential, short-lived Bun worker for EOD calculation, strict codec
-validation and immutable publication/retention. Main-thread source dispatch still
+validation and native Market Data publication. Main-thread source dispatch still
 uses the shared coordinator; workers do not fetch market data. Job state, admission,
 identity revalidation and final binding remain under the main authority. Worker
 failure during publication leaves `publishing` for exact recovery, not a retry of
@@ -351,14 +351,12 @@ The worker returns validated canonical artifact bytes and a small publication pr
 the main writer archives those bytes and commits Workspace references. Large parsed
 Technical objects are not cloned back into the main event loop, and the main path does
 not reparse the Technical V2 before publication.
-Background writer connections may wait up to 5s for SQLite contention; foreground
-connections retain the 100ms busy bound. A 350ms held-write regression proves the
-old foreground setting fails with `SQLITE_BUSY` while the background writer commits.
-Exhausted background contention remains an explicit failure, never a source replay.
+The worker opens Workspace SQLite read-only; all Workspace mutation belongs to the
+main writer, with the existing 100ms busy bound and no background-writer exception.
 The worker experiment passed on Windows/Bun 1.3.14/SQLite 3.53.0 (i7-9700,
-15.92 GiB RAM): two ten-year ingestions alongside 10,000 saved Drawings, 130,352
-foreground samples; event-loop maximum 62.49 ms, Drawing-save p95/max 3.57/230.28 ms,
-search p95/max 0.30/41.56 ms. These are fixture-load measurements, not API latency.
+15.92 GiB RAM): two ten-year ingestions alongside 10,000 saved Drawings, 59,694
+foreground samples; event-loop maximum 50.65 ms, Drawing-save p95/max 3.53/326.64 ms,
+search p95/max 0.26/20.93 ms. These are fixture-load measurements, not API latency.
 
 Technical V2 uses the existing Market Data repository and receipt V1 implementation
 under `market-data/workspace-v2`, so legacy ticker-latest readers never select V2.
@@ -374,6 +372,12 @@ observation; it never guesses an earlier listing date. Same-date refresh can upd
 labels using existing episodes. Its immutable catalog includes the accepted cutoff,
 normalized calendar, dated ordinary-master rows and complete source page/count/time
 evidence; offline validation recomputes the eligible session from these retained inputs.
+Catalog and episode registry metadata use `jquants_dated_ordinary_master_v1` as their
+source definition. Their calculation-version field denotes the validated evidence
+format (`workspace_catalog_v1` / `workspace_episode_v1`), not a Technical calculation.
+Technical input/V2/receipt metadata retain `workspace_jquants_eod_v1` and
+`technical_chart_calculation_v2`. Catalog metadata takes its source definition directly
+from the payload; episode evidence derives from the exact referenced dated catalog.
 A later master date does not by itself prove episode
 continuity: until independently evidenced continuity is available, such refreshes
 return `identity_review_required` and preserve the accepted catalog. This is an explicit

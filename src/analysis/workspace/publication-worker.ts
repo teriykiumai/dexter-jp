@@ -5,9 +5,11 @@ import { fixtureCodecs } from './test-fixtures.js';
 import { ObjectRefSchema, parse } from './contracts.js';
 import { backupWorkspace } from './backup.js';
 import type { PublicationCheckpoint } from './files.js';
+import { readFileSync } from 'node:fs';
+import { retainValidatedWorkspaceBytes, workspaceDataCodecs } from './data-objects.js';
 
 const [kind, root, source, encoded, phase] = process.argv.slice(2);
-if (!root || !source || !encoded || !['archive', 'marker', 'import'].includes(kind ?? '')) throw new Error('Invalid worker');
+if (!root || !source || !encoded || !['archive', 'marker', 'import', 'workspace-bytes'].includes(kind ?? '')) throw new Error('Invalid worker');
 const checkpoint: PublicationCheckpoint = point => {
   if (point !== phase) return;
   process.stdout.write('ready');
@@ -16,7 +18,13 @@ const checkpoint: PublicationCheckpoint = point => {
 if (kind === 'marker') backupWorkspace(root, resolve(source, 'child-backup'), fixtureCodecs, checkpoint);
 else {
   const db = new WorkspaceDatabase(root);
-  try { await registerReferences(db, source, [parse(ObjectRefSchema, JSON.parse(encoded))], fixtureCodecs, kind === 'import' ? undefined : checkpoint); }
+  try {
+    if (kind === 'workspace-bytes') {
+      const bytes = readFileSync(source, 'utf8');
+      const metadata = workspaceDataCodecs.get(encoded)!(JSON.parse(bytes));
+      retainValidatedWorkspaceBytes(db, encoded, bytes, metadata, checkpoint);
+    } else await registerReferences(db, source, [parse(ObjectRefSchema, JSON.parse(encoded))], fixtureCodecs, kind === 'import' ? undefined : checkpoint);
+  }
   finally { db.close(); }
   process.stdout.write('done');
 }
