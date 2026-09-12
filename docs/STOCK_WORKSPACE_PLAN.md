@@ -4,7 +4,7 @@
 
 **Date:** 2026-09-12
 
-**Status:** User-approved architecture; Step 0 contract migration candidate. Runtime steps remain unimplemented by this change and require their own validation/review/merge.
+**Status:** Step 0 merged in PR #113. Step 1 SQLite foundation is an implementation candidate; later steps still require their own implementation, validation, review and merge.
 
 ## 1. Authority and migration boundary
 
@@ -256,6 +256,34 @@ Committed Drawings/preferences survive process crashes. Uncommitted writes must 
 appear committed. Filesystem/hardware durability assumptions are recorded; do not
 claim that an in-memory probe proves disk recovery. Protect irreplaceable Drawings
 ahead of replaceable market caches.
+
+### 4.3 Step 1 implementation boundary
+
+`src/analysis/workspace/` supplies schema V1, the local repository, explicit codec
+registration, reference inventory and offline backup/restore. V1 implements the
+ordinary-stock/daily storage primitives; source job orchestration, full Drawing
+operations/basis comparison, AI execution and intraday fields belong to their later
+steps and versioned schema changes. It does not connect a Dashboard route or fetch
+data. Root directories and codec implementations are trusted local caller inputs,
+not accepted from HTTP requests or backup contents.
+
+Object references authenticate exact stored file bytes with SHA-256. They do not
+replace the existing Market Data artifact/receipt semantic digests. Reviewed,
+source-specific codecs must validate those formats and enumerate their complete
+dependencies before Step 2A can register real source data; Step 1 tests use a closed
+fixture codec. There is no permissive default codec. Backup policy V1 includes every
+registered object and permits no referenced-cache omissions or transformations.
+
+Maintenance requires all Workspace connections to be closed and the local server
+stopped. The implementation uses `VACUUM INTO`, a completion manifest, staged restore,
+an exclusive maintenance marker and a preserved previous installation. A failed
+restore requires explicit local reconciliation; it never fetches/replays jobs or
+silently falls back to another latest object. SQLite files/backup payloads are fsynced;
+directory fsync is used where Node exposes it. Windows does not provide directory
+fsync through this API. Process-kill recovery tests therefore prove process-crash
+behavior on the tested local filesystem, not power-loss/hardware durability on every
+filesystem. Network filesystems and concurrent unmanaged SQLite writers are outside
+the offline maintenance contract.
 
 ## 5. EOD chart and Drawing basis
 
@@ -555,9 +583,13 @@ a prerequisite. Step 1 has the required identity, ownership, revision, reference
 durability contracts and can implement the foundation after Step 0 review/merge under
 the existing repository workflow. No live source or LLM key is required for Step 1.
 
-Evidence still to produce is scoped to its owning work: Step 1 on-disk SQLite/version/
-crash/migration/WAL backup proof; Step 2A exact identity/binding races and V2 basis
-source evidence; Step 2B ETF/REIT capabilities; source-field/cadence eligibility before
+Step 1's repository/backup tests provide on-disk SQLite, migration, process-crash,
+WAL backup and closure fixtures; its responsiveness fixture covers 10,000 catalog
+rows and Drawings with concurrent local operations. The Step 1 PR records actual
+runtime/test results and limitations; merge still requires CI and independent review.
+
+Remaining evidence is scoped to its owning work: Step 2A real-source identity/binding
+finalization and V2 basis source evidence; Step 2B ETF/REIT capabilities; source-field/cadence eligibility before
 Step 5/6 collectors; Step 7 frozen-input/no-replay tests; SW-M0 exact market coverage;
 Step 9 intraday entitlement/timestamp/correction semantics; and the owning runtime
 steps' responsiveness/accessibility tests. Existing gates may be reused only for
