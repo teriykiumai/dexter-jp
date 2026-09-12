@@ -55,6 +55,7 @@ interface PriceChartProps {
   describedBy: string;
   technical?: { candles: readonly TechnicalCandle[]; interval: TechnicalInterval;
     unavailableDates: readonly string[];
+    sma20?: readonly { date: string; value: number | null }[];
     collapsed: readonly string[]; selectedDate: string | null; onSelect: (date: string) => void };
 }
 
@@ -170,6 +171,10 @@ export function PriceChart({ bars, priceLines, describedBy, technical }: PriceCh
     volume?.setData(volumeData);
 
     if (technical) {
+      if (technical.sma20?.length) {
+        const sma = chart.addSeries(LineSeries, { color: color('--color-chart-sma20'), title: 'SMA 20', priceLineVisible: false });
+        sma.setData(technical.sma20.map(row => ({ time: toBusinessDay(row.date)!, ...(row.value === null ? {} : { value: row.value }) })));
+      }
       let pane = volume ? 2 : 1;
       const addIndicator = (field: 'rsi' | 'macd' | 'signal' | 'histogram', paneIndex: number, token: string) => {
         const series = field === 'histogram'
@@ -214,7 +219,7 @@ export function PriceChart({ bars, priceLines, describedBy, technical }: PriceCh
       resizeObserver.disconnect();
       chart.remove();
     };
-  }, [bars, technical?.candles, technical?.interval, technical?.collapsed, technical?.unavailableDates]);
+  }, [bars, technical?.candles, technical?.interval, technical?.collapsed, technical?.unavailableDates, technical?.sma20]);
 
   useEffect(() => {
     const selected = technical?.candles.find(row => row.displayDate === technical.selectedDate);

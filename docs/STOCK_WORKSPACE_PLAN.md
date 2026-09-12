@@ -4,7 +4,7 @@
 
 **Date:** 2026-09-12
 
-**Status:** Step 0 merged in PR #113; Step 1 SQLite foundation merged in PR #114. Step 2A is an implementation candidate; later steps still require their own implementation, validation, review and merge.
+**Status:** Step 0 merged in PR #113; Step 1 SQLite foundation merged in PR #114; Step 2A library merged in PR #115 with its cross-date identity gate still open. Step 3 is an implementation candidate; later steps require their own implementation, validation, review and merge.
 
 ## 1. Authority and migration boundary
 
@@ -594,6 +594,30 @@ reproducible and join backup closure. Initial implementation has no automatic GC
 future retention may remove only proven-unreferenced revisions under a reviewed policy.
 
 ## 10. Delivery sequence and first milestone
+
+Step 3 adds `/workspace?instrument=<instrumentId>&interval=day|week|month` and a
+common-header link. The legacy landing/history routes stay accessible until Step 8.
+Unknown/duplicate route selectors fail explicitly; Back and reload preserve the exact
+instrument and interval. Candidate search and Workspace GET do not create a recent:
+the explicit open POST records it. Favorites use the existing Workspace revision.
+
+The guarded `/api/workspace` adapter shares the process session and coordinator.
+GET covers search, recents, session, active/exact jobs and saved instrument charts;
+POST covers explicit open, revision-checked favorites and catalog/EOD admission.
+Host/Origin/CSRF, JSON media type, strict bounded bodies and safe error mapping apply.
+No Drawing API is added before 4A. Interval/pane changes are presentation-only in
+Step 3; URL preserves interval, while saved chart-control preferences are deferred.
+
+Chart reads pin the current binding's exact artifact and receipt. A read-only worker
+validates both and their evidence closure before returning the eligible projection;
+at most one chart-read worker runs with eight admitted reads including the active
+read. Errors leave data unavailable without source/latest fallback. Data jobs remain
+under the main writer; reads, navigation and polling never initiate external fetch.
+Active-job polling runs once per second while visible and latches uncertain reads
+until full reload. Late read/open responses cannot redirect or replace a new selection.
+Exact-value tables expose all rows in bounded 100-row pages, separate from the full
+canvas series. A 2,600-candle browser fixture covers interval/Back navigation and
+table reachability; it is a presentation stress fixture, not historical source proof.
 
 Each step has its own reviewable diff and inherited regression checks. New names
 below identify module responsibilities, not Step 0 runtime additions.

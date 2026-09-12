@@ -16,6 +16,7 @@ import {
 import { loadDashboardAsset } from './assets.js';
 import type { StrategyValidationDashboardApiV1 } from './strategy-validation-api.js';
 import type { MarketDataDashboardApiV1 } from './market-data-api.js';
+import type { WorkspaceDashboardApi } from './workspace-api.js';
 import { isAllowedDashboardHost } from './session.js';
 export { isAllowedDashboardHost } from './session.js';
 
@@ -204,6 +205,7 @@ export async function handleDashboardRequest(
   repository: AnalysisSnapshotReader,
   strategyValidationApi?: StrategyValidationDashboardApiV1,
   marketDataApi?: MarketDataDashboardApiV1,
+  workspaceApi?: WorkspaceDashboardApi,
 ): Promise<Response> {
   const url = new URL(request.url);
   if (!isAllowedDashboardHost(request.headers.get('host'))) {
@@ -228,6 +230,10 @@ export async function handleDashboardRequest(
     const marketResponse = await marketDataApi.handle(request, url, segments);
     if (marketResponse !== null) return marketResponse;
   }
+  if (workspaceApi !== undefined) {
+    const workspaceResponse = await workspaceApi.handle(request, url, segments);
+    if (workspaceResponse !== null) return workspaceResponse;
+  }
 
   if (request.method !== 'GET') {
     return errorResponse(405, 'method_not_allowed', 'Only GET requests are supported.', {
@@ -237,7 +243,7 @@ export async function handleDashboardRequest(
 
   if (!url.pathname.startsWith('/api/')) {
     try {
-      const assetResponse = await staticAssetResponse(url.pathname);
+      const assetResponse = await staticAssetResponse(url.pathname === '/workspace' ? '/' : url.pathname);
       if (assetResponse) return assetResponse;
     } catch {
       return internalServerErrorResponse();
