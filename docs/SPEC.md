@@ -1,12 +1,18 @@
 # 日本株AI分析システム 仕様書
 
-**Version:** 0.4
+**Version:** 0.5
 **Status:** Draft  
 **Base Project:** `edinetdb/dexter-jp`  
 **Use:** Personal / Local only  
-**Last Updated:** 2026-09-04
+**Last Updated:** 2026-09-12
 
 ## 1. 目的
+
+次期Dashboardは、Snapshotなしで銘柄を検索してチャートとDrawingを利用できる
+Stock Workspaceを中心とする。承認済みの移行契約と適用時期は末尾の
+「Stock Workspace Contract Migration」および `docs/STOCK_WORKSPACE_PLAN.md` に従う。
+以下の既存分析機能・出力・完了条件はCLI/保存済み履歴の互換契約として維持し、
+新Workspaceへ全機能を再実装する要件とはしない。金融上の不変条件は共通である。
 
 `edinetdb/dexter-jp` を基盤として、日本株について以下を横断的に分析する個人向けAI分析システムを構築する。
 
@@ -150,6 +156,8 @@ Dexter JPに存在する機能を再実装しない。
 可能な範囲で `現在値 vs 自社過去 vs Peer vs 業界中央値` を比較する。
 
 ### 5.3 Peer Comparison
+
+CLI・既存Snapshot向けの契約。新WorkspaceのUIおよびAI入力には含めない。
 
 初期ルール:
 1. 同一東証33業種
@@ -329,7 +337,7 @@ AIは以下を担当する。
 
 ## 10. MVP後
 
-### Phase 1.5 — Local Web Visualization MVP
+### Phase 1.5 — Local Web Visualization MVP（既存Snapshot経路）
 
 Phase 1.5は、Step 10で満たしたMVP完成条件を変更または再度開くものではない。MVP完了後に、分析結果の保存・可視化・Presentation Layerを追加する拡張である。
 
@@ -359,7 +367,8 @@ Canonical AnalysisSnapshot
 - Snapshotはtyped source resultとdeterministic engine resultからコードで構築する
 - source date、provenance、unit、partial / unavailable状態を保持する
 - APIキー、auth token、raw tool argumentsをSnapshotやBrowserへ渡さない
-- Local Web Serverは`127.0.0.1`のみにbindし、Read-onlyとする
+- Local Web Serverは`127.0.0.1`のみにbindする。このPhaseのSnapshot閲覧経路は
+  Read-onlyを維持し、後続の明示的なjob/Workspace mutation契約と区別する
 - 個人・ローカル・単一ユーザー用途を維持し、外部公開しない
 - Phase 2以降の分析機能を先取りしない
 
@@ -444,6 +453,10 @@ Phase 3の対象としない。保存済み分析に対する具体的なレビ�
 新しいversioned gold setとgate IDを含む独立した計画で再評価する。
 
 ### Dashboard Refresh & Market Context（Phase 5前の独立計画）
+
+以下は既存Refresh経路の契約である。Stock Workspaceへの移行では、7tab、
+Market Overview必須表示、Dashboard DB禁止を新UIへ継承しない。変更する範囲は
+末尾の移行契約で限定し、source/receipt/金融計算/securityの規則は継承する。
 
 Phase 5へ進む前に、既存Dashboardの視覚・技術Chart・全市場共通contextを、
 `docs/DASHBOARD_REFRESH_PLAN.md` に従う独立した段階計画で刷新する。これは
@@ -535,3 +548,58 @@ realtimeや取引所現在値を意味しない。1321/2633はJPY建てETF市場
 - 銘柄間相関
 - VaR
 - 定期監視 / 通知
+
+## 11. Stock Workspace Contract Migration
+
+`docs/STOCK_WORKSPACE_PLAN.md` (`stock_workspace_plan_v1`) を新Workspaceの規範計画
+とする。Step 0は文書のみを変更する。以下は各実装Stepの検証・review・merge後に
+適用するtarget contractであり、旧runtimeが既に変更済みであることを意味しない。
+
+- 主画面はinstrumentId単位のStock Workspace。Snapshot/LLM keyなしで起動でき、
+  local catalogを検索する。候補表示ではWorkspaceを作らず、open時にrecentへ登録する。
+- 日/週/月のCandlestick、Volume、既存SMA/RSI/MACDを先行する。週月の進行中足は
+  未確定として表示し、indicatorは確定足まで。進行中とsource不足を区別する。
+- mutable stateはローカル`bun:sqlite`へ分離し、EOD Market Data Artifact/receiptは
+  既存create-only基盤を再利用する。Snapshot V10を作らずV9 writer/V1-V9 readerと
+  immutable history、GET-only `/api/analyses/*`を維持する。
+- instrument-owned（価格・財務・配当・個別空売り）はexact identity検証必須で、
+  ticker一致による採用・別instrumentIdへの自動再割当を禁止する。sector-scoped/
+  market-scopedはscope identity、effective date、source definition、calculation
+  versionが一致すれば複数Workspaceから参照できる。参照と所有権を混同しない。
+- source取得jobはidentityを固定する。artifact/receipt公開後、SQLite transaction内で
+  固定instrumentId/provider code/mapping revision/catalog generationをcurrent mapping
+  と再照合した場合だけbindingをcommitする。catalog writerも同じtransaction規律に
+  従う。crash recoveryも同じpredicateを使い、不一致時は未bindingのままidentity review
+  とする。ticker再検索、別銘柄への付替え、latest fallbackで回復しない。
+- Backupは復元後に残す全persistent referenceの依存閉包を含む。Drawing/AIだけでなく
+  binding、sync state、job、catalog等のexact artifact/receipt/inputも対象とする。
+  省略可能cacheは復元DBにdangling referenceを残さず明示的なunavailable/uncollected
+  にする。別latestへ差替えない。EODのみ取得したWorkspaceもassociationとcurrent data
+  を復元できる。実ファイル、migration失敗、crash、WAL整合backup/restoreをStep 1で検証する。
+- Drawingはtime/price anchorを保存し、Horizontal、Trendline、Fibonacciの順に追加する。
+  通常の価格追加によるartifact digest変更はbasis変更としない。分割、影響範囲内の
+  過去訂正、比較不能basisはreview規則を適用し、保存したDrawingを勝手に変換・消去しない。
+- `予想配当利回り`は有効な会社予想年間配当と最新eligible日足終値のexact referenceから
+  serverで決定論的に計算する。日足のみの更新でも追従し、週月切替で分母を変えない。
+  同じ通貨・一株basisを必須とし、再計算にAPI/LLMを使わない。
+  `実績配当性向（対象年度）`は直近eligible通期のsource値とする。配当履歴UIは作らない。
+- 個別の公開/機関別空売りと所属業種の空売り売買代金/比率をStep 5へ移す。
+  市場全体の空売り売買代金/比率は新規の後続必須SW-M0/M1とする。業種比率の単純平均
+  を使わず、正確な対象範囲・欠損規則を持つ売買代金の分子/分母で計算する。
+- Workspace AIの初期profileは`fundamental`/`supply_demand`。明示操作でのみ開始し、
+  保存済みtyped inputをexact referenceとともにfreezeして解釈する。Agentの追加取得、
+  Peer入力、Drawing自動入力は禁止。結果は`AnalysisRunArtifactV1`へimmutable保存し、
+  current chart更新で再計算せず、crash/曖昧な公開結果を理由にLLMを自動再実行しない。
+- Peer、Market Overview、Market/Sector、Strategyのtop-level UIをStep 8で退役する。
+  既存Snapshot履歴とCLI、Strategy engine/history/APIおよび必要なjob調停は維持する。
+  旧UIを外すことを共有基盤の削除と同義にしない。
+- 初期asset対象は株式・ETF・REITだが、最初のM1は普通株で完成させる。ETF/REIT gateは
+  M1をblockしない。intradayはStep 9-10へ分離し、1分足canonicalから5/10/30分足を生成する。
+  訂正は日単位のatomic replacementとし、参照中の旧入力は再現可能に保持する。
+- `256 receipt`はlatest recovery時の検査budgetであり保存件数上限ではない。
+  初期移行でreceipt削除/上限拡大をしない。filename列挙・sort性能は別に検証する。
+
+localhost/Host/Origin/CSRF、secret/path保護、source gate、rate/timeout/recovery、
+no-look-ahead、欠損と有効zeroの区別、Code calculates / AI interpretsを維持する。
+外部API/LLMは明示操作のみで、通常CIは外部quotaを消費しない。新規chart/financial値を
+過去SnapshotやStrategy検証へ混ぜない。実装のacceptanceとremaining gateは新Planを参照する。
