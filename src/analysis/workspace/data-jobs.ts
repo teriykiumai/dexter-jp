@@ -9,7 +9,7 @@ import { objectRow, rowRef, resolveReference, referencePath } from './references
 import { readBytes } from './files.js';
 import { ReceiptObjectSchema, workspaceDataCodecs, retainValidatedWorkspaceBytes } from './data-objects.js';
 import { collectWorkspaceCatalog, activateWorkspaceCatalog } from './data-source.js';
-import { runEodWorker } from './eod-worker-client.js';
+import { runEodWorker, type EodWorkerResult } from './eod-worker-client.js';
 
 type State = 'queued' | 'running' | 'publishing' | 'published' | 'failed' | 'interrupted' | 'identity_review_required';
 export type WorkspaceDataJob = { job_id: string; kind: 'catalog' | 'technical'; accepted_at: string; state: State;
@@ -140,7 +140,7 @@ export class WorkspaceDataJobs {
       } catch { this.coordinator.latchRecovery(); }
     } finally { clearTimeout(timer); this.pending.delete(lease.jobId); this.controllers.delete(lease.jobId); }
   }
-  private async finalize(id: string, published?: { artifact: unknown; receipt: unknown }) {
+  private async finalize(id: string, published?: EodWorkerResult) {
     const job = this.get(id), identity = parse(FrozenIdentitySchema, JSON.parse(job.identity!));
     if (!job.input_object) fail('reference_missing');
     const preparedRef = rowRef(objectRow(this.repository.db, job.input_object));
