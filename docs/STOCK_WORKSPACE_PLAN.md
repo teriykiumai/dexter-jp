@@ -4,7 +4,7 @@
 
 **Date:** 2026-09-12
 
-**Status:** User-approved architecture; Step 0 contract migration candidate. Runtime steps remain unimplemented by this change and require their own validation/review/merge.
+**Status:** Step 0 merged in PR #113. Step 1 SQLite foundation is an implementation candidate; later steps still require their own implementation, validation, review and merge.
 
 ## 1. Authority and migration boundary
 
@@ -160,8 +160,10 @@ Durably record the unsuccessful finalization without fabricating data success.
 
 Normal finalization and crash recovery use the same predicate and the same frozen
 job identity; never resolve instrumentId anew from ticker on completion. Recovery
-first checks for an already committed exact binding: an exact match is idempotent,
-a conflicting record is an error. For an uncommitted binding, reapply the current
+first checks for an already committed exact binding, including its immutable dataset:
+an exact match is idempotent, a conflicting record is an error. The same artifact /
+receipt pair cannot be acknowledged for a different dataset. Same-dataset replay
+does not move a newer current pointer backwards. For an uncommitted binding, reapply the current
 mapping predicate. Ambiguous receipt publication must be reconciled by exact proof
 before binding. Unbound published files may remain orphaned; no automatic deletion,
 external refetch or LLM replay is implied by recovery.
@@ -256,6 +258,75 @@ Committed Drawings/preferences survive process crashes. Uncommitted writes must 
 appear committed. Filesystem/hardware durability assumptions are recorded; do not
 claim that an in-memory probe proves disk recovery. Protect irreplaceable Drawings
 ahead of replaceable market caches.
+
+### 4.3 Step 1 implementation boundary
+
+`src/analysis/workspace/` supplies schema V1, the local repository, explicit codec
+registration, reference inventory and offline backup/restore. V1 implements the
+ordinary-stock/daily storage primitives; source job orchestration, full Drawing
+operations/basis comparison, AI execution and intraday fields belong to their later
+steps and versioned schema changes. It does not connect a Dashboard route or fetch
+data. Root directories and codec implementations are trusted local caller inputs,
+not accepted from HTTP requests or backup contents.
+
+Object references authenticate exact stored file bytes with SHA-256. They do not
+replace the existing Market Data artifact/receipt semantic digests. Reviewed,
+source-specific codecs must validate those formats and enumerate their complete
+dependencies before Step 2A can register real source data; Step 1 tests use a closed
+fixture codec. There is no permissive default codec. Backup policy V1 includes every
+registered object and permits no referenced-cache omissions or transformations.
+
+Every persistent object resolves through one Workspace-relative archive:
+`objects/<objectKey hex>.json`, with layout `object-key-v1` persisted in
+`workspace_meta`. Registration imports verified exact bytes into this archive before
+committing their registry rows. Source-relative `path` remains part of the exact
+reference/provenance, not an external root locator; different references with the same
+source-relative path have different object keys. Normal resolution, backup and restore
+use this layout without caller-supplied root mappings. After relocation, new imports
+may depend on archived old inputs without needing the old source directory. Missing
+registered bytes fail closed, even if the original source still has a copy.
+
+Archive publication writes and fsyncs a private file in the destination directory
+before taking the SQLite writer lock. Under that lock, an exact existing final is
+idempotent; a corrupt final with a registered row fails closed; only an unregistered
+incomplete final may be renamed to a unique quarantine path. Atomically rename the
+complete private file to final before committing registry references. All importers
+use this guard. Crashed private/quarantined files are unbound inspection material,
+never canonical input or backup roots, and are not automatically garbage-collected.
+Shared-context `role` is the binding dataset in V1: link writes and backup/restore
+validation require equality. No arbitrary role/dataset mapping is supported.
+
+This is generic dependency retention for persistent references, not a parallel EOD
+repository: existing Market Data collectors, artifact/receipt formats and publish
+authority remain unchanged. The archive has no fetch, recomputation or ticker/latest
+selection. Step 2A supplies the reviewed codecs and imports only exact published input.
+
+Reference registration is awaited and bounded: yield during file/codec/dependency
+validation and archival copying, then commit dependency-ordered batches of at most
+16 objects. Each committed row has durable bytes and committed dependency closure.
+Interrupted ingestion may retain verified unbound objects; it cannot activate a
+partial catalog or binding. The responsiveness fixture measures registration of new
+10,000-row evidence sets through catalog activation alongside foreground operations.
+Offline full-package validation remains synchronous under the maintenance contract.
+These are pre-merge schema V1 refinements; earlier PR prototype DBs/packages fail the
+fingerprint/layout check instead of guessing missing dataset or storage associations.
+
+Maintenance requires all Workspace connections to be closed and the local server
+stopped. The implementation uses `VACUUM INTO`, a completion manifest, staged restore,
+an exclusive maintenance marker and a preserved previous installation. A failed
+marker publication leaves only private staging: the marker at
+`<workspace>.maintenance.json` is a directory atomically published with a complete,
+fsynced `state.json`. Admission cannot replace an existing nonempty marker directory.
+Release first renames the whole marker to a private retired directory, then cleans
+up; a crash never exposes a partial live marker. This refines the pre-merge prototype
+marker layout; legacy/unreadable marker files fail closed. A failed
+restore requires explicit local reconciliation; it never fetches/replays jobs or
+silently falls back to another latest object. SQLite files/backup payloads are fsynced;
+directory fsync is used where Node exposes it. Windows does not provide directory
+fsync through this API. Process-kill recovery tests therefore prove process-crash
+behavior on the tested local filesystem, not power-loss/hardware durability on every
+filesystem. Network filesystems and concurrent unmanaged SQLite writers are outside
+the offline maintenance contract.
 
 ## 5. EOD chart and Drawing basis
 
@@ -555,9 +626,13 @@ a prerequisite. Step 1 has the required identity, ownership, revision, reference
 durability contracts and can implement the foundation after Step 0 review/merge under
 the existing repository workflow. No live source or LLM key is required for Step 1.
 
-Evidence still to produce is scoped to its owning work: Step 1 on-disk SQLite/version/
-crash/migration/WAL backup proof; Step 2A exact identity/binding races and V2 basis
-source evidence; Step 2B ETF/REIT capabilities; source-field/cadence eligibility before
+Step 1's repository/backup tests provide on-disk SQLite, migration, process-crash,
+WAL backup and closure fixtures; its responsiveness fixture covers 10,000 catalog
+rows and Drawings with concurrent local operations. The Step 1 PR records actual
+runtime/test results and limitations; merge still requires CI and independent review.
+
+Remaining evidence is scoped to its owning work: Step 2A real-source identity/binding
+finalization and V2 basis source evidence; Step 2B ETF/REIT capabilities; source-field/cadence eligibility before
 Step 5/6 collectors; Step 7 frozen-input/no-replay tests; SW-M0 exact market coverage;
 Step 9 intraday entitlement/timestamp/correction semantics; and the owning runtime
 steps' responsiveness/accessibility tests. Existing gates may be reused only for

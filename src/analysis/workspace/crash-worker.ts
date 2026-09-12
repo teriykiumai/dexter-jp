@@ -1,0 +1,10 @@
+import { WorkspaceDatabase } from './database.js';
+const [root, owner, phase] = process.argv.slice(2);
+if (!root || !owner || !['before', 'after'].includes(phase ?? '')) throw new Error('Invalid worker invocation');
+const db = new WorkspaceDatabase(root);
+db.sqlite.exec('PRAGMA wal_autocheckpoint=0; BEGIN IMMEDIATE;');
+db.sqlite.run("UPDATE drawings SET anchors=json_set(anchors,'$.price',321),revision=revision+1 WHERE instrument_id=?", [owner]);
+db.sqlite.run("UPDATE chart_preferences SET settings=json_set(settings,'$.volume',json('false')),revision=revision+1 WHERE instrument_id=?", [owner]);
+if (phase === 'after') db.sqlite.exec('COMMIT');
+process.stdout.write('ready');
+setInterval(() => {}, 1000);
