@@ -347,6 +347,10 @@ uses the shared coordinator; workers do not fetch market data. Job state, admiss
 identity revalidation and final binding remain under the main authority. Worker
 failure during publication leaves `publishing` for exact recovery, not a retry of
 external collection. Offline Backup/Restore still requires all writers quiesced.
+The worker returns validated canonical artifact bytes and a small publication proof;
+the main writer archives those bytes and commits Workspace references. Large parsed
+Technical objects are not cloned back into the main event loop, and the main path does
+not reparse the Technical V2 before publication.
 Background writer connections may wait up to 5s for SQLite contention; foreground
 connections retain the 100ms busy bound. A 350ms held-write regression proves the
 old foreground setting fails with `SQLITE_BUSY` while the background writer commits.

@@ -7,9 +7,9 @@ import { validateCurrentTechnicalMasterV1, createTechnicalSourceRequestWindowV1,
   resolveTechnicalEligibleThroughV1 } from '../market-data/technical-source-gate.js';
 import { WorkspaceTechnicalCodec } from './technical-artifact.js';
 import { WorkspaceMasterSchema, TechnicalInputSchema, calculateWorkspaceTechnical } from './technical-input.js';
-import { DateValue, Id, ObjectRefSchema, FrozenIdentitySchema, digest, json, fail, parse, type ReferenceCodecs, type ObjectRef, type ObjectMetadata } from './contracts.js';
+import { DateValue, Id, ObjectRefSchema, FrozenIdentitySchema, ObjectMetadataSchema, digest, json, fail, parse, objectKey, type ReferenceCodecs, type ObjectRef, type ObjectMetadata } from './contracts.js';
 import { writeExclusive } from './files.js';
-import { registerReferences, type VerifiedObject } from './references.js';
+import { registerReferences, referencePath, type VerifiedObject } from './references.js';
 import type { WorkspaceDatabase } from './database.js';
 
 const FetchEvidenceSchema = z.object({ fetchedAt: z.iso.datetime(), pageCount: z.number().int().positive().max(20),
@@ -83,6 +83,22 @@ export function stageWorkspaceObject(db: WorkspaceDatabase, codec: string, value
 export function cleanupWorkspaceImports(db: WorkspaceDatabase): void {
   const root = resolve(db.root, 'imports');
   for (const name of readdirSync(root)) if (/^[a-f0-9-]{36}\.json$/.test(name)) unlinkSync(resolve(root, name));
+}
+/** Main-thread single-writer registration for worker-validated immutable bytes. */
+export function retainValidatedWorkspaceObject(db: WorkspaceDatabase, codec: string, value: unknown, metadata: ObjectMetadata): ObjectRef {
+  return retainValidatedWorkspaceBytes(db, codec, json(value), metadata);
+}
+export function retainValidatedWorkspaceBytes(db: WorkspaceDatabase, codec: string, bytes: string, metadata: ObjectMetadata): ObjectRef {
+  if (!workspaceDataCodecs.has(codec)) fail('schema_unsupported');
+  parse(ObjectMetadataSchema, metadata);
+  const ref: ObjectRef = { path: `${randomUUID()}.json`, codec, digest: digest(bytes) };
+  const path = referencePath(db.root, ref); writeExclusive(path, bytes);
+  const key = objectKey(ref);
+  db.transaction(() => {
+    db.sqlite.run('INSERT INTO immutable_objects VALUES (?,?,?,?,?)', [key, ref.path, codec, ref.digest, json(metadata)]);
+    for (const child of metadata.dependencies) db.sqlite.run('INSERT INTO object_dependencies VALUES (?,?)', [key, objectKey(child)]);
+  });
+  return ref;
 }
 
 /** Validate cross-object claims as well as each codec; also used by Backup/Restore. */

@@ -16,10 +16,10 @@ self.onmessage = async (event: MessageEvent<EodWorkerRequest>) => {
     if (r.operation === 'prepare') {
       db = new WorkspaceDatabase(r.root, { readonly: true });
       const artifact = buildWorkspaceTechnical(r.identity, r.master, new WorkspaceRepository(db), r.fetched);
-      result = { artifact, receipt: null };
+      result = { artifactBytes: json(artifact), dataDate: artifact.dataDate, receipt: null };
     } else {
       const codec = new WorkspaceTechnicalCodec(r.identity.code.slice(0, 4));
-      const candidate = codec.parse(r.prepared);
+      const candidate = codec.parse(JSON.parse(r.preparedBytes));
       if (json(candidate.input.identity) !== json(r.identity)) fail('reference_conflict');
       safeDirectory(r.artifactRoot, true);
       const repository = new MarketDataRepositoryV1(codec, resolve(r.artifactRoot, 'workspace-v2'));
@@ -28,7 +28,7 @@ self.onmessage = async (event: MessageEvent<EodWorkerRequest>) => {
         : await repository.findObservation(r.jobId, r.acceptedAt);
       if (observed) {
         if (json(observed.artifact.input) !== json(candidate.input)) fail('reference_conflict');
-        result = { artifact: observed.artifact, receipt: observed.receipt };
+        result = { artifactBytes: json(observed.artifact), dataDate: observed.artifact.dataDate, receipt: observed.receipt };
       }
     }
     db?.close(); db = undefined;

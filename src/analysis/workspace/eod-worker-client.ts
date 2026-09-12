@@ -1,11 +1,10 @@
 import type { TechnicalFetchedInputsV1 } from '../market-data/technical-source.js';
-import type { TechnicalArtifactV2 } from './technical-artifact.js';
 import { WorkspaceError, type FrozenIdentity, type ObjectRef } from './contracts.js';
 
 export type EodWorkerRequest = { root: string; artifactRoot: string; identity: FrozenIdentity } & (
   { operation: 'prepare'; master: ObjectRef; fetched: TechnicalFetchedInputsV1 }
-  | { operation: 'publish' | 'recover'; prepared: TechnicalArtifactV2; jobId: string; acceptedAt: string; checkedAt: string });
-export type EodWorkerResult = { artifact: TechnicalArtifactV2; receipt: unknown } | null;
+  | { operation: 'publish' | 'recover'; preparedBytes: string; jobId: string; acceptedAt: string; checkedAt: string });
+export type EodWorkerResult = { artifactBytes: string; dataDate: string; receipt: unknown } | null;
 /** Only CPU/immutable I/O crosses this boundary. No worker market-data fetch. */
 export function runEodWorker(request: EodWorkerRequest, signal?: AbortSignal): Promise<EodWorkerResult> {
   return new Promise((resolve, reject) => {

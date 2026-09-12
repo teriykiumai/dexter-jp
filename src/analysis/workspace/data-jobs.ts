@@ -5,11 +5,11 @@ import { fetchTechnicalInputsV1, TECHNICAL_JOB_LIMITS_V1, type TechnicalCollecti
 import { createTechnicalSourceRequestWindowV1 } from '../market-data/technical-source-gate.js';
 import { WorkspaceRepository } from './repository.js';
 import { FrozenIdentitySchema, Id, json, parse, fail, objectKey, scopeKey, type FrozenIdentity, type ObjectRef, WorkspaceError } from './contracts.js';
-import { objectRow, rowRef, resolveReference } from './references.js';
-import { ReceiptObjectSchema, workspaceDataCodecs, retainWorkspaceObject, cleanupWorkspaceImports } from './data-objects.js';
+import { objectRow, rowRef, resolveReference, referencePath } from './references.js';
+import { readBytes } from './files.js';
+import { ReceiptObjectSchema, workspaceDataCodecs, retainValidatedWorkspaceBytes } from './data-objects.js';
 import { collectWorkspaceCatalog, activateWorkspaceCatalog } from './data-source.js';
 import { runEodWorker } from './eod-worker-client.js';
-import { WorkspaceTechnicalCodec } from './technical-artifact.js';
 
 type State = 'queued' | 'running' | 'publishing' | 'published' | 'failed' | 'interrupted' | 'identity_review_required';
 export type WorkspaceDataJob = { job_id: string; kind: 'catalog' | 'technical'; accepted_at: string; state: State;
@@ -110,17 +110,18 @@ export class WorkspaceDataJobs {
         const fetched = await fetchTechnicalInputsV1(identity.code.slice(0, 4), context, this.coordinator.environment);
         const prepared = await runEodWorker({ operation: 'prepare', root: this.repository.db.root, artifactRoot: this.artifactRoot, identity,
           master: rowRef(objectRow(this.repository.db, job.master_object!)), fetched }, context.signal) ?? fail('reference_missing');
-        const input = await retainWorkspaceObject(this.repository.db, 'workspace_technical_v2', prepared.artifact);
-        cleanupWorkspaceImports(this.repository.db);
+        const input = retainValidatedWorkspaceBytes(this.repository.db, 'workspace_technical_v2', prepared.artifactBytes,
+          { scope: { kind: 'instrument-owned', instrumentId: identity.instrumentId }, effectiveDate: prepared.dataDate,
+            dependencies: [rowRef(objectRow(this.repository.db, job.master_object!))], sourceDefinition: 'workspace_jquants_eod_v1', calculationVersion: 'technical_chart_calculation_v2' });
         this.repository.db.transaction(() => { this.repository.db.sqlite.run('UPDATE workspace_data_jobs SET input_object=? WHERE job_id=?', [objectKey(input), job.job_id]); });
         await this.checkpoint?.('before_publish', this.get(job.job_id));
         if (context.signal.aborted) fail('invalid_input');
         if (!this.matches(job, identity)) fail('identity_review_required');
         this.coordinator.assertOwner(lease);
         this.repository.db.transaction(() => this.set(job.job_id, 'publishing'));
-        const candidate = new WorkspaceTechnicalCodec(identity.code.slice(0, 4)).parse(JSON.parse(new TextDecoder().decode(resolveReference(this.repository.db, rowRef(objectRow(this.repository.db, objectKey(input))), workspaceDataCodecs).bytes)));
+        const candidateBytes = new TextDecoder().decode(readBytes(referencePath(this.repository.db.root, input)));
         const published = await runEodWorker({ operation: 'publish', root: this.repository.db.root, artifactRoot: this.artifactRoot, identity,
-          prepared: candidate, jobId: job.job_id, acceptedAt: job.accepted_at, checkedAt: new Date(this.coordinator.environment.wallNowMs()).toISOString() }, context.signal);
+          preparedBytes: candidateBytes, jobId: job.job_id, acceptedAt: job.accepted_at, checkedAt: new Date(this.coordinator.environment.wallNowMs()).toISOString() }, context.signal);
         await this.checkpoint?.('after_publish', this.get(job.job_id));
         await this.finalize(job.job_id, published ?? undefined);
       }
@@ -142,14 +143,18 @@ export class WorkspaceDataJobs {
   private async finalize(id: string, published?: { artifact: unknown; receipt: unknown }) {
     const job = this.get(id), identity = parse(FrozenIdentitySchema, JSON.parse(job.identity!));
     if (!job.input_object) fail('reference_missing');
-    const prepared = new WorkspaceTechnicalCodec(identity.code.slice(0, 4)).parse(JSON.parse(new TextDecoder().decode(resolveReference(this.repository.db, rowRef(objectRow(this.repository.db, job.input_object)), workspaceDataCodecs).bytes)));
+    const preparedRef = rowRef(objectRow(this.repository.db, job.input_object));
+    const preparedBytes = new TextDecoder().decode(readBytes(referencePath(this.repository.db.root, preparedRef)));
     const receipt = published ?? await runEodWorker({ operation: 'recover', root: this.repository.db.root, artifactRoot: this.artifactRoot, identity,
-      prepared, jobId: id, acceptedAt: job.accepted_at,
+      preparedBytes, jobId: id, acceptedAt: job.accepted_at,
       checkedAt: new Date(this.coordinator.environment.wallNowMs()).toISOString() });
     if (!receipt) { this.repository.db.transaction(() => this.set(id, 'interrupted')); return; }
-    const artifactRef = await retainWorkspaceObject(this.repository.db, 'workspace_technical_v2', receipt.artifact);
-    const receiptRef = await retainWorkspaceObject(this.repository.db, 'workspace_receipt_v1', { version: 'workspace_receipt_v1', identity, artifact: artifactRef, receipt: receipt.receipt });
-    cleanupWorkspaceImports(this.repository.db);
+    const artifactRef = retainValidatedWorkspaceBytes(this.repository.db, 'workspace_technical_v2', receipt.artifactBytes,
+      { scope: { kind: 'instrument-owned', instrumentId: identity.instrumentId }, effectiveDate: receipt.dataDate,
+        dependencies: [rowRef(objectRow(this.repository.db, job.master_object!))], sourceDefinition: 'workspace_jquants_eod_v1', calculationVersion: 'technical_chart_calculation_v2' });
+    const receiptRef = retainValidatedWorkspaceBytes(this.repository.db, 'workspace_receipt_v1', json({ version: 'workspace_receipt_v1', identity, artifact: artifactRef, receipt: receipt.receipt }),
+      { scope: { kind: 'instrument-owned', instrumentId: identity.instrumentId }, effectiveDate: receipt.dataDate,
+        dependencies: [artifactRef], sourceDefinition: 'workspace_jquants_eod_v1', calculationVersion: 'technical_chart_calculation_v2' });
     const observed = parse(ReceiptObjectSchema, JSON.parse(new TextDecoder().decode(resolveReference(this.repository.db, receiptRef, workspaceDataCodecs).bytes)));
     if (json(observed.identity) !== json(identity) || observed.receipt.jobId !== id || observed.receipt.acceptedAt !== job.accepted_at) fail('reference_conflict');
     const artifact = observed.artifact;
