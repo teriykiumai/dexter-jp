@@ -1,10 +1,42 @@
 # Dexter JP Dashboard Refresh & Market Context Implementation Plan
 
-**Plan version:** `dashboard_refresh_plan_v3`
+**Plan version:** `dashboard_refresh_plan_v4`
 
-**Status:** User-approved Standard calendar-boundary amendment (DR-T0B); this docs-only candidate and each runtime step still require independent review and merge
+**Status:** Legacy Dashboard Refresh/source contract; Stock Workspace successor boundary added by Step 0. Each runtime step still requires independent review and merge.
 
-**Last Updated:** 2026-09-08
+**Last Updated:** 2026-09-12
+
+## Successor boundary: Stock Workspace Step 0
+
+`STOCK_WORKSPACE_PLAN.md` is the normative successor for the new Workspace. Its
+section 1 explicitly replaces the Snapshot prerequisite, seven-tab shell, required
+Market Overview/Market-Sector/Peer/Strategy presentation, and no-Dashboard-DB rule.
+Those rules below remain applicable to the legacy Refresh surface; they do not
+require reintroducing retired UI into the Workspace. Root `DESIGN.md` remains the
+visual authority and `SPEC.md` the product/invariant authority.
+
+This plan continues to govern the inherited EOD/source gates, calendar/cutoff and
+financial calculations, artifact/receipt publication and recovery, local security,
+rate/admission and job coordination. Workspace identity/scope eligibility and the
+binding-commit transaction further restrict acceptance of saved inputs. They do not
+rewrite V1 artifacts, receipts, Snapshot V1-V9 or Strategy history. The legacy ban on
+artifact backfill remains; new identity bindings are separate validated DB records.
+
+Market-wide short-selling turnover/ratio is **new mandatory SW-M0/M1 work after the
+initial Workspace release**. The `market_short_ratio` contract below is not evidence
+that its production module exists. Sector-scoped context may be shared across
+Workspaces; this does not transfer issuer artifact ownership. Retiring overview UI
+does not retire this data requirement or authorize continued automatic overview jobs.
+
+The recovery limit of 256 receipts is an inspection budget, not a stored-receipt
+count limit. Valid newest receipts normally return early; deep corruption recovery
+may exhaust the budget. Filename enumeration/sort is a separate performance concern.
+Initial Workspace migration neither deletes receipts nor increases that budget.
+
+Step 0 changes documents only. Until the owning Workspace steps are implemented and
+merged, the existing runtime and its tests remain the implemented baseline. Later
+cutover retires UI only after its dependencies are detached; CLI, Snapshot history,
+Strategy engines/history/API and still-required shared job guards remain compatible.
 
 ## 1. Purpose and authority
 

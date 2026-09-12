@@ -1,10 +1,10 @@
 # Dexter JP Design System Reference
 
-**Design version:** `dexter_design_v1`
+**Design version:** `dexter_design_v1` (unchanged tokens; Workspace hierarchy amendment)
 
-**Status:** Visual Source of Truth — approved DR-0 contract (PR #94 merged)
+**Status:** Visual Source of Truth — approved DR-0 baseline with Stock Workspace Step 0 target contract
 
-**Last Updated:** 2026-09-03
+**Last Updated:** 2026-09-12
 
 ## 1. Authority and priority
 
@@ -223,6 +223,42 @@ with the identity or dataset they affect; secondary actions remain visually quie
 near the affected value. They are not hidden in a decorative footer, tooltip, color,
 or chart-only legend. `market-overview` always presents `全市場共通` as persistent
 identity text.
+
+### 4.1 Stock Workspace target hierarchy
+
+For the new Workspace in `docs/STOCK_WORKSPACE_PLAN.md`, use this hierarchy instead
+of the legacy KPI-first/seven-tab detail composition:
+
+```text
+common header: local instrument search, recents / favorites, legacy history access
+instrument identity + data date / source / availability + explicit data action
+interval / indicator / pane controls and Drawing tools
+primary price Candlestick + Volume, optional RSI / MACD panes
+supporting supply-demand / financial-dividend / AI regions
+exact data, limitations, saved AI history and its own as-of date
+```
+
+The chart is usable without a Snapshot or AI result. Search empty state offers an
+explicit catalog action; missing chart data offers explicit EOD acquisition. Opening
+or changing intervals does not imply a fetch. AI activity has its own state and does
+not cover the chart with a blocking loading layer.
+
+Reuse all existing tokens, typography, breakpoints, chart geometry and controls.
+Drawing tools use labelled Buttons; keyboard-selectable Drawing lists and labelled
+time/price fields provide alternatives to dragging. Expose selection, unsaved/save
+failure, revision conflict and basis-review states in text. Every Drawing step must
+support focus, keyboard and touch; accessibility is not deferred to final cutover.
+
+Show week/month candles with an explicit ongoing/unconfirmed label; confirmed-only
+indicators carry their own date. Distinguish source shortage from normal ongoing
+state. Use `予想配当利回り` and `実績配当性向（対象年度）` as separate labels. Shared
+short context is labelled as sector or market data with effective date, not as
+issuer-owned positions. Current chart date and historical analysis as-of stay distinct.
+
+Peer/Radar, Market Overview, Market/Sector and Strategy top-level surfaces are not
+part of this target hierarchy. Their component descriptions and DR migration notes
+below remain legacy compatibility references, not requirements to recreate them.
+Removing their navigation never removes exact-data access from retained features.
 
 ## 5. Component styling
 
