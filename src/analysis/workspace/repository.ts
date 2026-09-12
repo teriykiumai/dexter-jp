@@ -211,6 +211,7 @@ export class WorkspaceRepository {
     parse(Id, instrumentId); parse(Token, role); parse(Id, bindingId);
     this.db.transaction(() => {
       const binding = this.db.sqlite.query<Binding, [string]>('SELECT * FROM artifact_bindings WHERE binding_id=?').get(bindingId) ?? fail('not_found');
+      if (binding.dataset !== role) fail('reference_conflict');
       if (parse(ScopeSchema, JSON.parse(binding.scope)).kind === 'instrument-owned') fail('reference_conflict');
       const evidence = requireScope(this.db, objectKey(membership), { kind: 'instrument-owned', instrumentId });
       if (evidence.effectiveDate !== metadataFor(this.db, binding.artifact).effectiveDate

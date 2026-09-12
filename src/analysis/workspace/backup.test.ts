@@ -119,6 +119,28 @@ describe('Workspace backup reference closure and crash recovery', () => {
     expect(repo.db.sqlite.query('PRAGMA foreign_key_check').all()).toEqual([]);
     expect(repo.current(f.scope, 'technical')).toEqual(f.artifact);
   });
+  test.each(['backup', 'restore'] as const)('%s rejects a corrupted shared role/dataset association', async operation => {
+    const f = await setup(); f.repository.openWorkspace(f.instrumentId);
+    const scope = { kind: 'sector-scoped' as const, provider: 'jquants', scheme: 'tse33', sectorCode: '3700', definitionVersion: 'v1' };
+    const artifact = fixtureObject(f.objectRoot, scope), receipt = fixtureObject(f.objectRoot, scope, [artifact]);
+    const membership = fixtureObject(f.objectRoot, f.scope, [artifact]);
+    await registerReferences(f.db, f.objectRoot, [receipt, membership], fixtureCodecs);
+    const binding = f.repository.bindContext(scope, artifact, receipt, 'sector_short');
+    f.repository.linkContext(f.instrumentId, 'sector_short', binding, membership);
+    const packageRoot = resolve(f.directory, 'backup');
+    if (operation === 'backup') {
+      f.db.sqlite.run("UPDATE shared_context_links SET role='market_short'"); f.db.close();
+      expect(() => backupWorkspace(f.root, packageRoot, fixtureCodecs)).toThrow('reference_conflict');
+    } else {
+      f.db.close(); backupWorkspace(f.root, packageRoot, fixtureCodecs);
+      const db = new WorkspaceDatabase(packageRoot);
+      try { db.sqlite.run("UPDATE shared_context_links SET role='market_short'"); } finally { db.close(); }
+      const manifest = JSON.parse(readFileSync(resolve(packageRoot, 'manifest.json'), 'utf8'));
+      manifest.databaseDigest = digest(readFileSync(resolve(packageRoot, 'workspace.sqlite')));
+      writeFileSync(resolve(packageRoot, 'manifest.json'), json(manifest));
+      expect(() => restoreWorkspace(packageRoot, resolve(f.directory, 'restored'), fixtureCodecs)).toThrow('reference_conflict');
+    }
+  });
   test.each(['before', 'after'] as const)('process kill %s commit has atomic Drawing/preference recovery', async phase => {
     const f = await setup(); f.repository.openWorkspace(f.instrumentId); f.repository.saveDrawing(f.drawing, 0);
     await crash(f, phase);
@@ -194,7 +216,7 @@ describe('Workspace backup reference closure and crash recovery', () => {
     f.db.close(); backupWorkspace(f.root, packageRoot, fixtureCodecs);
     expect(() => restoreWorkspace(packageRoot, restored, fixtureCodecs, phase => {
       if (phase !== 'staged') return;
-      const marker = readJson(`${restored}.maintenance.json`) as { stage: string };
+      const marker = readJson(resolve(`${restored}.maintenance.json`, 'state.json')) as { stage: string };
       unlinkSync(resolve(f.directory, marker.stage, 'manifest.json'));
       throw new Error('interrupted before complete staging');
     })).toThrow('interrupted before complete staging');

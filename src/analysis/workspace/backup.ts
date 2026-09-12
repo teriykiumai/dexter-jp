@@ -1,11 +1,11 @@
-import { existsSync, mkdirSync, renameSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, renameSync, rmdirSync, unlinkSync } from 'node:fs';
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { WorkspaceDatabase, workspaceFingerprint, workspaceOpenCount } from './database.js';
 import { Digest, Id, ObjectMetadataSchema, ObjectRefSchema, RelativePath, Token, digest, fail, json, parse,
   type ReferenceCodecs } from './contracts.js';
-import { objectPath, readBytes, readJson, safeDirectory, syncDirectory, syncFile, writeExclusive } from './files.js';
+import { objectPath, readBytes, readJson, safeDirectory, stageFile, syncDirectory, syncFile, writeExclusive, type PublicationCheckpoint } from './files.js';
 import { referencePath, referenceRoots, validateReferences } from './references.js';
 
 const ManifestSchema = z.object({ version: z.literal(1), schemaVersion: z.literal(1),
@@ -27,13 +27,26 @@ function requireSeparateTrees(first: string, second: string): void {
   };
   if (contains(resolve(first), resolve(second)) || contains(resolve(second), resolve(first))) fail('storage_unsafe');
 }
-function beginMaintenance(root: string, value: z.infer<typeof MaintenanceSchema>): void {
+function beginMaintenance(root: string, value: z.infer<typeof MaintenanceSchema>, checkpoint?: PublicationCheckpoint): void {
   if (workspaceOpenCount(root)) fail('maintenance_required');
-  writeExclusive(markerPath(root), json(parse(MaintenanceSchema, value)));
+  const marker = markerPath(root), staging = `${marker}.prepare-${randomUUID()}`;
+  safeDirectory(dirname(marker)); mkdirSync(staging);
+  const payload = resolve(staging, 'state.json');
+  const temporary = stageFile(payload, new TextEncoder().encode(json(parse(MaintenanceSchema, value))), phase => {
+    if (phase !== 'published') checkpoint?.(phase);
+  });
+  renameSync(temporary, payload); syncDirectory(staging);
+  // A nonempty marker directory is create-only under rename on supported local
+  // filesystems; competing admission cannot overwrite its complete state.json.
+  try { renameSync(staging, marker); }
+  catch (error) { unlinkSync(payload); rmdirSync(staging); throw error; }
   syncDirectory(dirname(resolve(root)));
+  checkpoint?.('published');
 }
 function finishMaintenance(root: string): void {
-  unlinkSync(markerPath(root)); syncDirectory(dirname(resolve(root)));
+  const marker = markerPath(root), retired = `${marker}.retired-${randomUUID()}`;
+  safeDirectory(marker); renameSync(marker, retired); syncDirectory(dirname(resolve(root)));
+  unlinkSync(resolve(retired, 'state.json')); rmdirSync(retired);
 }
 function exclusive(db: WorkspaceDatabase): void {
   // Offline operation. Retain the exclusive SQLite lock outside a transaction so
@@ -62,12 +75,12 @@ export function validateWorkspaceBackup(packageRoot: string, codecs: ReferenceCo
 
 /** Offline only. All registered exact objects are retained; no referenced cache
  * omission or destructive cleanup is implemented in this initial version. */
-export function backupWorkspace(root: string, destination: string, codecs: ReferenceCodecs): void {
+export function backupWorkspace(root: string, destination: string, codecs: ReferenceCodecs, checkpoint?: PublicationCheckpoint): void {
   root = resolve(root); destination = resolve(destination);
   requireSeparateTrees(root, destination);
   if (existsSync(destination)) fail('backup_invalid');
   safeDirectory(dirname(destination));
-  beginMaintenance(root, { version: 1, operation: 'backup', token: randomUUID(), pid: process.pid });
+  beginMaintenance(root, { version: 1, operation: 'backup', token: randomUUID(), pid: process.pid }, checkpoint);
   let db: WorkspaceDatabase | undefined;
   try {
     db = new WorkspaceDatabase(root, { maintenance: true }); exclusive(db);
@@ -127,7 +140,7 @@ export function restoreWorkspace(packageRoot: string, root: string, codecs: Refe
 export function recoverWorkspaceMaintenance(root: string, codecs: ReferenceCodecs): 'recovered' | 'retry_restore' {
   root = resolve(root);
   if (workspaceOpenCount(root)) fail('maintenance_required');
-  const marker = parse(MaintenanceSchema, readJson(markerPath(root)));
+  const marker = parse(MaintenanceSchema, readJson(resolve(markerPath(root), 'state.json')));
   if (marker.pid !== process.pid) {
     try { process.kill(marker.pid, 0); fail('maintenance_required'); }
     catch (error) {

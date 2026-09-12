@@ -286,6 +286,16 @@ use this layout without caller-supplied root mappings. After relocation, new imp
 may depend on archived old inputs without needing the old source directory. Missing
 registered bytes fail closed, even if the original source still has a copy.
 
+Archive publication writes and fsyncs a private file in the destination directory
+before taking the SQLite writer lock. Under that lock, an exact existing final is
+idempotent; a corrupt final with a registered row fails closed; only an unregistered
+incomplete final may be renamed to a unique quarantine path. Atomically rename the
+complete private file to final before committing registry references. All importers
+use this guard. Crashed private/quarantined files are unbound inspection material,
+never canonical input or backup roots, and are not automatically garbage-collected.
+Shared-context `role` is the binding dataset in V1: link writes and backup/restore
+validation require equality. No arbitrary role/dataset mapping is supported.
+
 This is generic dependency retention for persistent references, not a parallel EOD
 repository: existing Market Data collectors, artifact/receipt formats and publish
 authority remain unchanged. The archive has no fetch, recomputation or ticker/latest
@@ -304,6 +314,12 @@ fingerprint/layout check instead of guessing missing dataset or storage associat
 Maintenance requires all Workspace connections to be closed and the local server
 stopped. The implementation uses `VACUUM INTO`, a completion manifest, staged restore,
 an exclusive maintenance marker and a preserved previous installation. A failed
+marker publication leaves only private staging: the marker at
+`<workspace>.maintenance.json` is a directory atomically published with a complete,
+fsynced `state.json`. Admission cannot replace an existing nonempty marker directory.
+Release first renames the whole marker to a private retired directory, then cleans
+up; a crash never exposes a partial live marker. This refines the pre-merge prototype
+marker layout; legacy/unreadable marker files fail closed. A failed
 restore requires explicit local reconciliation; it never fetches/replays jobs or
 silently falls back to another latest object. SQLite files/backup payloads are fsynced;
 directory fsync is used where Node exposes it. Windows does not provide directory

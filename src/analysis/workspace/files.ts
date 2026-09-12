@@ -1,5 +1,6 @@
 import { constants, existsSync, lstatSync, fstatSync, mkdirSync, openSync, closeSync, fsyncSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, parse as parsePath, relative, resolve, sep } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { RelativePath, fail, parse } from './contracts.js';
 import { parseStrictJsonBytesV1 } from '../strategy-validation/strict-json.js';
 
@@ -51,6 +52,22 @@ export function writeExclusive(path: string, bytes: string | Uint8Array): void {
   const handle = openSync(path, 'wx', 0o600);
   try { writeFileSync(handle, bytes); fsyncSync(handle); } finally { closeSync(handle); }
   syncDirectory(dirname(path));
+}
+export type PublicationCheckpoint = (phase: 'temporary_partial' | 'temporary_complete' | 'published') => void;
+/** The destination stays absent until the caller atomically renames this closed,
+ * fsynced private file. Checkpoints permit real process-kill tests. */
+export function stageFile(path: string, bytes: Uint8Array, checkpoint?: PublicationCheckpoint): string {
+  safeDirectory(dirname(path), true);
+  const temporary = resolve(dirname(path), `.workspace-${randomUUID()}.tmp`);
+  const handle = openSync(temporary, 'wx', 0o600);
+  try {
+    const split = Math.floor(bytes.length / 2);
+    writeFileSync(handle, bytes.subarray(0, split));
+    if (checkpoint) { fsyncSync(handle); checkpoint('temporary_partial'); }
+    writeFileSync(handle, bytes.subarray(split)); fsyncSync(handle);
+  } finally { closeSync(handle); }
+  checkpoint?.('temporary_complete');
+  return temporary;
 }
 export function syncFile(path: string): void {
   safeFile(path); const handle = openSync(path, 'r+');

@@ -134,6 +134,7 @@ describe('Workspace SQLite foundation', () => {
     f.repository.linkContext(f.instrumentId, 'sector_short', binding, am); f.repository.linkContext(b, 'sector_short', binding, bm);
     expect(f.db.sqlite.query('SELECT DISTINCT binding_id FROM shared_context_links').all()).toHaveLength(1);
     expect(() => f.repository.linkContext(b, 'sector_short', binding, am)).toThrow('reference_conflict');
+    expect(() => f.repository.linkContext(f.instrumentId, 'market_short', binding, am)).toThrow('reference_conflict');
     expect(() => f.repository.saveDrawing({ ...f.drawing, id: randomUUID(), instrumentId: b }, 0)).toThrow('reference_conflict');
     expect(() => f.db.sqlite.run('UPDATE immutable_objects SET codec=? WHERE object_key=?', ['other', objectKey(artifact)])).toThrow();
   });

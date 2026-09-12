@@ -1,10 +1,11 @@
-import { existsSync } from 'node:fs';
+import { existsSync, renameSync, unlinkSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { setImmediate } from 'node:timers/promises';
 import { type WorkspaceDatabase } from './database.js';
 import { FrozenIdentitySchema, PreferencesSchema, ObjectMetadataSchema, ObjectRefSchema, ScopeSchema, Token, digest, fail, json, objectKey, parse, restoredDrawing, safe,
   scopeKey, type ObjectMetadata, type ObjectRef, type ReferenceCodecs, type WorkspaceScope } from './contracts.js';
-import { objectPath, readBytes, writeExclusive } from './files.js';
+import { objectPath, readBytes, stageFile, syncDirectory, type PublicationCheckpoint } from './files.js';
 import { parseStrictJsonBytesV1 } from '../strategy-validation/strict-json.js';
 
 export type ObjectRow = { object_key: string; path: string; codec: string; digest: string; metadata: string };
@@ -75,7 +76,8 @@ function* collectSteps(roots: readonly ObjectRef[], read: (ref: ObjectRef) => Ve
 }
 /** Import exact dependencies, not another EOD publisher or latest selector. A failed
  * ingest may retain verified unbound objects; catalog/binding activation is separate. */
-export async function registerReferences(db: WorkspaceDatabase, sourceRoot: string, roots: readonly ObjectRef[], codecs: ReferenceCodecs): Promise<void> {
+export async function registerReferences(db: WorkspaceDatabase, sourceRoot: string, roots: readonly ObjectRef[], codecs: ReferenceCodecs,
+  publicationCheckpoint?: PublicationCheckpoint): Promise<void> {
   db.assertAvailable();
   sourceRoot = resolve(sourceRoot);
   if (roots.length > 100_000) fail('backup_invalid');
@@ -100,9 +102,22 @@ export async function registerReferences(db: WorkspaceDatabase, sourceRoot: stri
     const batch = objects.slice(offset, offset + 16);
     for (const object of batch) {
       const path = referencePath(db.root, object.ref);
-      if (existsSync(path)) {
-        if (digest(readBytes(path)) !== object.ref.digest) fail('reference_conflict');
-      } else writeExclusive(path, object.bytes);
+      const temporary = stageFile(path, object.bytes, publicationCheckpoint);
+      try {
+        // Every archive publisher uses the same SQLite writer lock. A concurrent
+        // importer cannot replace a winner between the registry check and rename.
+        db.transaction(() => {
+          const registered = db.sqlite.query('SELECT object_key FROM immutable_objects WHERE object_key=?').get(objectKey(object.ref));
+          if (existsSync(path)) {
+            if (digest(readBytes(path)) === object.ref.digest) return;
+            if (registered) fail('reference_conflict');
+            renameSync(path, `${path}.quarantine-${randomUUID()}`);
+            syncDirectory(resolve(db.root, 'objects'));
+          } else if (registered) fail('reference_missing');
+          renameSync(temporary, path); syncDirectory(resolve(db.root, 'objects'));
+          publicationCheckpoint?.('published');
+        });
+      } finally { if (existsSync(temporary)) unlinkSync(temporary); }
       await checkpoint();
     }
     // Dependencies precede parents; every committed row has durable bytes and a
@@ -206,10 +221,10 @@ export function validateReferences(db: WorkspaceDatabase, codecs: ReferenceCodec
       || artifact.effectiveDate !== receipt.effectiveDate || artifact.sourceDefinition !== receipt.sourceDefinition
       || artifact.calculationVersion !== receipt.calculationVersion) fail('reference_conflict');
   }
-  for (const row of db.sqlite.query<{ instrument_id: string; membership: string; scope: string; artifact: string }, []>(
-    'SELECT s.instrument_id,s.membership,b.scope,b.artifact FROM shared_context_links s JOIN artifact_bindings b USING(binding_id)').all()) {
+  for (const row of db.sqlite.query<{ instrument_id: string; membership: string; role: string; dataset: string; scope: string; artifact: string }, []>(
+    'SELECT s.instrument_id,s.membership,s.role,b.dataset,b.scope,b.artifact FROM shared_context_links s JOIN artifact_bindings b USING(binding_id)').all()) {
     const membership = requireScope(db, row.membership, { kind: 'instrument-owned', instrumentId: row.instrument_id });
-    if (parse(ScopeSchema, JSON.parse(row.scope)).kind === 'instrument-owned'
+    if (row.role !== row.dataset || parse(ScopeSchema, JSON.parse(row.scope)).kind === 'instrument-owned'
       || membership.effectiveDate !== metadataFor(db, row.artifact).effectiveDate
       || !membership.dependencies.some(ref => objectKey(ref) === row.artifact)) fail('reference_conflict');
   }
