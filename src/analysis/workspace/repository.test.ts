@@ -42,7 +42,7 @@ describe('Workspace SQLite foundation', () => {
     f.repository.savePreferences(f.instrumentId, f.repository.preferences(f.instrumentId).value, 1);
     expect(() => f.repository.savePreferences(f.instrumentId, f.repository.preferences(f.instrumentId).value, 1)).toThrow('revision_conflict');
     const otherId = randomUUID(), evidence = fixtureObject(f.objectRoot, { kind: 'instrument-owned', instrumentId: otherId }, [f.master]);
-    registerReferences(f.db, f.objectRoot, [evidence], fixtureCodecs);
+    await registerReferences(f.db, f.objectRoot, [evidence], fixtureCodecs);
     await f.repository.acceptCatalog(f.repository.requestCatalog('2026-09-11'), [{ ...f.row, instrumentId: otherId, label: '別銘柄', evidence }], f.master);
     expect(f.repository.search('7203')[0]?.instrumentId).toBe(otherId);
     expect(f.repository.drawings(otherId)).toEqual([]);
@@ -53,7 +53,7 @@ describe('Workspace SQLite foundation', () => {
   test('rejects a mapping change between validation and binding; serializes a concurrent writer', async () => {
     const f = await setup(), frozen = f.repository.freezeIdentity(f.instrumentId);
     const nextArtifact = fixtureObject(f.objectRoot, f.scope), nextReceipt = fixtureObject(f.objectRoot, f.scope, [nextArtifact]);
-    registerReferences(f.db, f.objectRoot, [nextReceipt], fixtureCodecs);
+    await registerReferences(f.db, f.objectRoot, [nextReceipt], fixtureCodecs);
     f.db.transaction(() => {
       expect(f.repository.identityMatches(frozen)).toBe(true);
       // Opening a second independent SQLite connection cannot write through our check/commit boundary.
@@ -78,9 +78,24 @@ describe('Workspace SQLite foundation', () => {
     f.repository.failCatalog(f.repository.requestCatalog('2026-09-12'));
     const oldMaster = fixtureObject(f.objectRoot, { kind: 'market-scoped', universe: 'master', definitionVersion: 'v1' }, [], '2026-09-10');
     const oldEvidence = fixtureObject(f.objectRoot, f.scope, [oldMaster], '2026-09-10');
-    registerReferences(f.db, f.objectRoot, [oldEvidence], fixtureCodecs);
+    await registerReferences(f.db, f.objectRoot, [oldEvidence], fixtureCodecs);
     expect(await f.repository.acceptCatalog(f.repository.requestCatalog('2026-09-10'), [{ ...f.row, evidence: oldEvidence }], oldMaster)).toBe('superseded');
     expect(f.repository.search('7203')[0]?.label).toBe('最新');
+  });
+  test('recovery proves the original dataset and never associates an exact receipt with another dataset', async () => {
+    const f = await setup();
+    const original = f.repository.bind(f.identity, f.artifact, f.receipt, 'technical');
+    expect(() => f.repository.bind(f.identity, f.artifact, f.receipt, 'fundamental')).toThrow('reference_conflict');
+    expect(f.repository.current(f.scope, 'fundamental')).toBeNull();
+    const artifact = fixtureObject(f.objectRoot, f.scope), receipt = fixtureObject(f.objectRoot, f.scope, [artifact]);
+    await registerReferences(f.db, f.objectRoot, [receipt], fixtureCodecs);
+    f.repository.bind(f.identity, artifact, receipt, 'technical');
+    f.db.close();
+    const db = new WorkspaceDatabase(f.root); connections.push(db); const repo = new WorkspaceRepository(db);
+    expect(repo.bind(f.identity, f.artifact, f.receipt, 'technical')).toBe(original);
+    expect(repo.current(f.scope, 'technical')).toEqual(artifact);
+    expect(() => repo.bind(f.identity, f.artifact, f.receipt, 'fundamental')).toThrow('reference_conflict');
+    expect(db.sqlite.query('SELECT dataset FROM artifact_bindings WHERE binding_id=?').get(original)).toEqual({ dataset: 'technical' });
   });
   test('failed migration and transaction preserve existing records and schema version', async () => {
     const f = await setup(); f.repository.openWorkspace(f.instrumentId); f.repository.saveDrawing(f.drawing, 0);
@@ -106,8 +121,16 @@ describe('Workspace SQLite foundation', () => {
     const scope: WorkspaceScope = { kind: 'sector-scoped', provider: 'jquants', scheme: 'tse33', sectorCode: '3700', definitionVersion: 'v1' };
     const artifact = fixtureObject(f.objectRoot, scope), receipt = fixtureObject(f.objectRoot, scope, [artifact]);
     const am = fixtureObject(f.objectRoot, f.scope, [artifact]), bm = fixtureObject(f.objectRoot, { kind: 'instrument-owned', instrumentId: b }, [artifact]);
-    registerReferences(f.db, f.objectRoot, [receipt, am, bm], fixtureCodecs);
+    await registerReferences(f.db, f.objectRoot, [receipt, am, bm], fixtureCodecs);
     const binding = f.repository.bindContext(scope, artifact, receipt, 'sector_short');
+    expect(f.repository.bindContext(scope, artifact, receipt, 'sector_short')).toBe(binding);
+    expect(() => f.repository.bindContext(scope, artifact, receipt, 'market_short')).toThrow('reference_conflict');
+    expect(f.repository.current(scope, 'market_short')).toBeNull();
+    const nextArtifact = fixtureObject(f.objectRoot, scope), nextReceipt = fixtureObject(f.objectRoot, scope, [nextArtifact]);
+    await registerReferences(f.db, f.objectRoot, [nextReceipt], fixtureCodecs);
+    f.repository.bindContext(scope, nextArtifact, nextReceipt, 'sector_short');
+    expect(f.repository.bindContext(scope, artifact, receipt, 'sector_short')).toBe(binding);
+    expect(f.repository.current(scope, 'sector_short')).toEqual(nextArtifact);
     f.repository.linkContext(f.instrumentId, 'sector_short', binding, am); f.repository.linkContext(b, 'sector_short', binding, bm);
     expect(f.db.sqlite.query('SELECT DISTINCT binding_id FROM shared_context_links').all()).toHaveLength(1);
     expect(() => f.repository.linkContext(b, 'sector_short', binding, am)).toThrow('reference_conflict');

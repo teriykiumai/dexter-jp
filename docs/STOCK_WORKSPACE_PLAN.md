@@ -160,8 +160,10 @@ Durably record the unsuccessful finalization without fabricating data success.
 
 Normal finalization and crash recovery use the same predicate and the same frozen
 job identity; never resolve instrumentId anew from ticker on completion. Recovery
-first checks for an already committed exact binding: an exact match is idempotent,
-a conflicting record is an error. For an uncommitted binding, reapply the current
+first checks for an already committed exact binding, including its immutable dataset:
+an exact match is idempotent, a conflicting record is an error. The same artifact /
+receipt pair cannot be acknowledged for a different dataset. Same-dataset replay
+does not move a newer current pointer backwards. For an uncommitted binding, reapply the current
 mapping predicate. Ambiguous receipt publication must be reconciled by exact proof
 before binding. Unbound published files may remain orphaned; no automatic deletion,
 external refetch or LLM replay is implied by recovery.
@@ -273,6 +275,31 @@ source-specific codecs must validate those formats and enumerate their complete
 dependencies before Step 2A can register real source data; Step 1 tests use a closed
 fixture codec. There is no permissive default codec. Backup policy V1 includes every
 registered object and permits no referenced-cache omissions or transformations.
+
+Every persistent object resolves through one Workspace-relative archive:
+`objects/<objectKey hex>.json`, with layout `object-key-v1` persisted in
+`workspace_meta`. Registration imports verified exact bytes into this archive before
+committing their registry rows. Source-relative `path` remains part of the exact
+reference/provenance, not an external root locator; different references with the same
+source-relative path have different object keys. Normal resolution, backup and restore
+use this layout without caller-supplied root mappings. After relocation, new imports
+may depend on archived old inputs without needing the old source directory. Missing
+registered bytes fail closed, even if the original source still has a copy.
+
+This is generic dependency retention for persistent references, not a parallel EOD
+repository: existing Market Data collectors, artifact/receipt formats and publish
+authority remain unchanged. The archive has no fetch, recomputation or ticker/latest
+selection. Step 2A supplies the reviewed codecs and imports only exact published input.
+
+Reference registration is awaited and bounded: yield during file/codec/dependency
+validation and archival copying, then commit dependency-ordered batches of at most
+16 objects. Each committed row has durable bytes and committed dependency closure.
+Interrupted ingestion may retain verified unbound objects; it cannot activate a
+partial catalog or binding. The responsiveness fixture measures registration of new
+10,000-row evidence sets through catalog activation alongside foreground operations.
+Offline full-package validation remains synchronous under the maintenance contract.
+These are pre-merge schema V1 refinements; earlier PR prototype DBs/packages fail the
+fingerprint/layout check instead of guessing missing dataset or storage associations.
 
 Maintenance requires all Workspace connections to be closed and the local server
 stopped. The implementation uses `VACUUM INTO`, a completion manifest, staged restore,

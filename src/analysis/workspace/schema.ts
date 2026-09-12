@@ -4,8 +4,9 @@ import { digest, fail, json } from './contracts.js';
 export const WORKSPACE_SCHEMA_VERSION = 1;
 const ddl = `
 CREATE TABLE workspace_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
+INSERT INTO workspace_meta VALUES ('object_store_layout','object-key-v1');
 CREATE TABLE immutable_objects (
-  object_key TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, codec TEXT NOT NULL,
+  object_key TEXT PRIMARY KEY, path TEXT NOT NULL, codec TEXT NOT NULL,
   digest TEXT NOT NULL, metadata TEXT NOT NULL CHECK(json_valid(metadata))
 ) STRICT;
 CREATE TABLE object_dependencies (
@@ -54,6 +55,7 @@ CREATE TABLE drawings (
 CREATE INDEX drawings_owner ON drawings(instrument_id,drawing_id);
 CREATE TABLE artifact_bindings (
   binding_id TEXT PRIMARY KEY, scope TEXT NOT NULL CHECK(json_valid(scope)),
+  dataset TEXT NOT NULL,
   artifact TEXT NOT NULL REFERENCES immutable_objects(object_key),
   receipt TEXT NOT NULL REFERENCES immutable_objects(object_key),
   frozen_identity TEXT CHECK(frozen_identity IS NULL OR json_valid(frozen_identity)),
@@ -109,7 +111,8 @@ export function migrateWorkspace(db: Database, migrations: readonly { version: n
 export function validateWorkspaceSchema(db: Database, expectedFingerprint: string): void {
   if (db.query<{ user_version: number }, []>('PRAGMA user_version').get()!.user_version !== WORKSPACE_SCHEMA_VERSION
     || schemaFingerprint(db) !== expectedFingerprint
-    || db.query<{ value: string }, [string]>('SELECT value FROM workspace_meta WHERE key=?').get('schema_fingerprint')?.value !== expectedFingerprint) {
+    || db.query<{ value: string }, [string]>('SELECT value FROM workspace_meta WHERE key=?').get('schema_fingerprint')?.value !== expectedFingerprint
+    || db.query<{ value: string }, [string]>('SELECT value FROM workspace_meta WHERE key=?').get('object_store_layout')?.value !== 'object-key-v1') {
     fail('schema_unsupported');
   }
   const integrity = db.query<{ integrity_check: string }, []>('PRAGMA integrity_check').all();

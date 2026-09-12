@@ -6,7 +6,7 @@ import { WorkspaceDatabase, workspaceFingerprint, workspaceOpenCount } from './d
 import { Digest, Id, ObjectMetadataSchema, ObjectRefSchema, RelativePath, Token, digest, fail, json, parse,
   type ReferenceCodecs } from './contracts.js';
 import { objectPath, readBytes, readJson, safeDirectory, syncDirectory, syncFile, writeExclusive } from './files.js';
-import { referenceRoots, validateReferences } from './references.js';
+import { referencePath, referenceRoots, validateReferences } from './references.js';
 
 const ManifestSchema = z.object({ version: z.literal(1), schemaVersion: z.literal(1),
   schemaFingerprint: Digest, databaseDigest: Digest,
@@ -53,7 +53,7 @@ export function validateWorkspaceBackup(packageRoot: string, codecs: ReferenceCo
     || digest(readBytes(resolve(packageRoot, 'workspace.sqlite'))) !== manifest.databaseDigest) fail('backup_invalid');
   const db = new WorkspaceDatabase(packageRoot, { readonly: true, maintenance });
   try {
-    const objects = validateReferences(db, resolve(packageRoot, 'objects'), codecs);
+    const objects = validateReferences(db, codecs);
     const entries = objects.map(({ ref, metadata }) => ({ ref, metadata }));
     if (json(entries) !== json(manifest.objects) || json(referenceRoots(db)) !== json(manifest.roots)) fail('backup_invalid');
   } finally { db.close(); }
@@ -62,28 +62,28 @@ export function validateWorkspaceBackup(packageRoot: string, codecs: ReferenceCo
 
 /** Offline only. All registered exact objects are retained; no referenced cache
  * omission or destructive cleanup is implemented in this initial version. */
-export function backupWorkspace(root: string, objectRoot: string, destination: string, codecs: ReferenceCodecs): void {
+export function backupWorkspace(root: string, destination: string, codecs: ReferenceCodecs): void {
   root = resolve(root); destination = resolve(destination);
-  requireSeparateTrees(root, destination); requireSeparateTrees(objectRoot, destination);
+  requireSeparateTrees(root, destination);
   if (existsSync(destination)) fail('backup_invalid');
   safeDirectory(dirname(destination));
   beginMaintenance(root, { version: 1, operation: 'backup', token: randomUUID(), pid: process.pid });
   let db: WorkspaceDatabase | undefined;
   try {
     db = new WorkspaceDatabase(root, { maintenance: true }); exclusive(db);
-    const objects = validateReferences(db, objectRoot, codecs), roots = referenceRoots(db);
+    const objects = validateReferences(db, codecs), roots = referenceRoots(db);
     mkdirSync(destination);
     const snapshot = resolve(destination, 'workspace.sqlite');
     db.sqlite.run('VACUUM INTO ?', [snapshot]); syncFile(snapshot);
     const check = new WorkspaceDatabase(destination, { readonly: true });
     check.close();
-    for (const object of objects) writeExclusive(objectPath(resolve(destination, 'objects'), object.ref.path), object.bytes);
+    for (const object of objects) writeExclusive(referencePath(destination, object.ref), object.bytes);
     const manifest: Manifest = { version: 1, schemaVersion: 1, schemaFingerprint: workspaceFingerprint(),
       databaseDigest: digest(readBytes(snapshot)), roots,
       objects: objects.map(({ ref, metadata }) => ({ ref, metadata })), omissions: [] };
     // Recheck copied bytes/closure before the completion manifest becomes visible.
     const staged = new WorkspaceDatabase(destination, { readonly: true });
-    try { validateReferences(staged, resolve(destination, 'objects'), codecs); } finally { staged.close(); }
+    try { validateReferences(staged, codecs); } finally { staged.close(); }
     writeExclusive(resolve(destination, 'manifest.json'), json(manifest)); syncDirectory(destination);
   } finally {
     db?.close(); finishMaintenance(root);
@@ -108,8 +108,8 @@ export function restoreWorkspace(packageRoot: string, root: string, codecs: Refe
   checkpoint?.('started');
   mkdirSync(stage);
   writeExclusive(resolve(stage, 'workspace.sqlite'), readBytes(resolve(packageRoot, 'workspace.sqlite')));
-  for (const object of manifest.objects) writeExclusive(objectPath(resolve(stage, 'objects'), object.ref.path),
-    readBytes(objectPath(resolve(packageRoot, 'objects'), object.ref.path)));
+  for (const object of manifest.objects) writeExclusive(referencePath(stage, object.ref),
+    readBytes(referencePath(packageRoot, object.ref)));
   writeExclusive(resolve(stage, 'manifest.json'), json(manifest));
   validateWorkspaceBackup(stage, codecs); syncDirectory(stage); checkpoint?.('staged');
   if (existed) {

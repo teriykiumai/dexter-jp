@@ -28,7 +28,7 @@ export async function fixtureWorkspace() {
   const master = fixtureObject(objectRoot, { kind: 'market-scoped', universe: 'master', definitionVersion: 'v1' });
   const evidence = fixtureObject(objectRoot, scope, [master]);
   const artifact = fixtureObject(objectRoot, scope), receipt = fixtureObject(objectRoot, scope, [artifact]);
-  registerReferences(db, objectRoot, [evidence, receipt], fixtureCodecs);
+  await registerReferences(db, objectRoot, [evidence, receipt], fixtureCodecs);
   const row: CatalogRow = { instrumentId, assetType: 'stock', provider: 'jquants', code: '72030', label: 'トヨタ',
     mappingRevision: 1, episodeFrom: '2026-01-01', episodeThrough: null, evidence };
   await repository.acceptCatalog(repository.requestCatalog('2026-09-11'), [row], master);
