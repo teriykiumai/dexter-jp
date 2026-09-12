@@ -511,7 +511,7 @@ typed request/response schemas, bounded pagination/ranges and revision conflicts
 No GET performs an external fetch or creates a Workspace. Explicit open may create
 the Workspace; merely listing a suggestion does not.
 
-Use an instrumentId URL (`/stock/:instrumentId`, interval/selection query state),
+Use the canonical instrumentId URL (`/workspace?instrument=<instrumentId>&interval=day|week|month`, superseding the earlier `/stock/:instrumentId` proposal),
 with names/codes as labels. URL navigation overrides saved defaults; preferences
 supply omitted values. Back/reload/bookmark never retarget a reused ticker. Legacy
 ticker links need explicit identity resolution or remain legacy, never silent
@@ -604,7 +604,23 @@ the explicit open POST records it. Favorites use the existing Workspace revision
 The guarded `/api/workspace` adapter shares the process session and coordinator.
 GET covers search, recents, session, active/exact jobs and saved instrument charts;
 POST covers explicit open, revision-checked favorites and catalog/EOD admission.
+DELETE `/api/workspace/jobs/:id` requests cancellation with an empty body. Queued/
+running jobs accept cancellation (202) while publication remains preventable;
+publishing, terminal or already-activated catalog jobs reject it (409), without
+undoing publication. Cancellation invalidates a pending catalog generation even
+during yielded import and settles in the inherited `failed` state. The UI exposes
+a keyboard/touch-accessible cancel button.
+After Host validation, exact-route method matching returns 405 with `Allow` before
+mutation authentication or payload validation. Supported mutations then require
+Origin/CSRF, query validation and bounded body validation before any side effect.
 Host/Origin/CSRF, JSON media type, strict bounded bodies and safe error mapping apply.
+All responses use strict versioned runtime DTOs, parsed at producer and Browser
+boundaries: `workspace_search_v1`, `workspace_recents_v1`, `workspace_item_v1`,
+`workspace_view_v1`, `workspace_chart_v1`, `workspace_job_v1`, `workspace_active_v1`,
+`workspace_error_v1`, and the inherited `dashboard_session_v1`. Chart DTO fields are
+an explicit projection, independent of the internal Technical Artifact schema.
+Unknown fields/versions and malformed nested data fail closed; Browser validation
+does not recalculate financial values.
 No Drawing API is added before 4A. Interval/pane changes are presentation-only in
 Step 3; URL preserves interval, while saved chart-control preferences are deferred.
 
@@ -615,6 +631,10 @@ read. Errors leave data unavailable without source/latest fallback. Data jobs re
 under the main writer; reads, navigation and polling never initiate external fetch.
 Active-job polling runs once per second while visible and latches uncertain reads
 until full reload. Late read/open responses cannot redirect or replace a new selection.
+Definite 4xx admission refusals preserve status/code and reconcile active state by
+GET before enabling a manual retry. They never replay POST automatically. Network,
+5xx, malformed/mismatched admission results or failed reconciliation retain the
+reload-only latch. Cancellation uses the same ambiguity rule.
 Exact-value tables expose all rows in bounded 100-row pages, separate from the full
 canvas series. A 2,600-candle browser fixture covers interval/Back navigation and
 table reachability; it is a presentation stress fixture, not historical source proof.

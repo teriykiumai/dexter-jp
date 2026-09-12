@@ -6,12 +6,12 @@ import { DashboardJobCoordinatorErrorV1, dashboardCoordinatorFailureV1 } from '.
 import { parseStrictJsonBytesV1, StrictJsonErrorV1 } from '../analysis/strategy-validation/strict-json.js';
 import { DashboardSessionV1, DashboardSecurityErrorV1, dashboardSecurityFailureV1, isAllowedDashboardHost,
   requireDashboardJsonMediaType, readDashboardBody } from './session.js';
-import type { WorkspaceChart, WorkspaceItem, WorkspaceJobView, WorkspaceView } from './workspace-contracts.js';
+import { WorkspaceResponseSchema, WorkspaceItemSchema, WorkspaceChartSchema, workspaceTerminal, type WorkspaceChart, type WorkspaceItem, type WorkspaceJobView, type WorkspaceView } from './workspace-contracts.js';
 
-const response = (value: unknown, status = 200) => Response.json(value, { status,
-  headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
-const errorResponse = (code: string, status: number) => response({ error: { code } }, status);
-const jobView = (job: WorkspaceDataJob): WorkspaceJobView => ({ id: job.job_id, kind: job.kind, state: job.state,
+const response = (value: unknown, status = 200, headers: Record<string, string> = {}) => Response.json(WorkspaceResponseSchema.parse(value), { status,
+  headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...headers } });
+const errorResponse = (code: string, status: number, headers?: Record<string, string>) => response({ schemaVersion: 'workspace_error_v1', error: { code } }, status, headers);
+const jobView = (job: WorkspaceDataJob): WorkspaceJobView => ({ schemaVersion: 'workspace_job_v1', id: job.job_id, kind: job.kind, state: job.state,
   instrumentId: job.identity ? JSON.parse(job.identity).instrumentId as string : null, error: job.error });
 
 export class WorkspaceDashboardApi {
@@ -20,10 +20,11 @@ export class WorkspaceDashboardApi {
   constructor(readonly jobs: WorkspaceDataJobs, readonly session: DashboardSessionV1) {}
   private item(id: string): WorkspaceItem {
     parse(Id, id);
-    return this.jobs.repository.db.sqlite.query<WorkspaceItem, [string]>(`SELECT i.instrument_id AS instrumentId,
+    const row = this.jobs.repository.db.sqlite.query<Omit<WorkspaceItem, 'schemaVersion'>, [string]>(`SELECT i.instrument_id AS instrumentId,
       r.code,r.label,COALESCE(w.favorite,0) AS favorite,COALESCE(w.revision,0) AS revision
       FROM instruments i JOIN catalog_rows r USING(instrument_id) JOIN catalog_generations g USING(generation)
       LEFT JOIN workspaces w USING(instrument_id) WHERE i.instrument_id=? AND g.activated=1 ORDER BY r.generation DESC LIMIT 1`).get(id) ?? fail('not_found');
+    return WorkspaceItemSchema.parse({ schemaVersion: 'workspace_item_v1', ...row });
   }
   private async chart(id: string): Promise<WorkspaceChart | null> {
     const db = this.jobs.repository.db;
@@ -45,7 +46,8 @@ export class WorkspaceDashboardApi {
       const timer = setTimeout(() => { finish(); reject(new WorkspaceError('reference_conflict')); }, 60_000);
       worker.onerror = () => { finish(); reject(new WorkspaceError('reference_conflict')); };
       worker.onmessage = (event: MessageEvent<{ ok: boolean; chart: WorkspaceChart }>) => {
-        finish(); if (event.data.ok) resolve(event.data.chart); else reject(new WorkspaceError('reference_conflict'));
+        finish(); const parsed = WorkspaceChartSchema.safeParse(event.data.chart);
+        if (event.data.ok && parsed.success) resolve(parsed.data); else reject(new WorkspaceError('reference_conflict'));
       };
       worker.postMessage({ root: this.jobs.repository.db.root, instrumentId, artifact, receipt });
     });
@@ -54,23 +56,39 @@ export class WorkspaceDashboardApi {
     if (segments[0] !== 'api' || segments[1] !== 'workspace') return null;
     try {
       if (!isAllowedDashboardHost(request.headers.get('host'))) throw new DashboardSecurityErrorV1('forbidden_host');
-      this.jobs.repository.db.assertAvailable();
       const route = segments.slice(2).join('/');
+      const jobRoute = segments.length === 4 && segments[2] === 'jobs' && segments[3] !== 'active';
+      const allow = ['search', 'session', 'recents', 'jobs/active'].includes(route) ? 'GET'
+        : route === 'jobs' ? 'POST' : jobRoute ? 'GET, DELETE'
+        : segments.length === 4 && segments[2] === 'instruments' ? 'GET'
+        : segments.length === 5 && segments[2] === 'instruments' && ['open', 'favorite'].includes(segments[4]!) ? 'POST' : null;
+      if (!allow) return errorResponse('invalid_input', 400);
+      if (!allow.split(', ').includes(request.method)) return errorResponse('method_not_allowed', 405, { Allow: allow });
+      this.jobs.repository.db.assertAvailable();
+      if (request.method === 'DELETE') {
+        this.session.requireMutation(request, url);
+        if ([...url.searchParams].length) fail('invalid_input');
+        if ((await readDashboardBody(request, 0)).byteLength) fail('invalid_input');
+        const id = parse(Id, segments[3]), job = jobView(this.jobs.get(id));
+        if (workspaceTerminal(job) || job.state === 'publishing') fail('revision_conflict');
+        this.jobs.cancel(id);
+        return response(jobView(this.jobs.get(id)), 202);
+      }
       if (request.method === 'GET') {
         if (route === 'search') {
           if ([...url.searchParams.keys()].some(key => key !== 'q') || url.searchParams.getAll('q').length > 1) fail('invalid_input');
-          return response({ items: this.jobs.repository.search(url.searchParams.get('q') ?? '') });
+          return response({ schemaVersion: 'workspace_search_v1', items: this.jobs.repository.search(url.searchParams.get('q') ?? '') });
         }
         if ([...url.searchParams].length) fail('invalid_input');
         if (route === 'session') return response(this.session.view());
         if (route === 'recents') {
           const rows = this.jobs.repository.db.sqlite.query<{ instrument_id: string }, []>(
             'SELECT instrument_id FROM workspaces ORDER BY favorite DESC,last_opened_at DESC,instrument_id LIMIT 30').all();
-          return response({ items: rows.map(row => this.item(row.instrument_id)) });
+          return response({ schemaVersion: 'workspace_recents_v1', items: rows.map(row => this.item(row.instrument_id)) });
         }
         if (route === 'jobs/active') {
           const active = await this.jobs.coordinator.active();
-          return response({ job: active?.domain === 'workspace' ? jobView(this.jobs.get(active.jobId)) : null,
+          return response({ schemaVersion: 'workspace_active_v1', job: active?.domain === 'workspace' ? jobView(this.jobs.get(active.jobId)) : null,
             blockingKind: active?.domain !== 'workspace' ? active?.kind ?? null : null });
         }
         if (segments.length === 4 && segments[2] === 'jobs') return response(jobView(this.jobs.get(parse(Id, segments[3]))));
@@ -108,7 +126,8 @@ export class WorkspaceDashboardApi {
     } catch (error) {
       if (error instanceof StrictJsonErrorV1) return errorResponse('invalid_input', 400);
       if (error instanceof DashboardSecurityErrorV1) { const failure = dashboardSecurityFailureV1(error, 'market_data'); return errorResponse(failure.code, failure.status); }
-      if (error instanceof DashboardJobCoordinatorErrorV1) { const failure = dashboardCoordinatorFailureV1(error, 'workspace'); return response({ error: { code: failure.code, message: failure.message } }, failure.status); }
+      if (error instanceof DashboardJobCoordinatorErrorV1) { const failure = dashboardCoordinatorFailureV1(error, 'workspace'); return response({ schemaVersion: 'workspace_error_v1', error: { code: failure.code, message: failure.message } }, failure.status,
+        failure.retryAfterSeconds ? { 'Retry-After': String(failure.retryAfterSeconds) } : undefined); }
       if (error instanceof WorkspaceError) return errorResponse(error.code, error.code === 'not_found' ? 404 : error.code === 'invalid_input' ? 400
         : ['identity_review_required', 'revision_conflict'].includes(error.code) ? 409 : 500);
       return errorResponse('workspace_unavailable', 500);

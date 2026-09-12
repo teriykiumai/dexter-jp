@@ -27,8 +27,17 @@ self.onmessage = (event: MessageEvent<{ root: string; artifact: ObjectRef; recei
       || object.metadata.scope.kind !== 'instrument-owned' || object.metadata.scope.instrumentId !== request.instrumentId
       || !receipt.metadata.dependencies.some(ref => objectKey(ref) === objectKey(request.artifact))) fail('reference_conflict');
     const artifact = JSON.parse(new TextDecoder().decode(object.bytes)) as TechnicalArtifactV2;
-    const chart: WorkspaceChart = { dataDate: artifact.dataDate, eligibilityFrom: artifact.input.eligibilityFrom,
-      artifactDigest: artifact.artifactDigest, intervals: artifact.result.intervals, unavailablePeriods: artifact.result.unavailablePeriods };
+    const rows = (interval: 'day' | 'week' | 'month') => artifact.result.intervals[interval].map(row => ({
+      interval: row.interval, identity: row.identity, periodStart: row.periodStart, periodEnd: row.periodEnd,
+      displayDate: row.displayDate, firstSessionDate: row.firstSessionDate, lastSessionDate: row.lastSessionDate,
+      partial: row.partial, open: row.open, high: row.high, low: row.low, close: row.close, volume: row.volume,
+      rsi: row.rsi, macd: row.macd, signal: row.signal, histogram: row.histogram, cross: row.cross, sma20: row.sma20,
+      completion: row.completion, coverage: row.coverage, sourceGaps: row.sourceGaps,
+    }));
+    const chart: WorkspaceChart = { schemaVersion: 'workspace_chart_v1', dataDate: artifact.dataDate, eligibilityFrom: artifact.input.eligibilityFrom,
+      artifactDigest: artifact.artifactDigest, intervals: { day: rows('day'), week: rows('week'), month: rows('month') },
+      unavailablePeriods: artifact.result.unavailablePeriods.map(({ interval, identity, periodStart, periodEnd, reason }) =>
+        ({ interval, identity, periodStart, periodEnd, reason })) as WorkspaceChart['unavailablePeriods'] };
     result = { ok: true, chart };
   } catch { result = { ok: false }; }
   finally { db?.close(); }

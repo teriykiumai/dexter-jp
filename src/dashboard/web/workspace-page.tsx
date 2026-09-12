@@ -3,7 +3,9 @@ import { z } from 'zod';
 import { Button, Card, DashboardDesign, TableScroll } from './primitives.js';
 import { PriceChart, LIGHTWEIGHT_CHARTS_NOTICE } from './chart.js';
 import { buildMarketOverviewPath } from './presentation.js';
-import { workspaceTerminal, WorkspaceJobViewSchema, type WorkspaceItem, type WorkspaceView, type WorkspaceJobView } from '../workspace-contracts.js';
+import { workspaceTerminal, WorkspaceJobViewSchema, WorkspaceItemSchema, WorkspaceSearchSchema, WorkspaceRecentsSchema,
+  WorkspaceViewSchema, WorkspaceActiveSchema, WorkspaceSessionSchema, WorkspaceErrorSchema,
+  type WorkspaceCandidate, type WorkspaceItem, type WorkspaceView, type WorkspaceJobView } from '../workspace-contracts.js';
 
 const intervalNames = { day: '日足', week: '週足', month: '月足' } as const;
 type Interval = keyof typeof intervalNames;
@@ -14,22 +16,28 @@ export function workspaceRoute(search: string) {
   return { id, interval: interval as Interval };
 }
 const path = (id: string | null, interval: Interval) => `/workspace${id ? `?instrument=${encodeURIComponent(id)}&interval=${interval}` : ''}`;
-async function read<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init), value = await response.json();
-  if (!response.ok) throw new Error(value.error?.message ?? ({ identity_review_required: '銘柄の同一性確認が必要です。',
-    revision_conflict: '別の操作で更新されました。ページを再読み込みしてください。', invalid_input: '入力またはJ-Quants設定を確認してください。'
-  } as Record<string, string>)[value.error?.code] ?? '処理を確認できません。ページ全体を再読み込みしてください。');
-  return value as T;
+class WorkspaceHttpError extends Error {
+  constructor(readonly status: number, readonly code: string, message: string) { super(message); }
 }
-async function mutate<T>(url: string, body: unknown): Promise<T> {
-  const session = await read<{ csrfToken: string }>('/api/workspace/session');
-  return read(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Dexter-CSRF': session.csrfToken }, body: JSON.stringify(body) });
+async function read<T>(url: string, schema: z.ZodType<T>, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, init), value = await response.json();
+  if (!response.ok) {
+    const { error } = WorkspaceErrorSchema.parse(value);
+    throw new WorkspaceHttpError(response.status, error.code, error.message ?? ({ identity_review_required: '銘柄の同一性確認が必要です。',
+    revision_conflict: '別の操作で更新されました。ページを再読み込みしてください。', invalid_input: '入力またはJ-Quants設定を確認してください。'
+    } as Record<string, string>)[error.code] ?? '処理を確認できません。保存済みの状態を確認してください。');
+  }
+  return schema.parse(value);
+}
+async function mutate<T>(url: string, body: unknown, schema: z.ZodType<T>, method = 'POST'): Promise<T> {
+  const session = await read('/api/workspace/session', WorkspaceSessionSchema);
+  return read(url, schema, { method, headers: { 'Content-Type': 'application/json', 'X-Dexter-CSRF': session.csrfToken }, body: body === undefined ? undefined : JSON.stringify(body) });
 }
 let jobReadFailed = false;
 
 export function WorkspacePage() {
   const [route, setRoute] = useState(() => workspaceRoute(location.search));
-  const [query, setQuery] = useState(''), [items, setItems] = useState<WorkspaceItem[]>([]), [recents, setRecents] = useState<WorkspaceItem[]>([]);
+  const [query, setQuery] = useState(''), [items, setItems] = useState<WorkspaceCandidate[]>([]), [recents, setRecents] = useState<WorkspaceItem[]>([]);
   const [revision, refresh] = useState(0), [job, setJob] = useState<WorkspaceJobView | null>(null);
   const [busy, setBusy] = useState(false), [ready, setReady] = useState(false), [blocked, setBlocked] = useState(jobReadFailed);
   const [message, setMessage] = useState<string | null>(null), [blockingKind, setBlockingKind] = useState<string | null>(null);
@@ -39,20 +47,20 @@ export function WorkspacePage() {
   useEffect(() => { const pop = () => { navigation.current++; const next = workspaceRoute(location.search); setRoute(next); setSearchExpanded(!next?.id); }; addEventListener('popstate', pop); return () => removeEventListener('popstate', pop); }, []);
   useEffect(() => {
     const controller = new AbortController();
-    const timer = setTimeout(() => { void read<{ items: WorkspaceItem[] }>(`/api/workspace/search?q=${encodeURIComponent(query)}`, { signal: controller.signal })
+    const timer = setTimeout(() => { void read(`/api/workspace/search?q=${encodeURIComponent(query)}`, WorkspaceSearchSchema, { signal: controller.signal })
       .then(value => { if (!controller.signal.aborted) setItems(value.items); }).catch(() => { if (!controller.signal.aborted) { setItems([]); setMessage('銘柄一覧を読み込めませんでした。'); } }); }, 150);
     return () => { clearTimeout(timer); controller.abort(); };
   }, [query, revision]);
   useEffect(() => {
     const controller = new AbortController();
-    void read<{ items: WorkspaceItem[] }>('/api/workspace/recents', { signal: controller.signal }).then(value => { if (!controller.signal.aborted) setRecents(value.items); })
+    void read('/api/workspace/recents', WorkspaceRecentsSchema, { signal: controller.signal }).then(value => { if (!controller.signal.aborted) setRecents(value.items); })
       .catch(() => { if (!controller.signal.aborted) setMessage('最近開いた銘柄を読み込めませんでした。'); });
     return () => controller.abort();
   }, [revision]);
   useEffect(() => {
     if (jobReadFailed) return;
     const controller = new AbortController();
-    void read<{ job: WorkspaceJobView | null; blockingKind: string | null }>('/api/workspace/jobs/active', { signal: controller.signal })
+    void read('/api/workspace/jobs/active', WorkspaceActiveSchema, { signal: controller.signal })
       .then(value => { if (!controller.signal.aborted) { setJob(value.job === null ? null : WorkspaceJobViewSchema.parse(value.job)); setBlockingKind(value.blockingKind); setReady(true); } })
       .catch(() => { if (!controller.signal.aborted) { jobReadFailed = true; setBlocked(true); } });
     return () => controller.abort();
@@ -65,7 +73,7 @@ export function WorkspacePage() {
       if (document.visibilityState !== 'visible') return;
       timer = setTimeout(() => {
         const current = new AbortController(); request = current;
-        void read<WorkspaceJobView>(`/api/workspace/jobs/${job.id}`, { signal: current.signal }).then(next => {
+        void read(`/api/workspace/jobs/${job.id}`, WorkspaceJobViewSchema, { signal: current.signal }).then(next => {
           if (current.signal.aborted) return;
           WorkspaceJobViewSchema.parse(next);
           if (next.id !== job.id || next.kind !== job.kind || next.instrumentId !== job.instrumentId) throw new Error('Job identity mismatch');
@@ -80,16 +88,38 @@ export function WorkspacePage() {
   async function start(kind: 'catalog' | 'technical') {
     if (busy || blocked || !ready || job && !workspaceTerminal(job)) return;
     setBusy(true); setMessage(null);
-    try { const next = await mutate<WorkspaceJobView>('/api/workspace/jobs', kind === 'catalog' ? { kind } : { kind, instrumentId: route?.id });
+    try { const next = await mutate('/api/workspace/jobs', kind === 'catalog' ? { kind } : { kind, instrumentId: route?.id }, WorkspaceJobViewSchema);
       WorkspaceJobViewSchema.parse(next);
       if (next.kind !== kind || kind === 'technical' && next.instrumentId !== route?.id) throw new Error('受付結果を確認できません。ページ全体を再読み込みしてください。');
       setJob(next); if (workspaceTerminal(next)) refresh(value => value + 1);
-    } catch (error) { jobReadFailed = true; setBlocked(true); setMessage((error as Error).message); }
+    } catch (error) { await mutationFailure(error); }
+    finally { setBusy(false); }
+  }
+  async function mutationFailure(error: unknown) {
+    setMessage(error instanceof WorkspaceHttpError ? error.message : '受付結果を確認できません。ページ全体を再読み込みしてください。');
+    if (error instanceof WorkspaceHttpError && error.status >= 400 && error.status < 500) {
+      try {
+        const active = await read('/api/workspace/jobs/active', WorkspaceActiveSchema);
+        setJob(active.job); setBlockingKind(active.blockingKind); return;
+      } catch { /* An uncertain reconciliation retains the reload-only latch. */ }
+    }
+    jobReadFailed = true; setBlocked(true);
+  }
+  async function cancel() {
+    if (!job || busy || blocked || !['queued', 'running'].includes(job.state)) return;
+    setBusy(true);
+    try {
+      const next = await mutate(`/api/workspace/jobs/${job.id}`, undefined, WorkspaceJobViewSchema, 'DELETE');
+      if (next.id !== job.id || next.kind !== job.kind || next.instrumentId !== job.instrumentId) throw new Error('Job identity mismatch');
+      setJob(next);
+    } catch (error) { await mutationFailure(error); }
     finally { setBusy(false); }
   }
   async function open(id: string) {
     const token = ++navigation.current;
-    try { await mutate(`/api/workspace/instruments/${id}/open`, {}); if (token !== navigation.current) return; navigate(id); refresh(value => value + 1); }
+    try { const item = await mutate(`/api/workspace/instruments/${id}/open`, {}, WorkspaceItemSchema);
+      if (item.instrumentId !== id) throw new Error('銘柄の受付結果が一致しません。');
+      if (token !== navigation.current) return; navigate(id); refresh(value => value + 1); }
     catch (error) { setMessage((error as Error).message); }
   }
   const disabled = busy || blocked || !ready || !!blockingKind || !!job && !workspaceTerminal(job);
@@ -112,6 +142,7 @@ export function WorkspacePage() {
       {blocked ? <p role="alert">ジョブ状態の確認を停止しました。再送せずページ全体を再読み込みしてください。</p> : null}
       {blockingKind ? <p role="status">他のデータジョブが実行中です。完了後にページを再読み込みしてください。</p> : null}
       {job ? <p role="status">{job.kind === 'catalog' ? '銘柄一覧' : `日足価格${job.instrumentId !== route?.id ? '（別の銘柄）' : ''}`}: {job.state}</p> : null}
+      {job && !workspaceTerminal(job) ? <Button disabled={busy || blocked || job.state === 'publishing'} onClick={() => void cancel()}>取得をキャンセル</Button> : null}
       {message ? <p role="alert">{message}</p> : null}
       {!route ? <p role="alert">Workspace URLが不正です。</p> : route.id ? <WorkspaceInstrument key={route.id} id={route.id} interval={route.interval}
         revision={revision} navigate={interval => navigate(route.id, interval)} disabled={disabled} acquire={() => void start('technical')} onFavorite={() => refresh(value => value + 1)} /> : <p>普通株を選択してWorkspaceを開いてください。Snapshot・LLM API keyは不要です。</p>}
@@ -129,7 +160,7 @@ function WorkspaceInstrument({ id, interval, revision, navigate, disabled, acqui
   const initialFocus = useRef(true);
   useEffect(() => {
     const controller = new AbortController(); setError(null);
-    void read<WorkspaceView>(`/api/workspace/instruments/${id}`, { signal: controller.signal }).then(value => {
+    void read(`/api/workspace/instruments/${id}`, WorkspaceViewSchema, { signal: controller.signal }).then(value => {
       if (!controller.signal.aborted) {
         if (value.schemaVersion !== 'workspace_view_v1' || value.item.instrumentId !== id) throw new Error('銘柄の読込結果が一致しません。');
         setView(value); if (initialFocus.current) { initialFocus.current = false; heading.current?.focus(); }
@@ -148,7 +179,9 @@ function WorkspaceInstrument({ id, interval, revision, navigate, disabled, acqui
   const indicator = (value: { state: string; value?: number; reason?: string }) => value.state === 'available' ? value.value : `利用不可 (${value.reason})`;
   async function favorite() {
     if (!view) return;
-    try { const item = await mutate<WorkspaceItem>(`/api/workspace/instruments/${id}/favorite`, { favorite: !view.item.favorite, revision: view.item.revision }); setView({ ...view, item }); onFavorite(); }
+    try { const item = await mutate(`/api/workspace/instruments/${id}/favorite`, { favorite: !view.item.favorite, revision: view.item.revision }, WorkspaceItemSchema);
+      if (item.instrumentId !== id) throw new Error('銘柄の受付結果が一致しません。');
+      setView({ ...view, item }); onFavorite(); }
     catch (error) { setError((error as Error).message); }
   }
   return <section className="design-stack">

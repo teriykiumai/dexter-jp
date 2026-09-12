@@ -58,12 +58,12 @@ test('mobile touch/keyboard search, back navigation and invalid URL', async ({ p
 
 test('active job resumes after reload, suspends hidden polling and latches uncertain reads', async ({ page }) => {
   const id = '00000000-0000-4000-8000-000000000001';
-  const job = { id, kind: 'catalog', state: 'running', instrumentId: null, error: null };
+  const job = { schemaVersion: 'workspace_job_v1', id, kind: 'catalog', state: 'running', instrumentId: null, error: null };
   let polls = 0, fail = false;
   await page.addInitScript(() => {
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (window as Window & { hiddenFixture?: boolean }).hiddenFixture ? 'hidden' : 'visible' });
   });
-  await page.route('**/api/workspace/jobs/active', route => route.fulfill({ json: { job, blockingKind: null } }));
+  await page.route('**/api/workspace/jobs/active', route => route.fulfill({ json: { schemaVersion: 'workspace_active_v1', job, blockingKind: null } }));
   await page.route(`**/api/workspace/jobs/${id}`, route => { polls++; return route.fulfill({ status: fail ? 500 : 200, json: fail ? { error: { code: 'unavailable' } } : job }); });
   await page.goto(`${base}workspace`); await expect.poll(() => polls).toBeGreaterThan(0);
   await page.evaluate(() => { (window as Window & { hiddenFixture?: boolean }).hiddenFixture = true; document.dispatchEvent(new Event('visibilitychange')); });
@@ -76,9 +76,9 @@ test('active job resumes after reload, suspends hidden polling and latches uncer
 });
 
 test('late instrument response ignoring AbortSignal cannot replace the selected instrument', async ({ page }) => {
-  const a = { instrumentId: '00000000-0000-4000-8000-000000000001', code: '72030', label: 'A社', favorite: 0, revision: 1 };
+  const a = { schemaVersion: 'workspace_item_v1', instrumentId: '00000000-0000-4000-8000-000000000001', code: '72030', label: 'A社', favorite: 0, revision: 1 };
   const b = { ...a, instrumentId: '00000000-0000-4000-8000-000000000002', label: 'B社' };
-  await page.route('**/api/workspace/search?*', route => route.fulfill({ json: { items: [a, b] } }));
+  await page.route('**/api/workspace/search?*', route => route.fulfill({ json: { schemaVersion: 'workspace_search_v1', items: [a, b].map(({ instrumentId, code, label }) => ({ instrumentId, code, label })) } }));
   await page.route('**/api/workspace/instruments/*/open', route => route.fulfill({ json: route.request().url().includes(a.instrumentId) ? a : b }));
   await page.route(`**/api/workspace/instruments/${b.instrumentId}`, route => route.fulfill({ json: { schemaVersion: 'workspace_view_v1', item: b, chart: null } }));
   await page.goto(`${base}workspace`);
@@ -99,7 +99,7 @@ test('late instrument response ignoring AbortSignal cannot replace the selected 
 });
 
 test('large saved chart keeps exact rows reachable and interval navigation responsive', async ({ page }) => {
-  const item = { instrumentId: '00000000-0000-4000-8000-000000000001', code: '72030', label: '長期表示fixture', favorite: 0, revision: 1 };
+  const item = { schemaVersion: 'workspace_item_v1', instrumentId: '00000000-0000-4000-8000-000000000001', code: '72030', label: '長期表示fixture', favorite: 0, revision: 1 };
   const unavailable = { state: 'unavailable', reason: 'warmup' };
   const rows = Array.from({ length: 2600 }, (_, index) => {
     const date = new Date(Date.UTC(2016, 0, 1) + index * 86_400_000).toISOString().slice(0, 10);
@@ -108,8 +108,8 @@ test('large saved chart keeps exact rows reachable and interval navigation respo
       sma20: unavailable, rsi: unavailable, macd: unavailable, signal: unavailable, histogram: unavailable, cross: unavailable };
   });
   await page.route(`**/api/workspace/instruments/${item.instrumentId}`, route => route.fulfill({ json: {
-    schemaVersion: 'workspace_view_v1', item, chart: { dataDate: rows.at(-1)!.displayDate, eligibilityFrom: rows[0]!.displayDate,
-      artifactDigest: 'fixture', intervals: { day: rows, week: [rows[0]], month: [rows[0]] }, unavailablePeriods: [] },
+    schemaVersion: 'workspace_view_v1', item, chart: { schemaVersion: 'workspace_chart_v1', dataDate: rows.at(-1)!.displayDate, eligibilityFrom: rows[0]!.displayDate,
+      artifactDigest: `sha256:${'a'.repeat(64)}`, intervals: { day: rows, week: [{ ...rows[0], interval: 'week' }], month: [{ ...rows[0], interval: 'month' }] }, unavailablePeriods: [] },
   } }));
   await page.goto(`${base}workspace?instrument=${item.instrumentId}&interval=day`);
   await expect(page.locator('.table-scroll tbody tr')).toHaveCount(100);
@@ -123,4 +123,47 @@ test('large saved chart keeps exact rows reachable and interval navigation respo
   expect(latency).toBeLessThan(1000);
   await expect(page.getByLabel('表示間隔')).toHaveValue('week');
   await page.goBack(); await expect(page.locator('.table-scroll tbody tr')).toHaveCount(100);
+});
+
+test('definite admission conflict reconciles another tab job and permits manual retry without replay', async ({ page }) => {
+  const job = { schemaVersion: 'workspace_job_v1', id: '00000000-0000-4000-8000-000000000001', kind: 'catalog', state: 'running', instrumentId: null, error: null };
+  let posts = 0, activeReads = 0, finished = false, deletes = 0;
+  await page.route('**/api/workspace/jobs/active', route => { activeReads++; return route.fulfill({ json: {
+    schemaVersion: 'workspace_active_v1', job: posts && !finished ? job : null, blockingKind: null,
+  } }); });
+  await page.route(`**/api/workspace/jobs/${job.id}`, route => {
+    if (route.request().method() === 'DELETE') { deletes++; expect(route.request().postData()).toBeNull(); finished = true; }
+    return route.fulfill({ json: { ...job, state: finished ? 'failed' : 'running' } });
+  });
+  await page.route('**/api/workspace/jobs', route => { posts++; return route.fulfill({ status: 409,
+    json: { schemaVersion: 'workspace_error_v1', error: { code: 'job_active' } } }); });
+  await page.goto(`${base}workspace`);
+  const start = page.getByRole('button', { name: '銘柄一覧を取得・更新' });
+  await start.click();
+  await expect.poll(() => posts).toBe(1);
+  await expect.poll(() => activeReads).toBeGreaterThanOrEqual(2);
+  await expect(page.getByText('銘柄一覧: running', { exact: true })).toBeVisible();
+  await expect(start).toBeDisabled();
+  await page.getByRole('button', { name: '取得をキャンセル' }).focus(); await page.keyboard.press('Enter');
+  await expect(start).toBeEnabled(); expect(deletes).toBe(1);
+  await page.waitForTimeout(1200); expect(posts).toBe(1);
+  await start.click(); await expect.poll(() => posts).toBe(2); await expect(start).toBeEnabled();
+  await expect(page.getByText('ジョブ状態の確認を停止しました。再送せずページ全体を再読み込みしてください。')).toHaveCount(0);
+});
+
+test('malformed admission envelope latches without replay and malformed chart stays hidden', async ({ page }) => {
+  let posts = 0;
+  await page.route('**/api/workspace/jobs', route => { posts++; return route.fulfill({ status: 202, json: {
+    schemaVersion: 'workspace_job_v2', id: '00000000-0000-4000-8000-000000000001', kind: 'catalog', state: 'running', instrumentId: null, error: null,
+  } }); });
+  await page.goto(`${base}workspace`); await page.getByRole('button', { name: '銘柄一覧を取得・更新' }).click();
+  await expect(page.getByText('ジョブ状態の確認を停止しました。再送せずページ全体を再読み込みしてください。')).toBeVisible();
+  await page.waitForTimeout(1200); expect(posts).toBe(1);
+  const item = { schemaVersion: 'workspace_item_v1', instrumentId: '00000000-0000-4000-8000-000000000001', code: '72030', label: 'Invalid chart', favorite: 0, revision: 1 };
+  await page.route(`**/api/workspace/instruments/${item.instrumentId}`, route => route.fulfill({ json: {
+    schemaVersion: 'workspace_view_v1', item, chart: { schemaVersion: 'workspace_chart_v1', intervals: {} },
+  } }));
+  await page.goto(`${base}workspace?instrument=${item.instrumentId}`);
+  await expect(page.getByRole('heading', { name: '価格・出来高', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('alert')).toBeVisible(); expect(posts).toBe(1);
 });
