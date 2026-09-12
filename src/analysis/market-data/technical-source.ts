@@ -127,7 +127,7 @@ export function createMarketDataReaderV1(context: TechnicalCollectionContextV1,
 }
 
 /** All network dispatches go through the admitted Dashboard lease, not the CLI limiter. */
-export async function collectTechnicalV1(ticker: string, context: TechnicalCollectionContextV1,
+export async function fetchTechnicalInputsV1(ticker: string, context: TechnicalCollectionContextV1,
   environment: JQuantsExecutionEnvironmentV1, secrets: NodeJS.ProcessEnv = process.env) {
   CanonicalTickerSchema.parse(ticker);
   const window = createTechnicalSourceRequestWindowV1(context.acceptedAt);
@@ -144,6 +144,21 @@ export async function collectTechnicalV1(ticker: string, context: TechnicalColle
     if (master.state !== 'accepted') return fail('instrument_identity_unverified');
     const barRows = await fetchRows('daily_bars', TECHNICAL_SOURCE_ENDPOINTS_V1.dailyBars,
       { code, from: window.queryFrom, to: eligibleThrough });
+    return { ticker, acceptedAt: context.acceptedAt, window, eligibleThrough, code, master: master.observation,
+      calendarRows: calendar.rows, barRows,
+      fetched: new Map([...fetched].map(([role, source]) => [role,
+        { fetchedAt: source.fetchedAt, pageCount: source.pageCount, rowCount: source.rows.length }])), metrics: reader.metrics() };
+  } catch (error) { return mapTechnicalFailure(error); }
+}
+export type TechnicalFetchedInputsV1 = Awaited<ReturnType<typeof fetchTechnicalInputsV1>>;
+
+/** Deterministic mapping/calculation seam; Workspace runs it off the server thread. */
+export function buildTechnicalFromInputsV1(input: TechnicalFetchedInputsV1, secrets: NodeJS.ProcessEnv = process.env) {
+  const { ticker, window, eligibleThrough, code, barRows, fetched } = input;
+  const context = { acceptedAt: input.acceptedAt }, master = { observation: input.master };
+  try {
+    const calendar = mapTechnicalCalendarV1(input.calendarRows, window.calendarCoverageFrom, window.calendarCoverageTo);
+    if (validateCurrentTechnicalMasterV1([master.observation], { ticker, eligibleThrough, environment: secrets }).state !== 'accepted') return fail('instrument_identity_unverified');
     const mapped = mapTechnicalDailyBarsV1(barRows, { ticker, queryFrom: window.queryFrom, eligibleThrough, calendar: calendar.calendar });
     const result = calculateTechnicalSeriesV1({ observations: mapped.observations, calendar: calendar.calendar,
       window: { queryFrom: window.queryFrom, eligibleThrough, calculationDate: window.calculationDate, historyBoundary: mapped.historyBoundary } });
@@ -157,7 +172,7 @@ export async function collectTechnicalV1(ticker: string, context: TechnicalColle
       return { ...identity, inputDigest, asOfCutoff: context.acceptedAt, fetchedAt: source.fetchedAt,
         // Minimum verified entitlement class: successful exact ten-year query proves Standard capability.
         entitlementClass: 'standard', entitlementVerifiedAt: source.fetchedAt,
-        pagination: { complete: true, pageCount: source.pageCount, rowCount: source.rows.length } };
+        pagination: { complete: true, pageCount: source.pageCount, rowCount: source.rowCount } };
     });
     const artifact = createTechnicalArtifactCodecV1(ticker, secrets).build({
       schemaVersion: 'technical_chart_dataset_v1', calculationVersion: 'technical_chart_calculation_v2',
@@ -171,12 +186,19 @@ export async function collectTechnicalV1(ticker: string, context: TechnicalColle
       warnings: currentCodeWarningsV1({ kind: 'technical', boundary: { state: 'available',
         sourceCoverageFrom: result.calculationFrom, historyCoverageClipped: result.historyCoverageClipped } }),
     });
-    return { artifact, ...reader.metrics() };
-  } catch (error) {
+    return { artifact, ...input.metrics };
+  } catch (error) { return mapTechnicalFailure(error); }
+}
+
+function mapTechnicalFailure(error: unknown): never {
     if (error instanceof TechnicalSourceGateErrorV1 || error instanceof TechnicalSeriesErrorV1) {
       return fail(error.code === 'source_no_observation' ? 'source_no_observation'
         : error.code === 'source_not_yet_updated' ? 'source_not_yet_updated' : 'source_invalid_response');
     }
     throw error;
-  }
+}
+
+export async function collectTechnicalV1(ticker: string, context: TechnicalCollectionContextV1,
+  environment: JQuantsExecutionEnvironmentV1, secrets: NodeJS.ProcessEnv = process.env) {
+  return buildTechnicalFromInputsV1(await fetchTechnicalInputsV1(ticker, context, environment, secrets), secrets);
 }

@@ -4,7 +4,7 @@ import { dexterPath } from '../../utils/paths.js';
 import { canonicalJsonV1, sha256CanonicalJsonV1, type CanonicalJsonValue } from '../snapshot/canonical-json.js';
 import { CreateOnlyFilePublicationError, publishCreateOnlyFile, type CreateOnlyLinkFile } from '../snapshot/create-only-file.js';
 import { StrategyValidationUuidV4Schema } from '../strategy-validation/artifacts.js';
-import { MarketDataArtifactCodecV1, type MarketDataArtifactFieldsV1 } from './artifact-codec.js';
+import { type MarketDataArtifactCodecPort, type MarketDataArtifactFieldsV1 } from './artifact-codec.js';
 import { MarketDataFilesV1, MarketDataRecoveryBudgetV1, MARKET_DATA_RECOVERY_LIMITS_V1 } from './repository-files.js';
 import {
   MarketDataArtifactIdentityV1Schema, MarketDataInstantV1Schema, MarketDataRepositoryErrorV1,
@@ -49,7 +49,7 @@ export class MarketDataRepositoryV1<T extends MarketDataArtifactFieldsV1> {
   private readonly files: MarketDataFilesV1;
   private readonly now: () => number;
   private readonly prefix: string;
-  constructor(readonly codec: MarketDataArtifactCodecV1<T>, root = dexterPath('market-data'),
+  constructor(readonly codec: MarketDataArtifactCodecPort<T>, root = dexterPath('market-data'),
     private readonly options: MarketDataRepositoryOptionsV1 = {}) {
     this.files = new MarketDataFilesV1(root);
     this.now = options.monotonicNow ?? (() => performance.now());

@@ -20,6 +20,14 @@ export const MarketDataArtifactCommonFieldsV1 = {
 const commonSchema = z.object(MarketDataArtifactCommonFieldsV1).strict();
 export type MarketDataArtifactFieldsV1 = z.infer<typeof commonSchema>;
 
+/** Versioned module codecs share publication/receipt semantics, not payload schemas. */
+export interface MarketDataArtifactCodecPort<T extends MarketDataArtifactFieldsV1> {
+  readonly target: MarketDataTargetV1;
+  parse(raw: unknown): T;
+  identity(value: T): MarketDataArtifactIdentityV1;
+  equivalent(left: T, right: T): boolean;
+}
+
 export interface MarketDataArtifactCodecOptionsV1<T extends MarketDataArtifactFieldsV1> {
   /** Full, closed module-owned schema, including all output invariants. No codec
    * is installed in production by DR-A1: source gates and module steps own these.

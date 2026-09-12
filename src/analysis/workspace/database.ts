@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fail } from './contracts.js';
 import { safeDirectory, safeFile } from './files.js';
-import { migrateWorkspace, schemaFingerprint, validateWorkspaceSchema } from './schema.js';
+import { migrateWorkspace, schemaFingerprint, validateWorkspaceSchema, WORKSPACE_MIGRATIONS, WORKSPACE_SCHEMA_VERSION } from './schema.js';
 
 export function supportedSqlite(version: string): boolean {
   const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
@@ -13,16 +13,17 @@ export function supportedSqlite(version: string): boolean {
   return major === 3 && (minor > 51 || minor === 51 && patch >= 3
     || minor === 50 && patch >= 7 || minor === 44 && patch >= 6);
 }
-let expectedFingerprint: string | undefined;
+const expectedFingerprints = new Map<number, string>();
 const openRoots = new Map<string, number>();
 const rootKey = (root: string) => process.platform === 'win32' ? resolve(root).toLowerCase() : resolve(root);
 export function workspaceOpenCount(root: string): number { return openRoots.get(rootKey(root)) ?? 0; }
-export function workspaceFingerprint(): string {
-  if (!expectedFingerprint) {
+export function workspaceFingerprint(version = WORKSPACE_SCHEMA_VERSION): string {
+  if (version < 1 || version > WORKSPACE_SCHEMA_VERSION) fail('schema_unsupported');
+  if (!expectedFingerprints.has(version)) {
     const db = new Database(':memory:');
-    try { migrateWorkspace(db); expectedFingerprint = schemaFingerprint(db); } finally { db.close(); }
+    try { migrateWorkspace(db, WORKSPACE_MIGRATIONS.slice(0, version)); expectedFingerprints.set(version, schemaFingerprint(db)); } finally { db.close(); }
   }
-  return expectedFingerprint;
+  return expectedFingerprints.get(version)!;
 }
 class WorkspaceSqlite extends Database {
   private statements = new Map<string, Statement<unknown, SQLQueryBindings[]>>();
@@ -63,8 +64,9 @@ export class WorkspaceDatabase {
       this.sqlite.exec('PRAGMA synchronous=FULL;');
       const version = this.sqlite.query<{ user_version: number }, []>('PRAGMA user_version').get()!.user_version;
       if (version === 0 && this.sqlite.query("SELECT name FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'").all().length) fail('schema_unsupported');
+      if (version > 0) validateWorkspaceSchema(this.sqlite, workspaceFingerprint(version), version);
       if (!options.readonly) migrateWorkspace(this.sqlite);
-      validateWorkspaceSchema(this.sqlite, workspaceFingerprint());
+      validateWorkspaceSchema(this.sqlite, workspaceFingerprint(options.readonly ? version : WORKSPACE_SCHEMA_VERSION), options.readonly ? version : WORKSPACE_SCHEMA_VERSION);
       openRoots.set(rootKey(this.root), workspaceOpenCount(this.root) + 1);
     } catch (error) { this.sqlite.close(); throw error; }
   }

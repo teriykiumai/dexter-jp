@@ -4,7 +4,7 @@ import { canonicalJsonV1, sha256CanonicalJsonV1, type CanonicalJsonValue,
   type SnapshotDigest } from '../snapshot/canonical-json.js';
 import { CanonicalTickerSchema } from '../snapshot/schema.js';
 import { parseStrictJsonBytesV1 } from '../strategy-validation/strict-json.js';
-import { parseAsOfCutoff, type AsOfCutoff } from '../strategy-validation/date.js';
+import { isStrictGregorianDate, parseAsOfCutoff, type AsOfCutoff } from '../strategy-validation/date.js';
 import { resolveJQuantsRequestsPerMinuteV1 } from '../strategy-validation/jquants-execution.js';
 import { toJQuantsSecuritiesCode } from '../../utils/japanese-securities-code.js';
 import {
@@ -337,6 +337,16 @@ export class TechnicalSourceSmokeClientV1 {
   async getAll(endpoint: Endpoint, rawQuery: Query, signal?: AbortSignal): Promise<TechnicalSourceFetchResultV1> {
     if (!Object.values(TECHNICAL_SOURCE_ENDPOINTS_V1).includes(endpoint)) return fail('invalid_configuration');
     const query = normalizeQuery(endpoint, rawQuery);
+    return this.#getPages(endpoint, query, signal);
+  }
+
+  /** Separate catalog gate: do not loosen the legacy code+date query contract. */
+  async getCatalog(date: string, signal?: AbortSignal): Promise<TechnicalSourceFetchResultV1> {
+    if (!isStrictGregorianDate(date)) return fail('invalid_configuration');
+    return this.#getPages(TECHNICAL_SOURCE_ENDPOINTS_V1.securityMaster, { date }, signal);
+  }
+
+  async #getPages(endpoint: Endpoint, query: Query, signal?: AbortSignal): Promise<TechnicalSourceFetchResultV1> {
     const rows: unknown[] = [];
     const cursors = new Set<string>();
     let pageCount = 0;

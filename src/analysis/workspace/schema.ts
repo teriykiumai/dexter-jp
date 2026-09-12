@@ -1,7 +1,7 @@
 import type { Database } from 'bun:sqlite';
 import { digest, fail, json } from './contracts.js';
 
-export const WORKSPACE_SCHEMA_VERSION = 1;
+export const WORKSPACE_SCHEMA_VERSION = 2;
 const ddl = `
 CREATE TABLE workspace_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
 INSERT INTO workspace_meta VALUES ('object_store_layout','object-key-v1');
@@ -92,7 +92,27 @@ export function schemaFingerprint(db: Database): string {
   return digest(json(db.query<{ type: string; name: string; sql: string }, []>(
     "SELECT type,name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").all()));
 }
-export const WORKSPACE_MIGRATIONS = [{ version: 1, sql: ddl }] as const;
+export const WORKSPACE_MIGRATIONS = [{ version: 1, sql: ddl }, { version: 2, sql: `
+CREATE TABLE workspace_data_jobs (
+  job_id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('catalog','technical')),
+  accepted_at TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('queued','running','publishing','published','failed','interrupted','identity_review_required')),
+  identity TEXT CHECK(identity IS NULL OR json_valid(identity)),
+  master_object TEXT REFERENCES immutable_objects(object_key),
+  input_object TEXT REFERENCES immutable_objects(object_key),
+  result_object TEXT REFERENCES immutable_objects(object_key),
+  generation INTEGER REFERENCES catalog_generations(generation),
+  error TEXT,
+  CHECK((kind='technical') = (identity IS NOT NULL AND master_object IS NOT NULL)),
+  CHECK(state <> 'published' OR result_object IS NOT NULL)
+) STRICT;
+CREATE INDEX workspace_jobs_state ON workspace_data_jobs(state);
+CREATE TRIGGER workspace_job_identity_update BEFORE UPDATE OF job_id,kind,accepted_at,identity,master_object,generation ON workspace_data_jobs
+BEGIN SELECT RAISE(ABORT,'immutable'); END;
+CREATE TRIGGER workspace_job_input_update BEFORE UPDATE OF input_object ON workspace_data_jobs
+WHEN OLD.input_object IS NOT NULL AND NEW.input_object IS NOT OLD.input_object BEGIN SELECT RAISE(ABORT,'immutable'); END;
+CREATE TRIGGER workspace_job_result_update BEFORE UPDATE OF result_object ON workspace_data_jobs
+WHEN OLD.result_object IS NOT NULL AND NEW.result_object IS NOT OLD.result_object BEGIN SELECT RAISE(ABORT,'immutable'); END;
+` }] as const;
 /** Each version is atomic, including its marker. Failed DDL never replaces the old DB. */
 export function migrateWorkspace(db: Database, migrations: readonly { version: number; sql: string }[] = WORKSPACE_MIGRATIONS): void {
   let version = db.query<{ user_version: number }, []>('PRAGMA user_version').get()!.user_version;
@@ -108,8 +128,8 @@ export function migrateWorkspace(db: Database, migrations: readonly { version: n
     version = migration.version;
   }
 }
-export function validateWorkspaceSchema(db: Database, expectedFingerprint: string): void {
-  if (db.query<{ user_version: number }, []>('PRAGMA user_version').get()!.user_version !== WORKSPACE_SCHEMA_VERSION
+export function validateWorkspaceSchema(db: Database, expectedFingerprint: string, version = WORKSPACE_SCHEMA_VERSION): void {
+  if (db.query<{ user_version: number }, []>('PRAGMA user_version').get()!.user_version !== version
     || schemaFingerprint(db) !== expectedFingerprint
     || db.query<{ value: string }, [string]>('SELECT value FROM workspace_meta WHERE key=?').get('schema_fingerprint')?.value !== expectedFingerprint
     || db.query<{ value: string }, [string]>('SELECT value FROM workspace_meta WHERE key=?').get('object_store_layout')?.value !== 'object-key-v1') {

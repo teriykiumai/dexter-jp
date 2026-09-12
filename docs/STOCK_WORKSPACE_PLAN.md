@@ -4,7 +4,7 @@
 
 **Date:** 2026-09-12
 
-**Status:** Step 0 merged in PR #113. Step 1 SQLite foundation is an implementation candidate; later steps still require their own implementation, validation, review and merge.
+**Status:** Step 0 merged in PR #113; Step 1 SQLite foundation merged in PR #114. Step 2A is an implementation candidate; later steps still require their own implementation, validation, review and merge.
 
 ## 1. Authority and migration boundary
 
@@ -330,6 +330,54 @@ the offline maintenance contract.
 
 ## 5. EOD chart and Drawing basis
 
+Step 2A implementation boundary: ordinary-stock catalog/EOD server library, without
+Dashboard routes/UI (Step 3) or Drawing interaction (Step 4A). An optional Workspace
+domain joins the same Dashboard coordinator before initialization; existing two-domain
+servers remain valid. Native jobs persist frozen identities and exact retained inputs
+in SQLite schema V2. Validate the V1 fingerprint before additive migration; V1 backup
+packages remain readable and restored DBs migrate on writable open. Reference closure
+includes all Workspace job object columns. An unresolved `publishing` job blocks a
+complete backup until exact publication reconciliation, never triggers a source replay.
+
+The initial ten-year EOD/10,000-Drawing experiment measured a 17,587.54 ms maximum
+server event-loop wait, failing the <1s acceptance. Accordingly the implementation
+uses one sequential, short-lived Bun worker for EOD calculation, strict codec
+validation and immutable publication/retention. Main-thread source dispatch still
+uses the shared coordinator; workers do not fetch market data. Job state, admission,
+identity revalidation and final binding remain under the main authority. Worker
+failure during publication leaves `publishing` for exact recovery, not a retry of
+external collection. Offline Backup/Restore still requires all writers quiesced.
+The worker experiment passed on Windows/Bun 1.3.14/SQLite 3.53.0 (i7-9700,
+15.92 GiB RAM): two ten-year ingestions alongside 10,000 saved Drawings, 130,352
+foreground samples; event-loop maximum 62.49 ms, Drawing-save p95/max 3.57/230.28 ms,
+search p95/max 0.30/41.56 ms. These are fixture-load measurements, not API latency.
+
+Technical V2 uses the existing Market Data repository and receipt V1 implementation
+under `market-data/workspace-v2`, so legacy ticker-latest readers never select V2.
+The V2 payload retains normalized raw/adjusted rows, calendar, master and frozen episode
+evidence, plus the strict V1 source result for inherited provenance. Only the separately
+recomputed eligible result is a Workspace chart projection; retained pre-eligibility
+source observations are not chart/indicator inputs. The Workspace receipt envelope
+retains the complete exact native receipt and its artifact dependency. Cross-object
+validators check that receipt identity, artifact identity and frozen issuer agree.
+
+The initial catalog importer establishes new opaque IDs at the first verified master
+observation; it never guesses an earlier listing date. Same-date refresh can update
+labels using existing episodes. Its immutable catalog includes the accepted cutoff,
+normalized calendar, dated ordinary-master rows and complete source page/count/time
+evidence; offline validation recomputes the eligible session from these retained inputs.
+A later master date does not by itself prove episode
+continuity: until independently evidenced continuity is available, such refreshes
+return `identity_review_required` and preserve the accepted catalog. This is an explicit
+source-identity limitation, not automatic creation/merging of a replacement issuer.
+No unverified V1 artifact or ticker-matched history is imported. Subsequent work must
+provide reviewed continuity evidence before enabling automatic cross-date catalog
+adoption; the first ordinary-stock M1 journey does not require such adoption.
+EOD likewise rejects a fetched dated master that differs from its frozen episode
+observation. This candidate therefore does not yet enable routine next-session EOD
+updates or historical prices before the first verified observation: resolving that
+source-identity gate is required before calling Step 2A fully operational.
+
 Reuse the existing EOD source gate, official calendar, cutoff, coverage and technical
 calculations. Add Technical Artifact V2 rather than changing V1 bytes. V2 holds exact
 instrument/episode/source evidence; raw and adjusted OHLCV with units; dated provider
@@ -620,6 +668,30 @@ avoid heavy work inside synchronous SQLite transactions. Introduce workers/proce
 only if measurements show the current process cannot meet the targets.
 
 ## 12. Remaining evidence gates and Step 1 readiness
+
+Step 2A's diagnostic `src/analysis/workspace/source-smoke.ts` checks the incremental
+catalog/raw-price field boundary before production registration. It reuses the
+existing bounded Technical smoke transport: three logical queries (calendar from
+the first day of the preceding month through the inherited calendar end; all-master
+at the resolved eligible session; 7203 daily bars from that first day through the
+eligible session), at most 20 requests/pages, 8,000 rows, 32 MiB, 180 seconds total,
+30 seconds per request, no retries. Pagination shares those total limits. Run only
+with separately authorized `--confirm-external-fetch`; no artifact, receipt, job or
+Workspace DB is written. Output is counts, dates and normalized-input digests,
+not raw responses or credentials. This proves neither historical instrument
+continuity nor a past adjustment vintage, and does not re-prove ten-year entitlement.
+Official field references checked 2026-09-12: [master](https://jpx-jquants.com/ja/spec/eq-master)
+and [daily bars](https://jpx-jquants.com/en/spec/eq-bars-daily). The master supplies
+dated snapshots, not listing/delisting dates or old/new code correspondence.
+
+Authorized live field smoke on 2026-09-12 passed with eligible date 2026-09-11:
+3 requests/pages, 4,537 total rows, 1,467,011 bytes; 3,887 ordinary-stock catalog
+entries and 29 daily rows for 7203 from 2026-08-01. No non-unit adjustment factor
+occurred in that sample. The normalized catalog digest was
+`sha256:eb9ce58f3d1a68fbfef3841e7dbe342288a84f6fa734fe81ff582e701970849b`,
+daily digest `sha256:88f0e256b84a34d8c75adf41c1dbd8fc7020401dfd2b50b6fcf8d7f98c81882e`.
+This closes the incremental field/pagination gate only; it is not historical
+identity or adjustment-vintage evidence, and no production Workspace DB was created.
 
 The architecture decisions are closed by Step 0; further general Plan review is not
 a prerequisite. Step 1 has the required identity, ownership, revision, reference and

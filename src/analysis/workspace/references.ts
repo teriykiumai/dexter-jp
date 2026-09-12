@@ -7,6 +7,8 @@ import { FrozenIdentitySchema, PreferencesSchema, ObjectMetadataSchema, ObjectRe
   scopeKey, type ObjectMetadata, type ObjectRef, type ReferenceCodecs, type WorkspaceScope } from './contracts.js';
 import { objectPath, readBytes, stageFile, syncDirectory, type PublicationCheckpoint } from './files.js';
 import { parseStrictJsonBytesV1 } from '../strategy-validation/strict-json.js';
+import { validateDataObjectLinks, ReceiptObjectSchema, EpisodeObjectSchema } from './data-objects.js';
+import { TechnicalInputSchema } from './technical-input.js';
 
 export type ObjectRow = { object_key: string; path: string; codec: string; digest: string; metadata: string };
 export type VerifiedObject = { ref: ObjectRef; metadata: ObjectMetadata; bytes: Uint8Array };
@@ -98,6 +100,7 @@ export async function registerReferences(db: WorkspaceDatabase, sourceRoot: stri
   let next = walk.next();
   while (!next.done) { await checkpoint(); next = walk.next(); }
   const objects = next.value;
+  validateDataObjectLinks(objects);
   for (let offset = 0; offset < objects.length; offset += 16) {
     const batch = objects.slice(offset, offset + 16);
     for (const object of batch) {
@@ -157,6 +160,13 @@ export function referenceRoots(db: WorkspaceDatabase): ReferenceRoot[] {
       result.push({ table, ...row, field });
     }
   }
+  if (db.sqlite.query<{ user_version: number }, []>('PRAGMA user_version').get()!.user_version >= 2) {
+    for (const field of ['master_object', 'input_object', 'result_object']) {
+      for (const row of db.sqlite.query<{ record: string; object: string }, []>(
+        `SELECT job_id AS record,${field} AS object FROM workspace_data_jobs WHERE ${field} IS NOT NULL ORDER BY job_id`).all())
+        result.push({ table: 'workspace_data_jobs', ...row, field });
+    }
+  }
   // Internal binding FKs retain both exact references, even without Drawings/AI.
   for (const table of ['data_sync_state', 'shared_context_links'] as const) {
     const key = table === 'data_sync_state' ? "s.scope || ':' || s.dataset" : "s.instrument_id || ':' || s.role";
@@ -172,8 +182,40 @@ export function validateReferences(db: WorkspaceDatabase, codecs: ReferenceCodec
   const walk = collectSteps(rows.map(rowRef), ref => verifyAt(referencePath(db.root, ref), ref, codecs));
   let next = walk.next(); while (!next.done) next = walk.next(); // Offline backup/restore only.
   const objects = next.value;
+  validateDataObjectLinks(objects);
   if (objects.length !== rows.length) fail('reference_missing');
   const byKey = new Map(objects.map(object => [objectKey(object.ref), object]));
+  if (db.sqlite.query<{ user_version: number }, []>('PRAGMA user_version').get()!.user_version >= 2) {
+    const value = (key: string) => {
+      const object = byKey.get(key) ?? fail('reference_missing');
+      return JSON.parse(new TextDecoder().decode(object.bytes));
+    };
+    for (const job of db.sqlite.query<{ job_id: string; kind: string; state: string; accepted_at: string; identity: string | null;
+      master_object: string | null; input_object: string | null; result_object: string | null; generation: number | null }, []>('SELECT * FROM workspace_data_jobs').all()) {
+      // Resolve ambiguous publication before an offline backup can claim closure.
+      if (job.state === 'publishing') fail('backup_invalid');
+      if (job.kind === 'technical') {
+        const identity = parse(FrozenIdentitySchema, JSON.parse(job.identity!));
+        const episode = parse(EpisodeObjectSchema, value(job.master_object!));
+        if (identity.instrumentId !== episode.instrumentId || identity.code !== episode.observation.Code) fail('reference_conflict');
+        if (job.input_object) {
+          const prepared = value(job.input_object) as { input: unknown };
+          const input = parse(TechnicalInputSchema, prepared.input);
+          if (json(input.identity) !== json(identity) || objectKey(input.masterEvidence) !== job.master_object) fail('reference_conflict');
+        }
+        if (job.result_object) {
+          const receipt = parse(ReceiptObjectSchema, value(job.result_object));
+          if (json(receipt.identity) !== json(identity) || receipt.receipt.jobId !== job.job_id
+            || receipt.receipt.acceptedAt !== job.accepted_at || !job.input_object) fail('reference_conflict');
+          if (job.state === 'published' && !db.sqlite.query('SELECT binding_id FROM artifact_bindings WHERE artifact=? AND receipt=? AND frozen_identity=?')
+            .get(objectKey(receipt.artifact), job.result_object, job.identity!)) fail('reference_conflict');
+        }
+      } else if (job.result_object) {
+        const generation = db.sqlite.query<{ evidence: string }, [number]>('SELECT evidence FROM catalog_generations WHERE generation=?').get(job.generation!);
+        if (generation?.evidence !== job.result_object) fail('reference_conflict');
+      }
+    }
+  }
   for (const row of rows) {
     const object = byKey.get(row.object_key);
     if (!object || objectKey(rowRef(row)) !== row.object_key || json(object.metadata) !== row.metadata) fail('reference_conflict');
