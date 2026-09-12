@@ -13,7 +13,7 @@ import type { EodWorkerRequest } from './eod-worker-client.js';
 self.onmessage = async (event: MessageEvent<EodWorkerRequest>) => {
   let db: WorkspaceDatabase | undefined;
   try {
-    const r = event.data; db = new WorkspaceDatabase(r.root);
+    const r = event.data; db = new WorkspaceDatabase(r.root, { backgroundWriter: true });
     let ref = null;
     if (r.operation === 'prepare') {
       const artifact = buildWorkspaceTechnical(r.identity, r.master, new WorkspaceRepository(db), r.fetched);
@@ -37,6 +37,7 @@ self.onmessage = async (event: MessageEvent<EodWorkerRequest>) => {
     self.postMessage({ ok: true, ref });
   } catch (error) {
     try { db?.close(); } finally { self.postMessage({ ok: false, ref: null,
-      code: error instanceof WorkspaceError && error.code === 'identity_review_required' ? error.code : 'reference_conflict' }); }
+      code: error instanceof WorkspaceError ? error.code
+        : error instanceof Error && 'code' in error && error.code === 'SQLITE_BUSY' ? 'database_busy' : 'reference_conflict' }); }
   }
 };

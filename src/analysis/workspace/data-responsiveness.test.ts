@@ -32,7 +32,8 @@ test('ten-year EOD ingestion with 10000 saved Drawings keeps foreground responsi
         start = performance.now(); f.repository.saveDrawing({ ...drawing, revision: drawing.revision + 1 }, drawing.revision);
         drawing.revision++; save.push(performance.now() - start);
       }
-      expect((await job).state).toBe('published');
+      const completed = await job;
+      expect({ state: completed.state, error: completed.error }).toEqual({ state: 'published', error: null });
     }
     const stats = (values: number[]) => { values.sort((a, b) => a - b); return { count: values.length, p95: values[Math.ceil(values.length * .95) - 1]!, max: values.at(-1)! }; };
     const report = { platform: process.platform, cpu: cpus()[0]?.model, ramGiB: totalmem() / 1024 ** 3,

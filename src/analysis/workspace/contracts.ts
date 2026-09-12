@@ -6,7 +6,7 @@ import { assertMarketDataSafeV1 } from '../market-data/contracts.js';
 
 export type WorkspaceErrorCode = 'invalid_input' | 'not_found' | 'revision_conflict'
   | 'identity_review_required' | 'reference_conflict' | 'reference_missing'
-  | 'schema_unsupported' | 'database_invalid' | 'sqlite_unsupported' | 'storage_unsafe'
+  | 'schema_unsupported' | 'database_invalid' | 'database_busy' | 'sqlite_unsupported' | 'storage_unsafe'
   | 'maintenance_required' | 'backup_invalid';
 export class WorkspaceError extends Error {
   constructor(readonly code: WorkspaceErrorCode) { super(`Workspace: ${code}`); }

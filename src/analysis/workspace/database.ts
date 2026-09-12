@@ -49,7 +49,7 @@ export class WorkspaceDatabase {
   readonly path: string;
   readonly sqliteVersion: string;
   private closed = false;
-  constructor(root: string, options: { create?: boolean; maintenance?: boolean; readonly?: boolean } = {}) {
+  constructor(root: string, options: { create?: boolean; maintenance?: boolean; readonly?: boolean; backgroundWriter?: boolean } = {}) {
     this.root = resolve(root); this.path = resolve(this.root, 'workspace.sqlite');
     if (!options.maintenance) this.assertAvailable();
     safeDirectory(this.root, options.create ?? false);
@@ -59,7 +59,9 @@ export class WorkspaceDatabase {
     try {
       this.sqliteVersion = this.sqlite.query<{ version: string }, []>('SELECT sqlite_version() AS version').get()!.version;
       if (!supportedSqlite(this.sqliteVersion)) fail('sqlite_unsupported');
-      this.sqlite.exec('PRAGMA foreign_keys=ON; PRAGMA trusted_schema=OFF; PRAGMA busy_timeout=100;');
+      // A background writer may wait for foreground saves without blocking the
+      // server event loop. Foreground connections retain their short wait bound.
+      this.sqlite.exec(`PRAGMA foreign_keys=ON; PRAGMA trusted_schema=OFF; PRAGMA busy_timeout=${options.backgroundWriter ? 5000 : 100};`);
       if (!options.readonly && this.sqlite.query<{ journal_mode: string }, []>('PRAGMA journal_mode=WAL').get()!.journal_mode !== 'wal') fail('database_invalid');
       this.sqlite.exec('PRAGMA synchronous=FULL;');
       const version = this.sqlite.query<{ user_version: number }, []>('PRAGMA user_version').get()!.user_version;

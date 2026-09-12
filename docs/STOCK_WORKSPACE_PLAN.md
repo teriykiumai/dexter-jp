@@ -347,6 +347,10 @@ uses the shared coordinator; workers do not fetch market data. Job state, admiss
 identity revalidation and final binding remain under the main authority. Worker
 failure during publication leaves `publishing` for exact recovery, not a retry of
 external collection. Offline Backup/Restore still requires all writers quiesced.
+Background writer connections may wait up to 5s for SQLite contention; foreground
+connections retain the 100ms busy bound. A 350ms held-write regression proves the
+old foreground setting fails with `SQLITE_BUSY` while the background writer commits.
+Exhausted background contention remains an explicit failure, never a source replay.
 The worker experiment passed on Windows/Bun 1.3.14/SQLite 3.53.0 (i7-9700,
 15.92 GiB RAM): two ten-year ingestions alongside 10,000 saved Drawings, 130,352
 foreground samples; event-loop maximum 62.49 ms, Drawing-save p95/max 3.57/230.28 ms,
