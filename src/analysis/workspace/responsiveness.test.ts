@@ -86,4 +86,6 @@ test('complete 10k catalog ingest including new reference registration remains r
     }
     expect(distribution.eventLoop!.maxMs).toBeLessThan(1000);
   } finally { f.dispose(); }
-}, 300_000);
+// Includes 30,000 fsynced immutable objects; this setup/total budget is independent
+// of the unchanged per-operation/event-loop latency assertions above.
+}, 600_000);

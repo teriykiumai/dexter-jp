@@ -7,8 +7,9 @@ import { Digest, Id, ObjectMetadataSchema, ObjectRefSchema, RelativePath, Token,
   type ReferenceCodecs } from './contracts.js';
 import { objectPath, readBytes, readJson, safeDirectory, stageFile, syncDirectory, syncFile, writeExclusive, type PublicationCheckpoint } from './files.js';
 import { referencePath, referenceRoots, validateReferences } from './references.js';
+import { WORKSPACE_SCHEMA_VERSION } from './schema.js';
 
-const ManifestSchema = z.object({ version: z.literal(1), schemaVersion: z.literal(1),
+const ManifestSchema = z.object({ version: z.literal(1), schemaVersion: z.union([z.literal(1), z.literal(2)]),
   schemaFingerprint: Digest, databaseDigest: Digest,
   roots: z.array(z.object({ table: Token, record: z.string().max(2000), field: z.string().max(100), object: Digest }).strict()).max(500_000),
   objects: z.array(z.object({ ref: ObjectRefSchema, metadata: ObjectMetadataSchema }).strict()).max(100_000),
@@ -62,7 +63,7 @@ export function validateWorkspaceBackup(packageRoot: string, codecs: ReferenceCo
     if (existsSync(resolve(packageRoot, `workspace.sqlite${suffix}`))) fail('backup_invalid');
   }
   const manifest = parse(ManifestSchema, readJson(resolve(packageRoot, 'manifest.json')));
-  if (manifest.schemaFingerprint !== workspaceFingerprint()
+  if (manifest.schemaFingerprint !== workspaceFingerprint(manifest.schemaVersion)
     || digest(readBytes(resolve(packageRoot, 'workspace.sqlite'))) !== manifest.databaseDigest) fail('backup_invalid');
   const db = new WorkspaceDatabase(packageRoot, { readonly: true, maintenance });
   try {
@@ -83,7 +84,10 @@ export function backupWorkspace(root: string, destination: string, codecs: Refer
   beginMaintenance(root, { version: 1, operation: 'backup', token: randomUUID(), pid: process.pid }, checkpoint);
   let db: WorkspaceDatabase | undefined;
   try {
-    db = new WorkspaceDatabase(root, { maintenance: true }); exclusive(db);
+    db = new WorkspaceDatabase(root, { maintenance: true, readonly: true });
+    const sourceVersion = db.sqlite.query<{ user_version: number }, []>('PRAGMA user_version').get()!.user_version;
+    if (sourceVersion < 1 || sourceVersion > WORKSPACE_SCHEMA_VERSION) fail('schema_unsupported');
+    if (sourceVersion === WORKSPACE_SCHEMA_VERSION) exclusive(db);
     const objects = validateReferences(db, codecs), roots = referenceRoots(db);
     mkdirSync(destination);
     const snapshot = resolve(destination, 'workspace.sqlite');
@@ -91,7 +95,7 @@ export function backupWorkspace(root: string, destination: string, codecs: Refer
     const check = new WorkspaceDatabase(destination, { readonly: true });
     check.close();
     for (const object of objects) writeExclusive(referencePath(destination, object.ref), object.bytes);
-    const manifest: Manifest = { version: 1, schemaVersion: 1, schemaFingerprint: workspaceFingerprint(),
+    const manifest: Manifest = { version: 1, schemaVersion: sourceVersion as 1 | 2, schemaFingerprint: workspaceFingerprint(sourceVersion),
       databaseDigest: digest(readBytes(snapshot)), roots,
       objects: objects.map(({ ref, metadata }) => ({ ref, metadata })), omissions: [] };
     // Recheck copied bytes/closure before the completion manifest becomes visible.

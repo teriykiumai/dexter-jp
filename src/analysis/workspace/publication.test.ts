@@ -7,6 +7,32 @@ import { fixtureCodecs, fixtureObject, fixtureWorkspace } from './test-fixtures.
 import { referencePath, registerReferences, resolveReference, validateReferences } from './references.js';
 import { backupWorkspace, recoverWorkspaceMaintenance } from './backup.js';
 import { digest, json } from './contracts.js';
+import { workspaceDataFixture } from './data-test-fixtures.js';
+import { retainValidatedWorkspaceBytes, workspaceDataCodecs } from './data-objects.js';
+
+test.each(['temporary_partial', 'temporary_complete', 'published'] as const)('Workspace byte retention process kill at %s leaves no partial canonical file', async phase => {
+  const f = await workspaceDataFixture(); let db: WorkspaceDatabase | undefined;
+  try {
+    expect((await f.jobs.wait(await f.jobs.start('catalog'))).state).toBe('published');
+    const objects = validateReferences(f.db, workspaceDataCodecs);
+    const catalog = objects.find(object => object.ref.codec === 'workspace_catalog_v1')!;
+    const archive = resolve(f.root, 'objects'), before = new Set(readdirSync(archive));
+    f.db.close();
+    const child = await paused(['workspace-bytes', f.root, referencePath(f.root, catalog.ref), catalog.ref.codec, phase]);
+    child.kill('SIGKILL'); await child.exited;
+    const added = readdirSync(archive).filter(name => !before.has(name));
+    expect(added).toHaveLength(1);
+    const name = added[0]!, bytes = readFileSync(resolve(archive, name));
+    expect(name.endsWith('.json')).toBe(phase === 'published');
+    expect(name.endsWith('.tmp')).toBe(phase !== 'published');
+    expect(bytes).toEqual(Buffer.from(phase === 'temporary_partial' ? catalog.bytes.subarray(0, Math.floor(catalog.bytes.length / 2)) : catalog.bytes));
+    db = new WorkspaceDatabase(f.root);
+    expect(validateReferences(db, workspaceDataCodecs)).toHaveLength(objects.length);
+    const ref = retainValidatedWorkspaceBytes(db, catalog.ref.codec, new TextDecoder().decode(catalog.bytes), catalog.metadata);
+    expect(resolveReference(db, ref, workspaceDataCodecs).bytes).toEqual(catalog.bytes);
+    expect(validateReferences(db, workspaceDataCodecs)).toHaveLength(objects.length + 1);
+  } finally { db?.close(); f.dispose(); }
+}, 30_000);
 
 const worker = fileURLToPath(new URL('./publication-worker.ts', import.meta.url));
 async function paused(args: string[]) {

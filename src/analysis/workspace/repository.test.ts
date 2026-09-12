@@ -99,9 +99,9 @@ describe('Workspace SQLite foundation', () => {
   });
   test('failed migration and transaction preserve existing records and schema version', async () => {
     const f = await setup(); f.repository.openWorkspace(f.instrumentId); f.repository.saveDrawing(f.drawing, 0);
-    expect(() => migrateWorkspace(f.db.sqlite, [{ version: 1, sql: '' }, { version: 2,
+    expect(() => migrateWorkspace(f.db.sqlite, [{ version: 1, sql: '' }, { version: 2, sql: '' }, { version: 3,
       sql: 'CREATE TABLE should_rollback(x); DELETE FROM drawings; THIS IS INVALID SQL;' }])).toThrow();
-    expect(f.db.sqlite.query('PRAGMA user_version').get()).toEqual({ user_version: 1 });
+    expect(f.db.sqlite.query('PRAGMA user_version').get()).toEqual({ user_version: 2 });
     expect(f.db.sqlite.query("SELECT name FROM sqlite_schema WHERE name='should_rollback'").all()).toEqual([]);
     expect(f.repository.drawings(f.instrumentId)).toEqual([f.drawing]);
     expect(() => f.db.transaction(() => { f.db.sqlite.run('DELETE FROM drawings'); throw new Error('abort'); })).toThrow('abort');

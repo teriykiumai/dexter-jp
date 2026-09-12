@@ -7,6 +7,8 @@ import { FrozenIdentitySchema, PreferencesSchema, ObjectMetadataSchema, ObjectRe
   scopeKey, type ObjectMetadata, type ObjectRef, type ReferenceCodecs, type WorkspaceScope } from './contracts.js';
 import { objectPath, readBytes, stageFile, syncDirectory, type PublicationCheckpoint } from './files.js';
 import { parseStrictJsonBytesV1 } from '../strategy-validation/strict-json.js';
+import { validateDataObjectLinks, ReceiptObjectSchema, EpisodeObjectSchema } from './data-objects.js';
+import { TechnicalInputSchema } from './technical-input.js';
 
 export type ObjectRow = { object_key: string; path: string; codec: string; digest: string; metadata: string };
 export type VerifiedObject = { ref: ObjectRef; metadata: ObjectMetadata; bytes: Uint8Array };
@@ -48,6 +50,43 @@ export function requireScope(db: WorkspaceDatabase, key: string, expected: Works
   const metadata = metadataFor(db, key);
   if (scopeKey(metadata.scope) !== scopeKey(expected)) fail('reference_conflict');
   return metadata;
+}
+function publishObject(db: WorkspaceDatabase, object: VerifiedObject, checkpoint?: PublicationCheckpoint): void {
+  db.assertAvailable();
+  const path = referencePath(db.root, object.ref);
+  const temporary = stageFile(path, object.bytes, checkpoint);
+  try {
+    db.transaction(() => {
+      const registered = db.sqlite.query('SELECT object_key FROM immutable_objects WHERE object_key=?').get(objectKey(object.ref));
+      if (existsSync(path)) {
+        if (digest(readBytes(path)) === object.ref.digest) return;
+        if (registered) fail('reference_conflict');
+        renameSync(path, `${path}.quarantine-${randomUUID()}`);
+        syncDirectory(resolve(db.root, 'objects'));
+      } else if (registered) fail('reference_missing');
+      renameSync(temporary, path); syncDirectory(resolve(db.root, 'objects'));
+      checkpoint?.('published');
+    });
+  } finally { if (existsSync(temporary)) unlinkSync(temporary); }
+}
+function registerObjectRows(db: WorkspaceDatabase, objects: readonly VerifiedObject[]): void {
+  db.transaction(() => {
+    for (const { ref, metadata } of objects) {
+      const key = objectKey(ref), existing = db.sqlite.query<ObjectRow, [string]>(
+        'SELECT * FROM immutable_objects WHERE object_key=?').get(key);
+      if (existing) {
+        if (json(rowRef(existing)) !== json(ref) || existing.metadata !== json(metadata)) fail('reference_conflict');
+        continue;
+      }
+      db.sqlite.run('INSERT INTO immutable_objects VALUES (?,?,?,?,?)', [key, ref.path, ref.codec, ref.digest, json(metadata)]);
+      for (const child of metadata.dependencies) db.sqlite.run('INSERT INTO object_dependencies VALUES (?,?)', [key, objectKey(child)]);
+    }
+  });
+}
+/** Worker validation may avoid a second codec pass, but never the archive guard. */
+export function retainVerifiedObject(db: WorkspaceDatabase, object: VerifiedObject, checkpoint?: PublicationCheckpoint): void {
+  publishObject(db, object, checkpoint);
+  registerObjectRows(db, [object]);
 }
 function* collectSteps(roots: readonly ObjectRef[], read: (ref: ObjectRef) => VerifiedObject): Generator<void, VerifiedObject[]> {
   const found = new Map<string, VerifiedObject>(), visiting = new Set<string>();
@@ -98,42 +137,16 @@ export async function registerReferences(db: WorkspaceDatabase, sourceRoot: stri
   let next = walk.next();
   while (!next.done) { await checkpoint(); next = walk.next(); }
   const objects = next.value;
+  validateDataObjectLinks(objects);
   for (let offset = 0; offset < objects.length; offset += 16) {
     const batch = objects.slice(offset, offset + 16);
     for (const object of batch) {
-      const path = referencePath(db.root, object.ref);
-      const temporary = stageFile(path, object.bytes, publicationCheckpoint);
-      try {
-        // Every archive publisher uses the same SQLite writer lock. A concurrent
-        // importer cannot replace a winner between the registry check and rename.
-        db.transaction(() => {
-          const registered = db.sqlite.query('SELECT object_key FROM immutable_objects WHERE object_key=?').get(objectKey(object.ref));
-          if (existsSync(path)) {
-            if (digest(readBytes(path)) === object.ref.digest) return;
-            if (registered) fail('reference_conflict');
-            renameSync(path, `${path}.quarantine-${randomUUID()}`);
-            syncDirectory(resolve(db.root, 'objects'));
-          } else if (registered) fail('reference_missing');
-          renameSync(temporary, path); syncDirectory(resolve(db.root, 'objects'));
-          publicationCheckpoint?.('published');
-        });
-      } finally { if (existsSync(temporary)) unlinkSync(temporary); }
+      publishObject(db, object, publicationCheckpoint);
       await checkpoint();
     }
     // Dependencies precede parents; every committed row has durable bytes and a
     // complete FK closure, including when a later batch fails or the process exits.
-    db.transaction(() => {
-      for (const { ref, metadata } of batch) {
-        const key = objectKey(ref), existing = db.sqlite.query<ObjectRow, [string]>(
-          'SELECT * FROM immutable_objects WHERE object_key=?').get(key);
-        if (existing) {
-          if (json(rowRef(existing)) !== json(ref) || existing.metadata !== json(metadata)) fail('reference_conflict');
-          continue;
-        }
-        db.sqlite.run('INSERT INTO immutable_objects VALUES (?,?,?,?,?)', [key, ref.path, ref.codec, ref.digest, json(metadata)]);
-        for (const child of metadata.dependencies) db.sqlite.run('INSERT INTO object_dependencies VALUES (?,?)', [key, objectKey(child)]);
-      }
-    });
+    registerObjectRows(db, batch);
     await checkpoint();
   }
 }
@@ -157,6 +170,13 @@ export function referenceRoots(db: WorkspaceDatabase): ReferenceRoot[] {
       result.push({ table, ...row, field });
     }
   }
+  if (db.sqlite.query<{ user_version: number }, []>('PRAGMA user_version').get()!.user_version >= 2) {
+    for (const field of ['master_object', 'input_object', 'result_object']) {
+      for (const row of db.sqlite.query<{ record: string; object: string }, []>(
+        `SELECT job_id AS record,${field} AS object FROM workspace_data_jobs WHERE ${field} IS NOT NULL ORDER BY job_id`).all())
+        result.push({ table: 'workspace_data_jobs', ...row, field });
+    }
+  }
   // Internal binding FKs retain both exact references, even without Drawings/AI.
   for (const table of ['data_sync_state', 'shared_context_links'] as const) {
     const key = table === 'data_sync_state' ? "s.scope || ':' || s.dataset" : "s.instrument_id || ':' || s.role";
@@ -172,8 +192,40 @@ export function validateReferences(db: WorkspaceDatabase, codecs: ReferenceCodec
   const walk = collectSteps(rows.map(rowRef), ref => verifyAt(referencePath(db.root, ref), ref, codecs));
   let next = walk.next(); while (!next.done) next = walk.next(); // Offline backup/restore only.
   const objects = next.value;
+  validateDataObjectLinks(objects);
   if (objects.length !== rows.length) fail('reference_missing');
   const byKey = new Map(objects.map(object => [objectKey(object.ref), object]));
+  if (db.sqlite.query<{ user_version: number }, []>('PRAGMA user_version').get()!.user_version >= 2) {
+    const value = (key: string) => {
+      const object = byKey.get(key) ?? fail('reference_missing');
+      return JSON.parse(new TextDecoder().decode(object.bytes));
+    };
+    for (const job of db.sqlite.query<{ job_id: string; kind: string; state: string; accepted_at: string; identity: string | null;
+      master_object: string | null; input_object: string | null; result_object: string | null; generation: number | null }, []>('SELECT * FROM workspace_data_jobs').all()) {
+      // Resolve ambiguous publication before an offline backup can claim closure.
+      if (job.state === 'publishing') fail('backup_invalid');
+      if (job.kind === 'technical') {
+        const identity = parse(FrozenIdentitySchema, JSON.parse(job.identity!));
+        const episode = parse(EpisodeObjectSchema, value(job.master_object!));
+        if (identity.instrumentId !== episode.instrumentId || identity.code !== episode.observation.Code) fail('reference_conflict');
+        if (job.input_object) {
+          const prepared = value(job.input_object) as { input: unknown };
+          const input = parse(TechnicalInputSchema, prepared.input);
+          if (json(input.identity) !== json(identity) || objectKey(input.masterEvidence) !== job.master_object) fail('reference_conflict');
+        }
+        if (job.result_object) {
+          const receipt = parse(ReceiptObjectSchema, value(job.result_object));
+          if (json(receipt.identity) !== json(identity) || receipt.receipt.jobId !== job.job_id
+            || receipt.receipt.acceptedAt !== job.accepted_at || !job.input_object) fail('reference_conflict');
+          if (job.state === 'published' && !db.sqlite.query('SELECT binding_id FROM artifact_bindings WHERE artifact=? AND receipt=? AND frozen_identity=?')
+            .get(objectKey(receipt.artifact), job.result_object, job.identity!)) fail('reference_conflict');
+        }
+      } else if (job.result_object) {
+        const generation = db.sqlite.query<{ evidence: string }, [number]>('SELECT evidence FROM catalog_generations WHERE generation=?').get(job.generation!);
+        if (generation?.evidence !== job.result_object) fail('reference_conflict');
+      }
+    }
+  }
   for (const row of rows) {
     const object = byKey.get(row.object_key);
     if (!object || objectKey(rowRef(row)) !== row.object_key || json(object.metadata) !== row.metadata) fail('reference_conflict');

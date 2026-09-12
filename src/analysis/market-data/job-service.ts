@@ -435,6 +435,7 @@ export class MarketDataJobServiceV1 {
       if (active.domain === 'strategy_validation') {
         return { schemaVersion: 'market_data_active_job_v1', marketJob: null, blockingKind: 'strategy_validation' };
       }
+      if (active.domain === 'workspace') throw new DashboardJobCoordinatorErrorV1('active_job_conflict', undefined, active.kind);
       try {
         const job = await this.jobRepository.load(active.jobId);
         if (isMarketDataJobTerminalV1(job.status) || job.kind !== active.kind) throw new Error('Active job changed.');
