@@ -40,6 +40,7 @@ import {
   validationSource,
 } from '../../analysis/strategy-validation/artifact-test-fixtures.js';
 import { StrategyValidationCaseV1Schema } from '../../analysis/strategy-validation/artifacts.js';
+import { overviewBrowserFixture, overviewBrowserJob, overviewJobId } from './market-overview.test-fixtures.js';
 
 type RadarMetric = 'per' | 'pbr' | 'roe' | 'roic' | 'operatingMargin'
   | 'revenueGrowth' | 'dividendYield';
@@ -1290,6 +1291,9 @@ async function guardRefreshRequests(page: Page): Promise<{ api: string[]; unexpe
     if (url.origin === baseUrl && route.request().method() === 'GET' && url.pathname === '/api/market-data/jobs/active') {
       await route.fulfill({ json: { schemaVersion: 'market_data_active_job_v1', marketJob: null, blockingKind: null } }); return;
     }
+    if (url.origin === baseUrl && route.request().method() === 'GET' && url.pathname === '/api/market-data/overview') {
+      await route.fulfill({ json: { schemaVersion: 'market_overview_response_v1', modules: [] } }); return;
+    }
     if (url.origin === baseUrl && route.request().method() === 'GET' && /^\/api\/market-data\/technical\/[^/]+\/latest$/.test(url.pathname)) {
       await route.fulfill({ status: 404, json: { error: { code: 'artifact_not_found' } } }); return;
     }
@@ -1369,6 +1373,191 @@ function technicalBrowserFixture() {
         week: [candle('2026-09-09', 'week')], month: [candle('2026-09-09', 'month')] },
       unavailablePeriods: [{ interval: 'week', identity: '2026-08-31', periodStart: '2026-08-31', periodEnd: '2026-09-06', reason: 'partial_period' }] } };
 }
+
+test.describe('DR-E2 ETF overview', () => {
+  async function setup(page: Page) {
+    const requests = await guardRefreshRequests(page); await mockSnapshotApi(page);
+    await page.route('**/api/market-data/overview', route => route.fulfill({ json: overviewBrowserFixture() }));
+    return requests;
+  }
+  test('global/detail use identical stored values, five URL ranges and no provider calls; keyboard, History and reload', async ({ page }) => {
+    const requests = await setup(page);
+    await page.goto(`${baseUrl}/?view=market-overview&future=keep&future=again`);
+    const select = page.getByLabel('ETF比較期間');
+    await expect(select).toHaveValue('1y');
+    await expect(page.getByRole('heading', { name: '1321 日経225連動ETF proxy' })).toBeVisible();
+    await expect(page.getByRole('img', { name: '1321と2633の正規化価格チャート' })).toBeVisible();
+    const table = page.getByRole('region', { name: 'ETF比較の正確な値' });
+    await expect(table.locator('tbody tr')).toHaveCount(2);
+    await expect(table.locator('tbody tr').last()).toContainText('104');
+    await table.focus(); await expect(table).toBeFocused();
+    await expect(page.getByText('JPY建てETF市場価格・選択期間: 1321優勢', { exact: true })).toBeVisible();
+    await expect(page.getByText(/表示期間全体が同一銘柄であることは確認していません/)).toHaveCount(2);
+    const reads = requests.api.length;
+    for (const range of ['3m', '6m', '1y', '3y', 'max']) {
+      await select.focus(); await select.selectOption(range); await expect(select).toBeFocused();
+      expect(new URL(page.url()).searchParams.get('marketRange')).toBe(range);
+      expect(new URL(page.url()).searchParams.getAll('future')).toEqual(['keep', 'again']);
+    }
+    expect(requests.api.length).toBe(reads);
+    await page.goBack(); await expect(select).toHaveValue('3y');
+    await page.goForward(); await expect(select).toHaveValue('max');
+    await page.reload(); await expect(select).toHaveValue('max');
+    await page.goto(`${baseUrl}/?ticker=1010&tab=market-overview&marketRange=max`);
+    await expect(select).toHaveValue('max'); await expect(table.locator('tbody tr').last()).toContainText('106');
+    await page.locator('#dashboard-tab-report').click(); await page.locator('#dashboard-tab-market-overview').click();
+    await expect(select).toHaveValue('max');
+    expect(requests.api.every(value => value.startsWith('GET '))).toBe(true);
+    expect(requests.api.some(value => value.includes('/overview/1010'))).toBe(false);
+    expect(requests.unexpected).toEqual([]);
+  });
+  test('responsive chart/table and persistent provenance at all required widths', async ({ page }, testInfo) => {
+    await setup(page); await page.goto(`${baseUrl}/?view=market-overview`);
+    await expect(page.getByLabel('ETF比較期間')).toBeVisible();
+    for (const width of [320, 390, 680, 768, 980, 1024, 1280]) {
+      await page.setViewportSize({ width, height: 900 });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      await expect(page.getByRole('img', { name: '1321と2633の正規化価格チャート' })).toBeVisible();
+      await expect(page.getByText(/fetchedAt（収集日時）/)).toHaveCount(2);
+      await expect(page.getByText(/経過暦日:/)).toHaveCount(2);
+      if (width === 320 || width === 1280) await page.screenshot({ path: testInfo.outputPath(`etf-${width}.png`), fullPage: true });
+    }
+  });
+  test('refresh is explicit, CSRF protected, adopts one authoritative read and focuses heading', async ({ page }) => {
+    const requests = await setup(page); let reads = 0, posts = 0;
+    await page.route('**/api/market-data/overview', route => { reads++; return route.fulfill({ json: overviewBrowserFixture(posts ? 41000 : 40000) }); });
+    await page.route('**/api/session', route => route.fulfill({ json: { csrfHeader: 'X-Dexter-CSRF', csrfToken: 'fixture' } }));
+    await page.route('**/api/market-data/overview/jobs', route => {
+      expect(route.request().headers()['x-dexter-csrf']).toBe('fixture'); expect(route.request().postDataJSON()).toEqual({}); posts++;
+      return route.fulfill({ status: 202, json: { jobId: overviewJobId } });
+    });
+    await page.route(`**/api/market-data/jobs/${overviewJobId}`, route => route.fulfill({ json: overviewBrowserJob('completed') }));
+    await page.goto(`${baseUrl}/?view=market-overview&marketRange=6m`);
+    await expect(page.getByRole('button', { name: '市場データを取得', exact: true })).toBeEnabled();
+    const before = reads; expect(posts).toBe(0);
+    await page.getByRole('button', { name: '市場データを取得', exact: true }).click();
+    await expect(page.getByRole('heading', { name: '保存済み市場データ', exact: true })).toBeFocused();
+    await expect(page.getByRole('region', { name: '1321 EODの正確な値' })).toContainText('41000');
+    expect(reads).toBe(before + 1); expect(posts).toBe(1); await expect(page.getByLabel('ETF比較期間')).toHaveValue('6m');
+    expect(requests.unexpected).toEqual([]);
+  });
+  for (const fails of [false, true]) test(`recovered job visible-only polling and ${fails ? 'error latch until reload' : 'one terminal adoption'}`, async ({ page }) => {
+    await setup(page); await page.clock.install(); let polls = 0, reads = 0;
+    await page.route('**/api/market-data/overview', route => { reads++; return route.fulfill({ json: overviewBrowserFixture() }); });
+    await page.route('**/api/market-data/jobs/active', route => route.fulfill({ json: { schemaVersion: 'market_data_active_job_v1', marketJob: overviewBrowserJob(), blockingKind: null } }));
+    await page.route(`**/api/market-data/jobs/${overviewJobId}`, route => { polls++; return fails ? route.fulfill({ status: 500, json: { error: { code: 'repository_failure', message: '記録の整合性を確認できません。' } } }) : route.fulfill({ json: overviewBrowserJob('completed') }); });
+    const visibility = (state: string) => page.evaluate(value => { Object.defineProperty(document, 'visibilityState', { configurable: true, value }); document.dispatchEvent(new Event('visibilitychange')); }, state);
+    await page.goto(`${baseUrl}/?ticker=1010&tab=market-overview`);
+    await expect(page.getByRole('status').filter({ hasText: '/ running' })).toBeVisible(); const before = reads;
+    await visibility('hidden'); await page.clock.runFor(5000); expect(polls).toBe(0);
+    await visibility('visible'); await page.clock.runFor(1000); await expect.poll(() => polls).toBe(1);
+    if (fails) await expect(page.getByRole('alert')).toContainText('記録の整合性を確認できません');
+    else { await expect(page.getByRole('heading', { name: '保存済み市場データ', exact: true })).toBeFocused(); expect(reads).toBe(before + 1); }
+    await visibility('hidden'); await visibility('visible'); await page.clock.runFor(5000); expect(polls).toBe(1);
+    if (fails) {
+      await page.locator('#dashboard-tab-report').click(); await page.locator('#dashboard-tab-market-overview').click(); await page.clock.runFor(5000); expect(polls).toBe(1);
+      await page.locator('#dashboard-tab-technical').click(); await page.clock.runFor(5000); expect(polls).toBe(1);
+      await expect(page.getByRole('button', { name: '最新EODを取得' })).toBeDisabled();
+      await page.locator('#dashboard-tab-market-overview').click();
+      await page.reload(); await expect(page.getByRole('status').filter({ hasText: '/ running' })).toBeVisible(); await page.clock.runFor(1000); await expect.poll(() => polls).toBe(2);
+    }
+  });
+  test('range change rejects abort-ignoring completion response without overwriting URL, data or focus', async ({ page }) => {
+    await setup(page);
+    await page.route('**/api/session', route => route.fulfill({ json: { csrfHeader: 'X-Dexter-CSRF', csrfToken: 'fixture' } }));
+    await page.route('**/api/market-data/overview/jobs', route => route.fulfill({ status: 202, json: { jobId: overviewJobId } }));
+    await page.route(`**/api/market-data/jobs/${overviewJobId}`, route => route.fulfill({ json: overviewBrowserJob('completed') }));
+    await page.goto(`${baseUrl}/?view=market-overview`);
+    await expect(page.getByLabel('ETF比較期間')).toBeVisible();
+    await holdNextFetchIgnoringAbort(page, '/api/market-data/overview', overviewBrowserFixture(99999));
+    await page.getByRole('button', { name: '市場データを取得', exact: true }).click();
+    await expect.poll(() => page.evaluate(() => !!(window as Window & { releaseHeldFetch?: unknown }).releaseHeldFetch)).toBe(true);
+    const select = page.getByLabel('ETF比較期間'); await select.focus(); await select.selectOption('max');
+    await releaseHeldFetch(page); await expect(select).toBeFocused(); await expect(select).toHaveValue('max');
+    await expect(page.getByRole('region', { name: '1321 EODの正確な値' })).toContainText('40000');
+    await expect(page.getByRole('region', { name: '1321 EODの正確な値' })).not.toContainText('99999');
+  });
+  test('unavailable ranges never show a polygon, direction or fallback period; valid zero and persisted warnings survive', async ({ page }) => {
+    await setup(page);
+    const fixture = overviewBrowserFixture();
+    const relative = fixture.modules.find(item => item.moduleId === 'etf_1321_2633_relative')!;
+    if (!('payload' in relative)) throw new Error('fixture');
+    const serialized = JSON.parse(JSON.stringify(fixture));
+    serialized.modules[5].state = 'fallback';
+    serialized.modules[5].payload.observations[2] = { range: '1y', state: 'unavailable', reason: 'insufficient_common_dates', commonDateCount: 1, rangeStart: '2026-09-10', rangeEnd: '2026-09-10' };
+    await page.route('**/api/market-data/overview', route => route.fulfill({ json: serialized }));
+    await page.goto(`${baseUrl}/?view=market-overview`);
+    await expect(page.getByText(/選択期間は利用不可: insufficient_common_dates/)).toBeVisible();
+    await expect(page.getByRole('img', { name: '1321と2633の正規化価格チャート' })).toHaveCount(0);
+    await expect(page.getByText(/^JPY建てETF市場価格・選択期間:/)).toHaveCount(0);
+    await expect(page.getByText(/直前のvalid artifactへフォールバック/)).toBeVisible();
+    await expect(page.getByRole('region', { name: '1321 EODの正確な値' }).getByRole('row', { name: '前回差 JPY 0', exact: true })).toBeVisible();
+    await page.getByLabel('ETF比較期間').selectOption('max'); await expect(page.getByRole('img', { name: '1321と2633の正規化価格チャート' })).toBeVisible();
+  });
+  test('cooldown is manual, focuses its scoped error, and never erases stored values', async ({ page }) => {
+    const requests = await setup(page); let posts = 0;
+    await page.route('**/api/session', route => route.fulfill({ json: { csrfHeader: 'X-Dexter-CSRF', csrfToken: 'fixture' } }));
+    await page.route('**/api/market-data/overview/jobs', route => { posts++; return route.fulfill({ status: 409, headers: { 'Retry-After': '60' }, json: { error: { code: 'active_job_conflict' } } }); });
+    await page.goto(`${baseUrl}/?view=market-overview`); await expect(page.getByLabel('ETF比較期間')).toBeVisible();
+    await page.getByRole('button', { name: '市場データを取得', exact: true }).click();
+    await expect(page.getByRole('alert')).toBeFocused(); await expect(page.getByRole('alert')).toContainText('あと 60 秒');
+    await expect(page.getByRole('region', { name: '1321 EODの正確な値' })).toContainText('40000');
+    expect(posts).toBe(1); expect(requests.unexpected).toEqual([]);
+  });
+  test('proved unavailable publication replaces old available values without silently retaining them', async ({ page }) => {
+    await setup(page); let completed = false;
+    const next = JSON.parse(JSON.stringify(overviewBrowserFixture()));
+    for (const module of next.modules.slice(4)) {
+      module.state = 'unavailable'; module.reason = 'source_no_observation'; module.payload.state = 'unavailable'; module.payload.reason = 'source_no_observation';
+      module.payload.observations = module.moduleId === 'etf_1321_eod' ? [{ identity: '2026-09-10', previousCommonDate: null,
+        ...Object.fromEntries(['adjustedCloseYen', 'previousAdjustedCloseYen', 'changeYen', 'changeRatePercent'].map(key => [key, { state: 'unavailable', reason: 'source_no_observation' }]))
+      }] : ['3m', '6m', '1y', '3y', 'max'].map(range => ({ range, state: 'unavailable', reason: 'source_no_observation', commonDateCount: 0, rangeStart: null, rangeEnd: null }));
+    }
+    await page.route('**/api/market-data/overview', route => route.fulfill({ json: completed ? next : overviewBrowserFixture() }));
+    await page.route('**/api/session', route => route.fulfill({ json: { csrfHeader: 'X-Dexter-CSRF', csrfToken: 'fixture' } }));
+    await page.route('**/api/market-data/overview/jobs', route => { completed = true; return route.fulfill({ status: 202, json: { jobId: overviewJobId } }); });
+    await page.route(`**/api/market-data/jobs/${overviewJobId}`, route => route.fulfill({ json: overviewBrowserJob('completed') }));
+    await page.goto(`${baseUrl}/?view=market-overview`); await expect(page.getByLabel('ETF比較期間')).toBeVisible();
+    await page.getByRole('button', { name: '市場データを取得', exact: true }).click();
+    await expect(page.getByRole('heading', { name: '保存済み市場データ', exact: true })).toBeFocused();
+    await expect(page.getByRole('region', { name: '1321 EODの正確な値' })).not.toContainText('40000');
+    await expect(page.getByRole('img', { name: '1321と2633の正規化価格チャート' })).toHaveCount(0);
+    await expect(page.getByText('利用不可: source_no_observation（0ではありません）', { exact: true })).toHaveCount(2);
+  });
+  test('manual cancel preserves values and returns focus; foreign-kind job cannot be cancelled here', async ({ page }) => {
+    await setup(page); let deletes = 0;
+    await page.route('**/api/market-data/jobs/active', route => route.fulfill({ json: { schemaVersion: 'market_data_active_job_v1', marketJob: overviewBrowserJob(), blockingKind: null } }));
+    await page.route('**/api/session', route => route.fulfill({ json: { csrfHeader: 'X-Dexter-CSRF', csrfToken: 'fixture' } }));
+    await page.route(`**/api/market-data/jobs/${overviewJobId}`, route => {
+      if (route.request().method() === 'DELETE') { deletes++; return route.fulfill({ json: overviewBrowserJob('cancelled') }); }
+      return route.fulfill({ json: overviewBrowserJob() });
+    });
+    await page.goto(`${baseUrl}/?view=market-overview`);
+    await page.getByRole('button', { name: '市場データ更新をキャンセル' }).click();
+    await expect(page.getByRole('button', { name: '市場データを取得', exact: true })).toBeFocused();
+    expect(deletes).toBe(1); await expect(page.getByRole('region', { name: '1321 EODの正確な値' })).toContainText('40000');
+    await page.route('**/api/market-data/jobs/active', route => route.fulfill({ json: { schemaVersion: 'market_data_active_job_v1', marketJob: { ...overviewBrowserJob(), kind: 'technical_refresh', target: { kind: 'technical', ticker: '7203' } }, blockingKind: null } }));
+    await page.reload(); await expect(page.getByRole('status').filter({ hasText: 'technical_refresh / 対象 7203' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '市場データ更新をキャンセル' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '市場データを取得', exact: true })).toBeDisabled();
+  });
+  test('failed post-completion read retains values; durable-write warning blocks further mutations even when that read fails', async ({ page }) => {
+    await setup(page); let failed = false;
+    await page.route('**/api/market-data/overview', route => failed ? route.fulfill({ status: 500, json: { error: { code: 'repository_failure' } } }) : route.fulfill({ json: overviewBrowserFixture() }));
+    await page.route('**/api/session', route => route.fulfill({ json: { csrfHeader: 'X-Dexter-CSRF', csrfToken: 'fixture' } }));
+    await page.route('**/api/market-data/overview/jobs', route => { failed = true; return route.fulfill({ status: 202, json: { jobId: overviewJobId } }); });
+    await page.route(`**/api/market-data/jobs/${overviewJobId}`, route => route.fulfill({ json: { ...overviewBrowserJob('completed'), result: { kind: 'overview', moduleResults: [
+      { moduleId: 'etf_1321_eod', state: 'published', warningCodes: ['job_record_write_failed'] },
+      { moduleId: 'etf_1321_2633_relative', state: 'retained_previous', failureCode: 'provider_failure', warningCodes: [] },
+    ] } } }));
+    await page.goto(`${baseUrl}/?view=market-overview`); await expect(page.getByLabel('ETF比較期間')).toBeVisible();
+    await page.getByRole('button', { name: '市場データを取得', exact: true }).click();
+    await expect(page.getByRole('alert')).toContainText('Dashboardを再起動');
+    await expect(page.getByRole('button', { name: '市場データを取得', exact: true })).toBeDisabled();
+    await expect(page.getByRole('region', { name: '1321 EODの正確な値' })).toContainText('40000');
+    await expect(page.getByText(/更新結果: retained_previous/)).toBeVisible();
+  });
+});
 
 test.describe('DR-T3 Technical', () => {
   test('reload recovers the matching running job and adopts one authoritative read with History replace', async ({ page }) => {
@@ -1584,7 +1773,7 @@ test.describe('DR-V2 Watchlist and global navigation', () => {
     expect(requests.unexpected).toEqual([]);
   });
 
-  test('restores global/list/detail navigation, focus, unknown queries, and reload without global data reads', async ({ page }) => {
+  test('restores global/list/detail navigation, focus, unknown queries, and reload with local overview reads only', async ({ page }) => {
     const requests = await guardRefreshRequests(page);
     await mockWatchlistApi(page, watchlistFixtures());
     await mockSnapshotApi(page);
@@ -1597,7 +1786,7 @@ test.describe('DR-V2 Watchlist and global navigation', () => {
     await expect(page.getByText('全市場共通', { exact: true })).toBeVisible();
     expect(new URL(page.url()).search).toBe('?future=keep&future=again&view=market-overview');
     expect(await page.evaluate(() => history.length)).toBe(initialLength + 1);
-    expect(requests.api).toEqual(initialReads);
+    expect(requests.api.filter(value => !value.startsWith('GET /api/market-data/'))).toEqual(initialReads);
     await page.goBack();
     await expect(page.getByRole('heading', { name: '保存済み分析', exact: true })).toBeFocused();
     await expect(page.getByRole('table')).toBeVisible();
@@ -1605,8 +1794,8 @@ test.describe('DR-V2 Watchlist and global navigation', () => {
     await expect(page.getByRole('heading', { name: '市場概況', exact: true })).toBeFocused();
     const beforeReload = [...requests.api];
     await page.reload();
-    await expect(page.getByRole('heading', { name: '市場データは準備中です' })).toBeVisible();
-    expect(requests.api).toEqual(beforeReload);
+    await expect(page.getByRole('heading', { name: '市場データと更新' })).toBeVisible();
+    expect(requests.api.filter(value => !value.startsWith('GET /api/market-data/'))).toEqual(beforeReload.filter(value => !value.startsWith('GET /api/market-data/')));
     await page.getByRole('link', { name: '保存済み分析', exact: true }).click();
     await expect(page.getByRole('table')).toBeVisible();
     await page.locator('tr[data-ticker="7203"]').getByRole('button', { name: /の詳細を表示$/ }).click();
@@ -1733,7 +1922,7 @@ test.describe('DR-V2 Watchlist and global navigation', () => {
     await page.reload();
     await expect(page.getByRole('heading', { name: '市場概況', exact: true })).toBeVisible();
     expect(page.url()).toBe(globalUrl);
-    expect(requests.api).toEqual([]);
+    expect(requests.api.every(value => value.startsWith('GET /api/market-data/'))).toBe(true);
     await page.goto(`${baseUrl}/?ticker=1009&tab=unknown&chartSource=latest&interval=month&marketRange=max&future=keep`);
     await expectSelectedTab(page, 'report');
     const historyLength = await page.evaluate(() => history.length);
@@ -1749,7 +1938,7 @@ test.describe('DR-V2 Watchlist and global navigation', () => {
       expect(await page.evaluate(() => history.length)).toBe(historyLength);
     }
     // DR-T3 adds persisted-data GETs, not Snapshot reloads or external refreshes.
-    expect(requests.api.filter(value => !value.startsWith('GET /api/market-data/'))).toEqual(initialReads);
+    expect(requests.api.filter(value => !value.startsWith('GET /api/market-data/'))).toEqual(initialReads.filter(value => !value.startsWith('GET /api/market-data/')));
     expect(requests.unexpected).toEqual([]);
   });
 
@@ -3850,7 +4039,7 @@ test.describe('Dashboard detail tab browser interaction', () => {
       ],
       fundamentals: ['同業比較', '配当分析'],
       'supply-demand': ['信用需給', '公開空売り残高報告'],
-      'market-overview': ['市場データは準備中です'],
+      'market-overview': ['市場データと更新'],
       market: ['投資部門別売買', '市場相関', '業種指数比較', '業種別空売り売買代金'],
       validation: ['戦略検証を実行', '保存済み検証結果'],
     } as const satisfies Record<DashboardTabId, readonly string[]>;
@@ -3956,7 +4145,7 @@ test.describe('DR-V3 complete Light detail', () => {
     const reads = [...requests.api];
     await page.locator('#dashboard-tab-market').click();
     await page.locator('#dashboard-tab-market-overview').click();
-    expect(requests.api).toEqual(reads);
+    expect(requests.api.filter(value => !value.startsWith('GET /api/market-data/'))).toEqual(reads.filter(value => !value.startsWith('GET /api/market-data/')));
     expect(new URL(page.url()).search).toBe(original);
     await page.reload();
     await expectSelectedTab(page, 'market-overview');

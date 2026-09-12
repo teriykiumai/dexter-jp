@@ -7,8 +7,8 @@ import { LIGHTWEIGHT_CHARTS_NOTICE, PriceChart } from './chart.js';
 import { selectedTechnicalSource, snapshotChartDate, technicalPath, technicalSelection, technicalValue,
   type TechnicalLatest } from './technical.js';
 import type { DashboardSessionV1 } from './strategy-validation.js';
+import { marketJobReadState } from './market-job-read-state.js';
 
-let pageReadFailure = false;
 const panePreferences = new Map<string, string[]>();
 class TechnicalReadError extends Error {
   constructor(readonly status: number, readonly code: string, readonly retryAfter: string | null = null) { super(code); }
@@ -40,7 +40,7 @@ export function TechnicalPanel({ snapshot, comparison, navigationRevision, child
   const [busy, setBusy] = useState(false);
   const [activeReady, setActiveReady] = useState(false);
   const [job, setJob] = useState<MarketDataJobViewV1 | null>(null);
-  const [blocked, setBlocked] = useState<string | null>(pageReadFailure ? '状態確認に失敗しました。ページ全体を再読み込みしてください。' : null);
+  const [blocked, setBlocked] = useState<string | null>(marketJobReadState.failed ? '状態確認に失敗しました。ページ全体を再読み込みしてください。' : null);
   const [collapsed, setCollapsed] = useState<string[]>(() => panePreferences.get(ticker) ?? []);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const mounted = useRef(true), scope = useRef(0), adoption = useRef<number | null>(null);
@@ -71,7 +71,7 @@ export function TechnicalPanel({ snapshot, comparison, navigationRevision, child
     return () => controller.abort();
   }, [ticker, comparison]);
   useEffect(() => {
-    if (pageReadFailure) return;
+    if (marketJobReadState.failed) return;
     const controller = new AbortController(), captured = scope.current;
     void json<MarketDataActiveJobV1>('/api/market-data/jobs/active', { signal: controller.signal }).then(value => {
       if (controller.signal.aborted) return;
@@ -83,25 +83,25 @@ export function TechnicalPanel({ snapshot, comparison, navigationRevision, child
       setJob(value.marketJob);
       setActiveReady(true);
       setBlocked(value.blockingKind ? '戦略検証ジョブが実行中です。完了後にこのタブへ戻ってください。' : null);
-    }).catch(() => { if (!controller.signal.aborted) { pageReadFailure = true; setBlocked('状態確認に失敗しました。ページ全体を再読み込みしてください。'); } });
+    }).catch(() => { if (!controller.signal.aborted) { marketJobReadState.failed = true; setBlocked('状態確認に失敗しました。ページ全体を再読み込みしてください。'); } });
     return () => controller.abort();
   }, [ticker]);
 
   useEffect(() => {
-    if (!job || terminal(job) || busy || pageReadFailure) return;
+    if (!job || terminal(job) || busy || marketJobReadState.failed) return;
     let timer: number | undefined, controller: AbortController | null = null;
     const suspend = () => { clearTimeout(timer); controller?.abort(); controller = null; };
     const schedule = () => {
       suspend();
-      if (document.visibilityState !== 'visible' || pageReadFailure) return;
+      if (document.visibilityState !== 'visible' || marketJobReadState.failed) return;
       timer = window.setTimeout(() => {
-        if (document.visibilityState !== 'visible' || pageReadFailure) return;
+        if (document.visibilityState !== 'visible' || marketJobReadState.failed) return;
         const request = new AbortController();
         controller = request;
         void json<MarketDataJobViewV1>(`/api/market-data/jobs/${job.jobId}`, { signal: request.signal }).then(next => {
           if (request.signal.aborted || document.visibilityState !== 'visible') return;
           setJob(next);
-        }).catch(() => { if (!request.signal.aborted) { pageReadFailure = true; setBlocked('ジョブ状態を確認できません。再試行せずページ全体を再読み込みしてください。'); } });
+        }).catch(() => { if (!request.signal.aborted) { marketJobReadState.failed = true; setBlocked('ジョブ状態を確認できません。再試行せずページ全体を再読み込みしてください。'); } });
       }, 1000);
     };
     document.addEventListener('visibilitychange', schedule);
@@ -115,7 +115,7 @@ export function TechnicalPanel({ snapshot, comparison, navigationRevision, child
     setSelection(technicalSelection(window.location.search)); setSelectedDate(null);
   }
   async function mutate(cancel = false) {
-    if (busy || blocked || pageReadFailure || comparison || !activeReady) return;
+    if (busy || blocked || marketJobReadState.failed || comparison || !activeReady) return;
     const captured = scope.current;
     setBusy(true); setWarning(null);
     try {
@@ -132,14 +132,14 @@ export function TechnicalPanel({ snapshot, comparison, navigationRevision, child
         try {
           const next = await json<MarketDataJobViewV1>(`/api/market-data/jobs/${accepted.jobId}`);
           if (mounted.current && captured === scope.current) setJob(next);
-        } catch { if (mounted.current && captured === scope.current) { pageReadFailure = true; setBlocked('受付後のジョブ状態を確認できません。ページ全体を再読み込みしてください。'); } }
+        } catch { if (mounted.current && captured === scope.current) { marketJobReadState.failed = true; setBlocked('受付後のジョブ状態を確認できません。ページ全体を再読み込みしてください。'); } }
       }
     } catch (error) {
       if (!mounted.current || captured !== scope.current) return;
       if (error instanceof TechnicalReadError && error.status < 500) setWarning(error.status === 409 && error.retryAfter && /^\d+$/.test(error.retryAfter)
         ? `J-Quantsの通信間隔を確保するため、あと ${error.retryAfter} 秒待って再度実行してください。ジョブは未受付です。`
         : `受付できませんでした (${error.code})。再操作は明示的に行ってください。`);
-      else { pageReadFailure = true; setBlocked('更新操作の成否を確認できません。再送せずページ全体を再読み込みしてください。'); }
+      else { marketJobReadState.failed = true; setBlocked('更新操作の成否を確認できません。再送せずページ全体を再読み込みしてください。'); }
     } finally { if (mounted.current) setBusy(false); }
   }
   const selected = selectedTechnicalSource(selection.source, snapshotChartDate(snapshot), latest, comparison);

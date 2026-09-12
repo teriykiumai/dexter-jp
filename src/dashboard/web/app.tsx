@@ -77,7 +77,7 @@ import {
 } from './presentation.js';
 import { PeerRadarPresentation } from './peer-radar-view.js';
 import { StrategyValidationPanel } from './strategy-validation-panel.js';
-import { DashboardHeader, DashboardRouteError, MarketOverviewContent, MarketOverviewPlaceholder, Watchlist, type PageNavigation } from './watchlist.js';
+import { DashboardHeader, DashboardRouteError, MarketOverviewContent, MarketOverviewPage, Watchlist, type PageNavigation } from './watchlist.js';
 import {
   Button,
   DashboardDesign,
@@ -1484,7 +1484,7 @@ function Dashboard({
             </>
           ) : null}
 
-          {tab.id === 'market-overview' ? <MarketOverviewContent /> : null}
+          {tab.id === 'market-overview' ? <MarketOverviewContent navigationRevision={navigationRevision} /> : null}
 
           {tab.id === 'validation' ? (
             <StrategyValidationPanel
@@ -2191,7 +2191,7 @@ function App() {
     onShowMarketOverview: navigateToMarketOverview,
   };
   if (pageRoute.kind === 'invalid') return <DashboardRouteError {...pageNavigation} reason={pageRoute.reason} />;
-  if (pageRoute.kind === 'market-overview') return <MarketOverviewPlaceholder {...pageNavigation} />;
+  if (pageRoute.kind === 'market-overview') return <MarketOverviewPage {...pageNavigation} navigationRevision={navigationRevision} />;
   if (pageRoute.kind === 'watchlist') {
     return (
       <Watchlist

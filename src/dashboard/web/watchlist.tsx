@@ -9,6 +9,7 @@ import {
   type WatchlistSortKey,
 } from './presentation.js';
 import { Button, Card, DashboardDesign, StatusBadge, StatusNotice, TableScroll, Value } from './primitives.js';
+import { MarketOverviewPanel } from './market-overview-panel.js';
 
 export interface PageNavigation {
   currentSearch: string;
@@ -46,17 +47,7 @@ export function DashboardHeader({ page = 'detail', ...navigation }: PageNavigati
   );
 }
 
-export function MarketOverviewContent() {
-  return (
-    <Card title="市場データは準備中です">
-      <div className="design-stack">
-        <StatusBadge label="全市場共通" />
-        <p>データの取得・表示は後続ステップで追加します。現在、この画面では市場データを読み込まず、外部通信も行いません。</p>
-        <p>このページは銘柄に依存しない全市場共通の情報を表示する予定です。</p>
-      </div>
-    </Card>
-  );
-}
+export const MarketOverviewContent = MarketOverviewPanel;
 
 function DashboardPage({ title, page, children, summary, ...navigation }: PageNavigation & {
   title: string;
@@ -190,10 +181,10 @@ export function Watchlist({ items, sortKey, onSort, onSelect, loading, error, on
   );
 }
 
-export function MarketOverviewPlaceholder(navigation: PageNavigation) {
+export function MarketOverviewPage({ navigationRevision, ...navigation }: PageNavigation & { navigationRevision: number }) {
   return (
     <DashboardPage {...navigation} page="market-overview" title="市場概況">
-      <MarketOverviewContent />
+      <MarketOverviewContent navigationRevision={navigationRevision} />
     </DashboardPage>
   );
 }
