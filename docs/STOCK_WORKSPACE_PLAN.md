@@ -4,7 +4,7 @@
 
 **Date:** 2026-09-12
 
-**Status:** Ordinary-stock implementation through Step 4C is merged (PR #119, `0881f320`). Step 5 is the current implementation candidate. Step 2A's cross-date identity gate remains open; later steps require their own implementation, validation, review and merge.
+**Status:** Ordinary-stock implementation through Step 5 is merged (PR #120, `e91dc0fc`). Step 6 source-field verification is the current candidate; its collector, projection and UI are not delivered. Step 2A's cross-date identity gate remains open; later steps require their own implementation, validation, review and merge.
 
 ## 1. Authority and migration boundary
 
@@ -476,6 +476,55 @@ gives zero yield with a valid positive close; missing/nonfinite inputs or a nonp
 close give typed unavailable. Preserve source-reported unusual actual payout values
 and their warnings, rather than clamping them. Frozen AI analysis retains its original
 projection inputs/result, even when the current projection changes.
+
+Step 6 source gate (`src/analysis/workspace/financial-source-smoke.ts`) reuses the
+existing J-Quants dividend mapper, fiscal-observation engine, bounded Market Data
+reader and `standard_calendar_boundary_v2`. Its fixed sample is code `72030`, dated
+master/price cutoff `2026-09-11`, all returned financial summaries for that code,
+calendar starting at the inherited ten-year boundary, and daily prices from
+`2026-08-01`. Four logical queries share limits of 20 requests/pages, 8,000 rows,
+32 MiB, 180 seconds total, 30 seconds per request, no retries, and at most 5 requests
+per minute (or the lower configured rate). Explicit `--confirm-external-fetch`
+starts the diagnostic; ongoing user authorization covers agent-run J-Quants checks.
+It writes no DB, Artifact, receipt or raw response. Output contains only counts,
+dates, digests and independently named field/ownership/basis gates.
+
+The field gate covers fiscal/document/period identity, Sales/OP/OdP/NP, EPS/BPS,
+assets/equity/equity ratio, cash flows, share counts, annual actual/forecast dividend
+and source payout fields. Unknown document kinds or missing required observations
+cannot pass. Signed cash flows and unusual finite actual payout ratios are retained;
+blank values remain null, with no dividend/EPS-derived payout. Availability uses the
+existing next-official-business-day model only inside the returned calendar.
+
+Official specifications checked 2026-09-13:
+[financial summary](https://jpx-jquants.com/ja/spec/fin-summary),
+[document kinds](https://jpx-jquants.com/ja/spec/fin-summary/typeofdocument),
+[update timing](https://jpx-jquants.com/ja/spec/data-update), and
+[correction limitations](https://jpx-jquants.com/ja/spec/fix-data-info).
+Summary publication is normally daily for Standard (18:00 preliminary / 24:30 final,
+with possible delays); this does not prove historical availability of a fetched row.
+Provider corrections overwrite rows without exposing their old vintage. Preserve
+each captured input immutably before future binding; never relabel a current fetch
+as point-in-time evidence or replay it into old analyses.
+
+Authorized live field check on 2026-09-13 passed: 4 requests/pages, 3,722 rows,
+234,473 bytes, no retries; 41 summary rows (11 FY statements), 3,651 calendar days
+from `2016-09-13`, 29 price rows, no unknown document kind or non-unit price factor.
+Summary digest: `sha256:af5212a8d2db35eb0d29e5ad2f89525198aed50d0d09ec42f325ca97f8f5e3e4`.
+An earlier attempt using a pre-coverage `2016-01-01` calendar stopped on entitlement
+failure after 3 requests (42 rows, 83,719 bytes); it did not retry or fall back.
+
+This is **field evidence only**. A current master does not attach the 41 historical
+rows to a Workspace instrument, and absence of a split in the sampled price range
+does not establish the forecast's share basis (including announced future splits).
+The documented summary fields do not supply an exact forecast share-basis identity.
+`historicalIdentity` and `forecastPriceShareBasis` remain `not_verified`, and
+`productionProjectionGate` remains `not_passed`. Before the dependent collector/
+projection, establish dated instrument eligibility for the selected financial input
+and a source-backed same-currency/share-basis predicate. Do not open those gates from
+matching ticker, a unit factor alone, or a field-probe success. Step 6 acceptance
+DY-1 and financial API/UI delivery remain outstanding; this prerequisite does not
+replace them or change the approved financial architecture.
 
 ### 6.2 Three distinct short-selling scopes
 
