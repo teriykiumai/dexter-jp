@@ -187,7 +187,7 @@ function WorkspaceInstrument({ id, interval, revision, navigate, disabled, acqui
         {['volume', 'rsi', 'macd'].map(pane => <Button key={pane} aria-pressed={!collapsed.includes(pane)} onClick={() => toggle(pane)}>{pane === 'volume' ? '出来高' : pane.toUpperCase()}</Button>)}
       </div>
       <p id="workspace-chart-description">ローソク足と出来高。進行中の週・月は未確定、indicatorは確定足のみ。source不足は別状態で表示します。</p>
-      <HorizontalDrawings id={id} chart={view.chart}>{lines => <PriceChart bars={bars} priceLines={lines} describedBy="workspace-chart-description" technical={{ candles: rows, interval, collapsed,
+      <HorizontalDrawings id={id} chart={view.chart} interval={interval}>{(lines, trends, editor) => <PriceChart trends={trends} trendEditor={editor} bars={bars} priceLines={lines} describedBy="workspace-chart-description" technical={{ candles: rows, interval, collapsed,
         selectedDate: selected, onSelect: setSelected, unavailableDates: gapDates, sma20: smaRows }} />}</HorizontalDrawings>
       <p>{LIGHTWEIGHT_CHARTS_NOTICE.join(' / ')}</p>
       <p>確定indicator対象日: {rows.filter(row => !row.partial && row.sourceGaps.length === 0).at(-1)?.lastSessionDate ?? '利用不可'}</p>

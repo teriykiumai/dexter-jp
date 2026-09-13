@@ -163,6 +163,15 @@ export class WorkspaceRepository {
     requireScope(this.db, row.basis_object, { kind: 'instrument-owned', instrumentId });
     return drawing;
   }
+  /** Restore an exact server-retained command into an absent ID, without resetting its revision. */
+  restoreDrawing(value: StoredDrawing): void {
+    const drawing = parse(DrawingSchema, value);
+    this.db.transaction(() => {
+      this.saveDrawing({ ...drawing, revision: 1 }, 0);
+      this.db.sqlite.run('UPDATE drawings SET revision=? WHERE drawing_id=? AND instrument_id=?',
+        [drawing.revision, drawing.id, drawing.instrumentId]);
+    });
+  }
   deleteDrawing(instrumentId: string, id: string, revision: number): void {
     parse(Id, instrumentId); parse(Id, id);
     if (!Number.isSafeInteger(revision) || revision < 1) fail('invalid_input');

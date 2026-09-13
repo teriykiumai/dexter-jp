@@ -547,3 +547,11 @@ For every user-facing UI task:
 Dark mode, automatic OS-theme switching, a theme picker, external design assets,
 pixel-perfect reference-site reproduction, and color-derived investment signals are
 not part of this design version.
+
+Step 4B Drawing endpoints reuse the chart-price stroke and surface fill: a 2px
+segment and 6px-radius visible handle, inside a 44px-diameter transparent pointer
+target. The draft segment is dashed; saved Trendlines are solid. Handles use the
+common 2px focus ring, inset to avoid clipping. A positioned SVG follows the price
+pane only; it never covers volume/indicator panes or intercepts chart navigation
+outside the handles. Labelled date/price fields remain the exact keyboard/touch
+alternative. No new color, typography, spacing or page hierarchy is introduced.
