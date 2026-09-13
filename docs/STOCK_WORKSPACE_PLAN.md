@@ -4,7 +4,7 @@
 
 **Date:** 2026-09-12
 
-**Status:** Step 0 merged in PR #113; Step 1 SQLite foundation merged in PR #114; Step 2A library merged in PR #115 with its cross-date identity gate still open. Step 3 is an implementation candidate; later steps require their own implementation, validation, review and merge.
+**Status:** Ordinary-stock implementation through Step 4C is merged (PR #119, `0881f320`). Step 5 is the current implementation candidate. Step 2A's cross-date identity gate remains open; later steps require their own implementation, validation, review and merge.
 
 ## 1. Authority and migration boundary
 
@@ -489,6 +489,81 @@ Credit long/short balances, ratio, change and days-to-cover reuse their typed so
 contracts only where eligible. Unknown current entitlement/changed source schema is
 gated; do not silently scrape or manufacture an old cadence. Refresh only explicitly
 selected datasets, not every retired Market Overview module.
+
+Step 5 source-field diagnostic (implementation prerequisite, not collector delivery):
+`bun run src/analysis/workspace/supply-demand-source-smoke.ts --confirm-external-fetch`.
+Its fixed sample is 72030 master/sector membership on 2026-09-11, 72030 margin
+balances for 2026-08-01 through 2026-09-11, all issuer reports disclosed on
+2026-09-11, and that day's selected sector turnover. The user granted standing
+J-Quants communication authorization on 2026-09-13; no per-run approval is needed.
+The diagnostic still requires its explicit CLI flag and bounded execution:
+four logical queries, at most 20 attempts/pages, 8,000 rows, 32 MiB,
+180 seconds, at most five requests/minute, zero retries. Output contains counts and
+digests, not raw reports; it creates no Workspace DB, artifact, receipt or binding.
+Empty samples cannot prove numeric fields. A pass proves only sampled field shape
+and access, not historical instrument/sector identity or long-history entitlement.
+
+Official specifications checked on 2026-09-13 retain weekly margin balances with
+normal second-business-day publication, daily sector turnover in JPY, and daily
+publication of thresholded issuer reports (empty disclosure is not zero positions).
+The same margin endpoint is scheduled to change on 2026-09-28, with daily records
+from application date 2026-09-25 and new amount fields. This diagnostic expires at
+2026-09-28 00:00 JST and rejects the new amount fields; it does not unlock the future
+daily contract. The future daily margin collector remains gated independently of
+the issuer/sector sources. Sources: [weekly margin](https://jpx-jquants.com/ja/spec/mkt-margin-int),
+[announced daily replacement](https://jpx-jquants.com/ja/spec/mkt-margin-int-daily),
+[issuer reports](https://jpx-jquants.com/ja/spec/mkt-short-sale),
+[sector turnover](https://jpx-jquants.com/ja/spec/mkt-short-ratio),
+[update timing](https://jpx-jquants.com/ja/spec/data-update).
+
+The 2026-09-13 live field gate passed at 08:11:48.672 UTC: four requests/pages,
+1,358 rows and 529,926 response bytes, zero transport retries. Counts were master 1,
+margin 5, issuer reports 1,351 and sector 1 (S33 3700). Earlier diagnostics rejected
+`PrevRptDate`: the actual missing marker was `-` (29 reports in the successful
+sample). Retain that raw marker in frozen inputs and project it as a missing date;
+never invent a previous calculation date. Diagnostic failures now expose only the
+stage, counters, schema-owned field names and coarse value shapes. Field digests:
+master `sha256:fe9c9de91ca90303033dcd02127407e11437e9e3b6e4cba52a160f2b1181de74`,
+margin `sha256:4aa76a781289492ef48cb4ee503a69a358491e535c75ff62cc16f86ac66a4fba`,
+reports `sha256:b984bada0c7b252eceaf0d1d61cdc737488c2bcd50d28d523be13e55bad68a40`,
+sector `sha256:a22bfbfe9a718a05fe1d82eceba25b426e844b2e2cc642c47e1755ef282ab791`.
+
+Step 5 uses additive `workspace` targets in the existing Market Data repository and
+receipt contract. Keys distinguish `margin_<instrumentId>`,
+`issuer_short_<instrumentId>` and `sector_short_<S33>`; legacy Technical/Overview
+targets, roles, paths and receipt digests remain unchanged. The Workspace codec
+recalculates `workspace_supply_artifact_v1` from its frozen typed input; it does not
+use or create a Snapshot version. The existing endpoint/path protection admits only
+the two additional exact canonical provider endpoints required by this step.
+SQLite schema V3 widens the durable job-kind constraint through an atomic table
+migration. Backup accepts V1/V2/V3 and retains the complete new input/artifact/
+receipt/membership/price-reference closure.
+
+Collectors use a conservative common 17:30 JST daily boundary and the official
+calendar, verify the dated master against the frozen episode, and restrict owned
+observations to that episode. Report calculation dates before the eligible episode
+require identity review. Sector collection uses the dated member's sector for that
+date only; it never applies today's sector to historical dates. An unpublished or
+ambiguous job is not replayed on restart; only its exact receipt may be finalized
+under the original transaction predicate.
+
+Credit history comparisons require consecutive observation weeks and verified
+unchanged price basis from an exact saved Technical Artifact. Unverified basis,
+source gaps or corporate-action evidence leave comparisons unavailable. Digestion
+days use eligible raw daily volume through the margin date from that same frozen
+Technical reference; collecting credit data never silently fetches prices. The
+UI renders server-calculated/formatted values and distinguishes shares, turnover
+in JPY, ratio percentages, no disclosure, missing observations and observed zero.
+
+Frozen multi-year price validation measured approximately 700 ms on the local
+Windows/Bun runtime. Step 5 therefore uses bounded Workers for supply artifact
+calculation/validation/publication and saved supply reads, while binding commits
+remain in the main SQLite transaction. Uncollected supply reads use only indexed
+binding queries without starting a Worker or decoding artifacts; collected reads
+have a separate queue from chart reads. A 7,000-report acquisition/read probe with
+concurrent Drawing saves and search measured a maximum event-loop delay of 236 ms,
+save p95 7.1 ms and search p95 1.5 ms. This is local fixture evidence, not a promise
+for every machine or intraday workload; minute-cache acceptance remains later.
 
 For market aggregation, freeze the non-overlapping coverage registry, source
 definition, effective period and calculation version in SW-M0. Establish whether

@@ -42,6 +42,8 @@ export const EVIDENCE_ENDPOINT_ALLOWLIST_V1 = [
   '/v2/indices/bars/daily',
   '/v2/markets/calendar',
   '/v2/markets/short-ratio',
+  '/v2/markets/margin-interest',
+  '/v2/markets/short-sale-report',
 ] as const;
 
 export type ArtifactSafetyErrorCode =

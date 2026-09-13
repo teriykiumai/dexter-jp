@@ -9,6 +9,8 @@ import { objectPath, readBytes, stageFile, syncDirectory, type PublicationCheckp
 import { parseStrictJsonBytesV1 } from '../strategy-validation/strict-json.js';
 import { validateDataObjectLinks, ReceiptObjectSchema, EpisodeObjectSchema } from './data-objects.js';
 import { TechnicalInputSchema } from './technical-input.js';
+import { SupplyPreparedSchema, SupplyReceiptSchema, supplyArtifact } from './supply-objects.js';
+import { WorkspaceSupplyCodec, supplyTarget } from './supply-artifact.js';
 
 export type ObjectRow = { object_key: string; path: string; codec: string; digest: string; metadata: string };
 export type VerifiedObject = { ref: ObjectRef; metadata: ObjectMetadata; bytes: Uint8Array };
@@ -224,6 +226,27 @@ export function validateReferences(db: WorkspaceDatabase, codecs: ReferenceCodec
             || receipt.receipt.acceptedAt !== job.accepted_at || !job.input_object) fail('reference_conflict');
           if (job.state === 'published' && !db.sqlite.query('SELECT binding_id FROM artifact_bindings WHERE artifact=? AND receipt=? AND frozen_identity=?')
             .get(objectKey(receipt.artifact), job.result_object, job.identity!)) fail('reference_conflict');
+        }
+      } else if (job.kind !== 'catalog') {
+        const identity = parse(FrozenIdentitySchema, JSON.parse(job.identity!));
+        const episode = parse(EpisodeObjectSchema, value(job.master_object!));
+        if (identity.instrumentId !== episode.instrumentId || identity.code !== episode.observation.Code) fail('reference_conflict');
+        if (job.input_object) {
+          const prepared = parse(SupplyPreparedSchema, value(job.input_object));
+          const artifact = supplyArtifact(prepared.artifact);
+          if (json(prepared.identity) !== json(identity) || objectKey(prepared.master) !== job.master_object
+            || artifact.input.dataset !== job.kind || artifact.asOfCutoff !== job.accepted_at) fail('reference_conflict');
+        }
+        if (job.result_object) {
+          const receipt = parse(SupplyReceiptSchema, value(job.result_object));
+          if (!job.input_object || receipt.receipt.jobId !== job.job_id || receipt.receipt.acceptedAt !== job.accepted_at) fail('reference_conflict');
+          const prepared = supplyArtifact(parse(SupplyPreparedSchema, value(job.input_object)).artifact);
+          const published = supplyArtifact(value(objectKey(receipt.artifact)));
+          if (!new WorkspaceSupplyCodec(supplyTarget(prepared.input)).equivalent(prepared, published)) fail('reference_conflict');
+          if (job.state === 'published' && !db.sqlite.query(`SELECT binding_id FROM artifact_bindings
+            WHERE artifact=? AND receipt=? AND dataset=? AND scope=? AND frozen_identity IS ?`)
+            .get(objectKey(receipt.artifact), job.result_object, job.kind, scopeKey(prepared.input.scope),
+              job.kind === 'sector_short' ? null : job.identity!)) fail('reference_conflict');
         }
       } else if (job.result_object) {
         const generation = db.sqlite.query<{ evidence: string }, [number]>('SELECT evidence FROM catalog_generations WHERE generation=?').get(job.generation!);

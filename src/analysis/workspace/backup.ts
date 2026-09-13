@@ -9,7 +9,7 @@ import { objectPath, readBytes, readJson, safeDirectory, stageFile, syncDirector
 import { referencePath, referenceRoots, validateReferences } from './references.js';
 import { WORKSPACE_SCHEMA_VERSION } from './schema.js';
 
-const ManifestSchema = z.object({ version: z.literal(1), schemaVersion: z.union([z.literal(1), z.literal(2)]),
+const ManifestSchema = z.object({ version: z.literal(1), schemaVersion: z.union([z.literal(1), z.literal(2), z.literal(3)]),
   schemaFingerprint: Digest, databaseDigest: Digest,
   roots: z.array(z.object({ table: Token, record: z.string().max(2000), field: z.string().max(100), object: Digest }).strict()).max(500_000),
   objects: z.array(z.object({ ref: ObjectRefSchema, metadata: ObjectMetadataSchema }).strict()).max(100_000),
@@ -95,7 +95,7 @@ export function backupWorkspace(root: string, destination: string, codecs: Refer
     const check = new WorkspaceDatabase(destination, { readonly: true });
     check.close();
     for (const object of objects) writeExclusive(referencePath(destination, object.ref), object.bytes);
-    const manifest: Manifest = { version: 1, schemaVersion: sourceVersion as 1 | 2, schemaFingerprint: workspaceFingerprint(sourceVersion),
+    const manifest: Manifest = { version: 1, schemaVersion: sourceVersion as 1 | 2 | 3, schemaFingerprint: workspaceFingerprint(sourceVersion),
       databaseDigest: digest(readBytes(snapshot)), roots,
       objects: objects.map(({ ref, metadata }) => ({ ref, metadata })), omissions: [] };
     // Recheck copied bytes/closure before the completion manifest becomes visible.

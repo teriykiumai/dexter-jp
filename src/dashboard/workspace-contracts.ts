@@ -26,7 +26,7 @@ export const WorkspaceItemSchema = candidate.extend({ schemaVersion: z.literal('
 export const WorkspaceSearchSchema = z.object({ schemaVersion: z.literal('workspace_search_v1'), items: z.array(candidate) }).strict();
 export const WorkspaceRecentsSchema = z.object({ schemaVersion: z.literal('workspace_recents_v1'), items: z.array(WorkspaceItemSchema) }).strict();
 export const WorkspaceViewSchema = z.object({ schemaVersion: z.literal('workspace_view_v1'), item: WorkspaceItemSchema, chart: WorkspaceChartSchema.nullable() }).strict();
-export const WorkspaceJobViewSchema = z.object({ schemaVersion: z.literal('workspace_job_v1'), id: z.uuid(), kind: z.enum(['catalog', 'technical']),
+export const WorkspaceJobViewSchema = z.object({ schemaVersion: z.literal('workspace_job_v1'), id: z.uuid(), kind: z.enum(['catalog', 'technical', 'margin', 'issuer_short', 'sector_short']),
   state: z.enum(['queued', 'running', 'publishing', 'published', 'failed', 'interrupted', 'identity_review_required']),
   instrumentId: z.uuid().nullable(), error: z.string().max(80).nullable() }).strict()
   .refine(job => (job.kind === 'catalog') === (job.instrumentId === null));
@@ -34,7 +34,19 @@ export const WorkspaceActiveSchema = z.object({ schemaVersion: z.literal('worksp
   .refine(value => value.job === null || value.blockingKind === null);
 export const WorkspaceSessionSchema = z.object({ schemaVersion: z.literal('dashboard_session_v1'), csrfHeader: z.literal('X-Dexter-CSRF'), csrfToken: z.string().min(1) }).strict();
 export const WorkspaceErrorSchema = z.object({ schemaVersion: z.literal('workspace_error_v1'), error: z.object({ code: z.string().min(1).max(80), message: z.string().max(300).optional() }).strict() }).strict();
-export const WorkspaceResponseSchema = z.union([WorkspaceSearchSchema, WorkspaceRecentsSchema, WorkspaceItemSchema, WorkspaceViewSchema,
+export const WorkspaceSupplySchema = z.object({ schemaVersion: z.literal('workspace_supply_view_v1'), instrumentId: z.uuid(),
+  datasets: z.array(z.object({ dataset: z.enum(['margin', 'issuer_short', 'sector_short']), label: z.string(),
+    state: z.enum(['not_collected', 'available', 'unavailable']), artifactDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/).nullable(),
+    from: date.nullable(), through: date.nullable(), checkedAt: z.iso.datetime().nullable(),
+    note: z.string().max(1000), columns: z.array(z.string()).min(1).max(10),
+    rows: z.array(z.array(z.string().max(4096)).max(10)).max(8000),
+  }).strict().refine(value => value.rows.every(row => row.length === value.columns.length)
+    && (value.state === 'not_collected' ? value.artifactDigest === null && value.from === null && value.through === null
+      && value.checkedAt === null && value.rows.length === 0 : value.artifactDigest !== null && value.from !== null
+        && value.through !== null && value.checkedAt !== null))).length(3) }).strict()
+  .refine(value => new Set(value.datasets.map(item => item.dataset)).size === 3);
+export type WorkspaceSupplyView = z.infer<typeof WorkspaceSupplySchema>;
+export const WorkspaceResponseSchema = z.union([WorkspaceSearchSchema, WorkspaceRecentsSchema, WorkspaceItemSchema, WorkspaceViewSchema, WorkspaceSupplySchema,
   WorkspaceJobViewSchema, WorkspaceActiveSchema, WorkspaceSessionSchema, WorkspaceErrorSchema]);
 export type WorkspaceCandidate = z.infer<typeof candidate>;
 export type WorkspaceItem = z.infer<typeof WorkspaceItemSchema>;

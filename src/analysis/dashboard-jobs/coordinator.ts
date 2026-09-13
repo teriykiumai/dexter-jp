@@ -2,7 +2,7 @@ import { lstat, readdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { JQuantsExecutionEnvironmentV1 } from '../strategy-validation/jquants-execution.js';
 
-export type DashboardJobKindV1 = 'strategy_validation' | 'technical_refresh' | 'overview_refresh' | 'workspace_catalog' | 'workspace_technical';
+export type DashboardJobKindV1 = 'strategy_validation' | 'technical_refresh' | 'overview_refresh' | 'workspace_catalog' | 'workspace_technical' | 'workspace_supply';
 export type DashboardJobDomainV1 = 'strategy_validation' | 'market_data' | 'workspace';
 export type JobWriteOutcomeV1<T> =
   | { state: 'definitely_not_published' }
@@ -45,7 +45,7 @@ export function dashboardCoordinatorFailureV1(error: DashboardJobCoordinatorErro
   if (error.reason === 'active_job_conflict') {
     const labels: Record<DashboardJobKindV1, string> = {
       strategy_validation: '戦略検証', technical_refresh: 'テクニカル更新', overview_refresh: '市場概況更新',
-      workspace_catalog: '銘柄一覧更新', workspace_technical: 'Workspace価格更新',
+      workspace_catalog: '銘柄一覧更新', workspace_technical: 'Workspace価格更新', workspace_supply: 'Workspace需給更新',
     };
     return { status: 409, code: 'active_job_conflict', message: `${labels[error.activeKind ?? 'strategy_validation']}ジョブが実行中です。` };
   }
@@ -61,7 +61,7 @@ type Lease = { value: DashboardJobLeaseV1; controller: AbortController };
 type State = 'initializing' | 'idle' | 'provisional' | 'active' | 'admission_recovery_required';
 const DOMAINS = ['strategy_validation', 'market_data'] as const;
 function domainFor(kind: DashboardJobKindV1): DashboardJobDomainV1 {
-  if (kind === 'workspace_catalog' || kind === 'workspace_technical') return 'workspace';
+  if (kind === 'workspace_catalog' || kind === 'workspace_technical' || kind === 'workspace_supply') return 'workspace';
   return kind === 'strategy_validation' ? kind : 'market_data';
 }
 
@@ -249,7 +249,7 @@ export class DashboardJobCoordinatorV1 {
       if (!adapter) throw new Error('Missing native job adapter.');
       for (const job of await adapter.inventory()) {
         const key = `${domain}:${job.jobId}`;
-        if (job.domain !== domain || !['strategy_validation', 'technical_refresh', 'overview_refresh', 'workspace_catalog', 'workspace_technical'].includes(job.kind)
+        if (job.domain !== domain || !['strategy_validation', 'technical_refresh', 'overview_refresh', 'workspace_catalog', 'workspace_technical', 'workspace_supply'].includes(job.kind)
           || domainFor(job.kind) !== domain || typeof job.terminal !== 'boolean'
           || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(job.jobId) || seen.has(key)) {
           throw new Error('Invalid native inventory.');
