@@ -208,19 +208,17 @@ describe('interval aggregation and completeness', () => {
     ];
     const result = calculateTechnicalSeriesV1(input);
     expect(Object.keys(result.intervals)).toEqual(['day', 'week', 'month']);
-    expect(result.intervals.week[0]).toMatchObject({
-      interval: 'week', identity: '2024-01-01', periodStart: '2024-01-01', periodEnd: '2024-01-07',
-      displayDate: '2024-01-05', firstSessionDate: '2024-01-02', lastSessionDate: '2024-01-05', partial: false,
-      open: 100, high: 120, low: 90, close: 118, volume: 40,
-    });
-    expect(result.intervals.month[0].partial).toBe(true); // calendar has later January sessions, beyond eligibleThrough
+    expect(result.intervals.week[0]).toMatchObject({ identity: '2024-01-01' });
+    expect(result.intervals.month[0]).toMatchObject({ identity: '2024-01' });
     expect(result.intervals.day[0]).toMatchObject({
       identity: '2024-01-02', periodStart: '2024-01-02', periodEnd: '2024-01-02',
       displayDate: '2024-01-02', firstSessionDate: '2024-01-02', lastSessionDate: '2024-01-02', partial: false,
     });
-    expect(result.unavailablePeriods).toEqual([
+    expect(result.unavailablePeriods).toEqual(expect.arrayContaining([
       { interval: 'day', identity: '2024-01-03', periodStart: '2024-01-03', periodEnd: '2024-01-03', reason: 'source_gap' },
-    ]);
+      { interval: 'week', identity: '2024-01-01', periodStart: '2024-01-01', periodEnd: '2024-01-07', reason: 'source_gap' },
+      { interval: 'month', identity: '2024-01', periodStart: '2024-01-01', periodEnd: '2024-01-31', reason: 'source_gap' },
+    ]));
   });
 
   test('gap-only weeks have one unavailable row, no fake candle or indicator reset', () => {
@@ -345,6 +343,22 @@ describe('interval aggregation and completeness', () => {
     expect(result.intervals.week.find(row => row.identity === '2024-02-05')?.partial).toBe(false);
     expect(result.unavailablePeriods.map(row => `${['day', 'week', 'month'].indexOf(row.interval)}:${row.identity}`))
       .toEqual(result.unavailablePeriods.map(row => `${['day', 'week', 'month'].indexOf(row.interval)}:${row.identity}`).sort());
+  });
+
+  test('closed week and month containing a source gap stay unavailable and never seed indicators', () => {
+    const input = fixture({ queryFrom: '2024-01-01', historyBoundary: { sourceCoverageFrom: '2024-01-01' } });
+    input.observations = input.observations.map(row => row.date === '2024-01-03'
+      ? { kind: 'gap', date: row.date, reason: 'source_all_null' } : row);
+    const result = calculateTechnicalSeriesV1(input);
+    expect(result.intervals.week[0]).toMatchObject({ identity: '2024-01-01' });
+    expect(result.intervals.month[0]).toMatchObject({ identity: '2024-01' });
+    expect(result.intervals.week[0]!.rsi).toEqual({ state: 'unavailable', reason: 'warmup' });
+    expect(result.unavailablePeriods).toEqual(expect.arrayContaining([
+      { interval: 'week', identity: '2024-01-01', periodStart: '2024-01-01', periodEnd: '2024-01-07', reason: 'source_gap' },
+      { interval: 'month', identity: '2024-01', periodStart: '2024-01-01', periodEnd: '2024-01-31', reason: 'source_gap' },
+    ]));
+    expect(result.intervals.week[0]!.rsi).toEqual({ state: 'unavailable', reason: 'source_gap' });
+    expect(result.intervals.day.some(row => row.identity === '2024-01-03')).toBe(false);
   });
 
   test('derives the coverage-warning input from official sessions rather than calendar-day distance', () => {

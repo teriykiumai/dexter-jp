@@ -638,6 +638,9 @@ reload-only latch. Cancellation uses the same ambiguity rule.
 Exact-value tables expose all rows in bounded 100-row pages, separate from the full
 canvas series. A 2,600-candle browser fixture covers interval/Back navigation and
 table reachability; it is a presentation stress fixture, not historical source proof.
+Any week/month containing a source-all-null session is typed as `source_gap` and is
+excluded from confirmed OHLCV indicator seeds. It is never treated as a normal
+ongoing `partial_period`; Browser only renders the deterministic unavailable state.
 
 Each step has its own reviewable diff and inherited regression checks. New names
 below identify module responsibilities, not Step 0 runtime additions.

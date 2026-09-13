@@ -182,8 +182,8 @@ function indicator(value: number | null): IndicatorValueV1 {
   return { state: 'available', value };
 }
 
-function attachIndicators(candles: TechnicalCandleV1[]): void {
-  const completed = candles.filter(candle => !candle.partial);
+function attachIndicators(candles: TechnicalCandleV1[], sourceGapIdentities = new Set<string>()): void {
+  const completed = candles.filter(candle => !candle.partial && !sourceGapIdentities.has(candle.identity));
   const closes = completed.map(candle => candle.close);
   try {
     const rsi = calculateRsiSeries(closes);
@@ -241,14 +241,15 @@ export function calculateTechnicalSeriesV1(input: {
   const intervals: TechnicalSeriesResultV1['intervals'] = { day: [], week: [], month: [] };
   const unavailablePeriods: TechnicalUnavailablePeriodV1[] = [];
   for (const interval of TECHNICAL_INTERVALS_V1) {
-    const groups = new Map<string, { period: Period; bars: Bar[] }>();
+    const groups = new Map<string, { period: Period; bars: Bar[]; hasSourceGap: boolean }>();
     for (const row of dailyObservations) {
       const period = periodFor(row.date, interval);
-      const group = groups.get(period.identity) ?? { period, bars: [] };
+      const group = groups.get(period.identity) ?? { period, bars: [], hasSourceGap: false };
       if (row.kind === 'bar') group.bars.push(row);
+      else group.hasSourceGap = true;
       groups.set(period.identity, group);
     }
-    for (const { period, bars } of groups.values()) {
+    for (const { period, bars, hasSourceGap } of groups.values()) {
       const periodSessions = interval === 'day' ? [] : calendar.sessions
         .filter(date => date >= period.periodStart && date <= period.periodEnd);
       // An unobserved pre-query prefix is not evidence of closed sessions.
@@ -256,6 +257,9 @@ export function calculateTechnicalSeriesV1(input: {
         || periodSessions.some(date => date < range.calculationFrom);
       const partial = interval !== 'day' && (leadingPartial || period.periodEnd >= window.calculationDate
         || periodSessions.some(date => date > window.eligibleThrough));
+      // A closed aggregate with a missing source session is not complete data.
+      // Keep the period in the explicit unavailable set and never seed indicators
+      // from the partial OHLCV projection.
       if (bars.length === 0) {
         unavailablePeriods.push(partial
           ? { ...period, interval, reason: 'partial_period' }
@@ -266,7 +270,9 @@ export function calculateTechnicalSeriesV1(input: {
       const last = bars[bars.length - 1];
       const volume = bars.reduce((sum, bar) => sum + bar.volume, 0);
       if (!Number.isFinite(volume)) return fail('source_invalid_response');
-      const unavailable = { state: 'unavailable', reason: partial ? 'partial_period' : 'warmup' } as const;
+      const sourceGaps = dailyObservations.filter(row => row.kind === 'gap' && row.date >= period.periodStart && row.date <= period.periodEnd).map(row => row.date);
+      const unavailable: IndicatorValueV1 = sourceGaps.length ? { state: 'unavailable', reason: 'source_gap' as const }
+        : { state: 'unavailable', reason: partial ? 'partial_period' as const : 'warmup' as const };
       intervals[interval].push({
         ...period, displayDate: last.date, firstSessionDate: first.date, lastSessionDate: last.date, partial,
         open: first.open, high: Math.max(...bars.map(bar => bar.high)), low: Math.min(...bars.map(bar => bar.low)),
@@ -275,7 +281,16 @@ export function calculateTechnicalSeriesV1(input: {
         histogram: { ...unavailable }, cross: { ...unavailable },
       });
     }
-    attachIndicators(intervals[interval]);
+    const sourceGapIdentities = new Set(dailyObservations.filter(row => row.kind === 'gap')
+      .map(row => periodFor(row.date, interval).identity));
+    attachIndicators(intervals[interval], sourceGapIdentities);
+    for (const candle of intervals[interval]) {
+      if (sourceGapIdentities.has(candle.identity)) {
+        const unavailable = { state: 'unavailable' as const, reason: 'warmup' as const };
+        candle.rsi = unavailable; candle.macd = unavailable; candle.signal = unavailable;
+        candle.histogram = unavailable; candle.cross = unavailable;
+      }
+    }
   }
   return { ...range, dataDate: lastBar.date, historyCoverageClipped, dailyObservations, intervals, unavailablePeriods };
 }

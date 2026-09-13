@@ -6,7 +6,12 @@ import { mapSnapshotToDashboard } from './presentation.js';
 export type TechnicalLatest = Awaited<ReturnType<MarketDataJobServiceV1['readTechnical']>>;
 export type TechnicalSource = 'auto' | 'snapshot' | 'latest';
 export type TechnicalInterval = 'day' | 'week' | 'month';
-export type TechnicalCandle = TechnicalChartDatasetV1['series']['day'][number];
+type TechnicalIndicator = { state: 'available'; value: number | string } | { state: 'unavailable'; reason: string };
+export type TechnicalCandle = Omit<TechnicalChartDatasetV1['series']['day'][number],
+  'rsi' | 'macd' | 'signal' | 'histogram' | 'cross' | 'sma20'> & {
+  rsi: TechnicalIndicator; macd: TechnicalIndicator; signal: TechnicalIndicator;
+  histogram: TechnicalIndicator; cross: TechnicalIndicator; sma20?: TechnicalIndicator;
+};
 export function technicalSelection(search: string) {
   const params = new URLSearchParams(search);
   return { source: (params.get('chartSource') ?? 'auto') as TechnicalSource,

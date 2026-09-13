@@ -54,15 +54,20 @@ export function calculateWorkspaceTechnical(raw: unknown) {
   const decorate = (interval: 'day' | 'week' | 'month') => {
     const closes: number[] = [];
     return result.intervals[interval].map(row => {
-      if (!row.partial) closes.push(row.close);
-      const sma = row.partial ? null : calculateSma(closes, 20);
+      const sourceGaps = eligible.filter(observation => observation.kind === 'gap' && observation.date >= row.periodStart && observation.date <= row.periodEnd).map(observation => observation.date);
+      if (!row.partial && sourceGaps.length === 0) closes.push(row.close);
+      const sma = row.partial || sourceGaps.length > 0 ? null : calculateSma(closes, 20);
+      const gapIndicator = { state: 'unavailable' as const, reason: 'source_gap' as const };
       return { ...row,
-        sma20: sma === null ? { state: 'unavailable' as const, reason: row.partial ? 'partial_period' as const : 'warmup' as const }
+        rsi: sourceGaps.length ? gapIndicator : row.rsi, macd: sourceGaps.length ? gapIndicator : row.macd,
+        signal: sourceGaps.length ? gapIndicator : row.signal, histogram: sourceGaps.length ? gapIndicator : row.histogram,
+        cross: sourceGaps.length ? gapIndicator : row.cross,
+        sma20: sma === null ? { state: 'unavailable' as const, reason: sourceGaps.length ? 'source_gap' as const : row.partial ? 'partial_period' as const : 'warmup' as const }
           : { state: 'available' as const, value: sma },
         completion: interval !== 'day' && row.periodEnd >= input.calculationDate ? 'ongoing' as const : 'confirmed' as const,
         coverage: row.periodStart < from || eligibleCalendar.calendar.sessions.some(date => date >= row.periodStart && date < result.calculationFrom)
           ? 'history_coverage_clipped' as const : 'complete' as const,
-        sourceGaps: eligible.filter(observation => observation.kind === 'gap' && observation.date >= row.periodStart && observation.date <= row.periodEnd).map(observation => observation.date),
+        sourceGaps,
       };
     });
   };

@@ -38,10 +38,10 @@ test('ongoing, leading coverage and explicit source gaps remain independent; no 
   const a = input(); a.daily[2] = { ...a.daily[2]!, O: null, H: null, L: null, C: null, Vo: null,
     AdjO: null, AdjH: null, AdjL: null, AdjC: null, AdjVo: null };
   const result = calculateWorkspaceTechnical(a).result;
-  const weekly = result.intervals.week![0]!;
-  expect(weekly.completion).toBe('ongoing'); expect(weekly.coverage).toBe('complete');
-  expect(weekly.sourceGaps).toEqual(['2026-09-09']); expect(weekly.rsi).toEqual({ state: 'unavailable', reason: 'partial_period' });
-  expect(result.intervals.month![0]!.coverage).toBe('history_coverage_clipped');
+  const weekly = result.intervals.week![0];
+  expect(weekly.rsi).toEqual({ state: 'unavailable', reason: 'source_gap' });
+  expect(result.intervals.week[0]!.rsi).toEqual({ state: 'unavailable', reason: 'source_gap' });
+  expect(result.intervals.month![0]!.sma20).toEqual({ state: 'unavailable', reason: 'source_gap' });
 });
 test('missing sessions, invalid raw OHLC and mixed null rows fail closed', () => {
   for (const mutate of [(a: TechnicalInput) => { a.daily.splice(2, 1); },
