@@ -1,6 +1,25 @@
 import { createTechnicalSourceRequestWindowV1 } from '../market-data/technical-source-gate.js';
 import type { TechnicalFetchedInputsV1 } from '../market-data/technical-source.js';
 import type { TechnicalInput } from './technical-input.js';
+import { readFileSync } from 'node:fs';
+import { gunzipSync } from 'node:zlib';
+import { digest, type ObjectRef } from './contracts.js';
+import type { TechnicalArtifactV2 } from './technical-artifact.js';
+
+/** Frozen bytes built with #115's codec/calculator at 9066a2b, not today's writer.
+ * Synthetic 2022–2026 history has a post-warmup gap on 2025-03-12. Sessions
+ * are weekdays on days 03/10/12 plus 2026-09-11 (not a real exchange calendar).
+ * Prices use workspaceTechnicalHistory's deterministic pattern. The
+ * bundle contains both dated catalog/episode dependencies for offline restore.
+ * Its synthetic continuity chain is storage evidence only, never a live gate.
+ */
+export function readStep2aTechnicalFixture() {
+  const bytes = gunzipSync(readFileSync(new URL('./fixtures/technical-v2-step2a.json.gz', import.meta.url)));
+  if (digest(bytes) !== 'sha256:8412e07bdfbd05bea86f8bb1cd77758373a661c9a58015f82676a5f32d7ae1a2')
+    throw new Error('Frozen Step 2A fixture bytes changed');
+  return JSON.parse(bytes.toString('utf8')) as { sourceCommit: string; artifact: TechnicalArtifactV2;
+    objects: { ref: ObjectRef; value: unknown }[] };
+}
 
 /** Synthetic calendar/history only; no entitlement or historical identity evidence. */
 export function workspaceTechnicalHistory(gapDates: readonly string[] = []) {

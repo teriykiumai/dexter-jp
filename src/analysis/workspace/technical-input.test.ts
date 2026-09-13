@@ -1,12 +1,6 @@
 import { expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { compareDrawingBasis, calculateWorkspaceTechnical, type TechnicalInput } from './technical-input.js';
-import { calculateRsiSeries, calculateMacdSeries } from '../../tools/finance/advanced-technical-engine.js';
-import { calculateSma } from '../../tools/finance/technical-engine.js';
-import { buildTechnicalFromInputsV1 } from '../market-data/technical-source.js';
-import { createTechnicalArtifactCodecV1 } from '../market-data/technical-artifact.js';
-import { WorkspaceTechnicalCodec } from './technical-artifact.js';
-import { workspaceTechnicalHistory } from './technical-test-fixtures.js';
 
 function input(through = '2026-09-11'): TechnicalInput {
   const calendar = [], daily = [];
@@ -44,10 +38,10 @@ test('ongoing, leading coverage and explicit source gaps remain independent; no 
   const a = input(); a.daily[2] = { ...a.daily[2]!, O: null, H: null, L: null, C: null, Vo: null,
     AdjO: null, AdjH: null, AdjL: null, AdjC: null, AdjVo: null };
   const result = calculateWorkspaceTechnical(a).result;
-  const weekly = result.intervals.week![0];
-  expect(weekly.rsi).toEqual({ state: 'unavailable', reason: 'source_gap' });
-  expect(result.intervals.week[0]!.rsi).toEqual({ state: 'unavailable', reason: 'source_gap' });
-  expect(result.intervals.month![0]!.sma20).toEqual({ state: 'unavailable', reason: 'source_gap' });
+  const weekly = result.intervals.week![0]!;
+  expect(weekly.completion).toBe('ongoing'); expect(weekly.coverage).toBe('complete');
+  expect(weekly.sourceGaps).toEqual(['2026-09-09']); expect(weekly.rsi).toEqual({ state: 'unavailable', reason: 'partial_period' });
+  expect(result.intervals.month![0]!.coverage).toBe('history_coverage_clipped');
 });
 test('missing sessions, invalid raw OHLC and mixed null rows fail closed', () => {
   for (const mutate of [(a: TechnicalInput) => { a.daily.splice(2, 1); },
@@ -68,49 +62,3 @@ test('SMA uses confirmed closes and keeps the ongoing month unavailable', () => 
   expect(result.intervals.day[19]!.sma20).toEqual({ state: 'available', value: 105 });
   expect(result.intervals.month[0]!.sma20).toEqual({ state: 'unavailable', reason: 'partial_period' });
 });
-
-test('post-warmup gaps preserve legacy V1 artifacts while Workspace independently excludes gap periods', () => {
-  const { input, fetched } = workspaceTechnicalHistory(['2025-03-12']);
-  const legacy = buildTechnicalFromInputsV1(fetched, {}).artifact;
-  const codec = createTechnicalArtifactCodecV1('7203', {});
-  expect(codec.parse(JSON.parse(JSON.stringify(legacy)))).toEqual(legacy);
-  const { sourcePayloadDigest, artifactDigest, ...draft } = legacy;
-  // Golden digests from the unchanged origin/main V1 builder/calculation/codec.
-  expect(sourcePayloadDigest).toBe('sha256:0999793c27b792e4159aa7c269e8988e47924ced1c6a193cd5b29d7829fa1e1f');
-  expect(artifactDigest).toBe('sha256:dc7cfcd4a49d964f4411bac3669e7a934ac01cccd2edcf0ce17c5017b878dc64');
-  expect(codec.build(draft)).toEqual(legacy);
-  expect(legacy.calculationVersion).toBe('technical_chart_calculation_v2');
-  const workspaceCodec = new WorkspaceTechnicalCodec('7203');
-  const artifact = workspaceCodec.build(legacy, input);
-  expect(workspaceCodec.parse(artifact)).toEqual(artifact);
-  expect(artifact.source).toEqual(legacy);
-  for (const interval of ['week', 'month'] as const) {
-    const legacyRows = legacy.series[interval].filter(row => !row.partial);
-    const legacyCloses = legacyRows.map(row => row.close);
-    const legacyRsi = calculateRsiSeries(legacyCloses), legacyMacd = calculateMacdSeries(legacyCloses);
-    const gapIndex = legacyRows.findIndex(row => row.periodStart <= '2025-03-12' && row.periodEnd >= '2025-03-12');
-    expect(gapIndex).toBeGreaterThan(34);
-    for (const index of [gapIndex, gapIndex + 1]) {
-      expect(legacyRows[index]!.rsi).toEqual({ state: 'available', value: legacyRsi[index]! });
-      expect(legacyRows[index]!.macd).toEqual({ state: 'available', value: legacyMacd[index]!.value });
-    }
-    const rows = artifact.result.intervals[interval];
-    const gap = rows.find(row => row.identity === legacyRows[gapIndex]!.identity)!;
-    expect(gap).toMatchObject({ completion: 'confirmed', partial: false, sourceGaps: ['2025-03-12'] });
-    for (const field of ['sma20', 'rsi', 'macd', 'signal', 'histogram', 'cross'] as const)
-      expect(gap[field]).toEqual({ state: 'unavailable', reason: 'source_gap' });
-    const complete = rows.filter(row => !row.partial && row.sourceGaps.length === 0);
-    const closes = complete.map(row => row.close), rsi = calculateRsiSeries(closes), macd = calculateMacdSeries(closes);
-    const nextIndex = complete.findIndex(row => row.identity === legacyRows[gapIndex + 1]!.identity);
-    for (let index = nextIndex; index < complete.length; index++) {
-      const current = macd[index]!, previous = macd[index - 1]!;
-      expect(complete[index]).toMatchObject({
-        sma20: { state: 'available', value: calculateSma(closes.slice(0, index + 1), 20) },
-        rsi: { state: 'available', value: rsi[index] }, macd: { state: 'available', value: current.value },
-        signal: { state: 'available', value: current.signal }, histogram: { state: 'available', value: current.histogram },
-        cross: { state: 'available', value: previous.value <= previous.signal && current.value > current.signal ? 'golden_cross' : 'none' },
-      });
-    }
-    expect(complete[nextIndex]!.macd).not.toEqual(legacyRows[gapIndex + 1]!.macd);
-  }
-}, 30_000);

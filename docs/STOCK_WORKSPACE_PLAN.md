@@ -641,10 +641,12 @@ table reachability; it is a presentation stress fixture, not historical source p
 Any week/month containing a source-all-null session is typed as `source_gap` and is
 excluded from confirmed OHLCV indicator seeds. It is never treated as a normal
 ongoing `partial_period`; Browser only renders the deterministic unavailable state.
-This rule is owned by the Workspace deterministic layer and public projection,
-including gap-only periods with no candle. The embedded legacy V1 artifact retains
-the exact `technical_chart_calculation_v2` sequence, validator and immutable identity;
-Workspace recomputes indicators from its eligible, complete, gap-free sequence.
+This rule is owned only by the non-persisted server-side `workspace_chart_v1`
+projection, including gap-only periods with no candle. Both legacy V1 and the
+merged Step 2A Workspace V2 retain their exact stored calculations, codecs, bytes
+and immutable identities. Projection recomputes indicators from verified eligible
+OHLCV and exact input gap evidence; it never rewrites either artifact. The displayed
+confirmed-indicator date excludes partial and source-gap candles.
 
 Each step has its own reviewable diff and inherited regression checks. New names
 below identify module responsibilities, not Step 0 runtime additions.

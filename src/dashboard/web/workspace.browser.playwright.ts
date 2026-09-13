@@ -50,7 +50,7 @@ test('no Snapshot/key: explicit acquisition, chart intervals, favorite, back and
 test('source-gap indicators and candle-free ongoing shortages render from the deterministic DTO', async ({ page }) => {
   test.setTimeout(60_000);
   page.on('pageerror', error => { throw error; });
-  const fixture = workspaceTechnicalHistory(['2025-03-12', '2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04',
+  const fixture = workspaceTechnicalHistory(['2025-03-12', '2026-08-12', '2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04',
     '2026-09-07', '2026-09-08', '2026-09-09', '2026-09-10', '2026-09-11']);
   const legacy = buildTechnicalFromInputsV1(fixture.fetched, {}).artifact;
   const chart = projectWorkspaceChart(new WorkspaceTechnicalCodec('7203').build(legacy, fixture.input));
@@ -69,6 +69,9 @@ test('source-gap indicators and candle-free ongoing shortages render from the de
     await expect(row.getByRole('cell', { name: '利用不可 (source_gap)', exact: true })).toHaveCount(5);
     const range = interval === 'week' ? '2026-09-07–2026-09-13' : '2026-09-01–2026-09-30';
     await expect(page.getByRole('list', { name: 'source不足の期間' }).getByText(`${range}: source不足（価格利用不可）`, { exact: true })).toBeVisible();
+    // Latest confirmed week/month contains gaps; its date is not an indicator date.
+    const indicatorDate = interval === 'week' ? '2026-08-28' : '2026-07-31';
+    await expect(page.getByText(`確定indicator対象日: ${indicatorDate}`, { exact: true })).toBeVisible();
   }
   expect(await (await page.request.get(`${base}test/counts`)).json()).toEqual({ calls: 0 });
 });

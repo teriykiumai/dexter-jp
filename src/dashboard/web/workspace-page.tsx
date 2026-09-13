@@ -205,7 +205,7 @@ function WorkspaceInstrument({ id, interval, revision, navigate, disabled, acqui
       <PriceChart bars={bars} priceLines={[]} describedBy="workspace-chart-description" technical={{ candles: rows, interval, collapsed,
         selectedDate: selected, onSelect: setSelected, unavailableDates: gapDates, sma20: smaRows }} />
       <p>{LIGHTWEIGHT_CHARTS_NOTICE.join(' / ')}</p>
-      <p>確定indicator対象日: {rows.filter(row => !row.partial).at(-1)?.lastSessionDate ?? '利用不可'}</p>
+      <p>確定indicator対象日: {rows.filter(row => !row.partial && row.sourceGaps.length === 0).at(-1)?.lastSessionDate ?? '利用不可'}</p>
       {rows.length > 100 ? <div className="design-actions" aria-label="正確な値の表示範囲">
         <Button disabled={end <= 100} onClick={() => setTablePage(page + 1)}>古い100行</Button>
         <span>{Math.max(1, end - 99)}–{end} / {rows.length}行</span>
