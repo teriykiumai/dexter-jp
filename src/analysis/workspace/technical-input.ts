@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { calculateSma } from '../../tools/finance/technical-engine.js';
+import { calculateMacdSeries, calculateRsiSeries } from '../../tools/finance/advanced-technical-engine.js';
 import { DateValue, FrozenIdentitySchema, ObjectRefSchema, parse, fail, json, digest } from './contracts.js';
 import { normalizeTechnicalDailyObservationV1, calculateTechnicalSeriesV1 } from '../market-data/technical-series.js';
 import { mapTechnicalCalendarV1, mapTechnicalDailyBarsV1, validateCurrentTechnicalMasterV1 } from '../market-data/technical-source-gate.js';
@@ -52,22 +53,35 @@ export function calculateWorkspaceTechnical(raw: unknown) {
     window: { queryFrom: from, eligibleThrough: input.queryTo, calculationDate: input.calculationDate,
       historyBoundary: { ...mapped.historyBoundary, sourceCoverageFrom: eligible[0]!.date } } });
   const decorate = (interval: 'day' | 'week' | 'month') => {
-    const closes: number[] = [];
-    return result.intervals[interval].map(row => {
-      const sourceGaps = eligible.filter(observation => observation.kind === 'gap' && observation.date >= row.periodStart && observation.date <= row.periodEnd).map(observation => observation.date);
-      if (!row.partial && sourceGaps.length === 0) closes.push(row.close);
-      const sma = row.partial || sourceGaps.length > 0 ? null : calculateSma(closes, 20);
-      const gapIndicator = { state: 'unavailable' as const, reason: 'source_gap' as const };
+    const rows = result.intervals[interval].map(row => ({ ...row,
+      sourceGaps: eligible.filter(observation => observation.kind === 'gap' && observation.date >= row.periodStart
+        && observation.date <= row.periodEnd).map(observation => observation.date),
+    }));
+    // Workspace owns this sequence. Legacy V1 includes all non-partial candles
+    // and must retain its original calculation version and immutable bytes.
+    const closes = rows.filter(row => !row.partial && row.sourceGaps.length === 0).map(row => row.close);
+    const rsi = calculateRsiSeries(closes), macd = calculateMacdSeries(closes);
+    let completedIndex = -1;
+    return rows.map(row => {
+      const unavailable = { state: 'unavailable' as const,
+        reason: row.sourceGaps.length ? 'source_gap' as const : row.partial ? 'partial_period' as const : 'warmup' as const };
+      const complete = !row.partial && row.sourceGaps.length === 0;
+      if (complete) completedIndex++;
+      const numeric = (value: number | null | undefined) => {
+        if (value == null) return unavailable;
+        if (!Number.isFinite(value)) fail('invalid_input');
+        return { state: 'available' as const, value };
+      };
+      const current = complete ? macd[completedIndex] : null, previous = complete ? macd[completedIndex - 1] : null;
       return { ...row,
-        rsi: sourceGaps.length ? gapIndicator : row.rsi, macd: sourceGaps.length ? gapIndicator : row.macd,
-        signal: sourceGaps.length ? gapIndicator : row.signal, histogram: sourceGaps.length ? gapIndicator : row.histogram,
-        cross: sourceGaps.length ? gapIndicator : row.cross,
-        sma20: sma === null ? { state: 'unavailable' as const, reason: sourceGaps.length ? 'source_gap' as const : row.partial ? 'partial_period' as const : 'warmup' as const }
-          : { state: 'available' as const, value: sma },
+        rsi: numeric(complete ? rsi[completedIndex] : null), macd: numeric(current?.value),
+        signal: numeric(current?.signal), histogram: numeric(current?.histogram),
+        cross: current && previous ? { state: 'available' as const, value: previous.value <= previous.signal
+          && current.value > current.signal ? 'golden_cross' as const : 'none' as const } : unavailable,
+        sma20: numeric(complete ? calculateSma(closes.slice(Math.max(0, completedIndex - 19), completedIndex + 1), 20) : null),
         completion: interval !== 'day' && row.periodEnd >= input.calculationDate ? 'ongoing' as const : 'confirmed' as const,
         coverage: row.periodStart < from || eligibleCalendar.calendar.sessions.some(date => date >= row.periodStart && date < result.calculationFrom)
           ? 'history_coverage_clipped' as const : 'complete' as const,
-        sourceGaps,
       };
     });
   };

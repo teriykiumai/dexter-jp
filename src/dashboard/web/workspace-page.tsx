@@ -171,7 +171,10 @@ function WorkspaceInstrument({ id, interval, revision, navigate, disabled, acqui
   const rows = useMemo(() => view?.chart?.intervals[interval] ?? [], [view?.chart, interval]);
   const gaps = useMemo(() => view?.chart?.unavailablePeriods.filter(period => period.interval === interval && period.reason === 'source_gap') ?? [], [view?.chart, interval]);
   const bars = useMemo(() => rows.map(row => ({ date: row.displayDate, open: row.open, high: row.high, low: row.low, close: row.close, volume: row.volume })), [rows]);
-  const gapDates = useMemo(() => gaps.map(gap => gap.periodStart), [gaps]);
+  // A source-short candle already has its chart point; only candle-free periods
+  // need whitespace. A second point can otherwise collide with its display date.
+  const gapDates = useMemo(() => gaps.filter(gap => !rows.some(row => row.identity === gap.identity))
+    .map(gap => gap.periodStart), [gaps, rows]);
   const smaRows = useMemo(() => sma ? rows.map(row => ({ date: row.displayDate, value: row.sma20.state === 'available' ? row.sma20.value : null })) : [], [sma, rows]);
   const page = Math.min(tablePage, Math.max(0, Math.ceil(rows.length / 100) - 1)), end = rows.length - page * 100;
   const tableRows = rows.slice(Math.max(0, end - 100), end);

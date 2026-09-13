@@ -1,6 +1,10 @@
 import { test, expect } from 'playwright/test';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { workspaceTechnicalHistory } from '../../analysis/workspace/technical-test-fixtures.js';
+import { buildTechnicalFromInputsV1 } from '../../analysis/market-data/technical-source.js';
+import { WorkspaceTechnicalCodec } from '../../analysis/workspace/technical-artifact.js';
+import { projectWorkspaceChart } from '../workspace-chart.js';
 
 let child: ChildProcessWithoutNullStreams, base: string;
 test.use({ hasTouch: true });
@@ -41,6 +45,32 @@ test('no Snapshot/key: explicit acquisition, chart intervals, favorite, back and
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: '.dexter/workspace-mobile-chart.png', fullPage: true });
   expect(errors).toEqual([]);
+});
+
+test('source-gap indicators and candle-free ongoing shortages render from the deterministic DTO', async ({ page }) => {
+  test.setTimeout(60_000);
+  page.on('pageerror', error => { throw error; });
+  const fixture = workspaceTechnicalHistory(['2025-03-12', '2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04',
+    '2026-09-07', '2026-09-08', '2026-09-09', '2026-09-10', '2026-09-11']);
+  const legacy = buildTechnicalFromInputsV1(fixture.fetched, {}).artifact;
+  const chart = projectWorkspaceChart(new WorkspaceTechnicalCodec('7203').build(legacy, fixture.input));
+  const item = { schemaVersion: 'workspace_item_v1', instrumentId: fixture.input.identity.instrumentId,
+    code: '72030', label: '欠損fixture', favorite: 0, revision: 1 };
+  await page.route(`**/api/workspace/instruments/${item.instrumentId}`, route => route.fulfill({ json: {
+    schemaVersion: 'workspace_view_v1', item, chart,
+  } }));
+  await page.goto(`${base}workspace?instrument=${item.instrumentId}&interval=week`);
+  for (const interval of ['week', 'month'] as const) {
+    await page.getByLabel('表示間隔').selectOption(interval);
+    const gap = chart.intervals[interval].find(row => row.sourceGaps.includes('2025-03-12'))!;
+    const row = page.getByRole('row').filter({ has: page.getByRole('cell', { name: gap.displayDate, exact: true }) });
+    await expect(row.getByRole('cell', { name: '確定', exact: true })).toBeVisible();
+    await expect(row.getByRole('cell', { name: 'source不足: 2025-03-12', exact: true })).toBeVisible();
+    await expect(row.getByRole('cell', { name: '利用不可 (source_gap)', exact: true })).toHaveCount(5);
+    const range = interval === 'week' ? '2026-09-07–2026-09-13' : '2026-09-01–2026-09-30';
+    await expect(page.getByRole('list', { name: 'source不足の期間' }).getByText(`${range}: source不足（価格利用不可）`, { exact: true })).toBeVisible();
+  }
+  expect(await (await page.request.get(`${base}test/counts`)).json()).toEqual({ calls: 0 });
 });
 
 test('mobile touch/keyboard search, back navigation and invalid URL', async ({ page }) => {
