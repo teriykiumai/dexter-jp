@@ -153,6 +153,24 @@ export class WorkspaceRepository {
         drawing.revision, drawing.id, drawing.instrumentId, expectedRevision]).changes !== 1) fail('revision_conflict');
     });
   }
+  drawing(instrumentId: string, id: string): StoredDrawing | null {
+    this.db.assertAvailable(); parse(Id, instrumentId); parse(Id, id);
+    const row = this.db.sqlite.query<{ anchors: string; basis_object: string; revision: number }, [string, string]>(
+      'SELECT anchors,basis_object,revision FROM drawings WHERE instrument_id=? AND drawing_id=?').get(instrumentId, id);
+    if (!row) return null;
+    const drawing = restoredDrawing(row.anchors, rowRef(objectRow(this.db, row.basis_object)), row.revision);
+    if (drawing.instrumentId !== instrumentId || drawing.id !== id) fail('reference_conflict');
+    requireScope(this.db, row.basis_object, { kind: 'instrument-owned', instrumentId });
+    return drawing;
+  }
+  deleteDrawing(instrumentId: string, id: string, revision: number): void {
+    parse(Id, instrumentId); parse(Id, id);
+    if (!Number.isSafeInteger(revision) || revision < 1) fail('invalid_input');
+    this.db.transaction(() => {
+      if (this.db.sqlite.run('DELETE FROM drawings WHERE instrument_id=? AND drawing_id=? AND revision=?',
+        [instrumentId, id, revision]).changes !== 1) fail('revision_conflict');
+    });
+  }
   drawings(instrumentId: string, after = '', limit = 100): StoredDrawing[] {
     this.db.assertAvailable(); parse(Id, instrumentId);
     if (!Number.isInteger(limit) || limit < 1 || limit > 1000) fail('invalid_input');

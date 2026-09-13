@@ -75,9 +75,14 @@ export function calculateWorkspaceTechnical(raw: unknown) {
 
 /** Whole-artifact changes are not price-basis changes. No automatic conversion. */
 export function compareDrawingBasis(before: TechnicalInput, after: TechnicalInput, from: string, through: string): 'compatible' | 'basis_review_required' {
+  return compareVerifiedDrawingBasis(calculateWorkspaceTechnical(before), calculateWorkspaceTechnical(after), from, through);
+}
+/** Same predicate on codec-verified artifacts; avoid recalculating per Drawing. */
+export function compareVerifiedDrawingBasis(a: Pick<ReturnType<typeof calculateWorkspaceTechnical>, 'input' | 'basis'>,
+  b: Pick<ReturnType<typeof calculateWorkspaceTechnical>, 'input' | 'basis'>, from: string, through: string): 'compatible' | 'basis_review_required' {
   parse(DateValue, from); parse(DateValue, through);
   if (from > through) fail('invalid_input');
-  const a = calculateWorkspaceTechnical(before), b = calculateWorkspaceTechnical(after);
+  const before = a.input, after = b.input;
   if (a.input.identity.instrumentId !== b.input.identity.instrumentId || a.input.identity.code !== b.input.identity.code
     || before.adjustmentMethod !== after.adjustmentMethod || from < before.eligibilityFrom || from < after.eligibilityFrom) return 'basis_review_required';
   // A new corporate-action event can change the coordinate basis even when the

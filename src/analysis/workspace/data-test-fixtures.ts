@@ -9,8 +9,9 @@ import { MarketDataJobServiceV1 } from '../market-data/job-service.js';
 import { MarketDataJobRepositoryV1 } from '../market-data/job-repository.js';
 import type { JQuantsExecutionEnvironmentV1 } from '../strategy-validation/jquants-execution.js';
 
-export async function workspaceDataFixture(checkpoint?: ConstructorParameters<typeof WorkspaceDataJobs>[3], fullHistory = false) {
-  const directory = mkdtempSync(resolve(tmpdir(), 'dexter-workspace-data-'));
+export async function workspaceDataFixture(checkpoint?: ConstructorParameters<typeof WorkspaceDataJobs>[3], fullHistory = false,
+  storage?: { directory: string; preserve: boolean }) {
+  const directory = storage?.directory ?? mkdtempSync(resolve(tmpdir(), 'dexter-workspace-data-'));
   const root = resolve(directory, 'workspace'), artifacts = resolve(directory, 'market-data');
   let wall = Date.parse('2026-09-11T08:00:00.000Z'), monotonic = 0, calls = 0;
   let transform: (path: string, rows: Record<string, unknown>[]) => void = () => {};
@@ -45,5 +46,5 @@ export async function workspaceDataFixture(checkpoint?: ConstructorParameters<ty
   return { directory, root, artifacts, db, environment, ...await connect(), calls: () => calls,
     setTransform(fn: typeof transform) { transform = fn; }, advance(ms = 61_000) { wall += ms; monotonic += ms; },
     async restart() { db.close(); db = new WorkspaceDatabase(root); return { db, ...await connect() }; },
-    dispose() { db.close(); rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }); } };
+    dispose() { db.close(); if (!storage?.preserve) rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }); } };
 }

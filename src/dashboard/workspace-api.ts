@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DrawingApi } from './drawing-api.js';
 import { Id, parse, fail, WorkspaceError, scopeKey, type ObjectRef } from '../analysis/workspace/contracts.js';
 import { rowRef, objectRow } from '../analysis/workspace/references.js';
 import type { WorkspaceDataJobs, WorkspaceDataJob } from '../analysis/workspace/data-jobs.js';
@@ -15,9 +16,10 @@ const jobView = (job: WorkspaceDataJob): WorkspaceJobView => ({ schemaVersion: '
   instrumentId: job.identity ? JSON.parse(job.identity).instrumentId as string : null, error: job.error });
 
 export class WorkspaceDashboardApi {
+  private drawings: DrawingApi;
   private readQueue: Promise<unknown> = Promise.resolve();
   private queuedReads = 0;
-  constructor(readonly jobs: WorkspaceDataJobs, readonly session: DashboardSessionV1) {}
+  constructor(readonly jobs: WorkspaceDataJobs, readonly session: DashboardSessionV1) { this.drawings = new DrawingApi(jobs.repository, session); }
   private item(id: string): WorkspaceItem {
     parse(Id, id);
     const row = this.jobs.repository.db.sqlite.query<Omit<WorkspaceItem, 'schemaVersion'>, [string]>(`SELECT i.instrument_id AS instrumentId,
@@ -56,6 +58,8 @@ export class WorkspaceDashboardApi {
     if (segments[0] !== 'api' || segments[1] !== 'workspace') return null;
     try {
       if (!isAllowedDashboardHost(request.headers.get('host'))) throw new DashboardSecurityErrorV1('forbidden_host');
+      if ([5, 6].includes(segments.length) && segments[2] === 'instruments' && segments[4] === 'drawings')
+        return await this.drawings.handle(request, url, segments);
       const route = segments.slice(2).join('/');
       const jobRoute = segments.length === 4 && segments[2] === 'jobs' && segments[3] !== 'active';
       const allow = ['search', 'session', 'recents', 'jobs/active'].includes(route) ? 'GET'

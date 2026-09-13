@@ -648,6 +648,36 @@ and immutable identities. Projection recomputes indicators from verified eligibl
 OHLCV and exact input gap evidence; it never rewrites either artifact. The displayed
 confirmed-indicator date excludes partial and source-gap candles.
 
+Step 4A exposes Horizontal CRUD under
+`/api/workspace/instruments/:instrumentId/drawings` (GET/POST) and `/:drawingId`
+(PUT/DELETE). Mutations inherit Host/Origin/CSRF and strict JSON checks. Reads are
+bounded to 100 Drawings with an explicit next cursor; only that page is overlaid.
+Writes carry the exact displayed chart digest and expected revision. A read worker
+verifies current and original exact receipt/artifact closures and the existing basis
+predicate; the writer transaction rechecks the current artifact/receipt binding and
+Drawing revision before committing. A deep-link save creates its Workspace in that
+same transaction when needed. It never resolves ticker latest or calls a source.
+The most recently read page may retain a process-local calculation proof when its
+complete dependency bytes total at most 8 MiB; larger closures stay in the worker. Warm
+writes reuse it only after guarded reads rehash every exact dependency and recheck
+each DB reference/metadata plus the unchanged Drawing record. The transaction still
+checks the binding and revision. No mtime-only trust or persistent proof cache is used.
+
+The existing Horizontal storage format is swing/adjusted-price only. Its basisObject
+pins the original V2 input, adjustment method and instrument evidence; the evidence
+window is the first through last eligible daily candle at creation and remains fixed
+during numeric time/price edits. Creation and last-accepted evidence are identical
+until Step 4C introduces revisioned acceptance. No schema or immutable codec change
+is needed. The installed chart price-line API projects the same price on day/week/
+month; original daily anchors are never rewritten. Labelled fields, selection and
+delete controls provide keyboard/touch operation. Conflict or ambiguous save retains
+the draft, disables writes and requires manual stored-state reconciliation; it never
+auto-retries or rebases. Incompatible basis retains the record with
+`basis_review_required` and suppresses its overlay. Complete acceptance UI, dragging,
+Trendline and undo/redo remain in their owning later steps. Process-restart and
+backup/restore fixtures exercise M1 offline; synthetic source/calendar data does not
+close the outstanding live cross-date identity gate.
+
 Each step has its own reviewable diff and inherited regression checks. New names
 below identify module responsibilities, not Step 0 runtime additions.
 

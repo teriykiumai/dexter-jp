@@ -1,10 +1,12 @@
+import { read, mutate, WorkspaceHttpError } from './workspace-http.js';
+import { HorizontalDrawings } from './horizontal-drawings.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { z } from 'zod';
 import { Button, Card, DashboardDesign, TableScroll } from './primitives.js';
 import { PriceChart, LIGHTWEIGHT_CHARTS_NOTICE } from './chart.js';
 import { buildMarketOverviewPath } from './presentation.js';
 import { workspaceTerminal, WorkspaceJobViewSchema, WorkspaceItemSchema, WorkspaceSearchSchema, WorkspaceRecentsSchema,
-  WorkspaceViewSchema, WorkspaceActiveSchema, WorkspaceSessionSchema, WorkspaceErrorSchema,
+  WorkspaceViewSchema, WorkspaceActiveSchema,
   type WorkspaceCandidate, type WorkspaceItem, type WorkspaceView, type WorkspaceJobView } from '../workspace-contracts.js';
 
 const intervalNames = { day: '日足', week: '週足', month: '月足' } as const;
@@ -16,23 +18,6 @@ export function workspaceRoute(search: string) {
   return { id, interval: interval as Interval };
 }
 const path = (id: string | null, interval: Interval) => `/workspace${id ? `?instrument=${encodeURIComponent(id)}&interval=${interval}` : ''}`;
-class WorkspaceHttpError extends Error {
-  constructor(readonly status: number, readonly code: string, message: string) { super(message); }
-}
-async function read<T>(url: string, schema: z.ZodType<T>, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init), value = await response.json();
-  if (!response.ok) {
-    const { error } = WorkspaceErrorSchema.parse(value);
-    throw new WorkspaceHttpError(response.status, error.code, error.message ?? ({ identity_review_required: '銘柄の同一性確認が必要です。',
-    revision_conflict: '別の操作で更新されました。ページを再読み込みしてください。', invalid_input: '入力またはJ-Quants設定を確認してください。'
-    } as Record<string, string>)[error.code] ?? '処理を確認できません。保存済みの状態を確認してください。');
-  }
-  return schema.parse(value);
-}
-async function mutate<T>(url: string, body: unknown, schema: z.ZodType<T>, method = 'POST'): Promise<T> {
-  const session = await read('/api/workspace/session', WorkspaceSessionSchema);
-  return read(url, schema, { method, headers: { 'Content-Type': 'application/json', 'X-Dexter-CSRF': session.csrfToken }, body: body === undefined ? undefined : JSON.stringify(body) });
-}
 let jobReadFailed = false;
 
 export function WorkspacePage() {
@@ -202,8 +187,8 @@ function WorkspaceInstrument({ id, interval, revision, navigate, disabled, acqui
         {['volume', 'rsi', 'macd'].map(pane => <Button key={pane} aria-pressed={!collapsed.includes(pane)} onClick={() => toggle(pane)}>{pane === 'volume' ? '出来高' : pane.toUpperCase()}</Button>)}
       </div>
       <p id="workspace-chart-description">ローソク足と出来高。進行中の週・月は未確定、indicatorは確定足のみ。source不足は別状態で表示します。</p>
-      <PriceChart bars={bars} priceLines={[]} describedBy="workspace-chart-description" technical={{ candles: rows, interval, collapsed,
-        selectedDate: selected, onSelect: setSelected, unavailableDates: gapDates, sma20: smaRows }} />
+      <HorizontalDrawings id={id} chart={view.chart}>{lines => <PriceChart bars={bars} priceLines={lines} describedBy="workspace-chart-description" technical={{ candles: rows, interval, collapsed,
+        selectedDate: selected, onSelect: setSelected, unavailableDates: gapDates, sma20: smaRows }} />}</HorizontalDrawings>
       <p>{LIGHTWEIGHT_CHARTS_NOTICE.join(' / ')}</p>
       <p>確定indicator対象日: {rows.filter(row => !row.partial && row.sourceGaps.length === 0).at(-1)?.lastSessionDate ?? '利用不可'}</p>
       {rows.length > 100 ? <div className="design-actions" aria-label="正確な値の表示範囲">

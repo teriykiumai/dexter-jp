@@ -49,9 +49,10 @@ export function EtfRelativeChart({ result, describedBy }: {
   return <div ref={ref} className="price-chart" role="img" aria-label="1321と2633の正規化価格チャート" aria-describedby={describedBy} />;
 }
 
+export type ChartOverlay = Pick<ChartPriceLine, 'price' | 'label'> & { colorToken: ChartPriceLine['colorToken'] | '--color-chart-price' };
 interface PriceChartProps {
   bars: ChartBar[];
-  priceLines: ChartPriceLine[];
+  priceLines: ChartOverlay[];
   describedBy: string;
   technical?: { candles: readonly TechnicalCandle[]; interval: TechnicalInterval;
     unavailableDates: readonly string[];
@@ -248,7 +249,7 @@ export function PriceChart({ bars, priceLines, describedBy, technical }: PriceCh
         candles.removePriceLine(handle);
       }
     };
-  }, [priceLines]);
+  }, [priceLines, bars, technical?.candles, technical?.interval, technical?.collapsed, technical?.unavailableDates, technical?.sma20]);
 
   if (bars.length === 0) {
     return <div className="empty-state chart-empty">調整済みOHLCVは利用できません。</div>;
