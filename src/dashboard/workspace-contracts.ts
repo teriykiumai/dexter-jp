@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { isStrictGregorianDate } from '../analysis/strategy-validation/date.js';
 
 const date = z.string().refine(isStrictGregorianDate), interval = z.enum(['day', 'week', 'month']);
-const unavailable = z.object({ state: z.literal('unavailable'), reason: z.enum(['warmup', 'partial_period']) }).strict();
+const unavailable = z.object({ state: z.literal('unavailable'), reason: z.enum(['warmup', 'partial_period', 'source_gap']) }).strict();
 const indicator = z.union([z.object({ state: z.literal('available'), value: z.number().finite() }).strict(), unavailable]);
 const period = { interval, identity: z.string().min(1), periodStart: date, periodEnd: date };
 // Public chart DTO is independent of the immutable artifact schema.
