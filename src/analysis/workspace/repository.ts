@@ -143,6 +143,7 @@ export class WorkspaceRepository {
     if (drawing.revision !== expectedRevision + 1 || expectedRevision < 0) fail('revision_conflict');
     this.db.transaction(() => {
       requireScope(this.db, objectKey(drawing.basisObject), { kind: 'instrument-owned', instrumentId: drawing.instrumentId });
+      if (drawing.acceptedBasis) requireScope(this.db, objectKey(drawing.acceptedBasis.object), { kind: 'instrument-owned', instrumentId: drawing.instrumentId });
       const { basisObject: _basis, revision: _revision, ...anchors } = drawing;
       if (expectedRevision === 0) {
         if (this.db.sqlite.query('SELECT drawing_id FROM drawings WHERE drawing_id=?').get(drawing.id)) fail('revision_conflict');
@@ -161,15 +162,19 @@ export class WorkspaceRepository {
     const drawing = restoredDrawing(row.anchors, rowRef(objectRow(this.db, row.basis_object)), row.revision);
     if (drawing.instrumentId !== instrumentId || drawing.id !== id) fail('reference_conflict');
     requireScope(this.db, row.basis_object, { kind: 'instrument-owned', instrumentId });
+    if (drawing.acceptedBasis) requireScope(this.db, objectKey(drawing.acceptedBasis.object), { kind: 'instrument-owned', instrumentId });
     return drawing;
   }
   /** Restore an exact server-retained command into an absent ID, without resetting its revision. */
   restoreDrawing(value: StoredDrawing): void {
     const drawing = parse(DrawingSchema, value);
     this.db.transaction(() => {
-      this.saveDrawing({ ...drawing, revision: 1 }, 0);
-      this.db.sqlite.run('UPDATE drawings SET revision=? WHERE drawing_id=? AND instrument_id=?',
-        [drawing.revision, drawing.id, drawing.instrumentId]);
+      const scope = { kind: 'instrument-owned' as const, instrumentId: drawing.instrumentId };
+      requireScope(this.db, objectKey(drawing.basisObject), scope);
+      if (drawing.acceptedBasis) requireScope(this.db, objectKey(drawing.acceptedBasis.object), scope);
+      if (this.db.sqlite.query('SELECT drawing_id FROM drawings WHERE drawing_id=?').get(drawing.id)) fail('revision_conflict');
+      const { basisObject, revision, ...anchors } = drawing;
+      this.db.sqlite.run('INSERT INTO drawings VALUES (?,?,?,?,?)', [drawing.id, drawing.instrumentId, json(anchors), objectKey(basisObject), revision]);
     });
   }
   deleteDrawing(instrumentId: string, id: string, revision: number): void {
@@ -189,6 +194,7 @@ export class WorkspaceRepository {
         const drawing = restoredDrawing(row.anchors, rowRef(objectRow(this.db, row.basis_object)), row.revision);
         if (drawing.instrumentId !== instrumentId || drawing.id !== row.drawing_id) fail('reference_conflict');
         requireScope(this.db, row.basis_object, { kind: 'instrument-owned', instrumentId });
+        if (drawing.acceptedBasis) requireScope(this.db, objectKey(drawing.acceptedBasis.object), { kind: 'instrument-owned', instrumentId });
         return drawing;
       });
   }

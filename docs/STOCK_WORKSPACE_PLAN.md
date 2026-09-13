@@ -756,6 +756,35 @@ without making it the new landing/input path. First remove navigation/dependenci
 only then remove demonstrably dead UI code. Do not delete shared source/receipt,
 Strategy job coordination/API, engine/history or CLI as a side effect of tab removal.
 
+### Step 4C implementation contract
+
+Fibonacci uses ordered daily anchors and the fixed `retracement_v1` ratios
+0, 0.236, 0.382, 0.5, 0.618, 0.786, 1. The server computes each price as
+`startPrice + (endPrice - startPrice) * ratio`: 0 is the start and 1 the end.
+Ascending, descending and equal prices are valid; extensions/custom ratios are
+out of scope. The Browser renders returned prices and exposes exact values.
+
+Drawing page DTO V3 adds server-computed day/week/month projections. Each anchor
+maps to its containing candle's displayDate. Missing periods or two endpoints in
+the same aggregated candle produce explicit unavailable projection, never invented
+positions. Canonical daily anchors remain unchanged. Drag handles remain daily-only;
+labelled daily date/price fields work in all intervals. Fibonacci uses the same
+endpoint controls and command history as Trendline.
+
+Basis acceptance is an explicit confirmed operation against the displayed chart
+and expected Drawing revision. It keeps prices, dates, creation basis and evidence
+window unchanged, and stores the exact last accepted artifact and acceptance revision.
+Original and accepted ownership/closures must both verify; the current artifact
+must cover the full original evidence window and anchors on the same instrument,
+provider code and adjustment method. Missing/corrupt evidence cannot be accepted.
+The current binding and revision are rechecked in the writer transaction. Acceptance
+participates in session undo/redo; undo restores the old review state without
+implicitly accepting a basis. A future incompatible update requires review again.
+Backup enumerates the accepted reference as well as the creation basis and retains
+both dependency closures. Older Horizontal/Trendline records remain readable without
+rewrite; Fibonacci/accepted records require a Step 4C-or-newer reader. SQL layout
+and immutable market codecs remain unchanged.
+
 ## 11. Acceptance and validation
 
 The following are required runtime acceptance tests, **not claims of Step 0 proof**.

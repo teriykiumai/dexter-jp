@@ -44,11 +44,13 @@ export type ChartPreferences = z.infer<typeof PreferencesSchema>;
 export const DEFAULT_PREFERENCES: ChartPreferences = { interval: 'day', sma: [20], rsi: true, macd: true, volume: true };
 const drawingBase = z.object({ id: Id, instrumentId: Id,
   price: z.number().positive().finite(), time: DateValue, evidenceFrom: DateValue,
-  evidenceThrough: DateValue, basisObject: ObjectRefSchema, revision: z.number().int().positive() });
+  evidenceThrough: DateValue, basisObject: ObjectRefSchema,
+  acceptedBasis: z.object({ object: ObjectRefSchema, revision: z.number().int().positive() }).strict().optional(), revision: z.number().int().positive() });
 export const DrawingSchema = z.discriminatedUnion('kind', [
   drawingBase.extend({ kind: z.literal('horizontal') }).strict(),
   drawingBase.extend({ kind: z.literal('trendline'), endTime: DateValue, endPrice: z.number().positive().finite() }).strict(),
-]).refine(d => d.evidenceFrom <= d.time && d.time <= d.evidenceThrough
+  drawingBase.extend({ kind: z.literal('fibonacci'), endTime: DateValue, endPrice: z.number().positive().finite(), levelsVersion: z.literal('retracement_v1') }).strict(),
+]).refine(d => (!d.acceptedBasis || d.acceptedBasis.revision <= d.revision) && d.evidenceFrom <= d.time && d.time <= d.evidenceThrough
   && (d.kind === 'horizontal' || (d.time < d.endTime && d.endTime <= d.evidenceThrough)));
 export type StoredDrawing = z.infer<typeof DrawingSchema>;
 export function restoredDrawing(anchors: string, basisObject: ObjectRef, revision: number): StoredDrawing {

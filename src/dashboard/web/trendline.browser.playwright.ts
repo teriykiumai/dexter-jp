@@ -146,3 +146,62 @@ test('rejected Trendline date order keeps an editable draft without reconciliati
   await save(page);
   expect(await stored(page)).toHaveLength(1);
 });
+
+
+test('Fibonacci exact levels, daily handles, week/month projection and restart preserve canonical anchors', async ({ page }) => {
+  test.setTimeout(120_000); await open(page);
+  await page.getByRole('button', { name: 'Fibonacciを作成', exact: true }).click();
+  await page.getByLabel('Fibonacci始点日（日足）').fill('2026-08-10');
+  await page.getByLabel('Fibonacci始点価格（円・調整後）').fill('100');
+  await page.getByLabel('Fibonacci終点価格（円・調整後）').fill('140');
+  const endpoint = page.getByRole('button', { name: 'Fibonacci終点を移動' });
+  await endpoint.focus(); await page.keyboard.press('ArrowUp');
+  await expect(page.getByLabel('Fibonacci終点価格（円・調整後）')).toHaveValue('141');
+  await page.getByRole('button', { name: 'Fibonacciを保存', exact: true }).click();
+  await expect(page.getByRole('button', { name: /Fibonacci .* を選択・編集/ })).toBeEnabled({ timeout: 30_000 });
+  const saved = (await stored(page))[0]; expect(saved.levels[3]).toEqual({ ratio: 0.5, price: 120.5 });
+  for (const interval of ['week', 'month', 'day']) {
+    await page.getByLabel('表示間隔').selectOption(interval);
+    expect(saved.projections[interval].state).toBe('available');
+    expect((await stored(page))[0]).toEqual(saved);
+    await page.locator('.price-chart').screenshot({ path: '.dexter/fibonacci-' + interval + '.png' });
+  }
+  await page.getByRole('button', { name: /Fibonacci .* を選択・編集/ }).click();
+  await page.getByLabel('Fibonacci始点日（日足）').fill('2026-09-10');
+  await page.getByRole('button', { name: 'Fibonacciを保存', exact: true }).click();
+  await expect(page.getByRole('button', { name: /Fibonacci .* を選択・編集/ })).toBeEnabled();
+  await page.getByLabel('表示間隔').selectOption('month');
+  await expect(page.getByText('投影不可：same_period（アンカー保持）')).toBeVisible();
+  await page.getByRole('button', { name: '元に戻す', exact: true }).click();
+  await expect(page.getByText('投影不可：same_period（アンカー保持）')).toHaveCount(0);
+  const before = (await stored(page))[0];
+  await page.goto('about:blank'); await stop(); await start(); await open(page);
+  expect((await stored(page))[0]).toEqual(before);
+});
+
+
+test('100 visible Fibonacci drawings keep chart and interval navigation below one-second stalls', async ({ page }) => {
+  test.setTimeout(90_000); await open(page);
+  await page.getByRole('button', { name: 'Fibonacciを作成', exact: true }).click();
+  await page.getByLabel('Fibonacci始点日（日足）').fill('2026-08-10');
+  await page.getByRole('button', { name: 'Fibonacciを保存', exact: true }).click();
+  await expect(page.getByRole('button', { name: /Fibonacci .* を選択・編集/ })).toBeEnabled({ timeout: 30_000 });
+  await page.route('**/api/workspace/instruments/*/drawings', async route => {
+    if (route.request().method() !== 'GET') return route.continue();
+    const response = await route.fetch(), body = await response.json();
+    body.items = Array.from({ length: 100 }, () => ({ ...body.items[0], id: crypto.randomUUID() }));
+    await route.fulfill({ response, json: body });
+  });
+  await page.evaluate(() => {
+    const measured = window as unknown as Window & { drawingStalls: number[] }; measured.drawingStalls = [];
+    let before = performance.now(); setInterval(() => { const now = performance.now(); measured.drawingStalls.push(now - before); before = now; }, 10);
+  });
+  await page.getByRole('button', { name: '保存状態を再読込' }).click();
+  await expect(page.getByRole('button', { name: /Fibonacci .* を選択・編集/ })).toHaveCount(100);
+  for (const interval of ['week', 'month', 'day', 'month', 'day']) {
+    await page.getByLabel('表示間隔').selectOption(interval); await page.waitForTimeout(200);
+  }
+  const stalls = await page.evaluate(() => (window as unknown as Window & { drawingStalls: number[] }).drawingStalls);
+  console.log('Fibonacci render responsiveness', JSON.stringify({ drawings: 100, segments: 700, intervals: 5, samples: stalls.length, maxMs: Math.max(...stalls) }));
+  expect(Math.max(...stalls)).toBeLessThan(1000);
+});

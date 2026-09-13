@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { IChartApi, ISeriesApi, Time } from 'lightweight-charts';
 
 export type TrendOverlay = { id: string; time: string; price: number; endTime: string; endPrice: number };
-export type TrendEditor = Omit<TrendOverlay, 'id'> & { dates: readonly string[];
+export type TrendEditor = Omit<TrendOverlay, 'id'> & { label?: 'Trendline' | 'Fibonacci'; dates: readonly string[];
   onChange: (point: 'start' | 'end', time: string, price: number) => void };
 type Point = { x: number; y: number };
 type Drag = { point: 'start' | 'end'; time: string; price: number; pointer: number };
@@ -35,14 +35,14 @@ export function TrendEndpoints({ chart, series, editor }: { chart: IChartApi; se
   }, [chart, series]);
   const valid = (point: 'start' | 'end', time: string, price: number) => editor.dates.includes(time) && Number.isFinite(price) && price > 0
     && (point === 'start' ? time < editor.endTime : time > editor.time);
-  return <svg className="drawing-endpoints" width={points.width} height={points.height} aria-label="Trendline端点編集">
+  return <svg className="drawing-endpoints" width={points.width} height={points.height} aria-label={`${editor.label ?? 'Trendline'}端点編集`}>
     {points.start && points.end ? <line className="drawing-segment" x1={points.start.x} y1={points.start.y} x2={points.end.x} y2={points.end.y} /> : null}
     {(['start', 'end'] as const).map(which => {
       const point = points[which]; if (!point) return null;
       return <g key={which}>
         <circle className="drawing-handle-visible" cx={point.x} cy={point.y} r="6" />
         <circle className="drawing-handle" cx={point.x} cy={point.y} r="22" tabIndex={0} role="button"
-          aria-label={which === 'start' ? 'Trendline始点を移動' : 'Trendline終点を移動'}
+          aria-label={`${editor.label ?? 'Trendline'}${which === 'start' ? '始点' : '終点'}を移動`}
           onPointerDown={event => { if (event.button !== 0 || dragRef.current) return; event.preventDefault(); event.stopPropagation();
             event.currentTarget.focus(); event.currentTarget.setPointerCapture(event.pointerId);
             changeDrag({ point: which, time: which === 'start' ? editor.time : editor.endTime,

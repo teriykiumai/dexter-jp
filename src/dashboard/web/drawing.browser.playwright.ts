@@ -135,7 +135,37 @@ test('undo restores a price-corrected Drawing as retained, hidden and non-editab
   await expect(page.getByText('basis_review_required（保持・非表示）', { exact: false })).toBeVisible();
   await expect(page.getByRole('button', { name: /を選択・編集/ })).toBeDisabled();
   const restored = (await (await page.request.get(path)).json()).items[0];
-  expect(restored).toEqual({ ...original, revision: 2, state: 'basis_review_required' });
+  expect(restored).toEqual({ ...original, revision: 2, state: 'basis_review_required',
+    projections: Object.fromEntries(['day', 'week', 'month'].map(key => [key, { state: 'unavailable', reason: 'basis_review_required' }])) });
   await page.mouse.move(0, 0); await page.waitForTimeout(300);
   expect(await chart.screenshot()).toEqual(hidden);
+});
+
+
+test('basis review requires explicit confirmation, preserves anchors, supports undo and survives restart', async ({ page }) => {
+  test.setTimeout(120_000); await acquire(page); await create(page);
+  const path = base + 'api/workspace/instruments/' + new URL(page.url()).searchParams.get('instrument') + '/drawings';
+  const original = (await (await page.request.get(path)).json()).items[0];
+  await page.request.post(base + 'test/price-correction');
+  await page.getByRole('button', { name: '日足データを取得・更新' }).click();
+  await expect(page.getByRole('button', { name: /basisを確認/ })).toBeEnabled({ timeout: 30_000 });
+  await page.getByRole('button', { name: /basisを確認/ }).click();
+  await expect(page.getByRole('button', { name: 'このbasisを承認' })).toBeDisabled();
+  for (const width of [320, 390, 768, 1280]) { await page.setViewportSize({ width, height: 900 }); expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true); }
+  await page.getByRole('button', { name: 'basis確認をキャンセル' }).click();
+  expect((await (await page.request.get(path)).json()).items[0].revision).toBe(1);
+  await page.getByRole('button', { name: /basisを確認/ }).click();
+  await page.getByRole('checkbox', { name: '価格を自動換算せず現在のbasisとして扱うことを確認しました' }).check();
+  await page.getByRole('button', { name: 'このbasisを承認' }).click();
+  await expect(page.getByRole('button', { name: /を選択・編集/ })).toBeEnabled();
+  const accepted = (await (await page.request.get(path)).json()).items[0];
+  expect(accepted).toMatchObject({ id: original.id, price: original.price, time: original.time, basisDigest: original.basisDigest, revision: 2, state: 'compatible' });
+  await page.getByRole('button', { name: '元に戻す', exact: true }).click();
+  await expect(page.getByRole('button', { name: /basisを確認/ })).toBeEnabled();
+  await page.getByRole('button', { name: 'やり直す', exact: true }).click();
+  await expect(page.getByRole('button', { name: /を選択・編集/ })).toBeEnabled();
+  const before = (await (await page.request.get(path)).json()).items[0], route = new URL(page.url()).pathname + new URL(page.url()).search;
+  await page.goto('about:blank'); await stop(); await start(); await page.goto(base.slice(0, -1) + route);
+  await expect(page.getByRole('button', { name: /を選択・編集/ })).toBeEnabled({ timeout: 30_000 });
+  expect((await (await page.request.get(base + new URL(path).pathname.slice(1))).json()).items[0]).toEqual(before);
 });
