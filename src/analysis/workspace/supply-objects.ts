@@ -64,7 +64,7 @@ export function validateSupplyLinks(object: VerifiedObject, get: (ref: ObjectRef
     if (!input.masterEvidence) return;
     const episode = parse(EpisodeObjectSchema, get(input.masterEvidence));
     if (episode.instrumentId !== input.identity?.instrumentId || episode.observation.Code !== input.identity.code
-      || input.from < episode.from || input.through !== episode.observation.Date) fail('reference_conflict');
+      || input.episodeFrom !== episode.from || input.from < episode.from || input.through !== episode.observation.Date) fail('reference_conflict');
     if (input.volumeEvidence && json(supplyPriceEvidence(input, get(input.volumeEvidence)))
       !== json({ volume: input.volume, basisComparable: input.basisComparable })) fail('reference_conflict');
     return;
@@ -77,7 +77,8 @@ export function validateSupplyLinks(object: VerifiedObject, get: (ref: ObjectRef
     const artifact = supplyArtifact(object.ref.codec === 'workspace_supply_prepared_v1' ? prepared.artifact : get((prepared as z.infer<typeof SupplyMembershipSchema>).artifact));
     if (artifact.input.identity) {
       if (json(artifact.input.identity) !== json(prepared.identity) || json(artifact.input.masterEvidence) !== json(prepared.master)
-        || artifact.input.from < episode.from || artifact.input.through !== episode.observation.Date) fail('reference_conflict');
+        || artifact.input.episodeFrom !== episode.from || artifact.input.from < episode.from
+        || artifact.input.through !== episode.observation.Date) fail('reference_conflict');
       if (artifact.input.volumeEvidence && json(supplyPriceEvidence(artifact.input, get(artifact.input.volumeEvidence)))
         !== json({ volume: artifact.input.volume, basisComparable: artifact.input.basisComparable })) fail('reference_conflict');
     }

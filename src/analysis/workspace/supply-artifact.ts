@@ -23,7 +23,7 @@ export const SectorRowSchema = z.object({ Date: DateValue, S33: sector33CodeSche
   SellExShortVa: amount, ShrtWithResVa: amount, ShrtNoResVa: amount }).strict();
 export const SupplyInputSchema = z.object({ version: z.literal('workspace_supply_input_v1'),
   dataset: SupplyDatasetSchema, scope: ScopeSchema, identity: FrozenIdentitySchema.nullable(),
-  masterEvidence: ObjectRefSchema.nullable(), from: DateValue, through: DateValue,
+  masterEvidence: ObjectRefSchema.nullable(), episodeFrom: DateValue.nullable(), from: DateValue, through: DateValue,
   source: z.object({ endpoint: z.string(), query: z.record(z.string(), z.string()), fetchedAt: z.iso.datetime(),
     pageCount: z.number().int().positive().max(20) }).strict(),
   margin: z.array(MarginRowSchema).max(8000), reports: z.array(ReportRowSchema).max(8000),
@@ -63,7 +63,7 @@ export function calculateSupply(raw: unknown) {
   const input = parse(SupplyInputSchema, raw);
   if (input.from > input.through || input.scope.kind === 'market-scoped') fail('invalid_input');
   if (input.dataset === 'sector_short') {
-    if (input.scope.kind !== 'sector-scoped' || input.identity || input.masterEvidence || input.volumeEvidence
+    if (input.scope.kind !== 'sector-scoped' || input.identity || input.masterEvidence || input.episodeFrom || input.volumeEvidence
       || input.margin.length || input.reports.length || input.volume.length || input.basisComparable
       || input.scope.provider !== 'jquants' || input.scope.scheme !== 's33' || input.scope.definitionVersion !== 'v1'
       || input.source.endpoint !== '/v2/markets/short-ratio'
@@ -77,6 +77,7 @@ export function calculateSupply(raw: unknown) {
       turnoverUnit: 'JPY', ratioUnit: 'fraction' } };
   }
   if (input.scope.kind !== 'instrument-owned' || !input.identity || !input.masterEvidence
+    || !input.episodeFrom || input.episodeFrom > input.from
     || input.identity.instrumentId !== input.scope.instrumentId || input.identity.provider !== 'jquants'
     || input.sector.length) fail('reference_conflict');
   if (input.dataset === 'margin') {
@@ -109,13 +110,14 @@ export function calculateSupply(raw: unknown) {
     || input.source.endpoint !== '/v2/markets/short-sale-report'
     || json(input.source.query) !== json({ code: input.identity.code, disc_date_from: input.from, disc_date_to: input.through })
     || input.reports.some(row => row.Code !== input.identity!.code || row.DiscDate < input.from || row.DiscDate > input.through
-      || row.CalcDate < input.from || row.CalcDate > row.DiscDate
+      || row.CalcDate < input.episodeFrom! || row.CalcDate > row.DiscDate
       || row.PrevRptDate && row.PrevRptDate !== '-' && row.PrevRptDate > row.CalcDate)) fail('reference_conflict');
   const result = analyzeReportedShortPositions(input.reports.map(row => ({ code: row.Code, disclosedDate: row.DiscDate,
     calculatedDate: row.CalcDate, reporterName: row.SSName, discretionaryManagerName: row.DICName, fundName: row.FundName,
     shortPositionRatio: row.ShrtPosToSO, shortPositionShares: row.ShrtPosShares,
-    previousCalculatedDate: row.PrevRptDate && row.PrevRptDate !== '-' && row.PrevRptDate >= input.from ? row.PrevRptDate : null,
-    previousReportedRatio: row.PrevRptDate && row.PrevRptDate !== '-' && row.PrevRptDate >= input.from ? row.PrevRptRatio : null })), input.through);
+    // The disclosure query horizon does not limit verified ownership of prior reports.
+    previousCalculatedDate: row.PrevRptDate && row.PrevRptDate !== '-' && row.PrevRptDate >= input.episodeFrom! ? row.PrevRptDate : null,
+    previousReportedRatio: row.PrevRptDate && row.PrevRptDate !== '-' && row.PrevRptDate >= input.episodeFrom! ? row.PrevRptRatio : null })), input.through);
   return { input, result: { dataset: input.dataset, ...result } };
 }
 

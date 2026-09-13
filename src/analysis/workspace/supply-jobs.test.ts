@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { resolve } from 'node:path';
 import { workspaceDataFixture } from './data-test-fixtures.js';
 import { workspaceDataCodecs } from './data-objects.js';
-import { validateReferences } from './references.js';
+import { registerReferences, resolveReference, validateReferences } from './references.js';
 import { readWorkspaceSupply } from '../../dashboard/workspace-supply.js';
 import { backupWorkspace, restoreWorkspace } from './backup.js';
 import { WorkspaceDatabase } from './database.js';
@@ -13,10 +13,11 @@ import { rowRef, objectRow } from './references.js';
 import { WorkspaceSupplyCodec, supplyTarget } from './supply-artifact.js';
 import { MarketDataRepositoryV1 } from '../market-data/repository.js';
 import { randomUUID } from 'node:crypto';
-import { safeDirectory } from './files.js';
+import { safeDirectory, writeExclusive } from './files.js';
 import { finalizeWorkspaceSupply } from './supply-jobs.js';
-import { type StoredDrawing } from './contracts.js';
+import { json, type StoredDrawing } from './contracts.js';
 import { runSupplyWorker } from './supply-worker-client.js';
+import { readStep2aTechnicalFixture } from './technical-test-fixtures.js';
 
 test('large saved issuer input keeps Drawing saves and search responsive during acquisition and read', async () => {
   const f = await fixture();
@@ -85,10 +86,53 @@ test.each(['margin', 'issuer_short', 'sector_short'] as const)('%s collector and
       recordProgress: () => {}, waitBeforeRetry: async () => { throw new Error('no retries'); },
     }, f.environment);
     const codec = new WorkspaceSupplyCodec(supplyTarget(prepared.artifact.input));
+    if (kind === 'issuer_short') expect(prepared.artifact.input.reports[0]).toMatchObject({
+      SSName: 'Synthetic Reporter', DICName: null, FundName: null, PrevRptDate: '-' });
+    if (kind === 'sector_short') expect(prepared.artifact.input.episodeFrom).toBeNull();
     safeDirectory(f.artifacts, true);
     const observed = await new MarketDataRepositoryV1(codec, resolve(f.artifacts, 'workspace-supply-v1')).publish(prepared.artifact,
       { jobId: randomUUID(), acceptedAt, checkedAt: new Date(f.environment.wallNowMs()).toISOString() });
     expect(observed.receipt.artifactIdentity.scope).toBe('workspace');
+  } finally { f.dispose(); }
+}, 30_000);
+
+test('issuer collection accepts pre-horizon dates inside the verified episode and rejects pre-episode dates', async () => {
+  const f = await workspaceDataFixture(), frozen = readStep2aTechnicalFixture(), input = frozen.artifact.input;
+  try {
+    // Reuse frozen synthetic continuity evidence; this does not open the live identity gate.
+    const sourceRoot = resolve(f.directory, 'inputs');
+    for (const object of frozen.objects) writeExclusive(resolve(sourceRoot, object.ref.path), json(object.value));
+    await registerReferences(f.db, sourceRoot, frozen.objects.map(object => object.ref), workspaceDataCodecs);
+    const identity = input.identity, id = identity.instrumentId;
+    const catalog = frozen.objects.find(object => object.ref.path === 'catalog-2026-09-11.json')!.ref;
+    await f.repository.acceptCatalog(f.repository.requestCatalog(input.queryTo), [{ instrumentId: id,
+      assetType: 'stock', provider: identity.provider, code: identity.code, label: input.master.CoName,
+      mappingRevision: identity.mappingRevision, episodeFrom: input.eligibilityFrom, episodeThrough: null,
+      evidence: input.masterEvidence }], catalog);
+    f.repository.openWorkspace(id); f.advance(3600_000);
+    let calculatedDate = '2025-09-10';
+    f.setTransform((path, data, url) => {
+      rows(path, data);
+      if (path.endsWith('/short-sale-report')) {
+        expect(url.searchParams.get('disc_date_from')).toBe('2025-09-11');
+        Object.assign(data[0]!, { DiscDate: '2025-09-11', CalcDate: calculatedDate, SSName: '',
+          PrevRptDate: '2025-09-09', PrevRptRatio: .005 });
+      }
+    });
+    expect((await f.jobs.wait(await f.jobs.start('issuer_short', id))).state).toBe('published');
+    const ref = f.repository.current({ kind: 'instrument-owned', instrumentId: id }, 'issuer_short')!;
+    const artifact = JSON.parse(new TextDecoder().decode(resolveReference(f.db, ref, workspaceDataCodecs).bytes));
+    expect(artifact.input).toMatchObject({ episodeFrom: input.eligibilityFrom, from: '2025-09-11',
+      reports: [{ SSName: null, DICName: null, FundName: null }] });
+    expect(artifact.result).toMatchObject({ reports: [{ calculatedDate: '2025-09-10',
+      previousCalculatedDate: '2025-09-09', previousReportedRatio: .005 }] });
+    const before = readWorkspaceSupply(f.repository, id);
+    expect(before.datasets[1]!.rows[0]!.slice(2, 5)).toEqual(['未公表', '未公表', '未公表']);
+    calculatedDate = '2022-01-02'; f.advance();
+    expect((await f.jobs.wait(await f.jobs.start('issuer_short', id))).state).toBe('identity_review_required');
+    expect(f.repository.current({ kind: 'instrument-owned', instrumentId: id }, 'issuer_short')).toEqual(ref);
+    expect(readWorkspaceSupply(f.repository, id)).toEqual(before);
+    validateReferences(f.db, workspaceDataCodecs);
   } finally { f.dispose(); }
 }, 30_000);
 
@@ -107,6 +151,7 @@ test('three explicit datasets publish exact receipts and survive backup/restore 
     expect(view.datasets[0]!.rows).toContainEqual(['信用売残（株）', '0']);
     expect(view.datasets[0]!.rows).toContainEqual(['信用倍率（倍）', '利用不可（売残がゼロ）']);
     expect(view.datasets[1]!.rows[0]![5]).toBe('0.51%');
+    expect(view.datasets[1]!.rows[0]!.slice(2, 5)).toEqual(['Synthetic Reporter', '未公表', '未公表']);
     expect(view.datasets[2]!.rows[0]).toEqual(['2026-09-11', '40', '100', '40%']);
     validateReferences(f.db, workspaceDataCodecs); f.db.close();
     const backup = resolve(f.directory, 'backup'), restored = resolve(f.directory, 'restored');

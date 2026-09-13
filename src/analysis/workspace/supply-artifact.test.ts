@@ -2,18 +2,65 @@ import { expect, test } from 'bun:test';
 import { calculateSupply, supplyPriceEvidence, supplyTarget, WorkspaceSupplyCodec, type SupplyInput } from './supply-artifact.js';
 import { readStep2aTechnicalFixture } from './technical-test-fixtures.js';
 import { assertMarketDataSafeV1 } from '../market-data/contracts.js';
-import { supplyCodecs } from './supply-objects.js';
+import { supplyCodecs, validateSupplyLinks } from './supply-objects.js';
+import { digest, json } from './contracts.js';
 
 function margin(): SupplyInput {
   const fixture = readStep2aTechnicalFixture().artifact.input;
   return { version: 'workspace_supply_input_v1', dataset: 'margin', identity: fixture.identity,
     scope: { kind: 'instrument-owned', instrumentId: fixture.identity.instrumentId }, masterEvidence: fixture.masterEvidence,
-    from: '2026-08-01', through: '2026-09-11', source: { endpoint: '/v2/markets/margin-interest',
+    episodeFrom: fixture.eligibilityFrom, from: '2026-08-01', through: '2026-09-11', source: { endpoint: '/v2/markets/margin-interest',
       query: { code: fixture.identity.code, from: '2026-08-01', to: '2026-09-11' }, fetchedAt: '2026-09-11T09:00:00.000Z', pageCount: 1 },
     margin: [{ Date: '2026-09-04', Code: fixture.identity.code, LongVol: 1000, ShrtVol: 100 },
       { Date: '2026-09-11', Code: fixture.identity.code, LongVol: 1100, ShrtVol: 0 }], reports: [], sector: [],
     volume: [], volumeEvidence: null, basisComparable: false };
 }
+function issuer(): SupplyInput {
+  const input = margin();
+  return { ...input, dataset: 'issuer_short', episodeFrom: '2024-01-01', from: '2025-09-11', margin: [],
+    source: { ...input.source, endpoint: '/v2/markets/short-sale-report',
+      query: { code: input.identity!.code, disc_date_from: '2025-09-11', disc_date_to: input.through } },
+    reports: [{ DiscDate: '2025-09-11', CalcDate: '2025-09-10', Code: input.identity!.code,
+      SSName: 'Synthetic Reporter', DICName: null, FundName: null, ShrtPosToSO: .006, ShrtPosShares: 100,
+      PrevRptDate: '2025-09-09', PrevRptRatio: .005 }] };
+}
+
+test('issuer ownership and previous context use the episode floor, not the disclosure horizon', () => {
+  const input = issuer(), codec = new WorkspaceSupplyCodec(supplyTarget(input));
+  const artifact = codec.parse(codec.build(input, input.source.fetchedAt));
+  expect(artifact.result).toMatchObject({ reports: [{ calculatedDate: '2025-09-10',
+    previousCalculatedDate: '2025-09-09', previousReportedRatio: .005, ratioDelta: .001 }] });
+  input.reports[0]!.CalcDate = input.episodeFrom!;
+  input.reports[0]!.PrevRptDate = input.episodeFrom!;
+  expect(calculateSupply(input).result).toMatchObject({ reports: [{ previousCalculatedDate: '2024-01-01', previousReportedRatio: .005 }] });
+  input.reports[0]!.PrevRptDate = '2023-12-31';
+  expect(calculateSupply(input).result).toMatchObject({ reports: [{ previousCalculatedDate: null, previousReportedRatio: null, ratioDelta: null }] });
+  input.reports[0]!.CalcDate = '2023-12-31';
+  expect(() => calculateSupply(input)).toThrow('reference_conflict');
+  input.episodeFrom = null;
+  expect(() => calculateSupply(input)).toThrow('reference_conflict');
+});
+
+test.each(['workspace_supply_artifact_v1', 'workspace_supply_prepared_v1'])('%s re-proves the frozen episode floor from its exact dependency', codecName => {
+  const fixture = readStep2aTechnicalFixture(), input = margin();
+  const verify = () => {
+    const artifact = new WorkspaceSupplyCodec(supplyTarget(input)).build(input, input.source.fetchedAt);
+    const value = codecName === 'workspace_supply_artifact_v1' ? artifact : {
+      version: codecName, identity: input.identity, master: input.masterEvidence,
+      observation: { ...fixture.artifact.input.master, S33: '3700', S33Nm: '輸送用機器' }, artifact };
+    const bytes = new TextEncoder().encode(json(value));
+    validateSupplyLinks({ ref: { codec: codecName, path: 'supply.json', digest: digest(bytes) },
+      metadata: supplyCodecs.get(codecName)!(value), bytes }, ref => {
+      const object = fixture.objects.find(object => json(object.ref) === json(ref));
+      expect(object).toBeDefined(); return object!.value;
+    });
+  };
+  expect(verify).not.toThrow();
+  for (const floor of ['2020-01-01', '2025-01-01']) {
+    input.episodeFrom = floor;
+    expect(verify).toThrow('reference_conflict');
+  }
+});
 test('margin zero, missing history and unverified basis remain distinct', () => {
   const result = calculateSupply(margin()).result;
   expect(result).toMatchObject({ buyingBalance: 1100, sellingBalance: 0, marginRatio: null,

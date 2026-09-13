@@ -541,8 +541,14 @@ receipt/membership/price-reference closure.
 
 Collectors use a conservative common 17:30 JST daily boundary and the official
 calendar, verify the dated master against the frozen episode, and restrict owned
-observations to that episode. Report calculation dates before the eligible episode
-require identity review. Sector collection uses the dated member's sector for that
+observations to that episode. Owned supply inputs freeze `episodeFrom` separately
+from the rolling disclosure query's `from`; exact episode dependencies re-prove
+that ownership floor. Report calculation dates before the episode require identity
+review, while calculation dates and previous-report context before the query horizon
+remain eligible when inside the episode. Only pre-episode previous context is omitted.
+Shared sector inputs have no instrument episode floor. Provider empty name markers
+are normalized to null and displayed as unpublished; `PrevRptDate: "-"` remains a
+saved raw missing-date marker. Sector collection uses the dated member's sector for that
 date only; it never applies today's sector to historical dates. An unpublished or
 ambiguous job is not replayed on restart; only its exact receipt may be finalized
 under the original transaction predicate.

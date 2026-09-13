@@ -59,6 +59,8 @@ test('explicit supply datasets restore on reload, preserve zero and remain respo
   await expect(page.getByRole('row').filter({ has: page.getByRole('cell', { name: '信用売残（株）', exact: true }) })).toContainText('0');
   await page.getByRole('button', { name: '公開空売り残高を取得・更新', exact: true }).click();
   await expect(page.getByRole('cell', { name: '0.51%', exact: true })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('row').filter({ has: page.getByRole('cell', { name: 'Synthetic Reporter', exact: true }) })
+    .getByRole('cell', { name: '未公表', exact: true })).toHaveCount(2);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole('button', { name: '所属業種の空売りを取得・更新', exact: true }).tap();
   await expect(page.getByRole('cell', { name: '40%', exact: true })).toBeVisible({ timeout: 30_000 });

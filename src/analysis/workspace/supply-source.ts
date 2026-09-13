@@ -49,10 +49,15 @@ export async function collectWorkspaceSupply(dataset: SupplyDataset, identity: F
   const input: SupplyInput = { version: 'workspace_supply_input_v1', dataset,
     scope: dataset === 'sector_short' ? { kind: 'sector-scoped', provider: 'jquants', scheme: 's33', sectorCode: observation.S33, definitionVersion: 'v1' }
       : { kind: 'instrument-owned', instrumentId: identity.instrumentId }, identity: dataset === 'sector_short' ? null : identity,
-    masterEvidence: dataset === 'sector_short' ? null : master, from, through,
+    masterEvidence: dataset === 'sector_short' ? null : master,
+    episodeFrom: dataset === 'sector_short' ? null : episode.from, from, through,
     source: { endpoint, query, fetchedAt: reader.fetched.get('data')!.fetchedAt, pageCount: reader.fetched.get('data')!.pageCount },
     margin: dataset === 'margin' ? rows.map(row => parse(MarginRowSchema, picked(row, Object.keys(MarginRowSchema.shape)))).sort((a, b) => a.Date.localeCompare(b.Date)) : [],
-    reports: dataset === 'issuer_short' ? rows.map(row => parse(ReportRowSchema, picked(row, Object.keys(ReportRowSchema.shape)))) : [],
+    reports: dataset === 'issuer_short' ? rows.map(row => {
+      const report = parse(ReportRowSchema, picked(row, Object.keys(ReportRowSchema.shape)));
+      for (const key of ['SSName', 'DICName', 'FundName'] as const) if (report[key] === '') report[key] = null;
+      return report;
+    }) : [],
     sector: dataset === 'sector_short' ? rows.map(row => parse(SectorRowSchema, picked(row, Object.keys(SectorRowSchema.shape)))) : [],
     volume: [], volumeEvidence: null, basisComparable: false };
   if (dataset === 'margin') {
@@ -62,7 +67,7 @@ export async function collectWorkspaceSupply(dataset: SupplyDataset, identity: F
         { volumeEvidence: evidence });
     }
   }
-  if (input.reports.some(row => row.CalcDate < from)) fail('identity_review_required');
+  if (input.reports.some(row => row.CalcDate < episode.from)) fail('identity_review_required');
   if (context.signal.aborted || dataset === 'margin' && environment.wallNowMs() >= Date.parse('2026-09-27T15:00:00Z')) fail('invalid_input');
   return { version: 'workspace_supply_prepared_v1' as const, identity, master, observation,
     artifact: await runSupplyWorker({ operation: 'build', root: repository.db.root, input, acceptedAt: context.acceptedAt }, context.signal) };
