@@ -14,7 +14,7 @@ export async function workspaceDataFixture(checkpoint?: ConstructorParameters<ty
   const directory = storage?.directory ?? mkdtempSync(resolve(tmpdir(), 'dexter-workspace-data-'));
   const root = resolve(directory, 'workspace'), artifacts = resolve(directory, 'market-data');
   let wall = Date.parse('2026-09-11T08:00:00.000Z'), monotonic = 0, calls = 0;
-  let transform: (path: string, rows: Record<string, unknown>[]) => void = () => {};
+  let transform: (path: string, rows: Record<string, unknown>[], url: URL) => void = () => {};
   const environment: JQuantsExecutionEnvironmentV1 = {
     apiKey: () => 'synthetic-key', wallNowMs: () => wall, monotonicNowMs: () => monotonic,
     sleep: async ms => { wall += ms; monotonic += ms; }, fetch: async input => {
@@ -30,7 +30,7 @@ export async function workspaceDataFixture(checkpoint?: ConstructorParameters<ty
             AdjO: 100, AdjH: 110, AdjL: 90, AdjC: 105, AdjVo: 1000, AdjFactor: 1, ExRT: null });
         }
       }
-      transform(url.pathname, rows); wall += 10;
+      transform(url.pathname, rows, url); wall += 10;
       return Response.json({ data: rows });
     },
   };

@@ -18,6 +18,62 @@ test.beforeEach(async () => {
 });
 test.afterEach(async () => { child.kill(); await new Promise<void>(resolve => child.once('exit', () => resolve())); });
 
+test('saved supply pagination works by keyboard and touch; foreign owner response hides data without fetching', async ({ page }) => {
+  const id = '00000000-0000-4000-8000-000000000001';
+  const datasets = (['margin', 'issuer_short', 'sector_short'] as const).map(dataset => ({ dataset, label: dataset,
+    state: 'available', artifactDigest: `sha256:${'a'.repeat(64)}`, from: '2026-09-11', through: '2026-09-11',
+    checkedAt: '2026-09-11T09:00:00.000Z', note: 'Synthetic saved data', columns: ['項目', '値'],
+    rows: dataset === 'issuer_short' ? Array.from({ length: 51 }, (_, index) => [`Report ${index + 1}`, '0.51%']) : [] }));
+  await page.route(`**/api/workspace/instruments/${id}`, route => route.fulfill({ json: { schemaVersion: 'workspace_view_v1',
+    item: { schemaVersion: 'workspace_item_v1', instrumentId: id, code: '72030', label: 'Synthetic', favorite: 0, revision: 1 }, chart: null } }));
+  let foreign = false;
+  await page.route(`**/api/workspace/instruments/${id}/supply`, route => route.fulfill({ json: {
+    schemaVersion: 'workspace_supply_view_v1', instrumentId: foreign ? '00000000-0000-4000-8000-000000000002' : id, datasets } }));
+  await page.goto(`${base}workspace?instrument=${id}`);
+  await expect(page.getByRole('cell', { name: 'Report 1', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '次の50行' }).focus(); await page.keyboard.press('Enter');
+  await expect(page.getByRole('cell', { name: 'Report 51', exact: true })).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'Report 1', exact: true })).toHaveCount(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('button', { name: '前の50行' }).tap();
+  await expect(page.getByRole('cell', { name: 'Report 1', exact: true })).toBeVisible();
+  foreign = true; await page.reload();
+  await expect(page.getByText('保存済み需給データを読み込めません。ページを再読み込みしてください。')).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'Report 1', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '公開空売り残高を取得・更新' })).toBeDisabled();
+  expect(await (await page.request.get(`${base}test/counts`)).json()).toEqual({ calls: 0 });
+});
+
+test('explicit supply datasets restore on reload, preserve zero and remain responsive to chart navigation', async ({ page }) => {
+  test.setTimeout(90_000);
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto(`${base}workspace`);
+  await page.getByRole('button', { name: '銘柄一覧を取得・更新' }).click();
+  await page.getByRole('button', { name: '72030 Synthetic', exact: true }).click();
+  await page.getByRole('button', { name: '日足データを取得・更新' }).click();
+  await expect(page.getByRole('heading', { name: '価格・出来高', exact: true })).toBeVisible({ timeout: 30_000 });
+  await page.request.post(`${base}test/supply`);
+  const credit = page.getByRole('button', { name: '信用取引残高を取得・更新', exact: true });
+  await credit.focus(); await page.keyboard.press('Enter');
+  await expect(page.getByRole('cell', { name: '信用売残（株）', exact: true })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('row').filter({ has: page.getByRole('cell', { name: '信用売残（株）', exact: true }) })).toContainText('0');
+  await page.getByRole('button', { name: '公開空売り残高を取得・更新', exact: true }).click();
+  await expect(page.getByRole('cell', { name: '0.51%', exact: true })).toBeVisible({ timeout: 30_000 });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('button', { name: '所属業種の空売りを取得・更新', exact: true }).tap();
+  await expect(page.getByRole('cell', { name: '40%', exact: true })).toBeVisible({ timeout: 30_000 });
+  const calls = await (await page.request.get(`${base}test/counts`)).json();
+  await page.getByLabel('表示間隔').selectOption('week');
+  await page.getByLabel('表示間隔').selectOption('month');
+  await page.reload();
+  await expect(page.getByRole('cell', { name: '40%', exact: true })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('cell', { name: '0.51%', exact: true })).toBeVisible();
+  expect(await (await page.request.get(`${base}test/counts`)).json()).toEqual(calls);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(errors).toEqual([]);
+  await page.screenshot({ path: '.dexter/workspace-supply-mobile.png', fullPage: true });
+});
+
 test('no Snapshot/key: explicit acquisition, chart intervals, favorite, back and reload', async ({ page }) => {
   test.setTimeout(60_000);
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));

@@ -93,7 +93,7 @@ function unavailableResult(
   };
 }
 
-function calculateObservation(row: SectorShortRatioSourceRow): SectorShortRatioObservation {
+export function calculateSectorShortObservation(row: SectorShortRatioSourceRow): SectorShortRatioObservation {
   const observation = {
     date: row.date,
     nonShortSellingValue: row.nonShortSellingValue,
@@ -182,7 +182,7 @@ export function analyzeSectorShortRatio(source: SectorShortRatioSource): SectorS
     }
   }
 
-  const observations = rows.map(calculateObservation);
+  const observations = rows.map(calculateSectorShortObservation);
   return {
     analysisAsOfDate: source.analysisAsOfDate,
     issuerCode: source.issuerCode,
