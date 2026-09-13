@@ -18,6 +18,57 @@ test.beforeEach(async () => {
 });
 test.afterEach(async () => { child.kill(); await new Promise<void>(resolve => child.once('exit', () => resolve())); });
 
+test('financial explicit acquisition retains unavailable identity, daily denominator and saved state on reload', async ({ page }) => {
+  test.setTimeout(90_000);
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto(`${base}workspace`);
+  await page.getByRole('button', { name: '銘柄一覧を取得・更新' }).click();
+  await page.getByRole('button', { name: '72030 Synthetic', exact: true }).click();
+  const section = page.getByRole('region', { name: '財務・配当', exact: true });
+  await expect(section.getByText('未取得', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '日足データを取得・更新' }).click();
+  await expect(page.getByRole('heading', { name: '価格・出来高', exact: true })).toBeVisible({ timeout: 30_000 });
+  await page.request.post(`${base}test/financial`);
+  await section.getByRole('button', { name: '財務・配当を取得・更新' }).focus(); await page.keyboard.press('Enter');
+  await expect(section.getByRole('row', { name: /売上高.*銘柄帰属を未確認/ })).toBeVisible({ timeout: 30_000 });
+  await expect(section.getByRole('row', { name: /利回り計算に用いる日足終値.*105/ })).toBeVisible();
+  const count = await (await page.request.get(`${base}test/counts`)).json();
+  await page.getByLabel('表示間隔').selectOption('week'); await page.getByLabel('表示間隔').selectOption('month');
+  await expect(section.getByRole('row', { name: /日足終値の基準日.*2026-09-11/ })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 }); await page.reload();
+  await expect(section.getByRole('row', { name: /予想配当利回り.*利用不可/ })).toBeVisible({ timeout: 30_000 });
+  expect(await (await page.request.get(`${base}test/counts`)).json()).toEqual(count);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(errors).toEqual([]);
+  await page.screenshot({ path: '.dexter/workspace-financial-mobile.png', fullPage: true });
+});
+
+test('financial foreign or failed saved response hides values without external replay', async ({ page }) => {
+  const id = '00000000-0000-4000-8000-000000000001';
+  await page.route(`**/api/workspace/instruments/${id}`, route => route.fulfill({ json: { schemaVersion: 'workspace_view_v1',
+    item: { schemaVersion: 'workspace_item_v1', instrumentId: id, code: '72030', label: 'Synthetic', favorite: 0, revision: 1 }, chart: null } }));
+  await page.route(`**/api/workspace/instruments/${id}/financial`, route => route.fulfill({ json: {
+    schemaVersion: 'workspace_financial_view_v1', instrumentId: '00000000-0000-4000-8000-000000000002', state: 'not_collected',
+    artifactDigest: null, through: null, checkedAt: null, note: 'foreign', rows: [], projection: null } }));
+  await page.goto(`${base}workspace?instrument=${id}`);
+  const section = page.getByRole('region', { name: '財務・配当', exact: true });
+  await expect(section.getByRole('alert')).toContainText('保存済み財務データを読み込めません');
+  await expect(section.getByRole('button')).toBeDisabled(); await expect(section.getByText('foreign')).toHaveCount(0);
+  expect(await (await page.request.get(`${base}test/counts`)).json()).toEqual({ calls: 0 });
+  await page.unroute(`**/api/workspace/instruments/${id}/financial`);
+  await page.route(`**/api/workspace/instruments/${id}/financial`, route => route.fulfill({ json: {
+    schemaVersion: 'workspace_financial_view_v1', instrumentId: id, state: 'unavailable',
+    artifactDigest: `sha256:${'a'.repeat(64)}`, through: '2026-09-11', checkedAt: '2026-09-11T08:00:00.000Z',
+    note: 'undeclared reason', rows: [['Invalid forecast', '999']], projection: {
+      policyVersion: 'workspace_dividend_projection_v1', cutoff: '2026-10-01', state: 'unavailable', reason: 'future_reason',
+      forecastReference: null, priceReference: null } } }));
+  await page.reload();
+  await expect(section.getByRole('alert')).toContainText('保存済み財務データを読み込めません');
+  await expect(section.getByRole('button')).toBeDisabled();
+  await expect(section.getByText('999')).toHaveCount(0);
+  expect(await (await page.request.get(`${base}test/counts`)).json()).toEqual({ calls: 0 });
+});
+
 test('saved supply pagination works by keyboard and touch; foreign owner response hides data without fetching', async ({ page }) => {
   const id = '00000000-0000-4000-8000-000000000001';
   const datasets = (['margin', 'issuer_short', 'sector_short'] as const).map(dataset => ({ dataset, label: dataset,

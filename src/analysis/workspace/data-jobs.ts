@@ -13,18 +13,20 @@ import { runEodWorker, type EodWorkerResult } from './eod-worker-client.js';
 import { collectWorkspaceSupply } from './supply-source.js';
 import { finalizeWorkspaceSupply, publishWorkspaceSupply } from './supply-jobs.js';
 import type { SupplyDataset } from './supply-artifact.js';
+import { collectWorkspaceFinancial } from './financial-source.js';
+import { publishWorkspaceFinancial, finalizeWorkspaceFinancial } from './financial-jobs.js';
 
 type State = 'queued' | 'running' | 'publishing' | 'published' | 'failed' | 'interrupted' | 'identity_review_required';
-export type WorkspaceDataJob = { job_id: string; kind: 'catalog' | 'technical' | SupplyDataset; accepted_at: string; state: State;
+export type WorkspaceDataJob = { job_id: string; kind: 'catalog' | 'technical' | 'financial' | SupplyDataset; accepted_at: string; state: State;
   identity: string | null; master_object: string | null; input_object: string | null; result_object: string | null;
   generation: number | null; error: string | null };
 const terminal = (state: State) => ['published', 'failed', 'interrupted', 'identity_review_required'].includes(state);
-const JobSchema = z.object({ job_id: Id, kind: z.enum(['catalog', 'technical', 'margin', 'issuer_short', 'sector_short']), accepted_at: z.iso.datetime(),
+const JobSchema = z.object({ job_id: Id, kind: z.enum(['catalog', 'technical', 'margin', 'issuer_short', 'sector_short', 'financial']), accepted_at: z.iso.datetime(),
   state: z.enum(['queued', 'running', 'publishing', 'published', 'failed', 'interrupted', 'identity_review_required']),
   identity: z.string().nullable(), master_object: z.string().nullable(), input_object: z.string().nullable(), result_object: z.string().nullable(),
   generation: z.number().int().positive().nullable(), error: z.string().max(80).nullable() }).strict();
 const projection = (job: WorkspaceDataJob): DashboardJobProjectionV1 => ({ domain: 'workspace',
-  kind: job.kind === 'catalog' ? 'workspace_catalog' : job.kind === 'technical' ? 'workspace_technical' : 'workspace_supply', jobId: job.job_id, terminal: terminal(job.state) });
+  kind: job.kind === 'catalog' ? 'workspace_catalog' : job.kind === 'technical' ? 'workspace_technical' : job.kind === 'financial' ? 'workspace_financial' : 'workspace_supply', jobId: job.job_id, terminal: terminal(job.state) });
 
 /** Server library only; Step 3 supplies guarded HTTP/Browser entry points. */
 export class WorkspaceDataJobs {
@@ -47,9 +49,9 @@ export class WorkspaceDataJobs {
     return parse(JobSchema, this.repository.db.sqlite.query<WorkspaceDataJob, [string]>('SELECT * FROM workspace_data_jobs WHERE job_id=?').get(id) ?? fail('not_found'));
   }
   async start(kind: WorkspaceDataJob['kind'], instrumentId?: string): Promise<string> {
-    if (!['catalog', 'technical', 'margin', 'issuer_short', 'sector_short'].includes(kind) || kind !== 'catalog' && !instrumentId) fail('invalid_input');
+    if (!['catalog', 'technical', 'margin', 'issuer_short', 'sector_short', 'financial'].includes(kind) || kind !== 'catalog' && !instrumentId) fail('invalid_input');
     const id = randomUUID();
-    await this.coordinator.admit({ kind: kind === 'catalog' ? 'workspace_catalog' : kind === 'technical' ? 'workspace_technical' : 'workspace_supply', jobId: id,
+    await this.coordinator.admit({ kind: kind === 'catalog' ? 'workspace_catalog' : kind === 'technical' ? 'workspace_technical' : kind === 'financial' ? 'workspace_financial' : 'workspace_supply', jobId: id,
       revalidate: () => { if (!this.coordinator.environment.apiKey()) fail('invalid_input'); if (instrumentId) this.repository.freezeIdentity(instrumentId); },
       create: async lease => {
         this.repository.db.transaction(() => {
@@ -120,6 +122,22 @@ export class WorkspaceDataJobs {
         this.repository.db.transaction(() => {
           this.repository.db.sqlite.run('UPDATE workspace_data_jobs SET result_object=? WHERE job_id=?', [objectKey(ref), job.job_id]); this.set(job.job_id, 'published');
         });
+      } else if (job.kind === 'financial') {
+        const identity = parse(FrozenIdentitySchema, JSON.parse(job.identity!));
+        const prepared = await collectWorkspaceFinancial(identity, rowRef(objectRow(this.repository.db, job.master_object!)),
+          this.repository, context, this.coordinator.environment);
+        const input = retainValidatedWorkspaceBytes(this.repository.db, 'workspace_financial_prepared_v1', json(prepared),
+          { scope: { kind: 'instrument-owned', instrumentId: identity.instrumentId }, effectiveDate: prepared.artifact.dataDate,
+            dependencies: [prepared.master], sourceDefinition: 'workspace_financial_source_v1', calculationVersion: 'workspace_financial_selection_v1' });
+        this.repository.db.transaction(() => this.repository.db.sqlite.run('UPDATE workspace_data_jobs SET input_object=? WHERE job_id=?', [objectKey(input), job.job_id]));
+        await this.checkpoint?.('before_publish', this.get(job.job_id));
+        if (context.signal.aborted) fail('invalid_input');
+        if (!this.matches(job, identity)) fail('identity_review_required');
+        this.coordinator.assertOwner(lease);
+        this.repository.db.transaction(() => this.set(job.job_id, 'publishing'));
+        await publishWorkspaceFinancial(this.repository, this.artifactRoot, this.get(job.job_id), new Date(this.coordinator.environment.wallNowMs()).toISOString());
+        await this.checkpoint?.('after_publish', this.get(job.job_id));
+        await finalizeWorkspaceFinancial(this.repository, this.artifactRoot, this.get(job.job_id), () => this.checkpoint?.('before_binding', this.get(job.job_id)));
       } else if (job.kind !== 'technical') {
         const identity = parse(FrozenIdentitySchema, JSON.parse(job.identity!));
         const prepared = await collectWorkspaceSupply(job.kind, identity, rowRef(objectRow(this.repository.db, job.master_object!)),
@@ -221,6 +239,7 @@ export class WorkspaceDataJobs {
   async recover(id: string) {
     const job = this.get(id); if (terminal(job.state)) return;
     if (job.kind === 'technical' && job.state === 'publishing') await this.finalize(id);
+    else if (job.kind === 'financial' && job.state === 'publishing') await finalizeWorkspaceFinancial(this.repository, this.artifactRoot, job);
     else if (job.kind !== 'catalog' && job.state === 'publishing') await finalizeWorkspaceSupply(this.repository, this.artifactRoot, job);
     else this.repository.db.transaction(() => {
       if (job.generation) this.repository.failCatalog(job.generation); this.set(id, 'interrupted');

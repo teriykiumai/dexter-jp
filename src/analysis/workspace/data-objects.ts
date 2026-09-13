@@ -13,6 +13,7 @@ import { writeExclusive, type PublicationCheckpoint } from './files.js';
 import { registerReferences, retainVerifiedObject, type VerifiedObject } from './references.js';
 import type { WorkspaceDatabase } from './database.js';
 import { supplyCodecs, validateSupplyLinks } from './supply-objects.js';
+import { financialCodecs, validateFinancialLinks } from './financial-objects.js';
 
 const FetchEvidenceSchema = z.object({ fetchedAt: z.iso.datetime(), pageCount: z.number().int().positive().max(20),
   rowCount: z.number().int().nonnegative().max(8000), complete: z.literal(true) }).strict();
@@ -30,6 +31,7 @@ const metadata = (scope: ObjectMetadata['scope'], effectiveDate: string, depende
   ({ scope, effectiveDate, dependencies, sourceDefinition, calculationVersion });
 export const workspaceDataCodecs: ReferenceCodecs = new Map([
   ...supplyCodecs,
+  ...financialCodecs,
   ['workspace_catalog_v1', value => {
     const catalog = parse(CatalogObjectSchema, value);
     const window = createTechnicalSourceRequestWindowV1(catalog.acceptedAt);
@@ -111,6 +113,7 @@ export function validateDataObjectLinks(objects: readonly VerifiedObject[]): voi
   for (const object of objects) {
     if (!workspaceDataCodecs.has(object.ref.codec)) continue;
     if (supplyCodecs.has(object.ref.codec)) { validateSupplyLinks(object, get); continue; }
+    if (financialCodecs.has(object.ref.codec)) { validateFinancialLinks(object, get); continue; }
     const value: unknown = JSON.parse(new TextDecoder().decode(object.bytes));
     if (object.ref.codec === 'workspace_episode_v1') {
       const e = parse(EpisodeObjectSchema, value), key = json(e.catalog);
