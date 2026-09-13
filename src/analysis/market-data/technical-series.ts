@@ -271,8 +271,7 @@ export function calculateTechnicalSeriesV1(input: {
       const volume = bars.reduce((sum, bar) => sum + bar.volume, 0);
       if (!Number.isFinite(volume)) return fail('source_invalid_response');
       const sourceGaps = dailyObservations.filter(row => row.kind === 'gap' && row.date >= period.periodStart && row.date <= period.periodEnd).map(row => row.date);
-      const unavailable: IndicatorValueV1 = sourceGaps.length ? { state: 'unavailable', reason: 'source_gap' as const }
-        : { state: 'unavailable', reason: partial ? 'partial_period' as const : 'warmup' as const };
+      const unavailable: IndicatorValueV1 = { state: 'unavailable', reason: partial ? 'partial_period' : 'warmup' };
       intervals[interval].push({
         ...period, displayDate: last.date, firstSessionDate: first.date, lastSessionDate: last.date, partial,
         open: first.open, high: Math.max(...bars.map(bar => bar.high)), low: Math.min(...bars.map(bar => bar.low)),

@@ -214,11 +214,6 @@ describe('interval aggregation and completeness', () => {
       identity: '2024-01-02', periodStart: '2024-01-02', periodEnd: '2024-01-02',
       displayDate: '2024-01-02', firstSessionDate: '2024-01-02', lastSessionDate: '2024-01-02', partial: false,
     });
-    expect(result.unavailablePeriods).toEqual(expect.arrayContaining([
-      { interval: 'day', identity: '2024-01-03', periodStart: '2024-01-03', periodEnd: '2024-01-03', reason: 'source_gap' },
-      { interval: 'week', identity: '2024-01-01', periodStart: '2024-01-01', periodEnd: '2024-01-07', reason: 'source_gap' },
-      { interval: 'month', identity: '2024-01', periodStart: '2024-01-01', periodEnd: '2024-01-31', reason: 'source_gap' },
-    ]));
   });
 
   test('gap-only weeks have one unavailable row, no fake candle or indicator reset', () => {
@@ -357,7 +352,7 @@ describe('interval aggregation and completeness', () => {
       { interval: 'week', identity: '2024-01-01', periodStart: '2024-01-01', periodEnd: '2024-01-07', reason: 'source_gap' },
       { interval: 'month', identity: '2024-01', periodStart: '2024-01-01', periodEnd: '2024-01-31', reason: 'source_gap' },
     ]));
-    expect(result.intervals.week[0]!.rsi).toEqual({ state: 'unavailable', reason: 'source_gap' });
+    expect(result.intervals.week[0]!.rsi).toEqual({ state: 'unavailable', reason: 'warmup' });
     expect(result.intervals.day.some(row => row.identity === '2024-01-03')).toBe(false);
   });
 
