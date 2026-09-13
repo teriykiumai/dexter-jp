@@ -115,7 +115,7 @@ function nullableSourceNumber(row: Record<string, unknown>, field: string): numb
   return invalidResponse(`${field} must be numeric or blank.`);
 }
 
-function mapDividendSummaryRow(
+export function mapDividendSummaryRow(
   value: unknown,
   requestedIssuerCode: string,
 ): DividendSummarySourceRow {
