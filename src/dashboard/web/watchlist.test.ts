@@ -68,7 +68,8 @@ describe('complete Watchlist light surface', () => {
       expect(document.querySelector('h1')?.textContent).toBe('保存済み分析');
       expect(document.querySelector('.watchlist-summary')).toBeNull();
       expect(document.querySelector('table')).toBeNull();
-      expect(document.querySelectorAll('nav a').length).toBe(2);
+      expect([...document.querySelectorAll('nav a')].map(link => link.textContent)).toEqual(['銘柄Workspace', '保存済み分析', '市場概況']);
+      expect(document.querySelector('nav a')?.getAttribute('href')).toBe('/workspace');
       expect(document.querySelector(error ? '[role="alert"]' : '[role="status"]')).not.toBeNull();
       expect(document.querySelector('h2')?.textContent).not.toBe('保存済み分析はありません');
     }

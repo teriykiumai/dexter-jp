@@ -4,7 +4,7 @@
 
 **Date:** 2026-09-12
 
-**Status:** Step 0 merged in PR #113; Step 1 SQLite foundation merged in PR #114. Step 2A is an implementation candidate; later steps still require their own implementation, validation, review and merge.
+**Status:** Step 0 merged in PR #113; Step 1 SQLite foundation merged in PR #114; Step 2A library merged in PR #115 with its cross-date identity gate still open. Step 3 is an implementation candidate; later steps require their own implementation, validation, review and merge.
 
 ## 1. Authority and migration boundary
 
@@ -511,7 +511,7 @@ typed request/response schemas, bounded pagination/ranges and revision conflicts
 No GET performs an external fetch or creates a Workspace. Explicit open may create
 the Workspace; merely listing a suggestion does not.
 
-Use an instrumentId URL (`/stock/:instrumentId`, interval/selection query state),
+Use the canonical instrumentId URL (`/workspace?instrument=<instrumentId>&interval=day|week|month`, superseding the earlier `/stock/:instrumentId` proposal),
 with names/codes as labels. URL navigation overrides saved defaults; preferences
 supply omitted values. Back/reload/bookmark never retarget a reused ticker. Legacy
 ticker links need explicit identity resolution or remain legacy, never silent
@@ -594,6 +594,59 @@ reproducible and join backup closure. Initial implementation has no automatic GC
 future retention may remove only proven-unreferenced revisions under a reviewed policy.
 
 ## 10. Delivery sequence and first milestone
+
+Step 3 adds `/workspace?instrument=<instrumentId>&interval=day|week|month` and a
+common-header link. The legacy landing/history routes stay accessible until Step 8.
+Unknown/duplicate route selectors fail explicitly; Back and reload preserve the exact
+instrument and interval. Candidate search and Workspace GET do not create a recent:
+the explicit open POST records it. Favorites use the existing Workspace revision.
+
+The guarded `/api/workspace` adapter shares the process session and coordinator.
+GET covers search, recents, session, active/exact jobs and saved instrument charts;
+POST covers explicit open, revision-checked favorites and catalog/EOD admission.
+DELETE `/api/workspace/jobs/:id` requests cancellation with an empty body. Queued/
+running jobs accept cancellation (202) while publication remains preventable;
+publishing, terminal or already-activated catalog jobs reject it (409), without
+undoing publication. Cancellation invalidates a pending catalog generation even
+during yielded import and settles in the inherited `failed` state. The UI exposes
+a keyboard/touch-accessible cancel button.
+After Host validation, exact-route method matching returns 405 with `Allow` before
+mutation authentication or payload validation. Supported mutations then require
+Origin/CSRF, query validation and bounded body validation before any side effect.
+Host/Origin/CSRF, JSON media type, strict bounded bodies and safe error mapping apply.
+All responses use strict versioned runtime DTOs, parsed at producer and Browser
+boundaries: `workspace_search_v1`, `workspace_recents_v1`, `workspace_item_v1`,
+`workspace_view_v1`, `workspace_chart_v1`, `workspace_job_v1`, `workspace_active_v1`,
+`workspace_error_v1`, and the inherited `dashboard_session_v1`. Chart DTO fields are
+an explicit projection, independent of the internal Technical Artifact schema.
+Unknown fields/versions and malformed nested data fail closed; Browser validation
+does not recalculate financial values.
+No Drawing API is added before 4A. Interval/pane changes are presentation-only in
+Step 3; URL preserves interval, while saved chart-control preferences are deferred.
+
+Chart reads pin the current binding's exact artifact and receipt. A read-only worker
+validates both and their evidence closure before returning the eligible projection;
+at most one chart-read worker runs with eight admitted reads including the active
+read. Errors leave data unavailable without source/latest fallback. Data jobs remain
+under the main writer; reads, navigation and polling never initiate external fetch.
+Active-job polling runs once per second while visible and latches uncertain reads
+until full reload. Late read/open responses cannot redirect or replace a new selection.
+Definite 4xx admission refusals preserve status/code and reconcile active state by
+GET before enabling a manual retry. They never replay POST automatically. Network,
+5xx, malformed/mismatched admission results or failed reconciliation retain the
+reload-only latch. Cancellation uses the same ambiguity rule.
+Exact-value tables expose all rows in bounded 100-row pages, separate from the full
+canvas series. A 2,600-candle browser fixture covers interval/Back navigation and
+table reachability; it is a presentation stress fixture, not historical source proof.
+Any week/month containing a source-all-null session is typed as `source_gap` and is
+excluded from confirmed OHLCV indicator seeds. It is never treated as a normal
+ongoing `partial_period`; Browser only renders the deterministic unavailable state.
+This rule is owned only by the non-persisted server-side `workspace_chart_v1`
+projection, including gap-only periods with no candle. Both legacy V1 and the
+merged Step 2A Workspace V2 retain their exact stored calculations, codecs, bytes
+and immutable identities. Projection recomputes indicators from verified eligible
+OHLCV and exact input gap evidence; it never rewrites either artifact. The displayed
+confirmed-indicator date excludes partial and source-gap candles.
 
 Each step has its own reviewable diff and inherited regression checks. New names
 below identify module responsibilities, not Step 0 runtime additions.

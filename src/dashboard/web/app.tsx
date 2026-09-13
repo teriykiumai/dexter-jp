@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from 'react';
 import { createRoot } from 'react-dom/client';
+import { WorkspacePage } from './workspace-page.js';
 import {
   AnalysisSnapshotSchema,
   type AnalysisSnapshot,
@@ -2278,4 +2279,4 @@ function App() {
 
 const rootElement = document.getElementById('root');
 if (!rootElement) throw new Error('Dashboard root element was not found.');
-createRoot(rootElement).render(<StrictMode><App /></StrictMode>);
+createRoot(rootElement).render(<StrictMode>{window.location.pathname === '/workspace' ? <WorkspacePage /> : <App />}</StrictMode>);

@@ -69,6 +69,16 @@ export class WorkspaceDataJobs {
     const job = this.get(id);
     if (terminal(job.state)) return;
     if (job.state === 'publishing') fail('revision_conflict');
+    if (job.kind === 'catalog' && job.generation) {
+      // Catalog import yields between batches. Invalidating its pending generation
+      // makes every subsequent write/final activation fail, including after fetch.
+      this.repository.db.transaction(() => {
+        const generation = this.repository.db.sqlite.query<{ state: string }, [number]>(
+          'SELECT state FROM catalog_generations WHERE generation=?').get(job.generation!);
+        if (generation?.state !== 'pending') fail('revision_conflict');
+        this.repository.failCatalog(job.generation!);
+      });
+    }
     this.controllers.get(id)?.abort();
   }
   private set(id: string, state: State, error: string | null = null) {

@@ -31,6 +31,7 @@ export function DashboardHeader({ page = 'detail', ...navigation }: PageNavigati
         <div className="design-content dashboard-header-content">
           <span className="dashboard-wordmark">DEXTER / JP</span>
           <nav aria-label="共通ナビゲーション" className="dashboard-page-nav">
+            <a href="/workspace">銘柄Workspace</a>
             <a
               aria-current={page === 'watchlist' ? 'page' : undefined}
               href={buildWatchlistPath(navigation.currentSearch)}
