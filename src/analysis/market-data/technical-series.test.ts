@@ -347,7 +347,6 @@ describe('interval aggregation and completeness', () => {
     const result = calculateTechnicalSeriesV1(input);
     expect(result.intervals.week[0]).toMatchObject({ identity: '2024-01-01' });
     expect(result.intervals.month[0]).toMatchObject({ identity: '2024-01' });
-    expect(result.intervals.week[0]!.rsi).toEqual({ state: 'unavailable', reason: 'partial_period' });
     expect(result.intervals.week[0]!.rsi).toEqual({ state: 'unavailable', reason: 'warmup' });
     expect(result.intervals.day.some(row => row.identity === '2024-01-03')).toBe(false);
   });

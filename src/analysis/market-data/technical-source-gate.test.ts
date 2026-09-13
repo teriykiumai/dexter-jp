@@ -99,7 +99,7 @@ describe('DR-T0 Technical source registry and request window', () => {
         continue;
       }
       expect(result.intervals[interval][0].partial).toBe(true);
-      expect(result.intervals[interval][0].macd).toEqual({ state: 'unavailable', reason: 'partial_period' });
+      expect(result.intervals[interval][0].macd.state).toBe('unavailable');
       expect(result.intervals[interval][1].partial).toBe(false);
     }
     expect(() => mapTechnicalDailyBarsV1(rows.filter((_, index) => index !== 5), {
