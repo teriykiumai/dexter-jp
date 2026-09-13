@@ -6,11 +6,13 @@ import { validateReceiptV1, MarketDataObservationReceiptV1Schema } from '../mark
 import { validateCurrentTechnicalMasterV1, createTechnicalSourceRequestWindowV1, mapTechnicalCalendarV1,
   resolveTechnicalEligibleThroughV1 } from '../market-data/technical-source-gate.js';
 import { WorkspaceTechnicalCodec } from './technical-artifact.js';
-import { WorkspaceMasterSchema, TechnicalInputSchema, calculateWorkspaceTechnical } from './technical-input.js';
-import { DateValue, Id, ObjectRefSchema, FrozenIdentitySchema, ObjectMetadataSchema, digest, json, fail, parse, type ReferenceCodecs, type ObjectRef, type ObjectMetadata } from './contracts.js';
+import { WorkspaceMasterSchema, EpisodeObjectSchema, TechnicalInputSchema, calculateWorkspaceTechnical } from './technical-input.js';
+export { EpisodeObjectSchema } from './technical-input.js';
+import { DateValue, ObjectRefSchema, FrozenIdentitySchema, ObjectMetadataSchema, digest, json, fail, parse, type ReferenceCodecs, type ObjectRef, type ObjectMetadata } from './contracts.js';
 import { writeExclusive, type PublicationCheckpoint } from './files.js';
 import { registerReferences, retainVerifiedObject, type VerifiedObject } from './references.js';
 import type { WorkspaceDatabase } from './database.js';
+import { supplyCodecs, validateSupplyLinks } from './supply-objects.js';
 
 const FetchEvidenceSchema = z.object({ fetchedAt: z.iso.datetime(), pageCount: z.number().int().positive().max(20),
   rowCount: z.number().int().nonnegative().max(8000), complete: z.literal(true) }).strict();
@@ -21,15 +23,13 @@ export const CatalogObjectSchema = z.object({ version: z.literal('workspace_cata
   sources: z.object({ master: FetchEvidenceSchema.extend({ endpoint: z.literal('/v2/equities/master') }).strict(),
     calendar: FetchEvidenceSchema.extend({ endpoint: z.literal('/v2/markets/calendar') }).strict() }).strict(),
   rows: z.array(WorkspaceMasterSchema).min(1).max(10000) }).strict();
-export const EpisodeObjectSchema = z.object({ version: z.literal('workspace_episode_v1'), instrumentId: Id,
-  observation: WorkspaceMasterSchema, from: DateValue, catalog: ObjectRefSchema,
-  previous: ObjectRefSchema.nullable() }).strict().refine(v => v.from <= v.observation.Date);
 export const ReceiptObjectSchema = z.object({ version: z.literal('workspace_receipt_v1'), identity: FrozenIdentitySchema,
   artifact: ObjectRefSchema, receipt: MarketDataObservationReceiptV1Schema }).strict();
 const metadata = (scope: ObjectMetadata['scope'], effectiveDate: string, dependencies: ObjectRef[],
   sourceDefinition = 'workspace_jquants_eod_v1', calculationVersion = 'technical_chart_calculation_v2'): ObjectMetadata =>
   ({ scope, effectiveDate, dependencies, sourceDefinition, calculationVersion });
 export const workspaceDataCodecs: ReferenceCodecs = new Map([
+  ...supplyCodecs,
   ['workspace_catalog_v1', value => {
     const catalog = parse(CatalogObjectSchema, value);
     const window = createTechnicalSourceRequestWindowV1(catalog.acceptedAt);
@@ -110,6 +110,7 @@ export function validateDataObjectLinks(objects: readonly VerifiedObject[]): voi
   };
   for (const object of objects) {
     if (!workspaceDataCodecs.has(object.ref.codec)) continue;
+    if (supplyCodecs.has(object.ref.codec)) { validateSupplyLinks(object, get); continue; }
     const value: unknown = JSON.parse(new TextDecoder().decode(object.bytes));
     if (object.ref.codec === 'workspace_episode_v1') {
       const e = parse(EpisodeObjectSchema, value), key = json(e.catalog);

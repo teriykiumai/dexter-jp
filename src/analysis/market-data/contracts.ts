@@ -87,6 +87,7 @@ export const MARKET_DATA_MODULE_IDS_V1 = [
   'tokyo_nagoya_foreign_flow', 'etf_1321_eod', 'etf_1321_2633_relative',
 ] as const;
 export const MARKET_DATA_CALCULATION_VERSIONS_V1 = [
+  'workspace_supply_calculation_v1',
   'technical_chart_calculation_v2', 'tse_margin_quantities_calculation_v1',
   'market_short_ratio_calculation_v1', 'margin_1570_calculation_v1',
   'tokyo_nagoya_foreign_flow_calculation_v1', 'etf_1321_eod_calculation_v1',
@@ -96,10 +97,13 @@ export type MarketDataModuleIdV1 = typeof MARKET_DATA_MODULE_IDS_V1[number];
 export type MarketDataCalculationVersionV1 = typeof MARKET_DATA_CALCULATION_VERSIONS_V1[number];
 const overviewTargetFields = { kind: z.literal('overview'), moduleId: z.enum(MARKET_DATA_MODULE_IDS_V1),
   sourceId: z.enum(MARKET_DATA_MODULE_IDS_V1.map(id => `${id}_v1` as const)) };
+const workspaceTargetFields = { kind: z.literal('workspace'),
+  key: z.string().regex(/^(?:(?:margin|issuer_short)_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|sector_short_[0-9]{4})$/) };
 export const MarketDataTargetV1Schema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('technical'), ticker: CanonicalTickerSchema }).strict(),
   z.object(overviewTargetFields).strict(),
-]).refine(target => target.kind === 'technical' || target.sourceId === `${target.moduleId}_v1`);
+  z.object(workspaceTargetFields).strict(),
+]).refine(target => target.kind !== 'overview' || target.sourceId === `${target.moduleId}_v1`);
 export type MarketDataTargetV1 = z.infer<typeof MarketDataTargetV1Schema>;
 const envelopeTarget = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('technical'), ticker: CanonicalTickerSchema,
@@ -118,6 +122,7 @@ const roleSets: Readonly<Record<'technical' | MarketDataModuleIdV1, readonly str
   etf_1321_2633_relative: [...etfHistoryRoles('1321'), ...etfHistoryRoles('2633'), 'trading_calendar'],
 };
 export function marketDataRolesV1(target: MarketDataTargetV1): readonly string[] {
+  if (target.kind === 'workspace') return ['workspace_source'];
   return [...roleSets[target.kind === 'technical' ? 'technical' : target.moduleId]].sort();
 }
 export const MarketDataSourcePayloadEnvelopeV1Schema = z.object({
@@ -174,9 +179,10 @@ export function assertMarketDataSafeV1(value: CanonicalJsonValue, environment: N
   try { visit(value); } catch { failMarketData('invalid_artifact'); }
 }
 
-const identityFieldsV1 = { scope: z.enum(['technical', 'overview']), tickerOrSourceId: z.string(),
+const identityFieldsV1 = { scope: z.enum(['technical', 'overview', 'workspace']), tickerOrSourceId: z.string(),
   rootRelativeIdentity: z.string() };
 function validScope(scope: string, key: string): boolean {
+  if (scope === 'workspace') return workspaceTargetFields.key.safeParse(key).success;
   return scope === 'technical' ? CanonicalTickerSchema.safeParse(key).success
     : MARKET_DATA_MODULE_IDS_V1.some(id => key === `${id}_v1`);
 }
@@ -200,6 +206,7 @@ export const MarketDataObservationReceiptV1Schema = z.object({
   && v.artifactIdentity.tickerOrSourceId === marketDataTargetKeyV1(v.target));
 export type MarketDataObservationReceiptV1 = z.infer<typeof MarketDataObservationReceiptV1Schema>;
 export function marketDataTargetKeyV1(target: MarketDataTargetV1): string {
+  if (target.kind === 'workspace') return target.key;
   return target.kind === 'technical' ? target.ticker : target.sourceId;
 }
 export function receiptIdentityV1(receipt: MarketDataObservationReceiptV1): MarketDataObservationReceiptIdentityV1 {

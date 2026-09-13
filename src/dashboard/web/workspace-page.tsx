@@ -1,5 +1,6 @@
 import { read, mutate, WorkspaceHttpError } from './workspace-http.js';
 import { HorizontalDrawings } from './horizontal-drawings.js';
+import { WorkspaceSupply, type SupplyKind } from './workspace-supply.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { z } from 'zod';
 import { Button, Card, DashboardDesign, TableScroll } from './primitives.js';
@@ -70,12 +71,12 @@ export function WorkspacePage() {
     document.addEventListener('visibilitychange', schedule); schedule();
     return () => { clearTimeout(timer); request?.abort(); document.removeEventListener('visibilitychange', schedule); };
   }, [job, blocked]);
-  async function start(kind: 'catalog' | 'technical') {
+  async function start(kind: WorkspaceJobView['kind']) {
     if (busy || blocked || !ready || job && !workspaceTerminal(job)) return;
     setBusy(true); setMessage(null);
     try { const next = await mutate('/api/workspace/jobs', kind === 'catalog' ? { kind } : { kind, instrumentId: route?.id }, WorkspaceJobViewSchema);
       WorkspaceJobViewSchema.parse(next);
-      if (next.kind !== kind || kind === 'technical' && next.instrumentId !== route?.id) throw new Error('受付結果を確認できません。ページ全体を再読み込みしてください。');
+      if (next.kind !== kind || kind !== 'catalog' && next.instrumentId !== route?.id) throw new Error('受付結果を確認できません。ページ全体を再読み込みしてください。');
       setJob(next); if (workspaceTerminal(next)) refresh(value => value + 1);
     } catch (error) { await mutationFailure(error); }
     finally { setBusy(false); }
@@ -126,17 +127,19 @@ export function WorkspacePage() {
       </div></Card></div>
       {blocked ? <p role="alert">ジョブ状態の確認を停止しました。再送せずページ全体を再読み込みしてください。</p> : null}
       {blockingKind ? <p role="status">他のデータジョブが実行中です。完了後にページを再読み込みしてください。</p> : null}
-      {job ? <p role="status">{job.kind === 'catalog' ? '銘柄一覧' : `日足価格${job.instrumentId !== route?.id ? '（別の銘柄）' : ''}`}: {job.state}</p> : null}
+      {job ? <p role="status">{job.kind === 'catalog' ? '銘柄一覧' : `${job.kind === 'technical' ? '日足価格' : '需給データ'}${job.instrumentId !== route?.id ? '（別の銘柄）' : ''}`}: {job.state}</p> : null}
       {job && !workspaceTerminal(job) ? <Button disabled={busy || blocked || job.state === 'publishing'} onClick={() => void cancel()}>取得をキャンセル</Button> : null}
       {message ? <p role="alert">{message}</p> : null}
       {!route ? <p role="alert">Workspace URLが不正です。</p> : route.id ? <WorkspaceInstrument key={route.id} id={route.id} interval={route.interval}
-        revision={revision} navigate={interval => navigate(route.id, interval)} disabled={disabled} acquire={() => void start('technical')} onFavorite={() => refresh(value => value + 1)} /> : <p>普通株を選択してWorkspaceを開いてください。Snapshot・LLM API keyは不要です。</p>}
+        revision={revision} navigate={interval => navigate(route.id, interval)} disabled={disabled} acquire={() => void start('technical')}
+        acquireSupply={kind => void start(kind)} onFavorite={() => refresh(value => value + 1)} /> : <p>普通株を選択してWorkspaceを開いてください。Snapshot・LLM API keyは不要です。</p>}
     </main>
   </DashboardDesign>;
 }
 
-function WorkspaceInstrument({ id, interval, revision, navigate, disabled, acquire, onFavorite }: {
+function WorkspaceInstrument({ id, interval, revision, navigate, disabled, acquire, acquireSupply, onFavorite }: {
   id: string; interval: Interval; revision: number; navigate: (interval: Interval) => void; disabled: boolean; acquire: () => void; onFavorite: () => void;
+  acquireSupply: (kind: SupplyKind) => void;
 }) {
   const [view, setView] = useState<WorkspaceView | null>(null), [error, setError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<string[]>([]), [sma, setSma] = useState(true), [selected, setSelected] = useState<string | null>(null);
@@ -202,5 +205,6 @@ function WorkspaceInstrument({ id, interval, revision, navigate, disabled, acqui
           {[row.open, row.high, row.low, row.close, row.volume, indicator(row.sma20), indicator(row.rsi), indicator(row.macd), indicator(row.signal), indicator(row.histogram)].map((value, index) => <td className={typeof value === 'number' ? 'numeric-cell' : undefined} key={index}>{value}</td>)}</tr>)}</tbody></table></TableScroll>
       {gaps.length ? <ul aria-label="source不足の期間">{gaps.map(gap => <li key={gap.identity}>{gap.periodStart}–{gap.periodEnd}: source不足（価格利用不可）</li>)}</ul> : null}
     </div></Card> : null}
+    {view ? <WorkspaceSupply id={id} revision={revision} disabled={disabled} acquire={acquireSupply} /> : null}
   </section>;
 }

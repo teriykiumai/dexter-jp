@@ -9,6 +9,30 @@ import { WorkspaceDatabase, workspaceFingerprint } from './database.js';
 import { digest, json } from './contracts.js';
 import { backupWorkspace, validateWorkspaceBackup, restoreWorkspace } from './backup.js';
 
+test('V2 job migration rolls back failed DDL and preserves existing jobs and immutable triggers on reopen', () => {
+  const root = mkdtempSync(resolve(tmpdir(), 'dexter-v2-jobs-'));
+  try {
+    const old = new Database(resolve(root, 'workspace.sqlite'), { create: true });
+    migrateWorkspace(old, WORKSPACE_MIGRATIONS.slice(0, 2));
+    const id = randomUUID();
+    old.run("INSERT INTO workspace_data_jobs(job_id,kind,accepted_at,state) VALUES (?,'catalog','2026-09-11T00:00:00.000Z','interrupted')", [id]);
+    const before = old.query('SELECT * FROM workspace_data_jobs').all();
+    expect(() => migrateWorkspace(old, [...WORKSPACE_MIGRATIONS.slice(0, 2),
+      { version: 3, sql: `${WORKSPACE_MIGRATIONS[2].sql}\nINVALID SQL;` }])).toThrow();
+    expect(old.query('PRAGMA user_version').get()).toEqual({ user_version: 2 });
+    expect(old.query('SELECT * FROM workspace_data_jobs').all()).toEqual(before);
+    old.close();
+    const reopened = new WorkspaceDatabase(root);
+    try {
+      expect(reopened.sqlite.query('PRAGMA user_version').get()).toEqual({ user_version: 3 });
+      expect(reopened.sqlite.query('SELECT * FROM workspace_data_jobs').all()).toEqual(before);
+      expect(() => reopened.sqlite.run("UPDATE workspace_data_jobs SET accepted_at='changed'")).toThrow('immutable');
+      expect(() => reopened.sqlite.run("INSERT INTO workspace_data_jobs(job_id,kind,accepted_at,state) VALUES (?,'margin','2026-09-11T00:00:00.000Z','queued')", [randomUUID()])).toThrow();
+      expect(reopened.sqlite.query('PRAGMA foreign_key_check').all()).toEqual([]);
+    } finally { reopened.close(); }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('V1 DB and backup remain readable; writable reopen migrates without losing preferences or instrument IDs', () => {
   const root = mkdtempSync(resolve(tmpdir(), 'dexter-v1-backup-')), destination = `${root}-restored`;
   const id = randomUUID(), path = resolve(root, 'workspace.sqlite');
@@ -27,7 +51,7 @@ test('V1 DB and backup remain readable; writable reopen migrates without losing 
     expect(validateWorkspaceBackup(backup, new Map()).schemaVersion).toBe(1);
     restoreWorkspace(root, destination, new Map());
     const upgraded = new WorkspaceDatabase(destination);
-    try { expect(upgraded.sqlite.query('PRAGMA user_version').get()).toEqual({ user_version: 2 });
+    try { expect(upgraded.sqlite.query('PRAGMA user_version').get()).toEqual({ user_version: 3 });
       expect(upgraded.sqlite.query('SELECT instrument_id,favorite,revision FROM workspaces').get()).toEqual({ instrument_id: id, favorite: 1, revision: 7 });
       expect(upgraded.sqlite.query('SELECT revision FROM chart_preferences').get()).toEqual({ revision: 4 });
     } finally { upgraded.close(); }

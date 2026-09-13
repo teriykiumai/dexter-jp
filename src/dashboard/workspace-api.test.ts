@@ -18,7 +18,7 @@ test('Workspace guarded API: explicit catalog/EOD, read-only search/open URL, ex
     expect((await call('search?q=7203')).status).toBe(200); expect(f.calls()).toBe(0);
     for (const [path, method, allow] of [['jobs', 'GET', 'POST'], ['search', 'POST', 'GET'], ['session', 'DELETE', 'GET'],
       ['recents', 'PUT', 'GET'], ['jobs/active', 'POST', 'GET'], ['jobs/bad-id', 'POST', 'GET, DELETE'],
-      ['instruments/bad-id', 'POST', 'GET'], ['instruments/bad-id/open', 'GET', 'POST'], ['instruments/bad-id/favorite', 'DELETE', 'POST']]) {
+      ['instruments/bad-id', 'POST', 'GET'], ['instruments/bad-id/supply', 'POST', 'GET'], ['instruments/bad-id/open', 'GET', 'POST'], ['instruments/bad-id/favorite', 'DELETE', 'POST']]) {
       const refused = await call(`${path}?invalid=1`, method, undefined, { origin: 'https://evil.test', 'X-Dexter-CSRF': 'bad' });
       expect(refused.status).toBe(405); expect(refused.headers.get('Allow')).toBe(allow!);
       expect((await call(path!, method, undefined, { host: 'evil.test' })).status).toBe(403);
@@ -37,6 +37,13 @@ test('Workspace guarded API: explicit catalog/EOD, read-only search/open URL, ex
     const catalog = await (await call('jobs', 'POST', { kind: 'catalog' })).json() as WorkspaceJobView;
     expect((await f.jobs.wait(catalog.id)).state).toBe('published');
     const id = f.repository.search('7203')[0]!.instrumentId;
+    const supplyCalls = f.calls();
+    expect((await call(`instruments/${id}/supply?latest=1`)).status).toBe(400);
+    expect((await call(`instruments/${id}/supply`, 'GET', undefined, { host: 'evil.test' })).status).toBe(403);
+    expect(WorkspaceResponseSchema.safeParse(await (await call(`instruments/${id}/supply`)).json()).success).toBe(true);
+    for (const kind of ['margin', 'issuer_short', 'sector_short'])
+      expect((await call('jobs', 'POST', { kind, instrumentId: id }, { 'X-Dexter-CSRF': 'invalid' })).status).toBe(403);
+    expect(f.calls()).toBe(supplyCalls);
     expect((await call(`instruments/${id}`)).status).toBe(200);
     expect(f.db.sqlite.query('SELECT COUNT(*) AS count FROM workspaces').get()).toEqual({ count: 0 });
     expect((await call(`instruments/${id}/open`, 'POST', {})).status).toBe(200);

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { calculateSma } from '../../tools/finance/technical-engine.js';
-import { DateValue, FrozenIdentitySchema, ObjectRefSchema, parse, fail, json, digest } from './contracts.js';
+import { DateValue, Id, FrozenIdentitySchema, ObjectRefSchema, parse, fail, json, digest } from './contracts.js';
 import { normalizeTechnicalDailyObservationV1, calculateTechnicalSeriesV1 } from '../market-data/technical-series.js';
 import { mapTechnicalCalendarV1, mapTechnicalDailyBarsV1, validateCurrentTechnicalMasterV1 } from '../market-data/technical-source-gate.js';
 
@@ -11,6 +11,9 @@ export const WorkspaceDailyRowSchema = z.object({ Date: DateValue, Code: z.strin
   AdjFactor: z.number().positive().finite(), ExRT: z.enum(['1', '2', '3']).nullable() }).strict();
 export const WorkspaceMasterSchema = z.object({ Date: DateValue, Code: z.string(), CoName: z.string().min(1).max(160),
   Mkt: z.string(), ProdCat: z.literal('011') }).strict();
+export const EpisodeObjectSchema = z.object({ version: z.literal('workspace_episode_v1'), instrumentId: Id,
+  observation: WorkspaceMasterSchema, from: DateValue, catalog: ObjectRefSchema,
+  previous: ObjectRefSchema.nullable() }).strict().refine(v => v.from <= v.observation.Date);
 export const TechnicalInputSchema = z.object({ version: z.literal('workspace_technical_input_v1'),
   identity: FrozenIdentitySchema, masterEvidence: ObjectRefSchema, eligibilityFrom: DateValue,
   master: WorkspaceMasterSchema, queryFrom: DateValue, queryTo: DateValue, calculationDate: DateValue,
