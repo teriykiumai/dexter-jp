@@ -5,12 +5,14 @@ import { financialFixture, financialSourceFixture } from './financial-test-fixtu
 import { readWorkspaceFinancial } from '../../dashboard/workspace-financial.js';
 import { WorkspaceDatabase } from './database.js';
 import { WorkspaceRepository } from './repository.js';
-import { workspaceDataCodecs } from './data-objects.js';
-import { validateReferences, rowRef, objectRow } from './references.js';
+import { workspaceDataCodecs, retainWorkspaceObject, EpisodeObjectSchema } from './data-objects.js';
+import { validateReferences, rowRef, objectRow, resolveReference } from './references.js';
 import { backupWorkspace, restoreWorkspace } from './backup.js';
 import { finalizeWorkspaceFinancial } from './financial-jobs.js';
 import { runFinancialWorker } from './financial-worker-client.js';
-import type { StoredDrawing } from './contracts.js';
+import { parse, type StoredDrawing } from './contracts.js';
+import { financialArtifact } from './financial-objects.js';
+import { collectWorkspaceCatalog } from './data-source.js';
 
 test('new catalog never adopts older financial history and restores the complete persistent reference closure', async () => {
   const f = await financialFixture();
@@ -40,6 +42,7 @@ test('eligible source financials keep payout, null and zero while daily-only cor
     expect(before.rows).toContainEqual(['実績配当性向（2026-03-31）', '30%']);
     expect(before.rows).toContainEqual(['投資CF（円）', '-50']); expect(before.rows).toContainEqual(['会社予想年間配当（円/株）', '4']);
     expect(before.projection).toMatchObject({ state: 'unavailable', reason: 'price_basis_unverified', priceReference: { close: 105, date: '2026-09-11' } });
+    expect(before.projection?.forecastReference).not.toBeNull();
     expect(readWorkspaceFinancial(f.repository, f.id)).toEqual(before); expect(f.calls()).toBe(calls);
     f.advance(); let summaries = 0;
     f.setTransform((path, rows) => { if (path.endsWith('/summary')) summaries++;
@@ -50,9 +53,36 @@ test('eligible source financials keep payout, null and zero while daily-only cor
     expect(after.projection?.priceReference?.artifact.digest).not.toBe(before.projection?.priceReference?.artifact.digest);
     expect(after.projection?.priceReference?.close).toBe(106); expect(after.projection?.reason).toBe('price_basis_unverified');
     expect(f.repository.current({ kind: 'instrument-owned', instrumentId: f.id }, 'financial')).toEqual(financial);
-    const restarted = await f.restart(); expect(readWorkspaceFinancial(restarted.repository, f.id)).toEqual(after);
+
+    const saved = financialArtifact(JSON.parse(new TextDecoder().decode(resolveReference(f.db, financial, workspaceDataCodecs).bytes)));
+    expect(saved.input.calendarThrough).toBe('2026-09-30');
+    // Supply offline synthetic continuity; the production cross-date identity gate remains closed.
+    const acceptedAt = '2026-10-01T08:00:00.000Z', signal = new AbortController().signal;
+    f.advance(Date.parse(acceptedAt) - f.environment.wallNowMs());
+    const catalog = await collectWorkspaceCatalog({ jobId: randomUUID(), acceptedAt, signal,
+      dispatch: start => start(signal), shareSource: (_key, load) => load(), recordProgress: () => {}, waitBeforeRetry: async () => {} }, f.environment);
+    const master = await retainWorkspaceObject(f.db, 'workspace_catalog_v1', catalog);
+    const previous = saved.input.masterEvidence;
+    const episode = parse(EpisodeObjectSchema, JSON.parse(new TextDecoder().decode(resolveReference(f.db, previous, workspaceDataCodecs).bytes)));
+    const observation = catalog.rows[0]!;
+    const evidence = await retainWorkspaceObject(f.db, 'workspace_episode_v1', { ...episode, observation, catalog: master, previous });
+    await f.repository.acceptCatalog(f.repository.requestCatalog(catalog.date), [{ instrumentId: f.id, assetType: 'stock',
+      provider: 'jquants', code: observation.Code, label: observation.CoName, mappingRevision: saved.input.identity.mappingRevision,
+      episodeFrom: episode.from, episodeThrough: null, evidence }], master);
+    f.advance();
+    expect((await f.jobs.wait(await f.jobs.start('technical', f.id))).state).toBe('published');
+    const callsAfterPrice = f.calls(), beyondCalendar = await runFinancialWorker({ operation: 'read', root: f.root, instrumentId: f.id });
+    expect(beyondCalendar.projection?.cutoff).toBe('2026-10-01');
+    expect(beyondCalendar.projection?.forecastReference).toEqual(before.projection?.forecastReference);
+    expect(beyondCalendar.rows).toContainEqual(['会社予想年間配当（円/株）', '4']);
+    expect(beyondCalendar.projection?.priceReference).toMatchObject({ date: '2026-10-01', close: 106 });
+    expect(beyondCalendar.projection?.priceReference?.artifact.digest).not.toBe(after.projection?.priceReference?.artifact.digest);
+    expect(beyondCalendar.projection?.reason).toBe('price_basis_unverified');
+    expect(summaries).toBe(0); expect(f.calls()).toBe(callsAfterPrice);
+    expect(f.repository.current({ kind: 'instrument-owned', instrumentId: f.id }, 'financial')).toEqual(financial);
+    const restarted = await f.restart(); expect(readWorkspaceFinancial(restarted.repository, f.id)).toEqual(beyondCalendar);
   } finally { f.dispose(); }
-}, 90_000);
+}, 120_000);
 
 test('binding and recovery use the frozen transaction predicate', async () => {
   let changed = false;

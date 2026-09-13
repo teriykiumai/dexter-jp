@@ -40,14 +40,14 @@ export function readWorkspaceFinancial(repository: WorkspaceRepository, instrume
     if (last) price = { artifact: rowRef(objectRow(db, technical.artifact)), receipt: rowRef(objectRow(db, technical.receipt)), date: last.Date, close: last.C };
   }
   const cutoff = [artifact.input.through, price?.date ?? artifact.input.through].sort().at(-1)!;
-  const selected = cutoff <= artifact.input.calendarThrough ? selectFinancial({ ...artifact.input, through: cutoff }) : null;
-  const forecast = selected?.forecast, annual = artifact.result.annual, reason = selected?.forecastReason
-    ?? (!selected ? 'availability_calendar_unavailable' : !price?.close ? 'price_unavailable' : 'price_basis_unverified');
+  const selected = selectFinancial(artifact.input, cutoff);
+  const forecast = selected.forecast, annual = artifact.result.annual, reason = selected.forecastReason
+    ?? (!price?.close ? 'price_unavailable' : 'price_basis_unverified');
   base.projection = { policyVersion: 'workspace_dividend_projection_v1', cutoff, state: 'unavailable', reason,
     forecastReference: forecast && forecast.sourceField !== 'DivAnn' ? { artifact: rowRef(objectRow(db, saved.artifact)),
       receipt: rowRef(objectRow(db, saved.receipt)), disclosureNumber: forecast.disclosureNumber, sourceField: forecast.sourceField } : null,
     priceReference: price };
-  const annualReason = artifact.result.annualReason, forecastReason = selected?.forecastReason ?? (!selected ? 'availability_calendar_unavailable' : null);
+  const annualReason = artifact.result.annualReason, forecastReason = selected.forecastReason;
   base.rows = [['通期対象年度', annual?.CurFYEn ?? display(null, annualReason)], ['通期開示日', annual?.dividend.disclosedDate ?? display(null, annualReason)],
     ['売上高（円）', display(annual?.Sales, annualReason)], ['営業利益（円）', display(annual?.OP, annualReason)],
     ['経常利益（円）', display(annual?.OdP, annualReason)], ['当期純利益（円）', display(annual?.NP, annualReason)],

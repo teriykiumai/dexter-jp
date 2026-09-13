@@ -55,6 +55,18 @@ test('financial foreign or failed saved response hides values without external r
   await expect(section.getByRole('alert')).toContainText('保存済み財務データを読み込めません');
   await expect(section.getByRole('button')).toBeDisabled(); await expect(section.getByText('foreign')).toHaveCount(0);
   expect(await (await page.request.get(`${base}test/counts`)).json()).toEqual({ calls: 0 });
+  await page.unroute(`**/api/workspace/instruments/${id}/financial`);
+  await page.route(`**/api/workspace/instruments/${id}/financial`, route => route.fulfill({ json: {
+    schemaVersion: 'workspace_financial_view_v1', instrumentId: id, state: 'unavailable',
+    artifactDigest: `sha256:${'a'.repeat(64)}`, through: '2026-09-11', checkedAt: '2026-09-11T08:00:00.000Z',
+    note: 'undeclared reason', rows: [['Invalid forecast', '999']], projection: {
+      policyVersion: 'workspace_dividend_projection_v1', cutoff: '2026-10-01', state: 'unavailable', reason: 'future_reason',
+      forecastReference: null, priceReference: null } } }));
+  await page.reload();
+  await expect(section.getByRole('alert')).toContainText('保存済み財務データを読み込めません');
+  await expect(section.getByRole('button')).toBeDisabled();
+  await expect(section.getByText('999')).toHaveCount(0);
+  expect(await (await page.request.get(`${base}test/counts`)).json()).toEqual({ calls: 0 });
 });
 
 test('saved supply pagination works by keyboard and touch; foreign owner response hides data without fetching', async ({ page }) => {

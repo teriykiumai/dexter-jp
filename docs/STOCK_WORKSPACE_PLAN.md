@@ -539,7 +539,10 @@ a warning. Current fetches remain `current_at_fetch_not_point_in_time`.
 
 The current dividend projection is a separate read of the exact saved forecast and
 latest eligible raw daily close, independent of chart interval, with exact references,
-cutoff and policy version. Standard summary has no verified forecast share basis:
+cutoff and policy version. Disclosure eligibility is bounded by the earlier of the
+current projection cutoff and the saved calendar end. A later price date retains
+already-proved forecasts without admitting unproved disclosures; forecast fiscal
+expiry still uses the current projection cutoff. Standard summary has no verified forecast share basis:
 the staged result therefore returns reasoned unavailable for yield (and price-based
 valuation), even when dividend is zero. Do not manufacture a verified basis flag or
 compute a number from incompatible/unproved inputs. Source-proof-backed numeric

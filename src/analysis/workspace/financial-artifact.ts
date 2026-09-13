@@ -22,32 +22,34 @@ export type FinancialInput = z.infer<typeof FinancialInputSchema>;
 export type FinancialUnavailable = 'missing_data' | 'historical_identity_unverified' | 'no_eligible_disclosure'
   | 'availability_calendar_unavailable' | 'price_basis_unverified' | 'price_unavailable';
 
-export function selectFinancial(input: FinancialInput) {
+export function selectFinancial(input: FinancialInput, projectionThrough = input.through) {
   const calendar = mapTechnicalCalendarV1(input.calendar, input.calendarFrom, input.calendarThrough);
   const days = calendar.rows.map(row => ({ date: row.Date, holidayDivision: row.HolDiv }));
+  // Saved sessions bound disclosure eligibility, not the forecast's fiscal expiry.
+  const availabilityThrough = projectionThrough < input.calendarThrough ? projectionThrough : input.calendarThrough;
   const owned = (row: FinancialInput['rows'][number]) => row.CurFYSt >= input.episodeFrom
     && row.dividend.disclosedDate >= input.episodeFrom;
   const availability = new Map<string, string | null>();
   const eligible = input.rows.filter(row => {
     const date = row.dividend.disclosedDate;
-    if (date < input.calendarFrom || date >= input.through) return false;
+    if (date < input.calendarFrom || date >= availabilityThrough) return false;
     if (!availability.has(date)) availability.set(date, resolveDividendSourceEligibleDate(date, days));
-    return (availability.get(date) ?? '9999-12-31') <= input.through;
+    return (availability.get(date) ?? '9999-12-31') <= availabilityThrough;
   });
   const emptyReason: FinancialUnavailable = input.rows.some(row => row.dividend.disclosedDate < input.calendarFrom)
     ? 'availability_calendar_unavailable' : 'no_eligible_disclosure';
-  const annual = eligible.filter(row => isFullYearFinancialStatement(row) && row.CurFYEn <= input.through)
+  const annual = eligible.filter(row => isFullYearFinancialStatement(row) && row.CurFYEn <= projectionThrough)
     .sort((a, b) => a.CurFYEn.localeCompare(b.CurFYEn) || compareFinancialDisclosures(a, b)).at(-1) ?? null;
   const annualReason: FinancialUnavailable | null = !annual ? emptyReason : !owned(annual) ? 'historical_identity_unverified' : null;
   // Each date below is the exact next session resolved from the validated complete
   // calendar. Repeated corrections need not revalidate ten years for every row.
   const nextSessions = new Set(availability.values());
   const fiscal = analyzeDividendFiscalObservations(input.identity.code, eligible.map(row => row.dividend),
-    days.filter(day => nextSessions.has(day.date)), input.through);
+    days.filter(day => nextSessions.has(day.date)), availabilityThrough);
   if (fiscal.unavailable.some(item => item.reason === 'invalid_data')) fail('invalid_input');
   const lastDisclosure = eligible.at(-1);
-  const unidentifiedNextYear = lastDisclosure && lastDisclosure.CurFYEn < input.through && lastDisclosure.dividend.nextFiscalYearEndDate === null;
-  const forecast = unidentifiedNextYear ? null : fiscal.observations.filter(row => row.kind === 'company_forecast' && row.fiscalYearEndDate >= input.through)
+  const unidentifiedNextYear = lastDisclosure && lastDisclosure.CurFYEn < projectionThrough && lastDisclosure.dividend.nextFiscalYearEndDate === null;
+  const forecast = unidentifiedNextYear ? null : fiscal.observations.filter(row => row.kind === 'company_forecast' && row.fiscalYearEndDate >= projectionThrough)
     .sort((a, b) => a.fiscalYearEndDate.localeCompare(b.fiscalYearEndDate))[0] ?? null;
   const forecastRow = forecast ? eligible.find(row => row.dividend.disclosureNumber === forecast.disclosureNumber)! : null;
   const forecastReason: FinancialUnavailable | null = unidentifiedNextYear ? owned(lastDisclosure) ? 'missing_data' : 'historical_identity_unverified'

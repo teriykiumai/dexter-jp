@@ -45,6 +45,27 @@ test('a later missing next-fiscal-year identity never revives an older forecast'
   expect(result.forecast).toBeNull(); expect(result.forecastReason).toBe('missing_data');
 });
 
+test('projection past saved calendar retains proved forecasts without admitting unproved disclosures', () => {
+  const rows = [financialSourceFixture(), financialSourceFixture({ DiscDate: '2026-09-11',
+    DiscNo: '20260911000001', NxFDivAnn: '7' })];
+  const value = input(rows);
+  value.calendarThrough = value.through;
+  value.calendar = value.calendar.filter(day => day.Date <= value.calendarThrough);
+  value.sources.calendar.rowCount = value.calendar.length;
+  const before = selectFinancial(value), later = selectFinancial(value, '2026-09-16');
+  expect(before.forecast?.annualDividendPerShare).toBe(4);
+  expect(later.forecast).toEqual(before.forecast); expect(later.forecastReason).toBeNull();
+  // The later disclosure's next session is known if the saved calendar includes it.
+  const covered = input(rows);
+  expect(selectFinancial(covered, '2026-09-16').forecast?.annualDividendPerShare).toBe(7);
+});
+
+test('projection keeps fiscal expiry tied to the current date after calendar coverage ends', () => {
+  const value = input();
+  expect(selectFinancial(value, '2027-03-31').forecast?.annualDividendPerShare).toBe(4);
+  expect(selectFinancial(value, '2027-04-01')).toMatchObject({ forecast: null, forecastReason: 'no_eligible_disclosure' });
+});
+
 test('fiscal period ownership cannot be inferred from a later disclosure date or matching code', () => {
   const value = input(); value.episodeFrom = '2026-04-01';
   expect(selectFinancial(value)).toMatchObject({ annual: null, forecast: null, annualReason: 'historical_identity_unverified',
