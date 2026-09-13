@@ -26,7 +26,7 @@ export const WorkspaceItemSchema = candidate.extend({ schemaVersion: z.literal('
 export const WorkspaceSearchSchema = z.object({ schemaVersion: z.literal('workspace_search_v1'), items: z.array(candidate) }).strict();
 export const WorkspaceRecentsSchema = z.object({ schemaVersion: z.literal('workspace_recents_v1'), items: z.array(WorkspaceItemSchema) }).strict();
 export const WorkspaceViewSchema = z.object({ schemaVersion: z.literal('workspace_view_v1'), item: WorkspaceItemSchema, chart: WorkspaceChartSchema.nullable() }).strict();
-export const WorkspaceJobViewSchema = z.object({ schemaVersion: z.literal('workspace_job_v1'), id: z.uuid(), kind: z.enum(['catalog', 'technical', 'margin', 'issuer_short', 'sector_short']),
+export const WorkspaceJobViewSchema = z.object({ schemaVersion: z.literal('workspace_job_v1'), id: z.uuid(), kind: z.enum(['catalog', 'technical', 'margin', 'issuer_short', 'sector_short', 'financial']),
   state: z.enum(['queued', 'running', 'publishing', 'published', 'failed', 'interrupted', 'identity_review_required']),
   instrumentId: z.uuid().nullable(), error: z.string().max(80).nullable() }).strict()
   .refine(job => (job.kind === 'catalog') === (job.instrumentId === null));
@@ -46,7 +46,22 @@ export const WorkspaceSupplySchema = z.object({ schemaVersion: z.literal('worksp
         && value.through !== null && value.checkedAt !== null))).length(3) }).strict()
   .refine(value => new Set(value.datasets.map(item => item.dataset)).size === 3);
 export type WorkspaceSupplyView = z.infer<typeof WorkspaceSupplySchema>;
-export const WorkspaceResponseSchema = z.union([WorkspaceSearchSchema, WorkspaceRecentsSchema, WorkspaceItemSchema, WorkspaceViewSchema, WorkspaceSupplySchema,
+const exactReference = z.object({ path: z.string().max(500), codec: z.string().max(80), digest: z.string().regex(/^sha256:[0-9a-f]{64}$/) }).strict();
+export const WorkspaceFinancialSchema = z.object({ schemaVersion: z.literal('workspace_financial_view_v1'), instrumentId: z.uuid(),
+  state: z.enum(['not_collected', 'available', 'unavailable']), through: date.nullable(), checkedAt: z.iso.datetime().nullable(),
+  artifactDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/).nullable(), note: z.string().max(1200),
+  rows: z.array(z.tuple([z.string().max(200), z.string().max(500)])).max(30),
+  projection: z.object({ policyVersion: z.literal('workspace_dividend_projection_v1'), cutoff: date,
+    state: z.literal('unavailable'), reason: z.string().max(80),
+    forecastReference: z.object({ artifact: exactReference, receipt: exactReference, disclosureNumber: z.string().max(80),
+      sourceField: z.enum(['FDivAnn', 'NxFDivAnn']) }).strict().nullable(),
+    priceReference: z.object({ artifact: exactReference, receipt: exactReference, date, close: z.number().positive().finite().nullable() }).strict().nullable(),
+  }).strict().nullable(),
+}).strict().refine(value => value.state === 'not_collected'
+  ? value.artifactDigest === null && value.through === null && value.checkedAt === null && value.projection === null && value.rows.length === 0
+  : value.artifactDigest !== null && value.through !== null && value.checkedAt !== null && value.projection !== null);
+export type WorkspaceFinancialView = z.infer<typeof WorkspaceFinancialSchema>;
+export const WorkspaceResponseSchema = z.union([WorkspaceSearchSchema, WorkspaceRecentsSchema, WorkspaceItemSchema, WorkspaceViewSchema, WorkspaceSupplySchema, WorkspaceFinancialSchema,
   WorkspaceJobViewSchema, WorkspaceActiveSchema, WorkspaceSessionSchema, WorkspaceErrorSchema]);
 export type WorkspaceCandidate = z.infer<typeof candidate>;
 export type WorkspaceItem = z.infer<typeof WorkspaceItemSchema>;

@@ -4,7 +4,7 @@
 
 **Date:** 2026-09-12
 
-**Status:** Ordinary-stock implementation through Step 5 is merged (PR #120, `e91dc0fc`). Step 6 source-field verification is the current candidate; its collector, projection and UI are not delivered. Step 2A's cross-date identity gate remains open; later steps require their own implementation, validation, review and merge.
+**Status:** Ordinary-stock implementation through Step 5 and Step 6 source-field verification are merged (PR #120/#121). Step 6 staged financial collection, persistence and display are the current candidate. Numeric forecast yield and cross-date identity remain gated; later steps require their own implementation, validation, review and merge.
 
 ## 1. Authority and migration boundary
 
@@ -519,12 +519,47 @@ rows to a Workspace instrument, and absence of a split in the sampled price rang
 does not establish the forecast's share basis (including announced future splits).
 The documented summary fields do not supply an exact forecast share-basis identity.
 `historicalIdentity` and `forecastPriceShareBasis` remain `not_verified`, and
-`productionProjectionGate` remains `not_passed`. Before the dependent collector/
-projection, establish dated instrument eligibility for the selected financial input
-and a source-backed same-currency/share-basis predicate. Do not open those gates from
-matching ticker, a unit factor alone, or a field-probe success. Step 6 acceptance
-DY-1 and financial API/UI delivery remain outstanding; this prerequisite does not
-replace them or change the approved financial architecture.
+`productionProjectionGate` remains `not_passed`. The approved staged Step 6 migration
+allows explicit collection, immutable storage and display before all observations
+can meet these gates. It does not relax numeric eligibility. The frozen instrument
+and exact dated master must still agree, including at binding commit/recovery.
+Retained code-query observations before the verified episode are source evidence,
+not adopted company history. Only disclosures whose fiscal/observed period and
+disclosure date fall within that episode and whose next official business day is
+eligible can supply displayed financial values; otherwise display
+`historical_identity_unverified` or the applicable missing/availability reason.
+No current ticker, unit factor or successful field probe proves those gates.
+
+The saved financial artifact retains normalized source observations, exact episode,
+official calendar, complete fetch evidence and deterministic selection. Full-year
+actual payout comes only from an FY statement; revisions/quarters never substitute.
+Select the latest applicable disclosure first, retaining its nulls, rather than
+falling back to an older non-null value. Preserve unusual finite source payout with
+a warning. Current fetches remain `current_at_fetch_not_point_in_time`.
+
+The current dividend projection is a separate read of the exact saved forecast and
+latest eligible raw daily close, independent of chart interval, with exact references,
+cutoff and policy version. Standard summary has no verified forecast share basis:
+the staged result therefore returns reasoned unavailable for yield (and price-based
+valuation), even when dividend is zero. Do not manufacture a verified basis flag or
+compute a number from incompatible/unproved inputs. Source-proof-backed numeric
+yield, daily-refresh numeric acceptance DY-1, and routine cross-date updates remain
+explicit follow-up gates; this staged release does not claim full Step 6 completion.
+
+The collector uses three explicit queries (official calendar, dated master and
+code-scoped summary), the existing coordinator/rate/deadline policy, and a shared
+20-page / 8,000-row / 32-MiB reader bound. SQLite V4 adds the financial job kind;
+V1-V3 databases/backups remain readable and writable reopen migrates atomically.
+Financial job inputs/results and bindings join the persistent backup closure.
+Repeated Windows/Bun 1.3.14 worker teardown crashes during financial tests required
+process isolation: short-lived Bun children run calculation, immutable publication
+and read-only SQLite verification, with bounded JSON output and a 60-second limit.
+The parent remains the only SQLite writer; neither reads nor child recovery fetch data.
+At 3,000 synthetic summaries, acquisition/read alongside Drawing saves/search measured
+218.94ms maximum event-loop delay and 5.01/54.75ms save p95/max. This is fixture evidence.
+The bounded live field check with the production input parser passed on 2026-09-13
+at `12:36:52Z`: four requests, 3,722 rows, 234,473 bytes, unchanged summary digest above.
+It still supplies field evidence only, not historical identity or price-basis proof.
 
 ### 6.2 Three distinct short-selling scopes
 

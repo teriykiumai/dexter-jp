@@ -10,6 +10,8 @@ import { DashboardSessionV1, DashboardSecurityErrorV1, dashboardSecurityFailureV
 import { WorkspaceResponseSchema, WorkspaceItemSchema, WorkspaceChartSchema, workspaceTerminal, type WorkspaceChart, type WorkspaceItem, type WorkspaceJobView, type WorkspaceView } from './workspace-contracts.js';
 import { runSupplyWorker } from '../analysis/workspace/supply-worker-client.js';
 import { readWorkspaceSupply } from './workspace-supply.js';
+import { readWorkspaceFinancial } from './workspace-financial.js';
+import { runFinancialWorker } from '../analysis/workspace/financial-worker-client.js';
 
 const response = (value: unknown, status = 200, headers: Record<string, string> = {}) => Response.json(WorkspaceResponseSchema.parse(value), { status,
   headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...headers } });
@@ -68,7 +70,7 @@ export class WorkspaceDashboardApi {
       const allow = ['search', 'session', 'recents', 'jobs/active'].includes(route) ? 'GET'
         : route === 'jobs' ? 'POST' : jobRoute ? 'GET, DELETE'
         : segments.length === 4 && segments[2] === 'instruments' ? 'GET'
-        : segments.length === 5 && segments[2] === 'instruments' && segments[4] === 'supply' ? 'GET'
+        : segments.length === 5 && segments[2] === 'instruments' && ['supply', 'financial'].includes(segments[4]!) ? 'GET'
         : segments.length === 5 && segments[2] === 'instruments' && ['open', 'favorite'].includes(segments[4]!) ? 'POST' : null;
       if (!allow) return errorResponse('invalid_input', 400);
       if (!allow.split(', ').includes(request.method)) return errorResponse('method_not_allowed', 405, { Allow: allow });
@@ -88,13 +90,16 @@ export class WorkspaceDashboardApi {
           return response({ schemaVersion: 'workspace_search_v1', items: this.jobs.repository.search(url.searchParams.get('q') ?? '') });
         }
         if ([...url.searchParams].length) fail('invalid_input');
-        if (segments.length === 5 && segments[2] === 'instruments' && segments[4] === 'supply') {
+        if (segments.length === 5 && segments[2] === 'instruments' && ['supply', 'financial'].includes(segments[4]!)) {
           const id = parse(Id, segments[3]); this.item(id);
-          const uncollected = readWorkspaceSupply(this.jobs.repository, id, true);
+          const financial = segments[4] === 'financial';
+          const uncollected = financial ? readWorkspaceFinancial(this.jobs.repository, id, true) : readWorkspaceSupply(this.jobs.repository, id, true);
           if (uncollected) return response(uncollected);
           if (this.queuedReads >= 8) fail('database_busy');
           this.queuedReads++;
-          const pending = this.supplyReadQueue.then(() => runSupplyWorker({ operation: 'read', root: this.jobs.repository.db.root, instrumentId: id }));
+          const pending = this.supplyReadQueue.then<unknown>(() => financial
+            ? runFinancialWorker({ operation: 'read', root: this.jobs.repository.db.root, instrumentId: id })
+            : runSupplyWorker({ operation: 'read', root: this.jobs.repository.db.root, instrumentId: id }));
           this.supplyReadQueue = pending.catch(() => undefined);
           try { return response(await pending); } finally { this.queuedReads--; }
         }
@@ -122,7 +127,7 @@ export class WorkspaceDashboardApi {
         const raw = parseStrictJsonBytesV1(await readDashboardBody(request, 4096), 4096);
         if (route === 'jobs') {
           const body = parse(z.discriminatedUnion('kind', [z.object({ kind: z.literal('catalog') }).strict(),
-            z.object({ kind: z.enum(['technical', 'margin', 'issuer_short', 'sector_short']), instrumentId: Id }).strict()]), raw);
+            z.object({ kind: z.enum(['technical', 'margin', 'issuer_short', 'sector_short', 'financial']), instrumentId: Id }).strict()]), raw);
           return response(jobView(this.jobs.get(await this.jobs.start(body.kind, 'instrumentId' in body ? body.instrumentId : undefined))), 202);
         }
         if (segments.length === 5 && segments[2] === 'instruments') {

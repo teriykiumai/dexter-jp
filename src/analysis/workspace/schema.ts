@@ -1,7 +1,7 @@
 import type { Database } from 'bun:sqlite';
 import { digest, fail, json } from './contracts.js';
 
-export const WORKSPACE_SCHEMA_VERSION = 3;
+export const WORKSPACE_SCHEMA_VERSION = 4;
 const ddl = `
 CREATE TABLE workspace_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
 INSERT INTO workspace_meta VALUES ('object_store_layout','object-key-v1');
@@ -124,6 +124,16 @@ ${workspaceJobsDdl.replace("kind IN ('catalog','technical')", "kind IN ('catalog
   .replace("(kind='technical')", "(kind<>'catalog')")}
 INSERT INTO workspace_data_jobs SELECT * FROM workspace_data_jobs_v2;
 DROP TABLE workspace_data_jobs_v2;
+` }, { version: 4, sql: `
+DROP TRIGGER workspace_job_identity_update;
+DROP TRIGGER workspace_job_input_update;
+DROP TRIGGER workspace_job_result_update;
+DROP INDEX workspace_jobs_state;
+ALTER TABLE workspace_data_jobs RENAME TO workspace_data_jobs_v3;
+${workspaceJobsDdl.replace("kind IN ('catalog','technical')", "kind IN ('catalog','technical','margin','issuer_short','sector_short','financial')")
+  .replace("(kind='technical')", "(kind<>'catalog')")}
+INSERT INTO workspace_data_jobs SELECT * FROM workspace_data_jobs_v3;
+DROP TABLE workspace_data_jobs_v3;
 ` }] as const;
 /** Each version is atomic, including its marker. Failed DDL never replaces the old DB. */
 export function migrateWorkspace(db: Database, migrations: readonly { version: number; sql: string }[] = WORKSPACE_MIGRATIONS): void {

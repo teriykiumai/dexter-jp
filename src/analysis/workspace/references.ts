@@ -11,6 +11,8 @@ import { validateDataObjectLinks, ReceiptObjectSchema, EpisodeObjectSchema } fro
 import { TechnicalInputSchema } from './technical-input.js';
 import { SupplyPreparedSchema, SupplyReceiptSchema, supplyArtifact } from './supply-objects.js';
 import { WorkspaceSupplyCodec, supplyTarget } from './supply-artifact.js';
+import { FinancialPreparedSchema, FinancialReceiptSchema, financialArtifact } from './financial-objects.js';
+import { WorkspaceFinancialCodec, financialTarget } from './financial-artifact.js';
 
 export type ObjectRow = { object_key: string; path: string; codec: string; digest: string; metadata: string };
 export type VerifiedObject = { ref: ObjectRef; metadata: ObjectMetadata; bytes: Uint8Array };
@@ -226,6 +228,23 @@ export function validateReferences(db: WorkspaceDatabase, codecs: ReferenceCodec
             || receipt.receipt.acceptedAt !== job.accepted_at || !job.input_object) fail('reference_conflict');
           if (job.state === 'published' && !db.sqlite.query('SELECT binding_id FROM artifact_bindings WHERE artifact=? AND receipt=? AND frozen_identity=?')
             .get(objectKey(receipt.artifact), job.result_object, job.identity!)) fail('reference_conflict');
+        }
+      } else if (job.kind === 'financial') {
+        const identity = parse(FrozenIdentitySchema, JSON.parse(job.identity!));
+        const episode = parse(EpisodeObjectSchema, value(job.master_object!));
+        if (identity.instrumentId !== episode.instrumentId || identity.code !== episode.observation.Code) fail('reference_conflict');
+        if (job.input_object) {
+          const p = parse(FinancialPreparedSchema, value(job.input_object)), artifact = financialArtifact(p.artifact);
+          if (json(p.identity) !== job.identity || objectKey(p.master) !== job.master_object || artifact.asOfCutoff !== job.accepted_at) fail('reference_conflict');
+        }
+        if (job.result_object) {
+          const receipt = parse(FinancialReceiptSchema, value(job.result_object));
+          if (!job.input_object || receipt.receipt.jobId !== job.job_id || receipt.receipt.acceptedAt !== job.accepted_at) fail('reference_conflict');
+          const p = financialArtifact(parse(FinancialPreparedSchema, value(job.input_object)).artifact);
+          const published = financialArtifact(value(objectKey(receipt.artifact)));
+          if (!new WorkspaceFinancialCodec(financialTarget(p.input)).equivalent(p, published)) fail('reference_conflict');
+          if (job.state === 'published' && !db.sqlite.query(`SELECT binding_id FROM artifact_bindings
+            WHERE artifact=? AND receipt=? AND dataset='financial' AND frozen_identity=?`).get(objectKey(receipt.artifact), job.result_object, job.identity!)) fail('reference_conflict');
         }
       } else if (job.kind !== 'catalog') {
         const identity = parse(FrozenIdentitySchema, JSON.parse(job.identity!));

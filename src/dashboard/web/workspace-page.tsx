@@ -1,6 +1,7 @@
 import { read, mutate, WorkspaceHttpError } from './workspace-http.js';
 import { HorizontalDrawings } from './horizontal-drawings.js';
 import { WorkspaceSupply, type SupplyKind } from './workspace-supply.js';
+import { WorkspaceFinancial } from './workspace-financial.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { z } from 'zod';
 import { Button, Card, DashboardDesign, TableScroll } from './primitives.js';
@@ -127,19 +128,19 @@ export function WorkspacePage() {
       </div></Card></div>
       {blocked ? <p role="alert">ジョブ状態の確認を停止しました。再送せずページ全体を再読み込みしてください。</p> : null}
       {blockingKind ? <p role="status">他のデータジョブが実行中です。完了後にページを再読み込みしてください。</p> : null}
-      {job ? <p role="status">{job.kind === 'catalog' ? '銘柄一覧' : `${job.kind === 'technical' ? '日足価格' : '需給データ'}${job.instrumentId !== route?.id ? '（別の銘柄）' : ''}`}: {job.state}</p> : null}
+      {job ? <p role="status">{job.kind === 'catalog' ? '銘柄一覧' : `${job.kind === 'technical' ? '日足価格' : job.kind === 'financial' ? '財務・配当' : '需給データ'}${job.instrumentId !== route?.id ? '（別の銘柄）' : ''}`}: {job.state}</p> : null}
       {job && !workspaceTerminal(job) ? <Button disabled={busy || blocked || job.state === 'publishing'} onClick={() => void cancel()}>取得をキャンセル</Button> : null}
       {message ? <p role="alert">{message}</p> : null}
       {!route ? <p role="alert">Workspace URLが不正です。</p> : route.id ? <WorkspaceInstrument key={route.id} id={route.id} interval={route.interval}
         revision={revision} navigate={interval => navigate(route.id, interval)} disabled={disabled} acquire={() => void start('technical')}
-        acquireSupply={kind => void start(kind)} onFavorite={() => refresh(value => value + 1)} /> : <p>普通株を選択してWorkspaceを開いてください。Snapshot・LLM API keyは不要です。</p>}
+        acquireSupply={kind => void start(kind)} acquireFinancial={() => void start('financial')} onFavorite={() => refresh(value => value + 1)} /> : <p>普通株を選択してWorkspaceを開いてください。Snapshot・LLM API keyは不要です。</p>}
     </main>
   </DashboardDesign>;
 }
 
-function WorkspaceInstrument({ id, interval, revision, navigate, disabled, acquire, acquireSupply, onFavorite }: {
+function WorkspaceInstrument({ id, interval, revision, navigate, disabled, acquire, acquireSupply, acquireFinancial, onFavorite }: {
   id: string; interval: Interval; revision: number; navigate: (interval: Interval) => void; disabled: boolean; acquire: () => void; onFavorite: () => void;
-  acquireSupply: (kind: SupplyKind) => void;
+  acquireSupply: (kind: SupplyKind) => void; acquireFinancial: () => void;
 }) {
   const [view, setView] = useState<WorkspaceView | null>(null), [error, setError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<string[]>([]), [sma, setSma] = useState(true), [selected, setSelected] = useState<string | null>(null);
@@ -206,5 +207,6 @@ function WorkspaceInstrument({ id, interval, revision, navigate, disabled, acqui
       {gaps.length ? <ul aria-label="source不足の期間">{gaps.map(gap => <li key={gap.identity}>{gap.periodStart}–{gap.periodEnd}: source不足（価格利用不可）</li>)}</ul> : null}
     </div></Card> : null}
     {view ? <WorkspaceSupply id={id} revision={revision} disabled={disabled} acquire={acquireSupply} /> : null}
+    {view ? <WorkspaceFinancial id={id} revision={revision} disabled={disabled} acquire={acquireFinancial} /> : null}
   </section>;
 }

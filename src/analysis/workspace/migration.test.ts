@@ -4,10 +4,32 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { migrateWorkspace, WORKSPACE_MIGRATIONS } from './schema.js';
+import { migrateWorkspace, WORKSPACE_MIGRATIONS, WORKSPACE_SCHEMA_VERSION } from './schema.js';
 import { WorkspaceDatabase, workspaceFingerprint } from './database.js';
 import { digest, json } from './contracts.js';
 import { backupWorkspace, validateWorkspaceBackup, restoreWorkspace } from './backup.js';
+
+test('V3 to V4 failed migration preserves jobs and user preferences, then reopens successfully', () => {
+  const root = mkdtempSync(resolve(tmpdir(), 'dexter-v3-financial-'));
+  try {
+    const old = new Database(resolve(root, 'workspace.sqlite'), { create: true }); migrateWorkspace(old, WORKSPACE_MIGRATIONS.slice(0, 3));
+    const id = randomUUID(), job = randomUUID();
+    old.run("INSERT INTO instruments VALUES (?,'stock')", [id]); old.run("INSERT INTO workspaces VALUES (?,'2026-09-11',1,7)", [id]);
+    old.run('INSERT INTO chart_preferences VALUES (?,?,4)', [id, json({ interval: 'month', sma: [20], rsi: true, macd: true, volume: true })]);
+    old.run("INSERT INTO workspace_data_jobs(job_id,kind,accepted_at,state) VALUES (?,'catalog','2026-09-11T00:00:00.000Z','interrupted')", [job]);
+    const before = old.query('SELECT * FROM workspace_data_jobs').all();
+    expect(() => migrateWorkspace(old, [...WORKSPACE_MIGRATIONS.slice(0, 3), { version: 4, sql: `${WORKSPACE_MIGRATIONS[3].sql}\nINVALID SQL;` }])).toThrow();
+    expect(old.query('PRAGMA user_version').get()).toEqual({ user_version: 3 });
+    expect(old.query('SELECT * FROM workspace_data_jobs').all()).toEqual(before); old.close();
+    const db = new WorkspaceDatabase(root);
+    try { expect(db.sqlite.query('PRAGMA user_version').get()).toEqual({ user_version: 4 });
+      expect(db.sqlite.query('SELECT * FROM workspace_data_jobs').all()).toEqual(before);
+      expect(db.sqlite.query('SELECT instrument_id,revision FROM chart_preferences').get()).toEqual({ instrument_id: id, revision: 4 });
+      expect(() => db.sqlite.run("UPDATE workspace_data_jobs SET kind='financial'")).toThrow('immutable');
+      expect(db.sqlite.query('PRAGMA foreign_key_check').all()).toEqual([]);
+    } finally { db.close(); }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
 
 test('V2 job migration rolls back failed DDL and preserves existing jobs and immutable triggers on reopen', () => {
   const root = mkdtempSync(resolve(tmpdir(), 'dexter-v2-jobs-'));
@@ -24,7 +46,7 @@ test('V2 job migration rolls back failed DDL and preserves existing jobs and imm
     old.close();
     const reopened = new WorkspaceDatabase(root);
     try {
-      expect(reopened.sqlite.query('PRAGMA user_version').get()).toEqual({ user_version: 3 });
+      expect(reopened.sqlite.query('PRAGMA user_version').get()).toEqual({ user_version: WORKSPACE_SCHEMA_VERSION });
       expect(reopened.sqlite.query('SELECT * FROM workspace_data_jobs').all()).toEqual(before);
       expect(() => reopened.sqlite.run("UPDATE workspace_data_jobs SET accepted_at='changed'")).toThrow('immutable');
       expect(() => reopened.sqlite.run("INSERT INTO workspace_data_jobs(job_id,kind,accepted_at,state) VALUES (?,'margin','2026-09-11T00:00:00.000Z','queued')", [randomUUID()])).toThrow();
@@ -51,7 +73,7 @@ test('V1 DB and backup remain readable; writable reopen migrates without losing 
     expect(validateWorkspaceBackup(backup, new Map()).schemaVersion).toBe(1);
     restoreWorkspace(root, destination, new Map());
     const upgraded = new WorkspaceDatabase(destination);
-    try { expect(upgraded.sqlite.query('PRAGMA user_version').get()).toEqual({ user_version: 3 });
+    try { expect(upgraded.sqlite.query('PRAGMA user_version').get()).toEqual({ user_version: WORKSPACE_SCHEMA_VERSION });
       expect(upgraded.sqlite.query('SELECT instrument_id,favorite,revision FROM workspaces').get()).toEqual({ instrument_id: id, favorite: 1, revision: 7 });
       expect(upgraded.sqlite.query('SELECT revision FROM chart_preferences').get()).toEqual({ revision: 4 });
     } finally { upgraded.close(); }

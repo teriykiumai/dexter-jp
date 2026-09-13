@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { mapDividendSummaryRow } from '../../tools/finance/dividend-summary.js';
 import { analyzeDividendFiscalObservations } from '../../tools/finance/advanced-dividend-engine.js';
+import { mapWorkspaceFinancialSummaries } from './financial-input.js';
 import { DateValue, digest, json } from './contracts.js';
 import { createMarketDataReaderV1, TechnicalSourceFailureV1, type TechnicalCollectionContextV1 } from '../market-data/technical-source.js';
 import { createTechnicalSourceRequestWindowV1, mapTechnicalCalendarV1, mapTechnicalDailyBarsV1, validateCurrentTechnicalMasterV1 } from '../market-data/technical-source-gate.js';
@@ -95,7 +96,12 @@ export async function proveFinancialSourceFields(options: { confirmed: boolean; 
       { ticker: code.slice(0, 4), eligibleThrough: through });
     if (master.state !== 'accepted') return fail('source_response_invalid');
     stage = 'summary';
-    const summary = inspectFinancialSourceRows(await reader.fetchRows(stage, '/v2/fins/summary', { code }));
+    const rawSummary = await reader.fetchRows(stage, '/v2/fins/summary', { code });
+    const summary = inspectFinancialSourceRows(rawSummary);
+    if (summary.every(row => row.knownDocument)) {
+      try { mapWorkspaceFinancialSummaries(rawSummary, code); }
+      catch { return fail('source_response_invalid'); }
+    }
     stage = 'calendar';
     const calendar = mapTechnicalCalendarV1(await reader.fetchRows(stage, '/v2/markets/calendar', { from: calendarFrom, to: through }), calendarFrom, through);
     // The inherited availability model is next official business day, not claimed receipt of a provider vintage.
