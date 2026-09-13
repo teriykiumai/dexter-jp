@@ -5,7 +5,7 @@ import { cpus, totalmem } from 'node:os';
 import { workspaceDataFixture } from '../analysis/workspace/data-test-fixtures.js';
 import { WorkspaceDashboardApi } from './workspace-api.js';
 import { DashboardSessionV1 } from './session.js';
-import { DrawingPageSchema, DrawingSavedSchema } from './drawing-contracts.js';
+import { DrawingPageSchema, DrawingSavedSchema, DrawingDeletedSchema, DrawingHistoryResultSchema } from './drawing-contracts.js';
 import { WorkspaceViewSchema } from './workspace-contracts.js';
 import { backupWorkspace, restoreWorkspace } from '../analysis/workspace/backup.js';
 import { workspaceDataCodecs } from '../analysis/workspace/data-objects.js';
@@ -139,6 +139,10 @@ test('Horizontal refresh and worker-to-commit races fail closed without deleting
     expect((await call(`${path}/${write.id}`, 'PUT', { ...write, revision: 1, chartDigest: volume.artifactDigest })).status).toBe(409);
     f.db.transaction = transaction;
     expect(f.repository.drawing(instrumentId, write.id)).toEqual(drawing);
+    const secondWrite = { ...write, id: randomUUID(), chartDigest: volume.artifactDigest };
+    expect((await call(path, 'POST', secondWrite)).status).toBe(200);
+    const secondDrawing = f.repository.drawing(instrumentId, secondWrite.id)!;
+    const earlyDelete = DrawingDeletedSchema.parse(await (await call(path + '/' + secondWrite.id, 'DELETE', { revision: 1 })).json());
     // The failed transaction also rolls the competing pointer change back.
     f.setTransform((endpoint, rows) => { if (endpoint.endsWith('/daily')) for (const row of rows) row.AdjC = 106; });
     f.advance(); await f.jobs.wait(await f.jobs.start('technical', instrumentId));
@@ -147,7 +151,24 @@ test('Horizontal refresh and worker-to-commit races fail closed without deleting
     expect((await call(`${path}/${write.id}`, 'PUT', { ...write, revision: 1, chartDigest: correction.artifactDigest })).status).toBe(409);
     expect(f.repository.drawing(instrumentId, write.id)).toEqual(drawing);
     expect((await call(`${path}/${write.id}`, 'DELETE', { revision: 99 })).status).toBe(409);
-    expect((await call(`${path}/${write.id}`, 'DELETE', { revision: 1 })).status).toBe(200);
+    const removed = DrawingDeletedSchema.parse(await (await call(path + '/' + write.id, 'DELETE', { revision: 1 })).json());
     expect(f.repository.drawing(instrumentId, write.id)).toBeNull();
+    // A valid current artifact must not mask corruption in the distinct historical basis.
+    const historicalFile = referencePath(f.root, drawing.basisObject), historicalBytes = readFileSync(historicalFile);
+    writeFileSync(historicalFile, 'corrupt');
+    expect((await call(path + '/' + drawing.id, 'POST', { token: removed.historyToken, direction: 'undo',
+      revision: 0, state: removed.historyState, chartDigest: correction.artifactDigest })).status).toBe(500);
+    expect(f.repository.drawing(instrumentId, drawing.id)).toBeNull();
+    writeFileSync(historicalFile, historicalBytes);
+    for (const [record, command] of [[drawing, removed], [secondDrawing, earlyDelete]] as const) {
+      const response = await call(path + '/' + record.id, 'POST', { token: command.historyToken, direction: 'undo',
+        revision: 0, state: command.historyState, chartDigest: correction.artifactDigest });
+      expect(response.status).toBe(200);
+      const restored = DrawingHistoryResultSchema.parse(await response.json());
+      expect(f.repository.drawing(instrumentId, record.id)).toEqual({ ...record, revision: restored.revision });
+      expect(restored.revision).toBe(2);
+    }
+    expect(DrawingPageSchema.parse(await (await call(path)).json()).items.map(item => item.state))
+      .toEqual(['basis_review_required', 'basis_review_required']);
   } finally { f.dispose(); }
 }, 120_000);

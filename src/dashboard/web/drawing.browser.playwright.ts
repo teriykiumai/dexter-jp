@@ -116,3 +116,26 @@ test('basis review retains the saved record while disabling compatible editing',
   await expect(page.getByRole('button', { name: /を削除/ })).toBeEnabled();
   await page.locator('.price-chart').screenshot({ path: '.dexter/horizontal-basis-review.png' });
 });
+
+test('undo restores a price-corrected Drawing as retained, hidden and non-editable', async ({ page }) => {
+  test.setTimeout(90_000); await acquire(page); await create(page);
+  const path = base + 'api/workspace/instruments/' + new URL(page.url()).searchParams.get('instrument') + '/drawings';
+  const original = (await (await page.request.get(path)).json()).items[0];
+  await page.request.post(base + 'test/price-correction');
+  await page.getByRole('button', { name: '日足データを取得・更新' }).click();
+  await expect(page.getByText('basis_review_required（保持・非表示）', { exact: false })).toBeVisible({ timeout: 30_000 });
+  await page.getByRole('button', { name: /を削除/ }).click();
+  await expect(page.getByRole('button', { name: '元に戻す', exact: true })).toBeEnabled();
+  await expect.poll(async () => (await (await page.request.get(path)).json()).items.length).toBe(0);
+  // Same chart pixels before and after restoration prove the retained line adds no overlay.
+  const chart = page.locator('.price-chart');
+  await page.mouse.move(0, 0); await page.waitForTimeout(300);
+  const hidden = await chart.screenshot();
+  await page.getByRole('button', { name: '元に戻す', exact: true }).click();
+  await expect(page.getByText('basis_review_required（保持・非表示）', { exact: false })).toBeVisible();
+  await expect(page.getByRole('button', { name: /を選択・編集/ })).toBeDisabled();
+  const restored = (await (await page.request.get(path)).json()).items[0];
+  expect(restored).toEqual({ ...original, revision: 2, state: 'basis_review_required' });
+  await page.mouse.move(0, 0); await page.waitForTimeout(300);
+  expect(await chart.screenshot()).toEqual(hidden);
+});

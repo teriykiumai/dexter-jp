@@ -10,6 +10,10 @@ if (process.env.WORKSPACE_BROWSER_TRENDLINES === '1') await seedTrendlineFixture
 const api = new WorkspaceDashboardApi(fixture.jobs, new DashboardSessionV1());
 const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: request => {
   if (new URL(request.url).pathname === '/test/counts') return Response.json({ calls: fixture.calls() });
+  if (request.method === 'POST' && new URL(request.url).pathname === '/test/price-correction') {
+    fixture.setTransform((endpoint, rows) => { if (endpoint.endsWith('/daily')) for (const row of rows) row.AdjC = 106; });
+    return Response.json({ configured: true });
+  }
   if (request.method === 'POST') fixture.advance();
   return handleDashboardRequest(request, { listLatest: async () => [], listHistory: async () => [],
     loadLatest: async () => { throw new Error('No Snapshot'); }, loadHistory: async () => { throw new Error('No Snapshot'); } }, undefined, undefined, api);

@@ -60,7 +60,9 @@ export function HorizontalDrawings({ id, chart, interval, children }: { id: stri
       if (saved.instrumentId !== id || saved.id !== submitted.id || saved.revision !== submitted.revision + 1) throw new Error('Drawing response mismatch');
       if (alive.current) { record(saved.id, saved.historyToken, saved.revision, saved.historyState); setDraft(null); setSelected(saved.id); setAfter(undefined); setReload(value => value + 1); setMessage('保存しました。'); newButton.current?.focus(); }
     } catch (error) {
-      if (alive.current) { setFailed(true); setMessage(error instanceof WorkspaceHttpError && error.status === 409
+      if (alive.current && error instanceof WorkspaceHttpError && error.status === 400) {
+        setMessage('入力が受け付けられませんでした。日付の順序・営業日・価格を確認して修正してください。下書きは保持しています。');
+      } else if (alive.current) { setFailed(true); setMessage(error instanceof WorkspaceHttpError && error.status === 409
         ? '保存競合またはbasis確認が必要です。入力は未保存のまま保持しています。保存状態を再読込し、キャンセル後に選び直してください。'
         : '保存結果を確認できません。入力を保持しています。自動再送せず、保存状態を再読込してください。'); }
     } finally { inFlight.current = false; if (alive.current) setBusy(false); }

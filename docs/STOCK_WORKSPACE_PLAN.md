@@ -694,7 +694,10 @@ it accepts no client-supplied restoration artifact. Create/edit/delete undo and 
 use revision, state-fence and exact-content preconditions, with a second check inside
 the writer transaction. Restoring an absent Drawing preserves its ID, original basis
 and evidence window, and advances its revision. Restoration revalidates original
-immutable closure/basis and the current binding. Expired/restarted command tokens,
+immutable closure/ownership and the current binding. A legitimate current price-basis
+difference permits exact restoration, followed by `basis_review_required` with
+overlay and editing disabled. Missing or corrupt original dependencies still reject
+restoration; restoration never accepts or converts the old basis. Expired/restarted command tokens,
 conflicts and ambiguous responses never trigger automatic retries or source calls.
 The Browser keeps a bounded session stack and only revisions confirmed by its own
 mutations; manual reconciliation or navigation clears that stack. Committed records

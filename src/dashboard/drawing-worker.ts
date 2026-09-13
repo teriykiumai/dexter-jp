@@ -27,22 +27,25 @@ export function drawingWork(request: DrawingWork): DrawingResult {
       return verified.get(key)!;
     };
     const current = binding ? load(binding.artifact, binding.receipt) : null;
+    const originalBasis = (drawing: StoredDrawing) => {
+      if (drawing.instrumentId !== id) fail('identity_review_required');
+      const old = db.sqlite.query<{ receipt: string }, [string, string]>(`SELECT receipt FROM artifact_bindings
+        WHERE artifact=? AND scope=? AND dataset='technical' ORDER BY binding_id LIMIT 1`)
+        .get(objectKey(drawing.basisObject), scopeKey({ kind: 'instrument-owned', instrumentId: id }));
+      if (!old) fail('reference_conflict');
+      return load(objectKey(drawing.basisObject), old.receipt);
+    };
     const compatibility = (drawing: StoredDrawing): DrawingView['state'] => {
       if (!current) return 'basis_review_required';
       try {
-        const old = db.sqlite.query<{ receipt: string }, [string, string]>(`SELECT receipt FROM artifact_bindings
-          WHERE artifact=? AND scope=? AND dataset='technical' ORDER BY binding_id LIMIT 1`)
-          .get(objectKey(drawing.basisObject), scopeKey({ kind: 'instrument-owned', instrumentId: id }));
-        if (!old) return 'basis_review_required';
-        const original = load(objectKey(drawing.basisObject), old.receipt);
-        return compareVerifiedDrawingBasis(original, current, drawing.evidenceFrom, drawing.evidenceThrough);
+        return compareVerifiedDrawingBasis(originalBasis(drawing), current, drawing.evidenceFrom, drawing.evidenceThrough);
       } catch { return 'basis_review_required'; }
     };
     if (request.restore) {
       const drawing = request.restore;
       if (!current || !binding || request.chartDigest !== current.artifactDigest) fail('revision_conflict');
-      if (drawing.instrumentId !== id || compatibility(drawing) !== 'compatible') fail('identity_review_required');
-      const dates = current.result.intervals.day.map(row => row.displayDate);
+      // Exact historical ownership/closure must verify even when the current basis differs.
+      const dates = originalBasis(drawing).result.intervals.day.map(row => row.displayDate);
       if (!dates.includes(drawing.time) || (drawing.kind === 'trendline' && !dates.includes(drawing.endTime))) fail('invalid_input');
       return { drawing, ...binding };
     }

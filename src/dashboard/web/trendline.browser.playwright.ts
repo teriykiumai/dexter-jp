@@ -128,3 +128,21 @@ test('Trendline undo cannot overwrite an edit confirmed in another tab', async (
   expect((await stored(page))[0].price).toBe(134);
   await other.close();
 });
+
+test('rejected Trendline date order keeps an editable draft without reconciliation', async ({ page }) => {
+  await open(page); await draft(page);
+  await page.getByLabel('Trendline始点日（日足）').fill('2026-09-11');
+  await page.getByRole('button', { name: 'Trendlineを保存', exact: true }).click();
+  await expect(page.getByText('入力が受け付けられませんでした。', { exact: false })).toBeVisible();
+  expect(await stored(page)).toHaveLength(0);
+  await expect(page.getByLabel('Trendline始点日（日足）')).toBeEnabled();
+  await expect(page.getByLabel('Trendline終点価格（円・調整後）')).toHaveValue('140');
+  await page.getByLabel('Trendline始点日（日足）').fill('2026-09-06');
+  const rejection = page.waitForResponse(response => response.request().method() === 'POST' && response.url().endsWith('/drawings'));
+  await page.getByRole('button', { name: 'Trendlineを保存', exact: true }).click();
+  expect((await rejection).status()).toBe(400);
+  await expect(page.getByRole('button', { name: 'Trendlineを保存', exact: true })).toBeEnabled();
+  await page.getByLabel('Trendline始点日（日足）').fill('2026-09-03');
+  await save(page);
+  expect(await stored(page)).toHaveLength(1);
+});
