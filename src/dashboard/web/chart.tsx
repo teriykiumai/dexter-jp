@@ -1,4 +1,6 @@
-import { useEffect, useRef } from 'react';
+import { TrendEndpoints, type TrendOverlay, type TrendEditor } from './trend-endpoints.js';
+export type { TrendOverlay, TrendEditor } from './trend-endpoints.js';
+import { useEffect, useRef, useState } from 'react';
 import {
   CandlestickSeries,
   ColorType,
@@ -51,6 +53,8 @@ export function EtfRelativeChart({ result, describedBy }: {
 
 export type ChartOverlay = Pick<ChartPriceLine, 'price' | 'label'> & { colorToken: ChartPriceLine['colorToken'] | '--color-chart-price' };
 interface PriceChartProps {
+  trends?: TrendOverlay[];
+  trendEditor?: TrendEditor;
   bars: ChartBar[];
   priceLines: ChartOverlay[];
   describedBy: string;
@@ -79,7 +83,8 @@ function chronological<T extends { time: BusinessDay }>(rows: T[]): T[] {
   return rows.sort((a, b) => key(a.time) - key(b.time));
 }
 
-export function PriceChart({ bars, priceLines, describedBy, technical }: PriceChartProps) {
+export function PriceChart({ bars, priceLines, describedBy, technical, trends, trendEditor }: PriceChartProps) {
+  const [surface, setSurface] = useState<{ chart: ReturnType<typeof createChart>; series: ISeriesApi<'Candlestick'> } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const chartRef = useRef<ReturnType<typeof createChart> | null>(null);
@@ -143,6 +148,7 @@ export function PriceChart({ bars, priceLines, describedBy, technical }: PriceCh
       scaleMargins: { top: 0.1, bottom: 0.05 },
     });
     candleSeriesRef.current = candles;
+    setSurface({ chart, series: candles });
     const [pricePane, volumePane] = chart.panes();
     pricePane?.setStretchFactor(CHART_PANE_STRETCH.price);
     volumePane?.setStretchFactor(CHART_PANE_STRETCH.volume);
@@ -215,6 +221,7 @@ export function PriceChart({ bars, priceLines, describedBy, technical }: PriceCh
     resizeObserver.observe(container);
 
     return () => {
+      setSurface(null);
       candleSeriesRef.current = null;
       chartRef.current = null;
       resizeObserver.disconnect();
@@ -251,17 +258,30 @@ export function PriceChart({ bars, priceLines, describedBy, technical }: PriceCh
     };
   }, [priceLines, bars, technical?.candles, technical?.interval, technical?.collapsed, technical?.unavailableDates, technical?.sma20]);
 
+  useEffect(() => {
+    const chart = chartRef.current, container = containerRef.current;
+    if (!chart || !container) return;
+    const handles = (trends ?? []).map(line => {
+      const series = chart.addSeries(LineSeries, { color: getComputedStyle(container).getPropertyValue('--color-chart-price').trim(),
+        lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+        autoscaleInfoProvider: () => null });
+      series.setData([{ time: line.time, value: line.price }, { time: line.endTime, value: line.endPrice }]);
+      return series;
+    });
+    return () => { if (chartRef.current === chart) for (const series of handles) chart.removeSeries(series); };
+  }, [trends, bars, technical?.candles, technical?.interval, technical?.collapsed, technical?.unavailableDates, technical?.sma20]);
+
   if (bars.length === 0) {
     return <div className="empty-state chart-empty">調整済みOHLCVは利用できません。</div>;
   }
 
   return (
-    <div
+    <div className="drawing-chart-frame"><div
       aria-describedby={describedBy}
       aria-label={technical ? '調整後OHLCV・RSI・MACDの同期チャート。正確な値は隣接する表で確認できます。' : '調整後日足ローソク足と日次出来高の同期チャート'}
       className="price-chart"
       ref={containerRef}
       role="img"
-    />
+    />{surface && trendEditor ? <TrendEndpoints key={technical?.interval} chart={surface.chart} series={surface.series} editor={trendEditor} /> : null}</div>
   );
 }

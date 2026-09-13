@@ -218,3 +218,11 @@ button, input, select, textarea, table { font: inherit; }
   .dashboard-design summary, .dashboard-design :is(.validation-mode label, .validation-confirm-checkbox) { min-width: var(--touch-target-size); min-height: var(--touch-target-size); }
   .dashboard-design .validation-field input::file-selector-button { min-height: var(--touch-target-size); }
 }
+
+.drawing-chart-frame { position: relative; min-width: 0; isolation: isolate; }
+.drawing-chart-frame > .price-chart { position: relative; z-index: 0; }
+.drawing-endpoints { position: absolute; z-index: 1; inset: 0 auto auto 0; overflow: hidden; pointer-events: none; }
+.drawing-segment { stroke: var(--color-chart-price); stroke-width: 2; stroke-dasharray: 4 4; }
+.drawing-handle-visible { fill: var(--color-surface); stroke: var(--color-chart-price); stroke-width: 2; }
+.drawing-handle { fill: transparent; pointer-events: all; touch-action: none; cursor: grab; }
+.drawing-handle:focus-visible { outline: 2px solid var(--color-focus); outline-offset: -2px; }

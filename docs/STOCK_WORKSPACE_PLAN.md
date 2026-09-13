@@ -678,6 +678,40 @@ Trendline and undo/redo remain in their owning later steps. Process-restart and
 backup/restore fixtures exercise M1 offline; synthetic source/calendar data does not
 close the outstanding live cross-date identity gate.
 
+Step 4B adds the `trendline` Drawing discriminant with an ordered pair of canonical
+daily anchors (`time`/`price`, `endTime`/`endPrice`). Both dates must be eligible
+daily sessions inside the fixed creation evidence window. Horizontal JSON remains
+unchanged; the existing anchors JSON column and reference inventory require no SQL
+layout change. Older binaries reject the unknown kind rather than silently dropping
+it; backups containing Trendlines require a Step 4B-or-newer reader. Immutable market
+codecs, receipts and legacy Snapshot formats are unchanged.
+
+The Drawing page/save/delete DTOs advance to V2 for the new kind and server-issued
+history token. Item POST accepts an explicit undo/redo token, expected current
+revision (zero means absent), direction, server-issued state fence and exact chart digest. The server retains
+at most 100 command snapshots in memory, scoped to exact instrument and Drawing ID;
+it accepts no client-supplied restoration artifact. Create/edit/delete undo and redo
+use revision, state-fence and exact-content preconditions, with a second check inside
+the writer transaction. Restoring an absent Drawing preserves its ID, original basis
+and evidence window, and advances its revision. Restoration revalidates original
+immutable closure/basis and the current binding. Expired/restarted command tokens,
+conflicts and ambiguous responses never trigger automatic retries or source calls.
+The Browser keeps a bounded session stack and only revisions confirmed by its own
+mutations; manual reconciliation or navigation clears that stack. Committed records
+remain durable even though undo/redo command history is intentionally session-local.
+Every successful mutation rotates the state fence, including deletion and
+recreation with the same ID/revision/content; an older tab cannot undo that new state.
+
+Trendline display and endpoint dragging initially use the daily chart. Week/month
+projection remains Step 4C and is explicitly unavailable in this step. Numeric
+endpoint fields work on every interval and preserve daily anchors. Drag uses chart
+time/price conversion, snaps only to eligible dates, and changes an unsaved draft
+on pointer release; Escape/pointer cancellation leaves the draft unchanged. Native
+fields, focusable handles with arrow-key date/price edits and touch targets provide
+equivalent operations. Only explicit save commits; edits, undo/redo, cancellation,
+restart restoration, basis rejection and cross-tab revision conflicts need browser
+and real-file API regression evidence.
+
 Each step has its own reviewable diff and inherited regression checks. New names
 below identify module responsibilities, not Step 0 runtime additions.
 

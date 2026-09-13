@@ -42,10 +42,14 @@ export const PreferencesSchema = z.object({ interval: z.enum(['day', 'week', 'mo
   volume: z.boolean() }).strict();
 export type ChartPreferences = z.infer<typeof PreferencesSchema>;
 export const DEFAULT_PREFERENCES: ChartPreferences = { interval: 'day', sma: [20], rsi: true, macd: true, volume: true };
-export const DrawingSchema = z.object({ id: Id, instrumentId: Id, kind: z.literal('horizontal'),
+const drawingBase = z.object({ id: Id, instrumentId: Id,
   price: z.number().positive().finite(), time: DateValue, evidenceFrom: DateValue,
-  evidenceThrough: DateValue, basisObject: ObjectRefSchema, revision: z.number().int().positive() }).strict()
-  .refine(d => d.evidenceFrom <= d.time && d.time <= d.evidenceThrough);
+  evidenceThrough: DateValue, basisObject: ObjectRefSchema, revision: z.number().int().positive() });
+export const DrawingSchema = z.discriminatedUnion('kind', [
+  drawingBase.extend({ kind: z.literal('horizontal') }).strict(),
+  drawingBase.extend({ kind: z.literal('trendline'), endTime: DateValue, endPrice: z.number().positive().finite() }).strict(),
+]).refine(d => d.evidenceFrom <= d.time && d.time <= d.evidenceThrough
+  && (d.kind === 'horizontal' || (d.time < d.endTime && d.endTime <= d.evidenceThrough)));
 export type StoredDrawing = z.infer<typeof DrawingSchema>;
 export function restoredDrawing(anchors: string, basisObject: ObjectRef, revision: number): StoredDrawing {
   const value: unknown = JSON.parse(anchors);

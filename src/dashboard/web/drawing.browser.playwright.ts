@@ -34,7 +34,7 @@ async function create(page: Page, price = '102.25') {
   await expect(page.getByLabel('Horizontal価格（円・調整後）')).toBeFocused();
   await page.getByLabel('Horizontal価格（円・調整後）').fill(price);
   await page.getByRole('button', { name: 'Horizontalを保存', exact: true }).click();
-  await expect(page.getByRole('list', { name: '保存済みHorizontal' }).getByText(`${price} 円`, { exact: false })).toBeVisible();
+  await expect(page.getByRole('list', { name: '保存済みDrawing' }).getByText(`${price} 円`, { exact: false })).toBeVisible();
 }
 
 test('M1: no Snapshot/LLM, explicit EOD, day/week/month, touch create, real process restart restores Horizontal', async ({ page }) => {
@@ -45,7 +45,7 @@ test('M1: no Snapshot/LLM, explicit EOD, day/week/month, touch create, real proc
   const route = new URL(page.url()).pathname + new URL(page.url()).search;
   const old = await page.request.get(`${base}api/workspace/instruments/${new URL(page.url()).searchParams.get('instrument')}/drawings`).then(r => r.json());
   await page.goto('about:blank'); await stop(); await start(); await page.goto(`${base.slice(0, -1)}${route}`);
-  await expect(page.getByRole('list', { name: '保存済みHorizontal' }).getByText('102.25 円', { exact: false })).toBeVisible();
+  await expect(page.getByRole('list', { name: '保存済みDrawing' }).getByText('102.25 円', { exact: false })).toBeVisible();
   const restored = await page.request.get(`${base}api/workspace/instruments/${old.instrumentId}/drawings`).then(r => r.json());
   expect(restored).toEqual(old); expect(await page.request.get(`${base}test/counts`).then(r => r.json())).toEqual({ calls: 0 });
   for (const width of [320, 390, 680, 768, 980, 1024, 1280]) {
@@ -54,18 +54,18 @@ test('M1: no Snapshot/LLM, explicit EOD, day/week/month, touch create, real proc
   }
   for (const interval of ['week', 'month', 'day']) {
     await page.getByLabel('表示間隔').selectOption(interval);
-    await expect(page.getByRole('list', { name: '保存済みHorizontal' }).getByText('102.25 円', { exact: false })).toBeVisible();
+    await expect(page.getByRole('list', { name: '保存済みDrawing' }).getByText('102.25 円', { exact: false })).toBeVisible();
   }
   await page.locator('.price-chart').screenshot({ path: '.dexter/horizontal-chart-restored.png' });
   await page.setViewportSize({ width: 390, height: 900 });
-  await page.getByRole('heading', { name: 'Horizontal line', exact: true }).scrollIntoViewIfNeeded();
+  await page.getByRole('heading', { name: 'Drawing', exact: true }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: '.dexter/horizontal-mobile.png' });
   await page.getByRole('button', { name: /を選択・編集/ }).focus(); await page.keyboard.press('Enter');
   await page.getByLabel('Horizontal価格（円・調整後）').fill('104');
   await page.getByRole('button', { name: 'Horizontalを保存', exact: true }).click();
-  await expect(page.getByRole('list', { name: '保存済みHorizontal' }).getByText('104 円', { exact: false })).toBeVisible();
+  await expect(page.getByRole('list', { name: '保存済みDrawing' }).getByText('104 円', { exact: false })).toBeVisible();
   await page.getByRole('button', { name: /を削除/ }).tap();
-  await expect(page.getByText('保存済みHorizontalはありません。')).toBeVisible();
+  await expect(page.getByText('保存済みDrawingはありません。')).toBeVisible();
   expect(errors).toEqual([]);
 });
 
@@ -97,7 +97,7 @@ test('save conflict and ambiguous publication preserve draft, never auto-retry, 
   await expect(page.getByRole('alert').filter({ hasText: '保存結果を確認できません' })).toBeVisible();
   await expect(page.getByLabel('Horizontal価格（円・調整後）')).toHaveValue('107'); expect(writes).toBe(2);
   await page.getByRole('button', { name: '保存状態を再読込' }).click();
-  await expect(page.getByRole('list', { name: '保存済みHorizontal' }).getByText('107 円', { exact: false })).toBeVisible();
+  await expect(page.getByRole('list', { name: '保存済みDrawing' }).getByText('107 円', { exact: false })).toBeVisible();
   await expect(page.getByLabel('Horizontal価格（円・調整後）')).toHaveValue('107'); expect(writes).toBe(2);
   await page.getByRole('button', { name: '編集をキャンセル' }).click();
 });

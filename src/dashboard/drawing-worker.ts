@@ -1,3 +1,4 @@
+import { drawingCandidate } from './drawing-candidate.js';
 import { WorkspaceDatabase } from '../analysis/workspace/database.js';
 import { WorkspaceRepository } from '../analysis/workspace/repository.js';
 import { objectRow, rowRef, type VerifiedObject } from '../analysis/workspace/references.js';
@@ -5,9 +6,9 @@ import { objectKey, scopeKey, fail, WorkspaceError, json, type ObjectRef, type S
 import { verifiedTechnical } from '../analysis/workspace/verified-technical.js';
 import { compareVerifiedDrawingBasis } from '../analysis/workspace/technical-input.js';
 import type { TechnicalArtifactV2 } from '../analysis/workspace/technical-artifact.js';
-import { HorizontalWriteSchema, type HorizontalWrite, type DrawingPage, type HorizontalView } from './drawing-contracts.js';
+import { DrawingWriteSchema, type DrawingWrite, type DrawingPage, type DrawingView } from './drawing-contracts.js';
 
-export type DrawingWork = { root: string; instrumentId: string; after?: string; write?: HorizontalWrite };
+export type DrawingWork = { root: string; instrumentId: string; after?: string; write?: DrawingWrite; restore?: StoredDrawing; chartDigest?: string };
 export type DrawingProof = { instrumentId: string; artifact: string; receipt: string; chartDigest: string; dates: string[];
   basisObject: ObjectRef; originals: StoredDrawing[]; compatible: string[];
   objects: { ref: ObjectRef; metadata: string }[] };
@@ -26,7 +27,7 @@ export function drawingWork(request: DrawingWork): DrawingResult {
       return verified.get(key)!;
     };
     const current = binding ? load(binding.artifact, binding.receipt) : null;
-    const compatibility = (drawing: StoredDrawing): HorizontalView['state'] => {
+    const compatibility = (drawing: StoredDrawing): DrawingView['state'] => {
       if (!current) return 'basis_review_required';
       try {
         const old = db.sqlite.query<{ receipt: string }, [string, string]>(`SELECT receipt FROM artifact_bindings
@@ -37,29 +38,32 @@ export function drawingWork(request: DrawingWork): DrawingResult {
         return compareVerifiedDrawingBasis(original, current, drawing.evidenceFrom, drawing.evidenceThrough);
       } catch { return 'basis_review_required'; }
     };
+    if (request.restore) {
+      const drawing = request.restore;
+      if (!current || !binding || request.chartDigest !== current.artifactDigest) fail('revision_conflict');
+      if (drawing.instrumentId !== id || compatibility(drawing) !== 'compatible') fail('identity_review_required');
+      const dates = current.result.intervals.day.map(row => row.displayDate);
+      if (!dates.includes(drawing.time) || (drawing.kind === 'trendline' && !dates.includes(drawing.endTime))) fail('invalid_input');
+      return { drawing, ...binding };
+    }
     if (request.write) {
-      const write = HorizontalWriteSchema.parse(request.write);
+      const write = DrawingWriteSchema.parse(request.write);
       if (!binding || !current || write.chartDigest !== current.artifactDigest) fail('revision_conflict');
       const existing = repository.drawing(id, write.id);
       if (write.revision === 0 ? existing !== null : existing?.revision !== write.revision) fail('revision_conflict');
       if (existing && compatibility(existing) !== 'compatible') fail('identity_review_required');
-      // A canonical daily anchor must exist, including when editing from week/month.
-      if (!current.result.intervals.day.some(row => row.displayDate === write.time)) fail('invalid_input');
-      const drawing: StoredDrawing = existing ? { ...existing, price: write.price, time: write.time, revision: write.revision + 1 }
-        : { id: write.id, instrumentId: id, kind: 'horizontal', price: write.price, time: write.time, revision: 1,
-          evidenceFrom: current.result.intervals.day[0]!.displayDate, evidenceThrough: current.result.intervals.day.at(-1)!.displayDate,
-          basisObject: rowRef(objectRow(db, binding.artifact)) };
-      // Edits preserve the original evidence window; accepting new basis is Step 4C.
-      if (drawing.time < drawing.evidenceFrom || drawing.time > drawing.evidenceThrough) fail('invalid_input');
+      const drawing = drawingCandidate(id, write, existing, current.result.intervals.day.map(row => row.displayDate),
+        rowRef(objectRow(db, binding.artifact)));
       if (compatibility(drawing) !== 'compatible') fail('identity_review_required');
       return { drawing, artifact: binding.artifact, receipt: binding.receipt };
     }
     const rows = repository.drawings(id, request.after ?? '', 101), pageRows = rows.slice(0, 100);
-    const items: HorizontalView[] = pageRows.map(drawing => ({ id: drawing.id, instrumentId: id, kind: 'horizontal', family: 'swing',
+    const items: DrawingView[] = pageRows.map(drawing => ({ id: drawing.id, instrumentId: id, kind: drawing.kind, family: 'swing',
         adjustmentMode: 'jquants_adjusted_ohlcv_not_total_return', revision: drawing.revision, price: drawing.price,
         time: drawing.time, evidenceFrom: drawing.evidenceFrom, evidenceThrough: drawing.evidenceThrough,
-        basisDigest: drawing.basisObject.digest, state: compatibility(drawing) }));
-    return { page: { schemaVersion: 'workspace_drawings_v1', instrumentId: id, chartDigest: current?.artifactDigest ?? null,
+        basisDigest: drawing.basisObject.digest, state: compatibility(drawing),
+        ...(drawing.kind === 'trendline' ? { endTime: drawing.endTime, endPrice: drawing.endPrice } : {}) } as DrawingView));
+    return { page: { schemaVersion: 'workspace_drawings_v2', instrumentId: id, chartDigest: current?.artifactDigest ?? null,
       items, next: rows.length > 100 ? pageRows.at(-1)!.id : null }, proof: current && binding
         && [...objects.values()].reduce((bytes, object) => bytes + object.bytes.byteLength, 0) <= 8 * 1024 * 1024 ? {
         instrumentId: id, ...binding, chartDigest: current.artifactDigest, dates: current.result.intervals.day.map(row => row.displayDate),
