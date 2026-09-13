@@ -555,3 +555,8 @@ common 2px focus ring, inset to avoid clipping. A positioned SVG follows the pri
 pane only; it never covers volume/indicator panes or intercepts chart navigation
 outside the handles. Labelled date/price fields remain the exact keyboard/touch
 alternative. No new color, typography, spacing or page hierarchy is introduced.
+
+Step 4C Fibonacci reuses the saved chart-price segment style and daily endpoint
+controls. Level ratios and exact prices use existing labelled data lists.
+Basis review uses an inline grouped section, native confirmation checkbox, existing
+Buttons and textual status; no new palette, geometry or dialog is introduced.

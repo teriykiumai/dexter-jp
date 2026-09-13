@@ -8,8 +8,8 @@ export function drawingCandidate(instrumentId: string, write: DrawingWrite, exis
   if (existing && existing.kind !== kind) fail('invalid_input');
   if (!dates.includes(write.time) || ('endTime' in write && !dates.includes(write.endTime))) fail('invalid_input');
   const common = { id: write.id, instrumentId, price: write.price, time: write.time, revision: write.revision + 1,
-    basisObject: existing?.basisObject ?? basisObject, evidenceFrom: existing?.evidenceFrom ?? dates[0],
+    basisObject: existing?.basisObject ?? basisObject, ...(existing?.acceptedBasis ? { acceptedBasis: existing.acceptedBasis } : {}), evidenceFrom: existing?.evidenceFrom ?? dates[0],
     evidenceThrough: existing?.evidenceThrough ?? dates.at(-1) };
   return parse(DrawingSchema, 'endTime' in write
-    ? { ...common, kind, endTime: write.endTime, endPrice: write.endPrice } : { ...common, kind });
+    ? { ...common, kind, endTime: write.endTime, endPrice: write.endPrice, ...(kind === 'fibonacci' ? { levelsVersion: 'retracement_v1' } : {}) } : { ...common, kind });
 }

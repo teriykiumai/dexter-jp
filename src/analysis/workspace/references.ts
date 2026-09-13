@@ -177,6 +177,11 @@ export function referenceRoots(db: WorkspaceDatabase): ReferenceRoot[] {
         result.push({ table: 'workspace_data_jobs', ...row, field });
     }
   }
+  for (const row of db.sqlite.query<{ drawing_id: string; anchors: string; basis_object: string; revision: number }, []>('SELECT * FROM drawings ORDER BY drawing_id').all()) {
+    const drawing = restoredDrawing(row.anchors, rowRef(objectRow(db, row.basis_object)), row.revision);
+    if (drawing.acceptedBasis) result.push({ table: 'drawings', record: row.drawing_id,
+      field: 'acceptedBasis', object: objectKey(drawing.acceptedBasis.object) });
+  }
   // Internal binding FKs retain both exact references, even without Drawings/AI.
   for (const table of ['data_sync_state', 'shared_context_links'] as const) {
     const key = table === 'data_sync_state' ? "s.scope || ':' || s.dataset" : "s.instrument_id || ':' || s.role";
@@ -254,6 +259,7 @@ export function validateReferences(db: WorkspaceDatabase, codecs: ReferenceCodec
   for (const row of db.sqlite.query<{ drawing_id: string; instrument_id: string; anchors: string; basis_object: string; revision: number }, []>('SELECT * FROM drawings').all()) {
     const drawing = restoredDrawing(row.anchors, rowRef(objectRow(db, row.basis_object)), row.revision);
     if (drawing.id !== row.drawing_id || drawing.instrumentId !== row.instrument_id) fail('reference_conflict');
+    if (drawing.acceptedBasis) requireScope(db, objectKey(drawing.acceptedBasis.object), { kind: 'instrument-owned', instrumentId: row.instrument_id });
   }
   for (const binding of db.sqlite.query<{ scope: string; dataset: string; artifact: string; receipt: string; frozen_identity: string | null }, []>('SELECT * FROM artifact_bindings').all()) {
     parse(Token, binding.dataset);

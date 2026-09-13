@@ -1,3 +1,4 @@
+import { BasisAcceptSchema } from './drawing-contracts.js';
 import { drawingCandidate } from './drawing-candidate.js';
 import { DrawingHistory, sameDrawingContent } from './drawing-history.js';
 import { DrawingHistoryWriteSchema, DrawingHistoryResultSchema } from './drawing-contracts.js';
@@ -70,6 +71,22 @@ export class DrawingApi {
     if ([...url.searchParams].length) fail('invalid_input');
     requireDashboardJsonMediaType(request);
     const raw = parseStrictJsonBytesV1(await readDashboardBody(request, 4096), 4096);
+    if (item && request.method === 'POST' && raw && typeof raw === 'object' && 'action' in raw) {
+      const accept = parse(BasisAcceptSchema, raw);
+      const checked = await this.work({ root: db.root, instrumentId, accept: { ...accept, id: id! } });
+      if (!('drawing' in checked)) fail('reference_conflict');
+      const drawing = parse(DrawingSchema, checked.drawing);
+      let before: StoredDrawing | null = null;
+      db.transaction(() => {
+        this.requireBinding(instrumentId, checked.artifact, checked.receipt);
+        before = this.repository.drawing(instrumentId, id!);
+        if (!checked.before || json(before) !== json(checked.before)) fail('revision_conflict');
+        this.repository.saveDrawing(drawing, accept.revision);
+      });
+      const history = this.history.record(instrumentId, id!, before, drawing);
+      return send(DrawingSavedSchema.parse({ schemaVersion: 'workspace_drawing_saved_v2', instrumentId,
+        id, revision: drawing.revision, ...history }));
+    }
     if (item && request.method === 'POST') {
       const body = parse(DrawingHistoryWriteSchema, raw);
       const command = this.history.get(body.token, instrumentId, id!, body.direction);

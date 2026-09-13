@@ -12,7 +12,7 @@ import { workspaceDataCodecs } from '../analysis/workspace/data-objects.js';
 import { referencePath } from '../analysis/workspace/references.js';
 import { DrawingHistory } from './drawing-history.js';
 
-test('Trendline CRUD and session undo/redo preserve exact basis and reject revision, identity and replay races', async () => {
+test.each(['trendline', 'fibonacci'] as const)('%s CRUD and session undo/redo preserve exact basis and reject revision, identity and replay races', async (kind) => {
   const f = await workspaceDataFixture(), session = new DashboardSessionV1();
   let historyState = '';
   let api = new WorkspaceDashboardApi(f.jobs, session);
@@ -27,12 +27,12 @@ test('Trendline CRUD and session undo/redo preserve exact basis and reject revis
   try {
     const instrumentId = await seedTrendlineFixture(f.db), path = `${instrumentId}/drawings`;
     const page = DrawingPageSchema.parse(await (await call(path)).json()), id = randomUUID();
-    const write = { id, revision: 0, chartDigest: page.chartDigest!, kind: 'trendline', price: 100, time: '2026-09-10', endTime: '2026-09-11', endPrice: 108 };
+    const write = { id, revision: 0, chartDigest: page.chartDigest!, kind, price: 100, time: '2026-09-10', endTime: '2026-09-11', endPrice: 108 };
     for (const invalid of [{ ...write, endTime: write.time }, { ...write, endTime: '2026-09-06' }, { ...write, endPrice: 0 },
       { ...write, endTime: '2026-09-12' }, { ...write, basisObject: {} }]) expect((await call(path, 'POST', invalid)).status).toBe(400);
     const saved = DrawingSavedSchema.parse(await (await call(path, 'POST', write)).json());
     const original = f.repository.drawing(instrumentId, id)!;
-    expect(original).toMatchObject({ kind: 'trendline', time: write.time, endTime: write.endTime });
+    expect(original).toMatchObject({ kind, time: write.time, endTime: write.endTime });
     const endpoint = `${path}/${id}`;
     const history = (token: string, direction: 'undo' | 'redo', revision: number) => call(endpoint, 'POST', { token, direction, revision, state: historyState, chartDigest: write.chartDigest });
     const undoneCreate = DrawingHistoryResultSchema.parse(await (await history(saved.historyToken, 'undo', 1)).json());
@@ -67,7 +67,7 @@ test('Trendline CRUD and session undo/redo preserve exact basis and reject revis
     const restored = f.repository.drawing(instrumentId, id)!;
     expect(restored.basisObject).toEqual(original.basisObject);
     const finalPage = DrawingPageSchema.parse(await (await call(path)).json());
-    expect(finalPage.items[0]).toMatchObject({ kind: 'trendline', state: 'compatible', endPrice: 108 });
+    expect(finalPage.items[0]).toMatchObject({ kind, state: 'compatible', endPrice: 108 });
     const calls = f.calls(), restarted = await f.restart(); api = new WorkspaceDashboardApi(restarted.jobs, session);
     expect((await history(removed.historyToken, 'redo', 6)).status).toBe(409);
     expect(DrawingPageSchema.parse(await (await call(path)).json())).toEqual(finalPage);
