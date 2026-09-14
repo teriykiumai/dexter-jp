@@ -15,6 +15,7 @@ import type { WorkspaceDatabase } from './database.js';
 import { supplyCodecs, validateSupplyLinks } from './supply-objects.js';
 import { financialCodecs, validateFinancialLinks } from './financial-objects.js';
 import { aiCodecs, validateAiResult } from './ai-objects.js';
+import { marketShortCodecs, validateMarketShortLinks } from './market-short-objects.js';
 import { AiInputSchema, AnalysisRunArtifactV1Schema } from './ai-contracts.js';
 
 const FetchEvidenceSchema = z.object({ fetchedAt: z.iso.datetime(), pageCount: z.number().int().positive().max(20),
@@ -35,6 +36,7 @@ export const workspaceDataCodecs: ReferenceCodecs = new Map([
   ...aiCodecs,
   ...supplyCodecs,
   ...financialCodecs,
+  ...marketShortCodecs,
   ['workspace_catalog_v1', value => {
     const catalog = parse(CatalogObjectSchema, value);
     const window = createTechnicalSourceRequestWindowV1(catalog.acceptedAt);
@@ -115,6 +117,7 @@ export function validateDataObjectLinks(objects: readonly VerifiedObject[]): voi
   };
   for (const object of objects) {
     if (!workspaceDataCodecs.has(object.ref.codec)) continue;
+    if (marketShortCodecs.has(object.ref.codec)) { validateMarketShortLinks(object, get); continue; }
     if (supplyCodecs.has(object.ref.codec)) { validateSupplyLinks(object, get); continue; }
     if (financialCodecs.has(object.ref.codec)) { validateFinancialLinks(object, get); continue; }
     if (object.ref.codec === 'analysis_run_artifact_v1') {

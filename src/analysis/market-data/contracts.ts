@@ -87,6 +87,7 @@ export const MARKET_DATA_MODULE_IDS_V1 = [
   'tokyo_nagoya_foreign_flow', 'etf_1321_eod', 'etf_1321_2633_relative',
 ] as const;
 export const MARKET_DATA_CALCULATION_VERSIONS_V1 = [
+  'market_short_turnover_weighted_v1',
   'workspace_supply_calculation_v1',
   'workspace_financial_selection_v1',
   'technical_chart_calculation_v2', 'tse_margin_quantities_calculation_v1',
@@ -99,7 +100,7 @@ export type MarketDataCalculationVersionV1 = typeof MARKET_DATA_CALCULATION_VERS
 const overviewTargetFields = { kind: z.literal('overview'), moduleId: z.enum(MARKET_DATA_MODULE_IDS_V1),
   sourceId: z.enum(MARKET_DATA_MODULE_IDS_V1.map(id => `${id}_v1` as const)) };
 const workspaceTargetFields = { kind: z.literal('workspace'),
-  key: z.string().regex(/^(?:(?:margin|issuer_short|financial)_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|sector_short_[0-9]{4})$/) };
+  key: z.string().regex(/^(?:(?:margin|issuer_short|financial)_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|sector_short_[0-9]{4}|market_short_tse_regular_market_v1)$/) };
 export const MarketDataTargetV1Schema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('technical'), ticker: CanonicalTickerSchema }).strict(),
   z.object(overviewTargetFields).strict(),

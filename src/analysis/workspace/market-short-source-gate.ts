@@ -25,7 +25,7 @@ export class MarketShortSourceGateError extends Error {
 }
 const fail = (code: MarketShortSourceGateError['code']): never => { throw new MarketShortSourceGateError(code); };
 const amount = z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable();
-const rowSchema = z.object({
+export const MarketShortRowSchemaV1 = z.object({
   Date: z.string().refine(isStrictGregorianDate), S33: z.enum(MARKET_SHORT_COVERAGE_V1.codes),
   SellExShortVa: amount, ShrtWithResVa: amount, ShrtNoResVa: amount,
 }).strict();
@@ -34,7 +34,7 @@ const rowSchema = z.object({
 export function inspectMarketShortCoverageV1(raw: readonly unknown[], date: string, asOfDate: string) {
   if (!isStrictGregorianDate(date) || !isStrictGregorianDate(asOfDate)
     || date < MARKET_SHORT_COVERAGE_V1.effectiveFrom || date > asOfDate) return fail('invalid_configuration');
-  const parsed = z.array(rowSchema).max(200).safeParse(raw);
+  const parsed = z.array(MarketShortRowSchemaV1).max(200).safeParse(raw);
   if (!parsed.success || parsed.data.some(row => row.Date !== date)) return fail('source_response_invalid');
   const rows = parsed.data.sort((a, b) => a.S33.localeCompare(b.S33));
   const codes = new Set(rows.map(row => row.S33));
