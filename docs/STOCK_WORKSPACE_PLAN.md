@@ -4,7 +4,7 @@
 
 **Date:** 2026-09-12
 
-**Status:** Implementation through Step 8 Dashboard cutover is merged (PR #124, `8e656c1`). SW-M0 diagnostics (PR #125, `6ecab88`), SW-M1 immutable storage (PR #126, `6dcbc0f`) and closed V1 binding qualification (PR #127, `691f9eb`) are merged. The current candidate adds production eligibility V2: complete J-Quants data may be used as an approximate reference under the hard gates below; JPX public-total differences are soft warnings. Dashboard market jobs/UI/AI integration remains a subsequent slice. Numeric forecast yield, cross-date identity and ETF/REIT capabilities remain gated; later steps require their own implementation, validation, review and merge.
+**Status:** Implementation through Step 8 Dashboard cutover is merged (PR #124, `8e656c1`). SW-M0 diagnostics (PR #125, `6ecab88`), SW-M1 immutable storage (PR #126, `6dcbc0f`), closed V1 binding qualification (PR #127, `691f9eb`) and production eligibility V2 (PR #128, `348c84b`) are merged. Complete J-Quants data may be used as an approximate reference under the hard gates below; JPX public-total differences are soft warnings. The current candidate adds the bounded V2 collector; Dashboard market jobs/UI/AI integration remains a subsequent slice. Numeric forecast yield, cross-date identity and ETF/REIT capabilities remain gated; later steps require their own implementation, validation, review and merge.
 
 ## 1. Authority and migration boundary
 
@@ -846,7 +846,7 @@ deny eligibility. Zero is data: sum JPY short turnover and total turnover before
 computing `100 * S / T`; T=0 preserves turnover and a null ratio with its reason.
 The 2026-09-10 registry floor is unchanged, not an assertion of earlier coverage.
 
-The following collection contract is mandatory for the subsequent collector slice,
+The following collection contract is mandatory for the collector slice,
 which must reuse the existing authenticated reader and admitted dispatcher.
 It first fetches `/v2/markets/calendar?from=date&to=date` with no holiday filter,
 then requests `/v2/markets/short-ratio?date=date`. The exact calendar row is required;
@@ -914,7 +914,7 @@ than bypassing the maintenance lock. Missing/corrupt/unqualified retained bindin
 fail before restore replaces an existing installation; no latest fallback, network
 replay, referenced-cache omission or Drawing loss is allowed.
 
-This slice supplies V2 immutable evidence/codecs and repository eligibility
+The merged policy slice supplies V2 immutable evidence/codecs and repository eligibility
 boundaries. It does not install a collector, Dashboard job route, membership
 collector, UI projection or AI input. Those remain separate implementation work;
 their absence is not another source reconciliation gate. Existing Snapshot/Strategy
@@ -928,6 +928,42 @@ and inherited transport regressions; exact refetch/correction recovery; two-Work
 issuer mixing; no-Drawing/AI backup restore of current data and complete closure;
 failed restore preserves existing Drawings. Validate broad persistence/Market Data
 regressions, type checking and full CI; ordinary tests make no live API/LLM calls.
+
+### SW-M1 bounded V2 collector
+
+`collectWorkspaceMarketShortV2` implements the two-query collection contract above.
+The caller supplies an already admitted context with its frozen `acceptedAt`,
+monotonic origin and configured request rate. Every attempt still goes through that
+owner's shared dispatcher. The collector acquires no independent lease and performs
+no automatic startup, GET-driven collection or direct CLI dispatch.
+
+Admission/date/cancellation/clock checks and minimum two-query schedule feasibility
+precede credential access. The 60-second budget starts at admission, not collector
+entry; an infeasible lower rate or delayed start is rejected without a request.
+Spacing is at least `60000 / min(configuredRate, 5)` milliseconds, including repeated
+checks after early timer wakeups. Queue waits and source body reads remain inside
+the total budget. Each actual request has a separate 30-second watchdog, and a
+queued callback rechecks validity before dispatch. Retryable transport failures
+terminate this collection without retrying or moving to another source/date.
+
+The existing authenticated bounded reader retains strict JSON/envelope checks and
+counts pages, rows and bytes cumulatively across calendar and short-ratio queries.
+Calendar schema/session validation precedes the market request. Strict market rows
+are sorted canonically only after validation; unknown fields are never stripped.
+The returned V2 input uses the reader's exact source observations and actual
+execution metrics, then passes the merged `marketShortInputV2` predicate. It reuses
+the V2 public-reference and warning contract without new reconciliation logic.
+
+This collector returns validated input only. Publication, current binding and backup
+are exercised through the existing V2 codecs/repositories in fixture integration
+tests. Dashboard job/schema/admission wiring, shared membership collection,
+projection, UI and AI integration remain subsequent reviewed work. No live call or
+new entitlement claim is needed for this fixture-tested transport slice.
+
+Acceptance additionally covers the last allowed page, cumulative overflow, strict
+calendar/market failures, cancelled/stalled/late dispatch, lower rates, actual shared
+coordinator lease/cooldown behavior, and collector input -> receipt -> qualified
+binding -> offline backup/restore with the observed 1,770,757-JPY discrepancy.
 
 ## 7. Workspace API, navigation and AI
 
