@@ -965,6 +965,45 @@ calendar/market failures, cancelled/stalled/late dispatch, lower rates, actual s
 coordinator lease/cooldown behavior, and collector input -> receipt -> qualified
 binding -> offline backup/restore with the observed 1,770,757-JPY discrepancy.
 
+### SW-M1 durable market job and exact publication recovery
+
+`WorkspaceDataJobs.startMarketShort(date)` is an explicit server-library operation
+under the existing shared coordinator (`workspace_market_short`). SQLite schema 6
+adds the closed job kind and an immutable `workspace_market_short_requests` date
+record in the same admission transaction. Market jobs have no instrument identity,
+master reference or catalog generation. Date/cutoff checks precede credential access
+and are repeated against the admitted timestamp; the existing V2 collector retains
+its two-query, 60-second, at-most-five-attempt and no-retry limits.
+
+The job freezes its exact V2 input before entering `publishing`. Publication uses
+the existing V2 Market Data repository; finalization finds only the receipt derived
+from the admitted job ID/timestamp, replays the exact input/receipt qualification,
+then commits the market-scoped binding and terminal job result together. Retained
+artifact/receipt references are deterministic across recovery. Artifact reuse keeps
+the original artifact input and the new receipt's observation input separately.
+Current ordering and transaction-time eligibility remain the merged V2 predicates.
+
+Restart interrupts queued/running jobs without collection. A publishing job with
+no exact receipt becomes interrupted; a valid exact receipt can complete locally.
+During recovery, corrupt, mismatched or missing retained evidence fails closed and
+blocks admission; recovery never fetches, republishes, consults latest or silently substitutes a date.
+Cancellation is allowed before publishing; ambiguous publication must be reconciled.
+
+Backup/Restore supports schema 1–6 and includes every job input/result dependency.
+It uses the same admitted-date/input/observation-receipt predicate offline, verifies
+published jobs' exact bindings, and refuses unresolved publication. Migration 6 is
+atomic and preserves prior job rows, Drawing references and settings. No V1 policy
+or immutable artifact is rewritten or promoted.
+
+This slice adds no market HTTP admission, Workspace membership, read projection,
+UI controls or AI input. The existing active-job endpoint reports the library job
+as `blockingKind`, never as an instrument job; legacy per-job HTTP access rejects
+it. These later interfaces require a reviewed dated job contract and scope evidence.
+Acceptance covers exact no-network restart, idempotent reuse, cancellation and
+shared contention, admission boundaries, forged input/receipt refusal, no-Drawing/AI
+backup closure, old backup compatibility and migration rollback. Broad persistence,
+existing dataset/coordinator/API regressions, type checking and full CI are required.
+
 ## 7. Workspace API, navigation and AI
 
 New routes live in a Workspace domain; legacy `/api/analyses/*` stays GET-only.

@@ -1,7 +1,7 @@
 import type { Database } from 'bun:sqlite';
 import { digest, fail, json } from './contracts.js';
 
-export const WORKSPACE_SCHEMA_VERSION = 5;
+export const WORKSPACE_SCHEMA_VERSION = 6;
 const ddl = `
 CREATE TABLE workspace_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
 INSERT INTO workspace_meta VALUES ('object_store_layout','object-key-v1');
@@ -159,6 +159,28 @@ CREATE TRIGGER analysis_publication_update BEFORE UPDATE OF publication ON analy
   WHEN OLD.publication IS NOT NULL AND NEW.publication IS NOT OLD.publication BEGIN SELECT RAISE(ABORT,'immutable'); END;
 CREATE TRIGGER analysis_published_update BEFORE UPDATE ON analysis_jobs WHEN OLD.state='published'
   BEGIN SELECT RAISE(ABORT,'immutable'); END;
+` }, { version: 6, sql: `
+DROP TRIGGER workspace_job_identity_update;
+DROP TRIGGER workspace_job_input_update;
+DROP TRIGGER workspace_job_result_update;
+DROP INDEX workspace_jobs_state;
+ALTER TABLE workspace_data_jobs RENAME TO workspace_data_jobs_v5;
+${workspaceJobsDdl.replace("kind IN ('catalog','technical')", "kind IN ('catalog','technical','margin','issuer_short','sector_short','financial','market_short')")
+  .replace("(kind='technical')", "(kind NOT IN ('catalog','market_short'))")
+  .replace("CHECK(state <> 'published'", "CHECK(kind <> 'market_short' OR (identity IS NULL AND master_object IS NULL AND generation IS NULL)),\n  CHECK(state <> 'published'")}
+INSERT INTO workspace_data_jobs SELECT * FROM workspace_data_jobs_v5;
+DROP TABLE workspace_data_jobs_v5;
+CREATE TABLE workspace_market_short_requests (
+  job_id TEXT PRIMARY KEY REFERENCES workspace_data_jobs(job_id),
+  requested_date TEXT NOT NULL CHECK(length(requested_date)=10)
+) STRICT;
+CREATE TRIGGER market_short_request_insert BEFORE INSERT ON workspace_market_short_requests
+WHEN (SELECT kind FROM workspace_data_jobs WHERE job_id=NEW.job_id) <> 'market_short'
+BEGIN SELECT RAISE(ABORT,'invalid market request'); END;
+CREATE TRIGGER market_short_request_update BEFORE UPDATE ON workspace_market_short_requests
+BEGIN SELECT RAISE(ABORT,'immutable'); END;
+CREATE TRIGGER market_short_request_delete BEFORE DELETE ON workspace_market_short_requests
+BEGIN SELECT RAISE(ABORT,'immutable'); END;
 ` }] as const;
 /** Each version is atomic, including its marker. Failed DDL never replaces the old DB. */
 export function migrateWorkspace(db: Database, migrations: readonly { version: number; sql: string }[] = WORKSPACE_MIGRATIONS): void {
