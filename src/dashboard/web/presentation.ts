@@ -16,11 +16,8 @@ export const UNAVAILABLE_TEXT = '利用不可' as const;
 export const DASHBOARD_TABS = [
   { id: 'report', label: '概要・レポート' },
   { id: 'technical', label: '株価・テクニカル' },
-  { id: 'fundamentals', label: '比較・配当' },
+  { id: 'fundamentals', label: '保存済み配当' },
   { id: 'supply-demand', label: '需給・空売り' },
-  { id: 'market-overview', label: '市場概況' },
-  { id: 'market', label: '市場・セクター' },
-  { id: 'validation', label: '戦略検証' },
 ] as const;
 
 export type DashboardTabId = (typeof DASHBOARD_TABS)[number]['id'];
@@ -50,14 +47,14 @@ export const DASHBOARD_SECTION_DESTINATIONS = {
   advancedTechnical: 'technical',
   volumeProfile: 'technical',
   strategy: 'technical',
-  peerComparison: 'fundamentals',
+  peerComparison: 'persistent',
   advancedDividend: 'fundamentals',
   supplyDemand: 'supply-demand',
   reportedShortPositions: 'supply-demand',
-  investorTypeFlows: 'market',
-  marketCorrelation: 'market',
-  sectorBenchmark: 'market',
-  sectorShortRatio: 'market',
+  investorTypeFlows: 'persistent',
+  marketCorrelation: 'persistent',
+  sectorBenchmark: 'persistent',
+  sectorShortRatio: 'persistent',
   scenarios: 'report',
   risks: 'report',
 } as const satisfies Record<SnapshotUnavailable['section'], DashboardSectionDestination>;
@@ -476,13 +473,14 @@ export interface WatchlistItemView {
 export type WatchlistSortKey = 'latestDataDate' | 'generatedAt';
 
 export type DashboardPageRoute =
+  | { kind: 'workspace' }
   | { kind: 'watchlist' }
-  | { kind: 'market-overview' }
+  | { kind: 'retired' }
   | { kind: 'detail'; ticker: string }
   | { kind: 'invalid'; reason: 'invalid_parameter' | 'conflicting_owner' | 'missing_owner' };
 
 const REFRESH_QUERY_VALUES = {
-  view: ['market-overview'],
+  view: ['history', 'market-overview'],
   chartSource: ['auto', 'snapshot', 'latest'],
   interval: ['day', 'week', 'month'],
   marketRange: ['3m', '6m', '1y', '3y', 'max'],
@@ -496,6 +494,9 @@ const DETAIL_QUERY_KEYS = [
 /** Validate new owned keys even while their data controls are still dormant. */
 export function parseDashboardPageRoute(search: string): DashboardPageRoute {
   const parameters = new URLSearchParams(search);
+  if (['ticker', 'tab'].some(key => parameters.getAll(key).length > 1)) {
+    return { kind: 'invalid', reason: 'invalid_parameter' };
+  }
   for (const [key, allowed] of Object.entries(REFRESH_QUERY_VALUES)) {
     const values = parameters.getAll(key);
     if (values.length > 0 && (values.length !== 1 || !allowed.some(value => value === values[0]))) {
@@ -505,16 +506,21 @@ export function parseDashboardPageRoute(search: string): DashboardPageRoute {
   if (parameters.has('view')) {
     return DETAIL_QUERY_KEYS.some(key => parameters.has(key))
       ? { kind: 'invalid', reason: 'conflicting_owner' }
-      : { kind: 'market-overview' };
+      : { kind: parameters.get('view') === 'history' ? 'watchlist' : 'retired' };
   }
   const ticker = parseDetailTicker(search);
+  if (['market-overview', 'market', 'validation'].includes(parameters.get('tab') ?? '')) {
+    return ticker ? { kind: 'retired' }
+      : { kind: 'invalid', reason: parameters.has('ticker') ? 'invalid_parameter' : 'missing_owner' };
+  }
   if (ticker) return { kind: 'detail', ticker };
   if ([...DETAIL_QUERY_KEYS.filter(key => key !== 'ticker'), 'marketRange']
     .some(key => parameters.has(key))) {
     return { kind: 'invalid', reason: 'missing_owner' };
   }
-  // Preserve the inherited ticker parser: an invalid ticker alone is not a detail.
-  return { kind: 'watchlist' };
+  return parameters.has('ticker')
+    ? { kind: 'invalid', reason: 'invalid_parameter' }
+    : { kind: 'workspace' };
 }
 
 interface FormatOptions {
@@ -760,7 +766,7 @@ export function buildDashboardTabPath(
 export function buildWatchlistPath(currentSearch = ''): string {
   const parameters = new URLSearchParams(currentSearch);
   for (const key of DETAIL_QUERY_KEYS) parameters.delete(key);
-  parameters.delete('view');
+  parameters.set('view', 'history');
   parameters.delete('marketRange');
   const search = parameters.toString();
   return search ? `/?${search}` : '/';

@@ -1,6 +1,5 @@
 import { useMemo, type MouseEvent, type ReactNode } from 'react';
 import {
-  buildMarketOverviewPath,
   buildWatchlistPath,
   sortWatchlistItems,
   WATCHLIST_STALE_AFTER_DAYS,
@@ -9,12 +8,10 @@ import {
   type WatchlistSortKey,
 } from './presentation.js';
 import { Button, Card, DashboardDesign, StatusBadge, StatusNotice, TableScroll, Value } from './primitives.js';
-import { MarketOverviewPanel } from './market-overview-panel.js';
 
 export interface PageNavigation {
   currentSearch: string;
   onShowWatchlist: () => void;
-  onShowMarketOverview: () => void;
 }
 
 function followLocalLink(event: MouseEvent<HTMLAnchorElement>, navigate: () => void): void {
@@ -24,7 +21,7 @@ function followLocalLink(event: MouseEvent<HTMLAnchorElement>, navigate: () => v
 }
 
 export function DashboardHeader({ page = 'detail', ...navigation }: PageNavigation & {
-  page?: 'watchlist' | 'market-overview' | 'invalid' | 'detail';
+  page?: 'watchlist' | 'retired' | 'invalid' | 'detail';
 }) {
   return (
       <header className="dashboard-page-header">
@@ -37,22 +34,15 @@ export function DashboardHeader({ page = 'detail', ...navigation }: PageNavigati
               href={buildWatchlistPath(navigation.currentSearch)}
               onClick={event => followLocalLink(event, navigation.onShowWatchlist)}
             >保存済み分析</a>
-            <a
-              aria-current={page === 'market-overview' ? 'page' : undefined}
-              href={buildMarketOverviewPath(navigation.currentSearch)}
-              onClick={event => followLocalLink(event, navigation.onShowMarketOverview)}
-            >市場概況</a>
           </nav>
         </div>
       </header>
   );
 }
 
-export const MarketOverviewContent = MarketOverviewPanel;
-
 function DashboardPage({ title, page, children, summary, ...navigation }: PageNavigation & {
   title: string;
-  page: 'watchlist' | 'market-overview' | 'invalid';
+  page: 'watchlist' | 'retired' | 'invalid';
   children: ReactNode;
   summary?: ReactNode;
 }) {
@@ -182,10 +172,14 @@ export function Watchlist({ items, sortKey, onSort, onSelect, loading, error, on
   );
 }
 
-export function MarketOverviewPage({ navigationRevision, ...navigation }: PageNavigation & { navigationRevision: number }) {
+export function RetiredDashboardPage(navigation: PageNavigation) {
   return (
-    <DashboardPage {...navigation} page="market-overview" title="市場概況">
-      <MarketOverviewContent navigationRevision={navigationRevision} />
+    <DashboardPage {...navigation} page="retired" title="この画面は退役しました">
+      <Card title="Stock Workspaceへ移行しました">
+        <p>市場概況・市場／セクター・戦略検証の画面は提供を終了しました。外部データ取得やジョブの開始は行いません。</p>
+        <p>保存済みSnapshotは履歴から参照できます。StrategyのCLI・API・保存済み履歴は引き続き利用できます。</p>
+        <Button onClick={navigation.onShowWatchlist}>保存済み分析の一覧へ戻る</Button>
+      </Card>
     </DashboardPage>
   );
 }

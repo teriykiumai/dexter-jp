@@ -23,7 +23,7 @@ test.use({ hasTouch: true });
 test.beforeEach(async () => { directory = mkdtempSync(resolve(tmpdir(), 'dexter-horizontal-browser-')); await start(); });
 test.afterEach(async () => { await stop(); rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }); });
 async function acquire(page: Page) {
-  await page.goto(`${base}workspace`);
+  await page.goto(base);
   await page.getByRole('button', { name: '銘柄一覧を取得・更新' }).click();
   await page.getByRole('button', { name: '72030 Synthetic', exact: true }).click();
   await page.getByRole('button', { name: '日足データを取得・更新' }).click();
@@ -37,7 +37,7 @@ async function create(page: Page, price = '102.25') {
   await expect(page.getByRole('list', { name: '保存済みDrawing' }).getByText(`${price} 円`, { exact: false })).toBeVisible();
 }
 
-test('M1: no Snapshot/LLM, explicit EOD, day/week/month, touch create, real process restart restores Horizontal', async ({ page }) => {
+test('M1: no Snapshot/LLM, explicit EOD, day/week/month, touch create, real process restart restores Horizontal', async ({ page }, testInfo) => {
   test.setTimeout(90_000); const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   await acquire(page);
   for (const interval of ['week', 'month', 'day']) await page.getByLabel('表示間隔').selectOption(interval);
@@ -51,6 +51,7 @@ test('M1: no Snapshot/LLM, explicit EOD, day/week/month, touch create, real proc
   for (const width of [320, 390, 680, 768, 980, 1024, 1280]) {
     await page.setViewportSize({ width, height: 900 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`workspace-restored-${width}.png`), fullPage: true });
   }
   for (const interval of ['week', 'month', 'day']) {
     await page.getByLabel('表示間隔').selectOption(interval);

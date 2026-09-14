@@ -16,21 +16,28 @@ const unknown = 'future=keep&future=again&note=%E6%97%A5%E6%9C%AC%E8%AA%9E';
 
 describe('Dashboard Refresh page ownership', () => {
   test('recognizes defaults, global scope, and the inherited ticker/tab parser', () => {
-    for (const search of ['', `?${unknown}`, '?ticker=../7203', '?ticker=72030']) {
+    for (const search of ['?view=history', `?view=history&${unknown}`]) {
       expect(parseDashboardPageRoute(search)).toEqual({ kind: 'watchlist' });
     }
+    expect(parseDashboardPageRoute('')).toEqual({ kind: 'workspace' });
+    expect(parseDashboardPageRoute('?tab=market')).toEqual({ kind: 'invalid', reason: 'missing_owner' });
+    for (const search of ['?ticker=../7203', '?ticker=72030', '?ticker=7203&ticker=6758', '?ticker=7203&tab=report&tab=validation']) {
+      expect(parseDashboardPageRoute(search)).toEqual({ kind: 'invalid', reason: 'invalid_parameter' });
+    }
+    expect(parseDashboardPageRoute('?ticker=bad&tab=validation')).toEqual({ kind: 'invalid', reason: 'invalid_parameter' });
     for (const suffix of ['', '&marketRange=1y', `&${unknown}`]) {
-      expect(parseDashboardPageRoute(`?view=market-overview${suffix}`)).toEqual({ kind: 'market-overview' });
+      expect(parseDashboardPageRoute(`?view=market-overview${suffix}`)).toEqual({ kind: 'retired' });
     }
     for (const ticker of ['7203', '130A']) {
-      for (const tab of ['', '&tab=unknown', '&tab=market-overview', '&tab=report']) {
+      for (const tab of ['', '&tab=unknown', '&tab=report']) {
         const search = `?ticker=${ticker}${tab}`;
         expect(parseDashboardPageRoute(search)).toEqual({ kind: 'detail', ticker });
-        expect(parseDetailTab(search)).toBe(tab === '&tab=market-overview' ? 'market-overview' : 'report');
+        expect(parseDetailTab(search)).toBe('report');
+      }
+      for (const tab of ['market-overview', 'market', 'validation']) {
+        expect(parseDashboardPageRoute(`?ticker=${ticker}&tab=${tab}`)).toEqual({ kind: 'retired' });
       }
     }
-    expect(parseDashboardPageRoute('?ticker=7203&ticker=6758'))
-      .toEqual({ kind: 'detail', ticker: '7203' });
   });
 
   test('rejects every raw detail key with the global owner, even empty values', () => {
@@ -63,7 +70,7 @@ describe('Dashboard Refresh page ownership', () => {
       const prefix = key === 'view' ? '?' : '?ticker=7203&tab=report&';
       for (const value of values) {
         expect(parseDashboardPageRoute(`${prefix}${key}=${value}`).kind)
-          .toBe(key === 'view' ? 'market-overview' : 'detail');
+          .toBe(key === 'view' ? 'retired' : 'detail');
         expect(parseDashboardPageRoute(`${prefix}${key}=${value}&${key}=${value}`))
           .toEqual({ kind: 'invalid', reason: 'invalid_parameter' });
       }
@@ -88,7 +95,7 @@ describe('Dashboard Refresh URL transitions', () => {
       ['marketRange', '3y'], ['future', 'keep'], ['future', 'again'], ['note', '日本語'],
       ['view', 'market-overview'],
     ]);
-    expect(parseDashboardPageRoute(global.search).kind).toBe('market-overview');
+    expect(parseDashboardPageRoute(global.search).kind).toBe('retired');
     expect(buildMarketOverviewPath()).toBe('/?view=market-overview');
     for (const invalid of ['marketRange=bad', 'marketRange=max&marketRange=max']) {
       expect(buildMarketOverviewPath(`?view=bad&${invalid}&${unknown}`))
@@ -97,8 +104,8 @@ describe('Dashboard Refresh URL transitions', () => {
   });
 
   test('return to list clears recognized state only, including duplicate/invalid keys', () => {
-    expect(buildWatchlistPath(`${detail}&view=market-overview&interval=day`)).toBe(`/?${unknown}`);
-    expect(buildWatchlistPath('?view=market-overview&marketRange=max')).toBe('/');
+    expect(buildWatchlistPath(`${detail}&view=market-overview&interval=day`)).toBe(`/?${unknown}&view=history`);
+    expect(buildWatchlistPath('?view=market-overview&marketRange=max')).toBe('/?view=history');
   });
 
   test('ticker change resets selection/source/range but preserves interval and unknowns', () => {

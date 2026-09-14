@@ -52,14 +52,10 @@ import {
   DASHBOARD_TABS,
   DEFAULT_DASHBOARD_TAB,
   UNAVAILABLE_TEXT,
-  INVESTOR_TYPE_FLOW_CONTEXT_NOTE,
   REPORTED_SHORT_POSITION_DISCLOSURE_NOTE,
-  SECTOR_BENCHMARK_CONTEXT_NOTE,
-  SECTOR_SHORT_RATIO_CONTEXT_NOTE,
   VOLUME_PROFILE_CONTEXT_NOTE,
   buildDashboardTabPath,
   buildDetailPath,
-  buildMarketOverviewPath,
   buildWatchlistPath,
   hasCanonicalDetailTab,
   formatMetric,
@@ -71,14 +67,11 @@ import {
   parseDetailTicker,
   type DashboardAvailabilityCount,
   type DashboardTabId,
-  type InvestorTypeCategoryView,
   type VolumeProfileView,
   type WatchlistItemView,
   type WatchlistSortKey,
 } from './presentation.js';
-import { PeerRadarPresentation } from './peer-radar-view.js';
-import { StrategyValidationPanel } from './strategy-validation-panel.js';
-import { DashboardHeader, DashboardRouteError, MarketOverviewContent, MarketOverviewPage, Watchlist, type PageNavigation } from './watchlist.js';
+import { DashboardHeader, DashboardRouteError, RetiredDashboardPage, Watchlist, type PageNavigation } from './watchlist.js';
 import {
   Button,
   DashboardDesign,
@@ -344,32 +337,6 @@ function VolumeProfileChart({ profile }: { profile: VolumeProfileView }) {
         POC・VAL・VAHは支持線・抵抗線や売買シグナルを意味しません。正確な保存値は下の全件表で確認できます。
       </p>
     </figure>
-  );
-}
-
-function InvestorTypeTable({ label, rows }: {
-  label: string;
-  rows: InvestorTypeCategoryView[];
-}) {
-  return (
-    <div aria-label={label} className="table-scroll" role="region" tabIndex={0}>
-      <table className="investor-type-table">
-        <thead>
-          <tr><th>公式区分</th><th className="numeric-cell">売り</th><th className="numeric-cell">買い</th><th className="numeric-cell">合計</th><th className="numeric-cell">差引</th></tr>
-        </thead>
-        <tbody>
-          {rows.map(row => (
-            <tr key={row.category}>
-              <th>{row.category}</th>
-              <td className="numeric-cell"><Value value={row.sell} kind="data" /></td>
-              <td className="numeric-cell"><Value value={row.buy} kind="data" /></td>
-              <td className="numeric-cell"><Value value={row.total} kind="data" /></td>
-              <td className="numeric-cell"><Value value={row.balance} kind="data" /></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
   );
 }
 
@@ -956,14 +923,6 @@ function Dashboard({
             </>
           ) : null}
 
-          {tab.id === 'fundamentals' ? (
-        <Card title="同業比較" eyebrow="保存済みの決定論的比較">
-          {view.peer ? (
-            <PeerRadarPresentation peer={view.peer} />
-          ) : <div className="empty-state">Peer比較は利用できません。</div>}
-        </Card>
-          ) : null}
-
           {tab.id === 'supply-demand' ? (
         <Card title="信用需給" eyebrow="信用取引残高">
           <p className="section-context">
@@ -1185,188 +1144,6 @@ function Dashboard({
       </Card>
           ) : null}
 
-          {tab.id === 'market' ? (
-      <Card
-        title="投資部門別売買"
-        eyebrow="東京・名古屋市場の週次情報"
-        guidanceTerm="investorTypeFlows"
-        onOpenGuidance={openGlossary}
-      >
-        <p className="disclosure-note">{INVESTOR_TYPE_FLOW_CONTEXT_NOTE}</p>
-        {view.investorTypeFlows.state === 'available' ? (
-          <>
-            <div className="investor-flow-meta">
-              <MetricGrid metrics={[
-                { label: '市場区分', value: view.investorTypeFlows.section },
-                { label: '公表日', valueKind: 'data', value: view.investorTypeFlows.publishedDate },
-                { label: '対象期間の開始日', valueKind: 'data', value: view.investorTypeFlows.periodStartDate },
-                { label: '対象期間の終了日', valueKind: 'data', value: view.investorTypeFlows.periodEndDate },
-              ]} />
-            </div>
-            <section className="investor-flow-group">
-              <h3>集計</h3>
-              <InvestorTypeTable
-                label="投資部門別売買の集計"
-                rows={view.investorTypeFlows.summary}
-              />
-            </section>
-            <StoredDisclosure
-              open={disclosures.investorBrokerage}
-              onOpenChange={open => setDisclosure('investorBrokerage', open)}
-              summary={`委託内訳 ${view.investorTypeFlows.brokerageBreakdown.length}区分`}
-            >
-              <section className="investor-flow-group">
-                <h3 className="visually-hidden">委託内訳</h3>
-                <InvestorTypeTable
-                  label="投資部門別売買の委託内訳"
-                  rows={view.investorTypeFlows.brokerageBreakdown}
-                />
-            </section>
-            </StoredDisclosure>
-          </>
-        ) : (
-          <div className="empty-state">
-            {view.investorTypeFlows.state === 'not_collected'
-              ? '投資部門別データは未収集です。'
-              : `投資部門別データは利用できません。${view.investorTypeFlows.unavailableReasons.join(' / ')}`}
-          </div>
-        )}
-      </Card>
-          ) : null}
-
-          {tab.id === 'market' ? (
-        <Card title="市場相関" eyebrow="TOPIXとの比較">
-          <p className="section-context">
-            日付を一致させた銘柄とTOPIXのリターンから計算され、Snapshotへ保存された期間別の比較です。
-          </p>
-          {view.correlations?.length ? (
-            <div className="correlation-grid">
-              {view.correlations.map(window => (
-                <article className="window-card" key={window.period}>
-                  <h3>{window.period}日</h3>
-                  <MetricGrid guidance={{ Beta: 'beta', '年率Alpha': 'alpha', 'R²': 'rSquared' }} metrics={[
-                    { label: '観測数', valueKind: 'data', value: window.observations },
-                    { label: '相関係数', valueKind: 'data', value: window.correlation },
-                    { label: 'Beta', valueKind: 'data', value: window.beta },
-                    { label: '年率Alpha', valueKind: 'data', value: window.alpha },
-                    { label: 'R²', valueKind: 'data', value: window.rSquared },
-                  ]} onOpenGuidance={openGlossary} />
-                  {window.unavailableReasons.length
-                    ? <p className="reason-list">{window.unavailableReasons.join(' / ')}</p>
-                    : null}
-                </article>
-              ))}
-            </div>
-          ) : <div className="empty-state">市場相関は利用できません。</div>}
-        </Card>
-          ) : null}
-
-          {tab.id === 'market' ? (
-      <Card title="業種指数比較" eyebrow="東証33業種の株価指数">
-        <p className="disclosure-note">{SECTOR_BENCHMARK_CONTEXT_NOTE}</p>
-        {view.sectorBenchmark.state !== 'not_collected' ? (
-          <>
-            <MetricGrid metrics={[
-              { label: '分析基準日', valueKind: 'data', value: view.sectorBenchmark.analysisAsOfDate },
-              { label: '比較対象種別', value: view.sectorBenchmark.benchmarkType },
-              { label: '業種コード', valueKind: 'data', value: view.sectorBenchmark.sectorCode },
-              { label: '業種名', value: view.sectorBenchmark.sectorName },
-              { label: '指数コード', valueKind: 'data', value: view.sectorBenchmark.indexCode },
-              { label: '業種分類の基準日', valueKind: 'data', value: view.sectorBenchmark.classificationDate },
-              { label: 'データ基準日', valueKind: 'data', value: view.sectorBenchmark.dataDate },
-              { label: '日付一致終値数', valueKind: 'data', value: view.sectorBenchmark.alignedPriceCount },
-            ]} />
-            {view.sectorBenchmark.windows.length ? (
-              <div className="correlation-grid">
-                {view.sectorBenchmark.windows.map(window => (
-                  <article className="window-card" key={window.period}>
-                    <h3>{window.period}日</h3>
-                    <MetricGrid guidance={{ Beta: 'beta', '年率Alpha': 'alpha', 'R²': 'rSquared' }} metrics={[
-                      { label: '観測数', valueKind: 'data', value: window.observations },
-                      { label: '相関係数', valueKind: 'data', value: window.correlation },
-                      { label: 'Beta', valueKind: 'data', value: window.beta },
-                      { label: '年率Alpha', valueKind: 'data', value: window.alpha },
-                      { label: 'R²', valueKind: 'data', value: window.rSquared },
-                      { label: '銘柄の年率ボラティリティ', valueKind: 'data', value: window.stockVolatility },
-                      { label: '業種指数の年率ボラティリティ', valueKind: 'data', value: window.benchmarkVolatility },
-                      { label: '超過リターン', valueKind: 'data', value: window.excessReturn },
-                    ]} onOpenGuidance={openGlossary} />
-                    {window.unavailableReasons.length
-                      ? <p className="reason-list">{window.unavailableReasons.join(' / ')}</p>
-                      : null}
-                  </article>
-                ))}
-              </div>
-            ) : null}
-            {view.sectorBenchmark.unavailableReasons.length ? (
-              <p className="reason-list">
-                業種指数比較は利用できません。{view.sectorBenchmark.unavailableReasons.join(' / ')}
-              </p>
-            ) : null}
-          </>
-        ) : (
-          <div className="empty-state">業種指数比較は未収集です。</div>
-        )}
-      </Card>
-          ) : null}
-
-          {tab.id === 'market' ? (
-      <Card title="業種別空売り売買代金" eyebrow="東証33業種の日次売買代金">
-        <p className="disclosure-note">{SECTOR_SHORT_RATIO_CONTEXT_NOTE}</p>
-        {view.sectorShortRatio.state !== 'not_collected' ? (
-          <>
-            <MetricGrid metrics={[
-              { label: '分析基準日', valueKind: 'data', value: view.sectorShortRatio.analysisAsOfDate },
-              { label: '業種分類の基準日', valueKind: 'data', value: view.sectorShortRatio.classificationDate },
-              { label: '業種コード', valueKind: 'data', value: view.sectorShortRatio.sectorCode },
-              { label: '業種名', value: view.sectorShortRatio.sectorName },
-              { label: 'データ基準日', valueKind: 'data', value: view.sectorShortRatio.dataDate },
-            ]} />
-            <p className="record-count">保存済み観測 {view.sectorShortRatio.observations.length}件</p>
-            {view.sectorShortRatio.observations.length ? (
-              <div
-                aria-label="業種別空売り売買代金の観測一覧"
-                className="table-scroll"
-                role="region"
-                tabIndex={0}
-              >
-                <table>
-                  <thead>
-                    <tr>
-                      <th>日付</th><th className="numeric-cell">空売り以外</th><th className="numeric-cell">価格規制あり空売り</th>
-                      <th className="numeric-cell">価格規制なし空売り</th><th className="numeric-cell">空売り合計</th>
-                      <th className="numeric-cell">売り合計</th><th className="numeric-cell">空売り比率</th><th>利用状態</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {view.sectorShortRatio.observations.map(observation => (
-                      <tr key={observation.date.text}>
-                        <td><Value value={observation.date} kind="data" /></td>
-                        <td className="numeric-cell"><Value value={observation.nonShortSellingValue} kind="data" /></td>
-                        <td className="numeric-cell"><Value value={observation.restrictedShortSellingValue} kind="data" /></td>
-                        <td className="numeric-cell"><Value value={observation.unrestrictedShortSellingValue} kind="data" /></td>
-                        <td className="numeric-cell"><Value value={observation.shortSellingValue} kind="data" /></td>
-                        <td className="numeric-cell"><Value value={observation.totalSellingValue} kind="data" /></td>
-                        <td className="numeric-cell"><Value value={observation.shortSellingRatio} kind="data" /></td>
-                        <td>{observation.unavailableReasons.join(' / ') || '利用可能'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : null}
-            {view.sectorShortRatio.unavailableReasons.length ? (
-              <p className="reason-list">
-                業種別空売り売買代金は利用できません。{view.sectorShortRatio.unavailableReasons.join(' / ')}
-              </p>
-            ) : null}
-          </>
-        ) : (
-          <div className="empty-state">業種別空売り売買代金は未収集です。</div>
-        )}
-      </Card>
-          ) : null}
-
           {tab.id === 'technical' ? (
         <Card title="戦略水準" eyebrow="保存済みの決定論的水準">
           {view.strategy ? (
@@ -1485,22 +1262,15 @@ function Dashboard({
             </>
           ) : null}
 
-          {tab.id === 'market-overview' ? <MarketOverviewContent navigationRevision={navigationRevision} /> : null}
-
-          {tab.id === 'validation' ? (
-            <StrategyValidationPanel
-              history={history}
-              navigationRevision={navigationRevision}
-              ticker={snapshot.canonicalTicker}
-            />
-          ) : null}
-
         </DashboardTabPanel>
       ))}
 
       <footer className="footer">
         <span>DEXTER JP / LOCAL ANALYSIS &amp; RESEARCH</span>
         <span>Snapshot値は再計算せず表示しています。</span>
+        {displayedSnapshotId ? <a className="design-button" data-variant="secondary" href={`/api/analyses/${snapshot.canonicalTicker}/history/${encodeURIComponent(displayedSnapshotId)}`}>
+          このSnapshotの保存済みJSON（全項目）
+        </a> : null}
       </footer>
       <GlossaryDialog
         selection={glossarySelection}
@@ -2037,20 +1807,6 @@ function App() {
     setComparisonSelection({ kind: 'none' });
     setLoadRevision(current => current + 1);
   };
-  const navigateToMarketOverview = () => {
-    const path = buildMarketOverviewPath(window.location.search);
-    if (pageRoute.kind === 'market-overview' && `${window.location.pathname}${window.location.search}` === path) return;
-    rememberNavigationFocusDestination(null, true);
-    mainRequestTokenRef.current += 1;
-    cancelSnapshotReload();
-    window.history.pushState({}, '', path);
-    setPageRoute({ kind: 'market-overview' });
-    setComparisonSelection({ kind: 'none' });
-    setSelectedTab(DEFAULT_DASHBOARD_TAB);
-    setError(null);
-    setLoading(false);
-    setNavigationRevision(current => current + 1);
-  };
   const navigateToTab = (tab: DashboardTabId) => {
     if (!selectedTicker) return;
     window.history.replaceState(
@@ -2189,10 +1945,9 @@ function App() {
   const pageNavigation = {
     currentSearch: window.location.search,
     onShowWatchlist: navigateToWatchlist,
-    onShowMarketOverview: navigateToMarketOverview,
   };
   if (pageRoute.kind === 'invalid') return <DashboardRouteError {...pageNavigation} reason={pageRoute.reason} />;
-  if (pageRoute.kind === 'market-overview') return <MarketOverviewPage {...pageNavigation} navigationRevision={navigationRevision} />;
+  if (pageRoute.kind === 'retired') return <RetiredDashboardPage {...pageNavigation} />;
   if (pageRoute.kind === 'watchlist') {
     return (
       <Watchlist
@@ -2279,4 +2034,19 @@ function App() {
 
 const rootElement = document.getElementById('root');
 if (!rootElement) throw new Error('Dashboard root element was not found.');
-createRoot(rootElement).render(<StrictMode>{window.location.pathname === '/workspace' ? <WorkspacePage /> : <App />}</StrictMode>);
+function DashboardRoot() {
+  const [url, setUrl] = useState(() => new URL(window.location.href));
+  const workspace = url.pathname === '/workspace' || parseDashboardPageRoute(url.search).kind === 'workspace';
+  const previousShell = useRef(workspace);
+  useEffect(() => {
+    const pop = () => setUrl(new URL(window.location.href));
+    window.addEventListener('popstate', pop);
+    return () => window.removeEventListener('popstate', pop);
+  }, []);
+  useEffect(() => {
+    if (previousShell.current !== workspace) document.querySelector<HTMLElement>('[data-main-heading]')?.focus();
+    previousShell.current = workspace;
+  }, [workspace]);
+  return workspace ? <WorkspacePage /> : <App />;
+}
+createRoot(rootElement).render(<StrictMode><DashboardRoot /></StrictMode>);

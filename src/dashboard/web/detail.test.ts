@@ -4,15 +4,12 @@ import { DASHBOARD_TABS, DASHBOARD_SECTION_DESTINATIONS } from './presentation.j
 
 const read = (name: string) => readFileSync(new URL(name, import.meta.url), 'utf8');
 
-test('DR-V3 freezes seven labels and leaves Snapshot section ownership unchanged', () => {
+test('Step 8 keeps four history tabs and preserves raw Snapshot ownership', () => {
   expect(DASHBOARD_TABS).toEqual([
     { id: 'report', label: '概要・レポート' },
     { id: 'technical', label: '株価・テクニカル' },
-    { id: 'fundamentals', label: '比較・配当' },
+    { id: 'fundamentals', label: '保存済み配当' },
     { id: 'supply-demand', label: '需給・空売り' },
-    { id: 'market-overview', label: '市場概況' },
-    { id: 'market', label: '市場・セクター' },
-    { id: 'validation', label: '戦略検証' },
   ]);
   expect(Object.values(DASHBOARD_SECTION_DESTINATIONS)).not.toContain('market-overview');
 });
