@@ -1026,8 +1026,16 @@ fallback; unknown query metadata remains inert in legacy history routes.
 
 History's global missing/uncollected summary still includes retired sections. An
 exact JSON link for the displayed Snapshot preserves access to all stored fields;
-it never substitutes latest or writes the artifact. Existing Snapshot comparison
-and historical dividend presentation remain compatibility features, not Workspace
+it never substitutes latest or writes the artifact.
+For legacy `latest.json` with no matching immutable history, export the validated
+displayed payload as a frozen browser JSON download instead of linking a latest
+selector. Its object URL belongs to that displayed Snapshot and is revoked on
+replacement/unmount; the downloaded file remains usable. Adding history cannot
+retarget the existing download. No repository migration or artifact write occurs.
+Retired detail URLs validate any comparison and Strategy selectors with the existing
+strict parsers before showing the notice; invalid pairs/UUIDs/duplicates are errors.
+
+Existing Snapshot comparison and historical dividend presentation remain compatibility features, not Workspace
 inputs or new dividend-history functionality. Source/artifact/receipt codecs,
 Strategy engines/history/API, CLI, shared coordination and recovery are unchanged.
 Detached UI modules may remain as legacy source; they have no production entry.

@@ -1268,9 +1268,7 @@ function Dashboard({
       <footer className="footer">
         <span>DEXTER JP / LOCAL ANALYSIS &amp; RESEARCH</span>
         <span>Snapshot値は再計算せず表示しています。</span>
-        {displayedSnapshotId ? <a className="design-button" data-variant="secondary" href={`/api/analyses/${snapshot.canonicalTicker}/history/${encodeURIComponent(displayedSnapshotId)}`}>
-          このSnapshotの保存済みJSON（全項目）
-        </a> : null}
+        <SnapshotJsonLink snapshot={snapshot} snapshotId={displayedSnapshotId} />
       </footer>
       <GlossaryDialog
         selection={glossarySelection}
@@ -1280,6 +1278,27 @@ function Dashboard({
     </main>
     </DashboardDesign>
   );
+}
+
+function SnapshotJsonLink({ snapshot, snapshotId }: { snapshot: AnalysisSnapshot; snapshotId: string | null }) {
+  const [download, setDownload] = useState<{ snapshot: AnalysisSnapshot; url: string } | null>(null);
+  useEffect(() => {
+    if (snapshotId) { setDownload(null); return; }
+    // Legacy latest-only records have no immutable server address. Freeze the
+    // displayed payload; never re-fetch a latest selector when exporting it.
+    const url = URL.createObjectURL(new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' }));
+    setDownload({ snapshot, url });
+    return () => URL.revokeObjectURL(url);
+  }, [snapshot, snapshotId]);
+  if (snapshotId) return <a className="design-button" data-variant="secondary" href={`/api/analyses/${snapshot.canonicalTicker}/history/${encodeURIComponent(snapshotId)}`}>
+    このSnapshotの保存済みJSON（全項目）
+  </a>;
+  // Do not expose a previous Snapshot's URL during the effect handover.
+  if (download?.snapshot !== snapshot) return null;
+  return <a className="design-button" data-variant="secondary" href={download.url}
+    download={`${snapshot.canonicalTicker}-${snapshotIdFromGeneratedAt(snapshot.generatedAt)}.json`}>
+    このSnapshotのJSONを保存（全項目）
+  </a>;
 }
 
 class DashboardHttpError extends Error {

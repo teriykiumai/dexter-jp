@@ -9,7 +9,8 @@ import {
   type PeerRadarAxisState,
   type PeerRadarSelectionState,
 } from './peer-radar.js';
-import { clearStrategyValidationQuery } from './strategy-validation.js';
+import { clearStrategyValidationQuery, parseStrategyValidationPageSelection } from './strategy-validation.js';
+import { parseComparisonPageSelection } from './comparison.js';
 
 export const UNAVAILABLE_TEXT = '利用不可' as const;
 
@@ -510,6 +511,10 @@ export function parseDashboardPageRoute(search: string): DashboardPageRoute {
   }
   const ticker = parseDetailTicker(search);
   if (['market-overview', 'market', 'validation'].includes(parameters.get('tab') ?? '')) {
+    if (parseStrategyValidationPageSelection(search).kind === 'invalid'
+      || parseComparisonPageSelection(search).kind === 'invalid') {
+      return { kind: 'invalid', reason: 'invalid_parameter' };
+    }
     return ticker ? { kind: 'retired' }
       : { kind: 'invalid', reason: parameters.has('ticker') ? 'invalid_parameter' : 'missing_owner' };
   }

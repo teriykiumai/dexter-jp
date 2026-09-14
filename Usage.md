@@ -18,6 +18,10 @@ DashboardはStock Workspaceを入口とし、保存済みSnapshotの履歴とCLI
 
 既存Snapshotは「保存済み分析」（`/?view=history`）から開きます。
 同一銘柄の保存済みSnapshot比較、exact履歴URLと全項目JSONは維持します。
+旧`latest.json`だけがある場合は、detail下部の「このSnapshotのJSONを保存（全項目）」で
+表示時点の全項目を保存できます。表示中だけ有効なダウンロード用リンクのため、
+継続して参照する場合はJSONファイルを保存してください。後から履歴が増えても
+表示中のダウンロード内容が別の最新Snapshotへ切り替わることはありません。
 Peer/Radar、市場概況、市場／セクター、Strategy Validation画面は退役しました。
 旧市場・Strategy URLは退役案内を表示し、ジョブを実行しません。
 StrategyのCLI・API・immutable run/historyは引き続き利用できます。

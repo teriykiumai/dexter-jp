@@ -1,8 +1,12 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createServer } from 'node:net';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
 import { expect, test, type Page } from 'playwright/test';
 import {
   AnalysisSnapshotSchema,
+  AnalysisSnapshotRepository,
   AnalysisSnapshotV1Schema,
   AnalysisSnapshotV2Schema,
   AnalysisSnapshotV3Schema,
@@ -1002,7 +1006,8 @@ test.describe('Step 8 cutover compatibility', () => {
     const requests = await guardRefreshRequests(page);
     await mockWatchlistApi(page);
     const selectors = ['view=market-overview&marketRange=3y', 'ticker=1010&tab=market-overview',
-      'ticker=1010&tab=market', 'ticker=1010&tab=validation&validationRun=old&validationCase=case'];
+      'ticker=1010&tab=market', 'ticker=1010&tab=validation&validationRun=11111111-1111-4111-8111-111111111111&validationCase=22222222-2222-4222-8222-222222222222',
+      'ticker=1010&tab=market&base=2026-08-21T01-02-03-000Z&target=2026-08-22T01-02-03-000Z'];
     for (const selector of selectors) {
       const url = `${baseUrl}/?${selector}&future=one&future=two`;
       await page.goto(url);
@@ -1040,6 +1045,96 @@ test.describe('Step 8 cutover compatibility', () => {
     await page.reload();
     await expect(exact).toHaveAttribute('href', path);
     expect(requests.api.every(request => request.startsWith('GET /api/analyses'))).toBe(true);
+    expect(requests.unexpected).toEqual([]);
+  });
+
+  test('legacy latest-only JSON export stays frozen after history is added without rewriting artifacts', async ({ page }, testInfo) => {
+    const requests = await guardRefreshRequests(page);
+    const directory = mkdtempSync(resolve(tmpdir(), 'dexter-legacy-export-'));
+    try {
+      const repository = new AnalysisSnapshotRepository(directory);
+      const legacy = AnalysisSnapshotV9Schema.parse({ ...completeV9Snapshot(),
+        sectorBenchmark: comparisonSnapshot('2026-08-23T01:02:03.000Z').sectorBenchmark });
+      const tickerDirectory = resolve(directory, legacy.canonicalTicker);
+      mkdirSync(tickerDirectory);
+      const latestPath = resolve(tickerDirectory, 'latest.json');
+      const originalBytes = JSON.stringify(legacy, null, 2);
+      writeFileSync(latestPath, originalBytes);
+      expect(await repository.listHistory(legacy.canonicalTicker)).toEqual([]);
+      // Use the real repository's zero-history fallback behind the unchanged API shapes.
+      await page.route('**/api/analyses/**', async route => {
+        const parts = new URL(route.request().url()).pathname.split('/').filter(Boolean);
+        const value = parts[3] === 'history'
+          ? await repository.listHistory(legacy.canonicalTicker)
+          : await repository.loadLatest(legacy.canonicalTicker);
+        await route.fulfill({ json: value });
+      });
+      await openDetail(page, legacy.canonicalTicker, 'report');
+      const exact = page.getByRole('link', { name: 'このSnapshotのJSONを保存（全項目）', exact: true });
+      await expect(exact).toBeVisible();
+      await expect(exact).toHaveAttribute('download', `${legacy.canonicalTicker}-${createSnapshotId(legacy.generatedAt)}.json`);
+      const frozenUrl = await exact.getAttribute('href');
+      expect(frozenUrl).toMatch(/^blob:/);
+      for (const width of [320, 390, 680, 768, 980, 1024, 1280]) {
+        await page.setViewportSize({ width, height: 900 });
+        await exact.focus();
+        await expect(exact).toBeFocused();
+        await expect(exact).toHaveCSS('outline-width', '2px');
+        expect((await exact.boundingBox())!.height).toBeGreaterThanOrEqual(width < 680 ? 44 : 40);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+        await page.locator('.footer').screenshot({ path: testInfo.outputPath(`legacy-export-${width}.png`) });
+      }
+      expect(readdirSync(tickerDirectory)).toEqual(['latest.json']);
+      expect(readFileSync(latestPath, 'utf8')).toBe(originalBytes);
+      const newer = AnalysisSnapshotSchema.parse({ ...legacy, generatedAt: '2026-08-25T01:02:03.000Z',
+        finalReportMarkdown: '# New history' });
+      await repository.save(newer);
+      expect(await repository.loadLatest(legacy.canonicalTicker)).toEqual(newer);
+      const filesAfterPublication = readdirSync(tickerDirectory).sort();
+      const bytesAfterPublication = filesAfterPublication.map(name => readFileSync(resolve(tickerDirectory, name), 'utf8'));
+      const readsBeforeExport = requests.api.length;
+      await expect(exact).toHaveAttribute('href', frozenUrl!);
+      await exact.focus();
+      await expect(exact).toBeFocused();
+      const downloaded = page.waitForEvent('download');
+      await exact.press('Enter');
+      const download = await downloaded;
+      const downloadPath = testInfo.outputPath('legacy-snapshot.json');
+      await download.saveAs(downloadPath);
+      const exported = AnalysisSnapshotV9Schema.parse(JSON.parse(readFileSync(downloadPath, 'utf8')));
+      expect(exported).toEqual(legacy);
+      expect(exported.peerComparison).not.toBeNull();
+      expect(exported.marketCorrelation).not.toBeNull();
+      expect(exported.sectorBenchmark).not.toBeNull();
+      expect(exported.sectorShortRatio).toBeNull();
+      expect(requests.api).toHaveLength(readsBeforeExport);
+      expect(readdirSync(tickerDirectory).sort()).toEqual(filesAfterPublication);
+      expect(filesAfterPublication.map(name => readFileSync(resolve(tickerDirectory, name), 'utf8'))).toEqual(bytesAfterPublication);
+      expect(requests.api.every(request => request.startsWith('GET /api/analyses'))).toBe(true);
+      expect(requests.unexpected).toEqual([]);
+    } finally { rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }); }
+  });
+
+  test('retired owned selectors fail closed before any API or job read', async ({ page }) => {
+    const requests = await guardRefreshRequests(page);
+    const run = '11111111-1111-4111-8111-111111111111';
+    const caseId = '22222222-2222-4222-8222-222222222222';
+    const base = '2026-08-21T01-02-03-000Z', target = '2026-08-22T01-02-03-000Z';
+    for (const [tab, selector] of [
+      ['validation', 'validationRun=bad'], ['validation', `validationRun=${run}&validationCase=bad`],
+      ['validation', `validationRun=${run}&validationRun=${run}`],
+      ['validation', `validationRun=${run}&validationCase=${caseId}&validationCase=${caseId}`],
+      ['validation', `validationCase=${caseId}`], ['validation', `validationRun=${run.replace('-4111-', '-1111-')}`],
+      ['validation', `validationRun=${run}&validationCase=${caseId.replace('-4222-', '-1222-')}`],
+      ['market', `base=bad&target=${target}`], ['market-overview', `base=${base}&target=bad`],
+      ['market', `base=${base}&base=${base}&target=${target}`], ['validation', `base=${base}&target=${target}&target=${target}`],
+    ]) {
+      const url = `${baseUrl}/?ticker=1010&tab=${tab}&${selector}`;
+      await page.goto(url);
+      await expect(page.getByRole('heading', { name: '表示先を確認してください' })).toBeVisible();
+      expect(page.url()).toBe(url);
+      expect(requests.api).toEqual([]);
+    }
     expect(requests.unexpected).toEqual([]);
   });
 });

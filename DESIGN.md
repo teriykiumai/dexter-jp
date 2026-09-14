@@ -267,6 +267,9 @@ page heading, Card and recovery Button pattern. The displayed Snapshot's exact J
 link uses the secondary Button styling with native anchor semantics and touch/focus
 geometry. These replace the legacy global navigation/seven-tab requirements below;
 all palette, spacing, typography, accessibility and exact-data rules remain intact.
+If a legacy Snapshot has no immutable history address, use the same secondary
+anchor styling with native download semantics and the label
+`このSnapshotのJSONを保存（全項目）` for its frozen displayed payload.
 
 ## 5. Component styling
 

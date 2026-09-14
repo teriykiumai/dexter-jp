@@ -49,6 +49,27 @@ describe('Dashboard Refresh page ownership', () => {
     }
   });
 
+  test('retired tabs keep strict comparison and Strategy selector validation', () => {
+    const run = '11111111-1111-4111-8111-111111111111';
+    const caseId = '22222222-2222-4222-8222-222222222222';
+    const base = '2026-08-21T01-02-03-000Z', target = '2026-08-22T01-02-03-000Z';
+    for (const tab of ['market-overview', 'market', 'validation']) {
+      const prefix = `?ticker=7203&tab=${tab}&`;
+      for (const valid of [`validationRun=${run}`, `validationRun=${run}&validationCase=${caseId}`,
+        `base=${base}&target=${target}`]) {
+        expect(parseDashboardPageRoute(prefix + valid)).toEqual({ kind: 'retired' });
+      }
+      for (const invalid of ['validationRun=bad', `validationRun=${run}&validationCase=bad`,
+        `validationCase=${caseId}`, `validationRun=${run}&validationRun=${run}`,
+        `validationRun=${run}&validationCase=${caseId}&validationCase=${caseId}`,
+        `validationRun=${run.replace('-4111-', '-1111-')}`, `validationRun=${run}&validationCase=${caseId.replace('-4222-', '-1222-')}`,
+        'base=bad&target=bad', `base=${base}`, `target=${target}`, `base=${base}&target=${base}`,
+        `base=${base}&base=${base}&target=${target}`, `base=${base}&target=${target}&target=${target}`]) {
+        expect(parseDashboardPageRoute(prefix + invalid)).toEqual({ kind: 'invalid', reason: 'invalid_parameter' });
+      }
+    }
+  });
+
   test('rejects orphan owned state instead of silently treating it as Watchlist', () => {
     for (const entry of [
       'tab=', 'tab=report', 'base=old', 'target=new', 'validationRun=run',
