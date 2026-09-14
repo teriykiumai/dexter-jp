@@ -199,3 +199,11 @@ test('qualification is rechecked after the binding checkpoint inside the commit 
   expect(f.db.sqlite.query('SELECT * FROM data_sync_state').all()).toEqual([]);
   await expect(f.jobs.start('catalog')).rejects.toMatchObject({ reason: 'recovery_required' }); expect(f.calls()).toBe(2);
 });
+
+test('legacy admission retains the shared coordinator clock failure rather than market-date conversion', async () => {
+  const f = await fixture(), wall = spyOn(f.environment, 'wallNowMs').mockReturnValue(NaN);
+  try {
+    await expect(f.jobs.start('catalog')).rejects.toMatchObject({ reason: 'clock_invalid' });
+    expect(f.jobs.inventory()).toEqual([]); expect(f.calls()).toBe(0);
+  } finally { wall.mockRestore(); }
+});

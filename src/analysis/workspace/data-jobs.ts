@@ -74,7 +74,7 @@ export class WorkspaceDataJobs {
     };
     const id = randomUUID();
     await this.coordinator.admit({ kind: coordinatorKind(kind), jobId: id,
-      revalidate: () => { checkMarketDate(new Date(this.coordinator.environment.wallNowMs()).toISOString());
+      revalidate: () => { if (kind === 'market_short') checkMarketDate(new Date(this.coordinator.environment.wallNowMs()).toISOString());
         if (!this.coordinator.environment.apiKey()) fail('invalid_input'); if (instrumentId) this.repository.freezeIdentity(instrumentId); },
       create: async lease => {
         this.repository.db.transaction(() => {
