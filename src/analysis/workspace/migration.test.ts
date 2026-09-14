@@ -77,22 +77,22 @@ test('V2 job migration rolls back failed DDL and preserves existing jobs and imm
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('V1 DB and backup remain readable; writable reopen migrates without losing preferences or instrument IDs', () => {
-  const root = mkdtempSync(resolve(tmpdir(), 'dexter-v1-backup-')), destination = `${root}-restored`;
+test.each([1, 5])('V%i DB and backup remain readable; writable reopen migrates without losing preferences or instrument IDs', version => {
+  const root = mkdtempSync(resolve(tmpdir(), `dexter-v${version}-backup-`)), destination = `${root}-restored`;
   const id = randomUUID(), path = resolve(root, 'workspace.sqlite');
   try {
-    const old = new Database(path, { create: true }); migrateWorkspace(old, WORKSPACE_MIGRATIONS.slice(0, 1));
+    const old = new Database(path, { create: true }); migrateWorkspace(old, WORKSPACE_MIGRATIONS.slice(0, version));
     old.run("INSERT INTO instruments VALUES (?,'stock')", [id]); old.run("INSERT INTO workspaces VALUES (?, '2026-09-11T00:00:00.000Z', 1, 7)", [id]);
     old.run('INSERT INTO chart_preferences VALUES (?,?,4)', [id, json({ interval: 'week', sma: [20], rsi: true, macd: true, volume: true })]); old.close();
-    writeFileSync(resolve(root, 'manifest.json'), json({ version: 1, schemaVersion: 1, schemaFingerprint: workspaceFingerprint(1),
+    writeFileSync(resolve(root, 'manifest.json'), json({ version: 1, schemaVersion: version, schemaFingerprint: workspaceFingerprint(version),
       databaseDigest: digest(readFileSync(path)), roots: [], objects: [], omissions: [] }));
-    expect(validateWorkspaceBackup(root, new Map()).schemaVersion).toBe(1);
+    expect(validateWorkspaceBackup(root, new Map()).schemaVersion).toBe(version);
     const backup = `${root}-backup`;
     backupWorkspace(root, backup, new Map());
     const sourceAfterBackup = new Database(path, { readonly: true });
-    try { expect(sourceAfterBackup.query('PRAGMA user_version').get()).toEqual({ user_version: 1 }); }
+    try { expect(sourceAfterBackup.query('PRAGMA user_version').get()).toEqual({ user_version: version }); }
     finally { sourceAfterBackup.close(); }
-    expect(validateWorkspaceBackup(backup, new Map()).schemaVersion).toBe(1);
+    expect(validateWorkspaceBackup(backup, new Map()).schemaVersion).toBe(version);
     restoreWorkspace(root, destination, new Map());
     const upgraded = new WorkspaceDatabase(destination);
     try { expect(upgraded.sqlite.query('PRAGMA user_version').get()).toEqual({ user_version: WORKSPACE_SCHEMA_VERSION });
@@ -100,4 +100,31 @@ test('V1 DB and backup remain readable; writable reopen migrates without losing 
       expect(upgraded.sqlite.query('SELECT revision FROM chart_preferences').get()).toEqual({ revision: 4 });
     } finally { upgraded.close(); }
   } finally { rmSync(root, { recursive: true, force: true }); rmSync(destination, { recursive: true, force: true }); rmSync(`${root}-backup`, { recursive: true, force: true }); }
+});
+
+test('V5 to V6 migration failure preserves job and Drawing references; reopening commits the whole migration', () => {
+  const root = mkdtempSync(resolve(tmpdir(), 'dexter-v5-market-jobs-'));
+  try {
+    const old = new Database(resolve(root, 'workspace.sqlite'), { create: true }); migrateWorkspace(old, WORKSPACE_MIGRATIONS.slice(0, 5));
+    old.exec('PRAGMA foreign_keys=ON');
+    const id = randomUUID(), drawing = randomUUID(), input = `sha256:${'1'.repeat(64)}`;
+    old.run("INSERT INTO instruments VALUES (?,'stock')", [id]); old.run("INSERT INTO workspaces VALUES (?,'2026-09-11',1,7)", [id]);
+    old.run("INSERT INTO immutable_objects VALUES (?,'input.json','foundation_fixture',?,'{}')", [input, input]);
+    old.run("INSERT INTO drawings VALUES (?,?,'{}',?,3)", [drawing, id, input]);
+    old.run("INSERT INTO workspace_data_jobs(job_id,kind,accepted_at,state) VALUES (?,'catalog','2026-09-11T00:00:00.000Z','interrupted')", [randomUUID()]);
+    const jobs = old.query('SELECT * FROM workspace_data_jobs').all(), drawings = old.query('SELECT * FROM drawings').all();
+    expect(() => migrateWorkspace(old, [...WORKSPACE_MIGRATIONS.slice(0, 5), { version: 6, sql: `${WORKSPACE_MIGRATIONS[5].sql}\nINVALID SQL;` }])).toThrow();
+    expect(old.query('PRAGMA user_version').get()).toEqual({ user_version: 5 });
+    expect(old.query('SELECT * FROM workspace_data_jobs').all()).toEqual(jobs);
+    expect(old.query('SELECT * FROM drawings').all()).toEqual(drawings);
+    old.close();
+    const db = new WorkspaceDatabase(root);
+    try {
+      expect(db.sqlite.query('PRAGMA user_version').get()).toEqual({ user_version: 6 });
+      expect(db.sqlite.query('SELECT * FROM workspace_data_jobs').all()).toEqual(jobs);
+      expect(db.sqlite.query('SELECT * FROM drawings').all()).toEqual(drawings);
+      expect(db.sqlite.query('SELECT * FROM workspace_market_short_requests').all()).toEqual([]);
+      expect(db.sqlite.query('PRAGMA foreign_key_check').all()).toEqual([]);
+    } finally { db.close(); }
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

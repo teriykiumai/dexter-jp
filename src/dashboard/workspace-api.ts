@@ -18,8 +18,12 @@ import { WorkspaceAiApi } from './workspace-ai-api.js';
 const response = (value: unknown, status = 200, headers: Record<string, string> = {}) => Response.json(WorkspaceResponseSchema.parse(value), { status,
   headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...headers } });
 const errorResponse = (code: string, status: number, headers?: Record<string, string>) => response({ schemaVersion: 'workspace_error_v1', error: { code } }, status, headers);
-const jobView = (job: WorkspaceDataJob): WorkspaceJobView => ({ schemaVersion: 'workspace_job_v1', id: job.job_id, kind: job.kind, state: job.state,
-  instrumentId: job.identity ? JSON.parse(job.identity).instrumentId as string : null, error: job.error });
+const jobView = (job: WorkspaceDataJob): WorkspaceJobView => {
+  // The dated market job is server-library only until its HTTP contract lands.
+  if (job.kind === 'market_short') fail('not_found');
+  return { schemaVersion: 'workspace_job_v1', id: job.job_id, kind: job.kind, state: job.state,
+    instrumentId: job.identity ? JSON.parse(job.identity).instrumentId as string : null, error: job.error };
+};
 
 export class WorkspaceDashboardApi {
   private drawings: DrawingApi;
@@ -117,8 +121,9 @@ export class WorkspaceDashboardApi {
         }
         if (route === 'jobs/active') {
           const active = await this.jobs.coordinator.active();
-          return response({ schemaVersion: 'workspace_active_v1', job: active?.domain === 'workspace' ? jobView(this.jobs.get(active.jobId)) : null,
-            blockingKind: active?.domain !== 'workspace' ? active?.kind ?? null : null });
+          const visible = active?.domain === 'workspace' && active.kind !== 'workspace_market_short';
+          return response({ schemaVersion: 'workspace_active_v1', job: visible ? jobView(this.jobs.get(active.jobId)) : null,
+            blockingKind: visible ? null : active?.kind ?? null });
         }
         if (segments.length === 4 && segments[2] === 'jobs') return response(jobView(this.jobs.get(parse(Id, segments[3]))));
         if (segments.length === 4 && segments[2] === 'instruments') {

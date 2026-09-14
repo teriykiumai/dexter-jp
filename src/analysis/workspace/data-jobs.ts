@@ -1,13 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import type { DashboardJobCoordinatorV1, DashboardJobLeaseV1, DashboardJobProjectionV1 } from '../dashboard-jobs/coordinator.js';
+import type { DashboardJobCoordinatorV1, DashboardJobKindV1, DashboardJobLeaseV1, DashboardJobProjectionV1 } from '../dashboard-jobs/coordinator.js';
 import { fetchTechnicalInputsV1, TECHNICAL_JOB_LIMITS_V1, type TechnicalCollectionContextV1 } from '../market-data/technical-source.js';
 import { createTechnicalSourceRequestWindowV1 } from '../market-data/technical-source-gate.js';
 import { WorkspaceRepository } from './repository.js';
 import { FrozenIdentitySchema, Id, json, parse, fail, objectKey, scopeKey, type FrozenIdentity, type ObjectRef, WorkspaceError } from './contracts.js';
 import { objectRow, rowRef, resolveReference, referencePath } from './references.js';
 import { readBytes } from './files.js';
-import { ReceiptObjectSchema, workspaceDataCodecs, retainValidatedWorkspaceBytes } from './data-objects.js';
+import { ReceiptObjectSchema, workspaceDataCodecs, retainValidatedWorkspaceBytes, retainWorkspaceObject } from './data-objects.js';
 import { collectWorkspaceCatalog, activateWorkspaceCatalog } from './data-source.js';
 import { runEodWorker, type EodWorkerResult } from './eod-worker-client.js';
 import { collectWorkspaceSupply } from './supply-source.js';
@@ -15,18 +15,25 @@ import { finalizeWorkspaceSupply, publishWorkspaceSupply } from './supply-jobs.j
 import type { SupplyDataset } from './supply-artifact.js';
 import { collectWorkspaceFinancial } from './financial-source.js';
 import { publishWorkspaceFinancial, finalizeWorkspaceFinancial } from './financial-jobs.js';
+import { collectWorkspaceMarketShortV2 } from './market-short-source-v2.js';
+import { MARKET_SHORT_LIMITS_V2, marketShortAdmissionV2 } from './market-short-policy-v2.js';
+import { marketShortJobDate } from './market-short-job-contract.js';
+import { finalizeWorkspaceMarketShort, publishWorkspaceMarketShort, validateStoredMarketShortJob } from './market-short-jobs.js';
 
 type State = 'queued' | 'running' | 'publishing' | 'published' | 'failed' | 'interrupted' | 'identity_review_required';
-export type WorkspaceDataJob = { job_id: string; kind: 'catalog' | 'technical' | 'financial' | SupplyDataset; accepted_at: string; state: State;
+export type WorkspaceDataJob = { job_id: string; kind: 'catalog' | 'technical' | 'financial' | 'market_short' | SupplyDataset; accepted_at: string; state: State;
   identity: string | null; master_object: string | null; input_object: string | null; result_object: string | null;
   generation: number | null; error: string | null };
 const terminal = (state: State) => ['published', 'failed', 'interrupted', 'identity_review_required'].includes(state);
-const JobSchema = z.object({ job_id: Id, kind: z.enum(['catalog', 'technical', 'margin', 'issuer_short', 'sector_short', 'financial']), accepted_at: z.iso.datetime(),
+const JobSchema = z.object({ job_id: Id, kind: z.enum(['catalog', 'technical', 'margin', 'issuer_short', 'sector_short', 'financial', 'market_short']), accepted_at: z.iso.datetime(),
   state: z.enum(['queued', 'running', 'publishing', 'published', 'failed', 'interrupted', 'identity_review_required']),
   identity: z.string().nullable(), master_object: z.string().nullable(), input_object: z.string().nullable(), result_object: z.string().nullable(),
   generation: z.number().int().positive().nullable(), error: z.string().max(80).nullable() }).strict();
+const coordinatorKind = (kind: WorkspaceDataJob['kind']): DashboardJobKindV1 => kind === 'catalog' ? 'workspace_catalog'
+  : kind === 'technical' ? 'workspace_technical' : kind === 'financial' ? 'workspace_financial'
+    : kind === 'market_short' ? 'workspace_market_short' : 'workspace_supply';
 const projection = (job: WorkspaceDataJob): DashboardJobProjectionV1 => ({ domain: 'workspace',
-  kind: job.kind === 'catalog' ? 'workspace_catalog' : job.kind === 'technical' ? 'workspace_technical' : job.kind === 'financial' ? 'workspace_financial' : 'workspace_supply', jobId: job.job_id, terminal: terminal(job.state) });
+  kind: coordinatorKind(job.kind), jobId: job.job_id, terminal: terminal(job.state) });
 
 /** Server library only; Step 3 supplies guarded HTTP/Browser entry points. */
 export class WorkspaceDataJobs {
@@ -42,28 +49,46 @@ export class WorkspaceDataJobs {
   }
   inventory(): WorkspaceDataJob[] {
     this.repository.db.assertAvailable();
-    return this.repository.db.sqlite.query<WorkspaceDataJob, []>('SELECT * FROM workspace_data_jobs ORDER BY accepted_at,job_id').all().map(job => parse(JobSchema, job));
+    return this.repository.db.sqlite.query<WorkspaceDataJob, []>('SELECT * FROM workspace_data_jobs ORDER BY accepted_at,job_id').all().map(job => this.parseJob(job));
   }
   get(id: string): WorkspaceDataJob {
     parse(Id, id); this.repository.db.assertAvailable();
-    return parse(JobSchema, this.repository.db.sqlite.query<WorkspaceDataJob, [string]>('SELECT * FROM workspace_data_jobs WHERE job_id=?').get(id) ?? fail('not_found'));
+    return this.parseJob(this.repository.db.sqlite.query<WorkspaceDataJob, [string]>('SELECT * FROM workspace_data_jobs WHERE job_id=?').get(id) ?? fail('not_found'));
   }
-  async start(kind: WorkspaceDataJob['kind'], instrumentId?: string): Promise<string> {
+  private parseJob(raw: unknown): WorkspaceDataJob {
+    const job = parse(JobSchema, raw);
+    if (job.kind === 'market_short') marketShortJobDate(this.repository.db, job);
+    return job;
+  }
+  async start(kind: Exclude<WorkspaceDataJob['kind'], 'market_short'>, instrumentId?: string): Promise<string> {
     if (!['catalog', 'technical', 'margin', 'issuer_short', 'sector_short', 'financial'].includes(kind) || kind !== 'catalog' && !instrumentId) fail('invalid_input');
+    return this.admit(kind, instrumentId);
+  }
+  /** Explicit server-library entry point. No HTTP/UI admission in this slice. */
+  async startMarketShort(date: string): Promise<string> { return this.admit('market_short', undefined, date); }
+  private async admit(kind: WorkspaceDataJob['kind'], instrumentId?: string, date?: string): Promise<string> {
+    const checkMarketDate = (acceptedAt: string) => {
+      if (kind !== 'market_short') return;
+      marketShortAdmissionV2(date!, acceptedAt);
+      if (60_000 / Math.min(this.coordinator.requestsPerMinute, MARKET_SHORT_LIMITS_V2.maximumRequestsPerMinute) >= MARKET_SHORT_LIMITS_V2.deadlineMs) fail('invalid_input');
+    };
     const id = randomUUID();
-    await this.coordinator.admit({ kind: kind === 'catalog' ? 'workspace_catalog' : kind === 'technical' ? 'workspace_technical' : kind === 'financial' ? 'workspace_financial' : 'workspace_supply', jobId: id,
-      revalidate: () => { if (!this.coordinator.environment.apiKey()) fail('invalid_input'); if (instrumentId) this.repository.freezeIdentity(instrumentId); },
+    await this.coordinator.admit({ kind: coordinatorKind(kind), jobId: id,
+      revalidate: () => { checkMarketDate(new Date(this.coordinator.environment.wallNowMs()).toISOString());
+        if (!this.coordinator.environment.apiKey()) fail('invalid_input'); if (instrumentId) this.repository.freezeIdentity(instrumentId); },
       create: async lease => {
         this.repository.db.transaction(() => {
-          const identity = kind !== 'catalog' ? this.repository.freezeIdentity(instrumentId!) : null;
+          const identity = kind !== 'catalog' && kind !== 'market_short' ? this.repository.freezeIdentity(instrumentId!) : null;
           const master = identity ? this.repository.db.sqlite.query<{ evidence: string }, [number, string]>(
             'SELECT evidence FROM catalog_rows WHERE generation=? AND instrument_id=?').get(identity.catalogGeneration, identity.instrumentId)!.evidence : null;
           const accepted = new Date(lease.acceptedAtMs).toISOString();
+          checkMarketDate(accepted);
           if (kind === 'sector_short' && identity && !this.repository.db.sqlite.query('SELECT instrument_id FROM workspaces WHERE instrument_id=?').get(identity.instrumentId))
             this.repository.openWorkspace(identity.instrumentId, accepted);
           const generation = kind === 'catalog' ? this.repository.requestCatalog(createTechnicalSourceRequestWindowV1(accepted).calculationDate) : null;
           this.repository.db.sqlite.run('INSERT INTO workspace_data_jobs VALUES (?,?,?,\'queued\',?,?,NULL,NULL,?,NULL)',
             [id, kind, accepted, identity ? json(identity) : null, master, generation]);
+          if (kind === 'market_short') this.repository.db.sqlite.run('INSERT INTO workspace_market_short_requests VALUES (?,?)', [id, date!]);
         });
         return { state: 'published', record: projection(this.get(id)) };
       },
@@ -103,10 +128,10 @@ export class WorkspaceDataJobs {
       waitBeforeRetry: async delay => { check(delay); await env.sleep(delay, signal); },
       recordProgress: p => { pages += p.pages; rows += p.acceptedRows; bytes += p.responseBytes;
         if (pages > limits.maximumPages || rows > limits.maximumRows || bytes > limits.maximumResponseBytes) fail('invalid_input'); },
-      dispatch: async start => this.coordinator.dispatch(lease, check, async () => {
+      dispatch: async (start, callerSignal) => this.coordinator.dispatch(lease, check, async () => {
         check(); if (++attempts > limits.maximumAttempts) fail('invalid_input');
         const deadline = AbortSignal.timeout(30_000); return start(AbortSignal.any([signal, deadline]));
-      }, signal),
+      }, callerSignal ? AbortSignal.any([signal, callerSignal]) : signal),
     };
   }
   private async run(lease: DashboardJobLeaseV1) {
@@ -122,6 +147,18 @@ export class WorkspaceDataJobs {
         this.repository.db.transaction(() => {
           this.repository.db.sqlite.run('UPDATE workspace_data_jobs SET result_object=? WHERE job_id=?', [objectKey(ref), job.job_id]); this.set(job.job_id, 'published');
         });
+      } else if (job.kind === 'market_short') {
+        const input = await collectWorkspaceMarketShortV2(marketShortJobDate(this.repository.db, job),
+          { ...context, monotonicOriginMs: lease.monotonicOriginMs, requestsPerMinute: this.coordinator.requestsPerMinute }, this.coordinator.environment);
+        const ref = await retainWorkspaceObject(this.repository.db, input.version, input);
+        this.repository.db.transaction(() => this.repository.db.sqlite.run('UPDATE workspace_data_jobs SET input_object=? WHERE job_id=?', [objectKey(ref), job.job_id]));
+        await this.checkpoint?.('before_publish', this.get(job.job_id));
+        if (context.signal.aborted) fail('invalid_input');
+        this.coordinator.assertOwner(lease);
+        this.repository.db.transaction(() => this.set(job.job_id, 'publishing'));
+        await publishWorkspaceMarketShort(this.repository, this.artifactRoot, this.get(job.job_id), new Date(this.coordinator.environment.wallNowMs()).toISOString());
+        await this.checkpoint?.('after_publish', this.get(job.job_id));
+        await finalizeWorkspaceMarketShort(this.repository, this.artifactRoot, this.get(job.job_id), () => this.checkpoint?.('before_binding', this.get(job.job_id)));
       } else if (job.kind === 'financial') {
         const identity = parse(FrozenIdentitySchema, JSON.parse(job.identity!));
         const prepared = await collectWorkspaceFinancial(identity, rowRef(objectRow(this.repository.db, job.master_object!)),
@@ -237,8 +274,11 @@ export class WorkspaceDataJobs {
       'SELECT evidence FROM catalog_rows WHERE generation=? AND instrument_id=?').get(identity.catalogGeneration, identity.instrumentId)?.evidence === job.master_object;
   }
   async recover(id: string) {
-    const job = this.get(id); if (terminal(job.state)) return;
-    if (job.kind === 'technical' && job.state === 'publishing') await this.finalize(id);
+    const job = this.get(id);
+    if (job.kind === 'market_short') validateStoredMarketShortJob(this.repository, job);
+    if (terminal(job.state)) return;
+    if (job.kind === 'market_short' && job.state === 'publishing') await finalizeWorkspaceMarketShort(this.repository, this.artifactRoot, job);
+    else if (job.kind === 'technical' && job.state === 'publishing') await this.finalize(id);
     else if (job.kind === 'financial' && job.state === 'publishing') await finalizeWorkspaceFinancial(this.repository, this.artifactRoot, job);
     else if (job.kind !== 'catalog' && job.state === 'publishing') await finalizeWorkspaceSupply(this.repository, this.artifactRoot, job);
     else this.repository.db.transaction(() => {
