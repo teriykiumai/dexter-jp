@@ -112,6 +112,10 @@ async function withRetry<T>(fn: () => Promise<T>, provider: string, maxAttempts 
 // Model provider configuration
 interface ModelOpts {
   streaming: boolean;
+  maxRetries?: number;
+  timeout?: number;
+  maxTokens?: number;
+  zdrEnabled?: boolean;
 }
 
 type ModelFactory = (name: string, opts: ModelOpts) => BaseChatModel;
@@ -136,6 +140,7 @@ const MODEL_FACTORIES: Record<string, ModelFactory> = {
     const model = new ChatGoogleGenerativeAI({
       model: name,
       ...opts,
+      ...(opts.maxTokens === undefined ? {} : { maxOutputTokens: opts.maxTokens }),
       apiKey: getApiKey('GOOGLE_API_KEY'),
     });
     // Wrap bindTools to sanitize schemas for Gemini API
@@ -229,6 +234,7 @@ const MODEL_FACTORIES: Record<string, ModelFactory> = {
     new ChatOllama({
       model: name.replace(/^ollama:/, ''),
       ...opts,
+      ...(opts.maxTokens === undefined ? {} : { numPredict: opts.maxTokens }),
       ...(process.env.OLLAMA_BASE_URL ? { baseUrl: process.env.OLLAMA_BASE_URL } : {}),
     }),
 };
@@ -249,9 +255,10 @@ const createOpenAiModel = (
 
 export function getChatModel(
   modelOrRuntime: string | ResolvedLlmRuntime = DEFAULT_MODEL,
-  streaming: boolean = false
+  streaming: boolean = false,
+  limits: Omit<ModelOpts, 'streaming'> = {},
 ): BaseChatModel {
-  const opts: ModelOpts = { streaming };
+  const opts: ModelOpts = { streaming, ...limits };
   const runtime = typeof modelOrRuntime === 'string'
     ? resolveLlmRuntime(modelOrRuntime)
     : modelOrRuntime;

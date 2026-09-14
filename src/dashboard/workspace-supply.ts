@@ -1,21 +1,26 @@
 import type { WorkspaceRepository } from '../analysis/workspace/repository.js';
-import { scopeKey, parse, fail, objectKey } from '../analysis/workspace/contracts.js';
-import { objectRow, rowRef, resolveReference } from '../analysis/workspace/references.js';
+import { scopeKey, parse, fail, objectKey, type ObjectRef } from '../analysis/workspace/contracts.js';
+import { objectRow, rowRef, resolveReference, type VerifiedObject } from '../analysis/workspace/references.js';
 import { workspaceDataCodecs } from '../analysis/workspace/data-objects.js';
 import { SupplyReceiptSchema, SupplyMembershipSchema, supplyArtifact, validateSupplyLinks } from '../analysis/workspace/supply-objects.js';
 import { WorkspaceSupplySchema, type WorkspaceSupplyView } from './workspace-contracts.js';
 import type { SupplyDemandMetric } from '../tools/finance/supply-demand-engine.js';
+import type { AiSelection } from '../analysis/workspace/ai-contracts.js';
 
 const labels = { margin: '信用取引残高', issuer_short: '個別銘柄の公開空売り残高・機関別報告', sector_short: '所属業種の空売り売買代金・比率' } as const;
 const number = (value: number | null) => value === null ? '利用不可' : new Intl.NumberFormat('ja-JP', { maximumFractionDigits: 8 }).format(value);
 const ratio = (value: number | null) => value === null ? '利用不可' : `${number(value * 100)}%`;
 export function readWorkspaceSupply(repository: WorkspaceRepository, instrumentId: string): WorkspaceSupplyView;
 export function readWorkspaceSupply(repository: WorkspaceRepository, instrumentId: string, uncollectedOnly: true): WorkspaceSupplyView | null;
-export function readWorkspaceSupply(repository: WorkspaceRepository, instrumentId: string, uncollectedOnly = false): WorkspaceSupplyView | null {
-  const read = (key: string) => resolveReference(repository.db, rowRef(objectRow(repository.db, key)), workspaceDataCodecs);
+export function readWorkspaceSupply(repository: WorkspaceRepository, instrumentId: string, uncollectedOnly: false, selection: AiSelection, readExact?: (ref: ObjectRef) => VerifiedObject): WorkspaceSupplyView;
+export function readWorkspaceSupply(repository: WorkspaceRepository, instrumentId: string, uncollectedOnly = false, selection?: AiSelection,
+  readExact?: (ref: ObjectRef) => VerifiedObject): WorkspaceSupplyView | null {
+  const read = (key: string) => readExact ? readExact(rowRef(objectRow(repository.db, key))) : resolveReference(repository.db, rowRef(objectRow(repository.db, key)), workspaceDataCodecs);
   const decode = (key: string) => JSON.parse(new TextDecoder().decode(read(key).bytes));
   const datasets = (Object.keys(labels) as (keyof typeof labels)[]).map(dataset => {
-    const binding = dataset === 'sector_short'
+    const frozen = selection?.[dataset];
+    const binding = selection ? frozen ? { artifact: objectKey(frozen.artifact), receipt: objectKey(frozen.receipt),
+      membership: 'membership' in frozen ? objectKey(frozen.membership) : undefined } : null : dataset === 'sector_short'
       ? repository.db.sqlite.query<{ artifact: string; receipt: string; membership?: string }, [string]>(`SELECT b.artifact,b.receipt,l.membership FROM shared_context_links l
         JOIN artifact_bindings b USING(binding_id) WHERE l.instrument_id=? AND l.role='sector_short'`).get(instrumentId)
       : repository.db.sqlite.query<{ artifact: string; receipt: string; membership?: string }, [string, string]>(`SELECT b.artifact,b.receipt FROM data_sync_state s

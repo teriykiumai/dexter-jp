@@ -14,6 +14,8 @@ import { registerReferences, retainVerifiedObject, type VerifiedObject } from '.
 import type { WorkspaceDatabase } from './database.js';
 import { supplyCodecs, validateSupplyLinks } from './supply-objects.js';
 import { financialCodecs, validateFinancialLinks } from './financial-objects.js';
+import { aiCodecs, validateAiResult } from './ai-objects.js';
+import { AiInputSchema, AnalysisRunArtifactV1Schema } from './ai-contracts.js';
 
 const FetchEvidenceSchema = z.object({ fetchedAt: z.iso.datetime(), pageCount: z.number().int().positive().max(20),
   rowCount: z.number().int().nonnegative().max(8000), complete: z.literal(true) }).strict();
@@ -30,6 +32,7 @@ const metadata = (scope: ObjectMetadata['scope'], effectiveDate: string, depende
   sourceDefinition = 'workspace_jquants_eod_v1', calculationVersion = 'technical_chart_calculation_v2'): ObjectMetadata =>
   ({ scope, effectiveDate, dependencies, sourceDefinition, calculationVersion });
 export const workspaceDataCodecs: ReferenceCodecs = new Map([
+  ...aiCodecs,
   ...supplyCodecs,
   ...financialCodecs,
   ['workspace_catalog_v1', value => {
@@ -114,6 +117,10 @@ export function validateDataObjectLinks(objects: readonly VerifiedObject[]): voi
     if (!workspaceDataCodecs.has(object.ref.codec)) continue;
     if (supplyCodecs.has(object.ref.codec)) { validateSupplyLinks(object, get); continue; }
     if (financialCodecs.has(object.ref.codec)) { validateFinancialLinks(object, get); continue; }
+    if (object.ref.codec === 'analysis_run_artifact_v1') {
+      const run = parse(AnalysisRunArtifactV1Schema, JSON.parse(new TextDecoder().decode(object.bytes)));
+      validateAiResult(parse(AiInputSchema, get(run.input)), run.input, run); continue;
+    }
     const value: unknown = JSON.parse(new TextDecoder().decode(object.bytes));
     if (object.ref.codec === 'workspace_episode_v1') {
       const e = parse(EpisodeObjectSchema, value), key = json(e.catalog);

@@ -2,6 +2,7 @@ import { read, mutate, WorkspaceHttpError } from './workspace-http.js';
 import { HorizontalDrawings } from './horizontal-drawings.js';
 import { WorkspaceSupply, type SupplyKind } from './workspace-supply.js';
 import { WorkspaceFinancial } from './workspace-financial.js';
+import { WorkspaceAi } from './workspace-ai.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { z } from 'zod';
 import { Button, Card, DashboardDesign, TableScroll } from './primitives.js';
@@ -208,5 +209,6 @@ function WorkspaceInstrument({ id, interval, revision, navigate, disabled, acqui
     </div></Card> : null}
     {view ? <WorkspaceSupply id={id} revision={revision} disabled={disabled} acquire={acquireSupply} /> : null}
     {view ? <WorkspaceFinancial id={id} revision={revision} disabled={disabled} acquire={acquireFinancial} /> : null}
+    {view?.item.revision ? <WorkspaceAi key={id} id={id} /> : null}
   </section>;
 }

@@ -4,13 +4,19 @@ import { DashboardSessionV1 } from './session.js';
 import { handleDashboardRequest } from './api.js';
 import { seedTrendlineFixture } from './drawing-test-fixtures.js';
 import { financialSourceFixture } from '../analysis/workspace/financial-test-fixtures.js';
+import { WorkspaceAiJobs } from '../analysis/workspace/ai-jobs.js';
+import { syntheticAiModel, syntheticAiOutput } from '../analysis/workspace/ai-test-fixtures.js';
 
 const fixture = await workspaceDataFixture(undefined, false, process.env.WORKSPACE_BROWSER_ROOT
   ? { directory: process.env.WORKSPACE_BROWSER_ROOT, preserve: true } : undefined);
 if (process.env.WORKSPACE_BROWSER_TRENDLINES === '1') await seedTrendlineFixture(fixture.db);
-const api = new WorkspaceDashboardApi(fixture.jobs, new DashboardSessionV1());
+let aiCalls = 0, aiDelay = 0;
+const ai = new WorkspaceAiJobs(fixture.repository, syntheticAiModel(async input => { aiCalls++; await Bun.sleep(aiDelay); return syntheticAiOutput(input); }));
+const api = new WorkspaceDashboardApi(fixture.jobs, new DashboardSessionV1(), ai);
 const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: request => {
   if (new URL(request.url).pathname === '/test/counts') return Response.json({ calls: fixture.calls() });
+  if (new URL(request.url).pathname === '/test/ai-counts') return Response.json({ calls: aiCalls });
+  if (new URL(request.url).pathname === '/test/ai-delay' && request.method === 'POST') { aiDelay = 4000; return Response.json({ configured: true }); }
   if (request.method === 'POST' && new URL(request.url).pathname === '/test/financial') {
     fixture.advance(); fixture.setTransform((endpoint, rows) => { if (endpoint.endsWith('/summary')) rows.push(financialSourceFixture()); });
     return Response.json({ configured: true });

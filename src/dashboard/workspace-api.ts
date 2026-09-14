@@ -12,6 +12,8 @@ import { runSupplyWorker } from '../analysis/workspace/supply-worker-client.js';
 import { readWorkspaceSupply } from './workspace-supply.js';
 import { readWorkspaceFinancial } from './workspace-financial.js';
 import { runFinancialWorker } from '../analysis/workspace/financial-worker-client.js';
+import { WorkspaceAiJobs } from '../analysis/workspace/ai-jobs.js';
+import { WorkspaceAiApi } from './workspace-ai-api.js';
 
 const response = (value: unknown, status = 200, headers: Record<string, string> = {}) => Response.json(WorkspaceResponseSchema.parse(value), { status,
   headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...headers } });
@@ -21,10 +23,13 @@ const jobView = (job: WorkspaceDataJob): WorkspaceJobView => ({ schemaVersion: '
 
 export class WorkspaceDashboardApi {
   private drawings: DrawingApi;
+  readonly ai: WorkspaceAiApi;
   private readQueue: Promise<unknown> = Promise.resolve();
   private supplyReadQueue: Promise<unknown> = Promise.resolve();
   private queuedReads = 0;
-  constructor(readonly jobs: WorkspaceDataJobs, readonly session: DashboardSessionV1) { this.drawings = new DrawingApi(jobs.repository, session); }
+  constructor(readonly jobs: WorkspaceDataJobs, readonly session: DashboardSessionV1, aiJobs = new WorkspaceAiJobs(jobs.repository)) {
+    this.drawings = new DrawingApi(jobs.repository, session); this.ai = new WorkspaceAiApi(aiJobs, session);
+  }
   private item(id: string): WorkspaceItem {
     parse(Id, id);
     const row = this.jobs.repository.db.sqlite.query<Omit<WorkspaceItem, 'schemaVersion'>, [string]>(`SELECT i.instrument_id AS instrumentId,
@@ -63,6 +68,7 @@ export class WorkspaceDashboardApi {
     if (segments[0] !== 'api' || segments[1] !== 'workspace') return null;
     try {
       if (!isAllowedDashboardHost(request.headers.get('host'))) throw new DashboardSecurityErrorV1('forbidden_host');
+      if (segments[2] === 'instruments' && segments[4] === 'ai') return await this.ai.handle(request, url, segments);
       if ([5, 6].includes(segments.length) && segments[2] === 'instruments' && segments[4] === 'drawings')
         return await this.drawings.handle(request, url, segments);
       const route = segments.slice(2).join('/');

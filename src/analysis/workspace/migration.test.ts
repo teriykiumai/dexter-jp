@@ -9,6 +9,28 @@ import { WorkspaceDatabase, workspaceFingerprint } from './database.js';
 import { digest, json } from './contracts.js';
 import { backupWorkspace, validateWorkspaceBackup, restoreWorkspace } from './backup.js';
 
+test('V4 AI migration rollback preserves foundation jobs and user settings without reinterpreting old input', () => {
+  const root = mkdtempSync(resolve(tmpdir(), 'dexter-v4-ai-'));
+  try {
+    const old = new Database(resolve(root, 'workspace.sqlite'), { create: true }); migrateWorkspace(old, WORKSPACE_MIGRATIONS.slice(0, 4));
+    old.exec('PRAGMA foreign_keys=ON');
+    const id = randomUUID(), job = randomUUID(), input = `sha256:${'1'.repeat(64)}`;
+    old.run("INSERT INTO instruments VALUES (?,'stock')", [id]); old.run("INSERT INTO workspaces VALUES (?,'2026-09-11',1,7)", [id]);
+    old.run("INSERT INTO immutable_objects VALUES (?,'input.json','foundation_fixture',?,'{}')", [input, input]);
+    old.run("INSERT INTO analysis_jobs VALUES (?,?,'fundamental',?,NULL,'prepared')", [job, id, input]);
+    const before = old.query('SELECT * FROM analysis_jobs').get();
+    expect(() => migrateWorkspace(old, [...WORKSPACE_MIGRATIONS.slice(0, 4), { version: 5, sql: `${WORKSPACE_MIGRATIONS[4].sql}\nINVALID SQL;` }])).toThrow();
+    expect(old.query('PRAGMA user_version').get()).toEqual({ user_version: 4 }); expect(old.query('SELECT * FROM analysis_jobs').get()).toEqual(before); old.close();
+    const db = new WorkspaceDatabase(root);
+    try {
+      expect(db.sqlite.query('SELECT job_id,instrument_id,profile,input_object,result_object,state FROM analysis_jobs').get()).toEqual(before);
+      expect(db.sqlite.query('SELECT accepted_at,publication,error FROM analysis_jobs').get()).toEqual({ accepted_at: null, publication: null, error: null });
+      expect(db.sqlite.query('SELECT favorite,revision FROM workspaces').get()).toEqual({ favorite: 1, revision: 7 });
+      expect(db.sqlite.query('PRAGMA foreign_key_check').all()).toEqual([]);
+    } finally { db.close(); }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('V3 to V4 failed migration preserves jobs and user preferences, then reopens successfully', () => {
   const root = mkdtempSync(resolve(tmpdir(), 'dexter-v3-financial-'));
   try {
@@ -22,7 +44,7 @@ test('V3 to V4 failed migration preserves jobs and user preferences, then reopen
     expect(old.query('PRAGMA user_version').get()).toEqual({ user_version: 3 });
     expect(old.query('SELECT * FROM workspace_data_jobs').all()).toEqual(before); old.close();
     const db = new WorkspaceDatabase(root);
-    try { expect(db.sqlite.query('PRAGMA user_version').get()).toEqual({ user_version: 4 });
+    try { expect(db.sqlite.query('PRAGMA user_version').get()).toEqual({ user_version: WORKSPACE_SCHEMA_VERSION });
       expect(db.sqlite.query('SELECT * FROM workspace_data_jobs').all()).toEqual(before);
       expect(db.sqlite.query('SELECT instrument_id,revision FROM chart_preferences').get()).toEqual({ instrument_id: id, revision: 4 });
       expect(() => db.sqlite.run("UPDATE workspace_data_jobs SET kind='financial'")).toThrow('immutable');
