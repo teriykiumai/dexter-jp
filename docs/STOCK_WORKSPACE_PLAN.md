@@ -4,7 +4,7 @@
 
 **Date:** 2026-09-12
 
-**Status:** Implementation through Step 8 Dashboard cutover is merged (PR #124, `8e656c1`). SW-M0 diagnostics are merged (PR #125, `6ecab88`): live coverage is complete, but reconciliation with the published total remains incomplete. The current SW-M1 candidate implements immutable storage and exact-reference verification only; production collection, binding/read/UI integration remains closed. Numeric forecast yield, cross-date identity and ETF/REIT capabilities remain gated; later steps require their own implementation, validation, review and merge.
+**Status:** Implementation through Step 8 Dashboard cutover is merged (PR #124, `8e656c1`). SW-M0 diagnostics are merged (PR #125, `6ecab88`): live coverage is complete, but reconciliation with the published total remains incomplete. SW-M1 immutable storage is merged (PR #126, `6dcbc0f`). The current candidate enforces closed market-source qualification at binding/recovery/read/backup boundaries; production collection and Workspace/UI integration remain closed. Numeric forecast yield, cross-date identity and ETF/REIT capabilities remain gated; later steps require their own implementation, validation, review and merge.
 
 ## 1. Authority and migration boundary
 
@@ -796,6 +796,40 @@ missing input rejection; incompatible scope rejection; and market-job requests
 still rejected before any source access. This financial/persistence boundary uses
 broad Workspace/Market Data regressions, affected Dashboard API tests and strict
 type checking; user-facing UI behavior is unchanged.
+
+### SW-M1 binding qualification boundary
+
+`workspace_market_short_binding_qualification_v1` has **no production-qualified
+market source/schema version**. It denies binding the archived unverified market
+inputs/artifacts/receipts, regardless of a successful coverage calculation, access
+to the Standard endpoint, stored flags, or a renamed dataset. Recognition checks
+the requested binding scope/dataset and both objects' codec, scope, source definition
+and calculation version. A marker in any one of these identities closes admission;
+relabelling one field cannot turn market data into eligible issuer/sector data.
+
+The generic repository applies this same predicate inside the binding transaction,
+before either insert or acknowledgement of an existing committed association.
+Current reads, shared links and Backup/Restore validation apply it as well. A
+pre-existing/injected unqualified binding is a `reference_conflict`; it is never
+silently adopted, deleted, remapped to latest, or treated as an empty collection.
+A current-pointer scope/dataset mismatch also fails closed. There is no schema
+migration or automatic DB repair. Restore rejects an invalid package before
+replacing the destination, preserving the existing Drawings.
+
+Unqualified immutable evidence remains a valid archival reference. Standalone
+receipt -> artifact -> input closures can still be retained, read exactly and
+backed up/restored. Catalog market scope, eligible sector context and issuer data
+retain their existing qualification/identity rules. This policy opens no collector,
+job, current market dataset, shared Workspace link, UI or AI path. Production
+activation requires a separately reviewed versioned predicate with authoritative
+source reconciliation and trading-date/provider-completion evidence; neither a
+configuration switch nor a persisted `verified` flag is sufficient.
+
+Acceptance includes denial with no binding/current-pointer writes; refusal of
+unqualified idempotent recovery/shared links/current reads; coherent-but-unqualified
+backup package rejection before destination replacement; preservation of Drawings
+and archival inputs; and unchanged issuer/sector/catalog operation. Use broad
+persistence and affected data-boundary regressions plus type checking and full CI.
 
 ## 7. Workspace API, navigation and AI
 

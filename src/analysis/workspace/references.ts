@@ -15,6 +15,7 @@ import { FinancialPreparedSchema, FinancialReceiptSchema, financialArtifact } fr
 import { WorkspaceFinancialCodec, financialTarget } from './financial-artifact.js';
 import { verifyAiInput } from './ai-verify.js';
 import { validateAiResult } from './ai-objects.js';
+import { bindingQualificationV1 } from './market-short-qualification.js';
 
 export type ObjectRow = { object_key: string; path: string; codec: string; digest: string; metadata: string };
 export type VerifiedObject = { ref: ObjectRef; metadata: ObjectMetadata; bytes: Uint8Array };
@@ -56,6 +57,17 @@ export function requireScope(db: WorkspaceDatabase, key: string, expected: Works
   const metadata = metadataFor(db, key);
   if (scopeKey(metadata.scope) !== scopeKey(expected)) fail('reference_conflict');
   return metadata;
+}
+/** Admission, exact recovery, reads and offline validation share the same policy.
+ * Registration/archival of unqualified immutable evidence remains permitted.
+ */
+export function requireBindingQualification(db: WorkspaceDatabase, scope: WorkspaceScope, dataset: string,
+  artifact: string, receipt: string): void {
+  const objects = [artifact, receipt].map(key => {
+    const row = objectRow(db, key);
+    return { codec: row.codec, metadata: parse(ObjectMetadataSchema, JSON.parse(row.metadata)) };
+  });
+  if (bindingQualificationV1(scope, dataset, objects).state === 'unqualified') fail('reference_conflict');
 }
 function publishObject(db: WorkspaceDatabase, object: VerifiedObject, checkpoint?: PublicationCheckpoint): void {
   db.assertAvailable();
@@ -327,6 +339,7 @@ export function validateReferences(db: WorkspaceDatabase, codecs: ReferenceCodec
   for (const binding of db.sqlite.query<{ scope: string; dataset: string; artifact: string; receipt: string; frozen_identity: string | null }, []>('SELECT * FROM artifact_bindings').all()) {
     parse(Token, binding.dataset);
     const scope = parse(ScopeSchema, JSON.parse(binding.scope));
+    requireBindingQualification(db, scope, binding.dataset, binding.artifact, binding.receipt);
     if (scope.kind === 'instrument-owned') {
       const identity = parse(FrozenIdentitySchema, binding.frozen_identity ? JSON.parse(binding.frozen_identity) : null);
       const episode = db.sqlite.query<{ episode_from: string; episode_through: string | null }, [number, string, string, string, number]>(`SELECT r.episode_from,r.episode_through FROM catalog_rows r
