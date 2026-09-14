@@ -4,7 +4,7 @@
 
 **Date:** 2026-09-12
 
-**Status:** Implementation through Step 8 Dashboard cutover is merged (PR #124, `8e656c1`). SW-M0 diagnostics are merged (PR #125, `6ecab88`): live coverage is complete, but reconciliation with the published total remains incomplete. SW-M1 immutable storage is merged (PR #126, `6dcbc0f`). The current candidate enforces closed market-source qualification at binding/recovery/read/backup boundaries; production collection and Workspace/UI integration remain closed. Numeric forecast yield, cross-date identity and ETF/REIT capabilities remain gated; later steps require their own implementation, validation, review and merge.
+**Status:** Implementation through Step 8 Dashboard cutover is merged (PR #124, `8e656c1`). SW-M0 diagnostics (PR #125, `6ecab88`), SW-M1 immutable storage (PR #126, `6dcbc0f`) and closed V1 binding qualification (PR #127, `691f9eb`) are merged. The current candidate adds production eligibility V2: complete J-Quants data may be used as an approximate reference under the hard gates below; JPX public-total differences are soft warnings. Dashboard market jobs/UI/AI integration remains a subsequent slice. Numeric forecast yield, cross-date identity and ETF/REIT capabilities remain gated; later steps require their own implementation, validation, review and merge.
 
 ## 1. Authority and migration boundary
 
@@ -743,13 +743,12 @@ Summing separately rounded public components could explain the total discrepancy
 but the checked specification does not establish that procedure. Do not silently
 widen tolerance or promote an approximate reconciliation to exact evidence.
 
-Before SW-M1 production activation, establish the published total's calculation/
-rounding semantics from authoritative evidence or obtain a corrected source,
-then review the reconciliation rule and rerun the bounded diagnostic as needed.
-Only that unresolved total/source-definition evidence blocks this source gate;
-SW-M1 must separately implement immutable market inputs/receipts, shared-reference
-validation/backup closure and explicit job/read/UI integration. Future production
-collection also needs trading-date/cutoff handling: the
+The comparison and exit result above describe the preserved SW-M0 **diagnostic V1**,
+not the production activation rule. The approved V2 policy below supersedes exact
+public-total reconciliation as a production blocker without changing V1 evidence
+or claiming a rounding method. Further rounding/correction evidence may improve
+the warning; it is no longer required to enable a complete reference indicator.
+Explicit Dashboard job/read/UI integration remains separate. The
 [published update time](https://jpx-jquants.com/ja/spec/data-update) is around
 16:30 JST, not a completion guarantee, and no uncollected/missing day is zero.
 
@@ -821,15 +820,114 @@ receipt -> artifact -> input closures can still be retained, read exactly and
 backed up/restored. Catalog market scope, eligible sector context and issuer data
 retain their existing qualification/identity rules. This policy opens no collector,
 job, current market dataset, shared Workspace link, UI or AI path. Production
-activation requires a separately reviewed versioned predicate with authoritative
-source reconciliation and trading-date/provider-completion evidence; neither a
-configuration switch nor a persisted `verified` flag is sufficient.
+activation uses the separately versioned V2 policy below. V1 remains closed;
+neither a configuration switch nor a persisted `verified` flag changes its meaning.
 
 Acceptance includes denial with no binding/current-pointer writes; refusal of
 unqualified idempotent recovery/shared links/current reads; coherent-but-unqualified
 backup package rejection before destination replacement; preservation of Drawings
 and archival inputs; and unchanged issuer/sector/catalog operation. Use broad
 persistence and affected data-boundary regressions plus type checking and full CI.
+
+### SW-M1 production eligibility V2 (approved policy change)
+
+`workspace_market_short_binding_qualification_v2` permits **reference use** of newly
+collected, structurally complete J-Quants input. It does not certify exact JPX
+reconciliation, provider completion or point-in-time historical vintages. This
+replaces the earlier exact-public-total activation blocker for V2 only. The V1
+diagnostic, immutable codecs and closed `bindingQualificationV1()` are unchanged.
+No old input is relabelled, migrated, replayed into V2, or promoted automatically.
+
+Hard gates retain the exact TSE regular-market scope/registry (33 sectors plus
+9999), date-only all-category query and exact five source fields. All 34 codes must
+occur exactly once. Missing/null/duplicate/unknown constituents, unknown fields,
+unsafe/nonfinite/negative numbers, mismatched/future dates or incomplete pagination
+deny eligibility. Zero is data: sum JPY short turnover and total turnover before
+computing `100 * S / T`; T=0 preserves turnover and a null ratio with its reason.
+The 2026-09-10 registry floor is unchanged, not an assertion of earlier coverage.
+
+The following collection contract is mandatory for the subsequent collector slice,
+which must reuse the existing authenticated reader and admitted dispatcher.
+It first fetches `/v2/markets/calendar?from=date&to=date` with no holiday filter,
+then requests `/v2/markets/short-ratio?date=date`. The exact calendar row is required;
+unknown fields/divisions, extra/missing/duplicate dates fail. Per the official
+[holiday division definition](https://jpx-jquants.com/en/spec/mkt-cal/holiday-division),
+1 and 2 are TSE sessions; 0 and 3 are not. Half-days and irregular dates follow the
+calendar, never weekday arithmetic. A non-session stops before the short-ratio query.
+Both queries together have at most 5 attempts/pages, 200 rows, 2 MiB, 30 seconds per
+request, 60 seconds total, no retries and at most 5 requests/minute (respect lower
+configuration). Frozen execution counts must agree with complete source evidence.
+
+`dexter_market_short_1730_jst_v2` denies same-day admission before 17:30 JST and
+permits it from exactly 17:30 if every other hard gate passes. Earlier fetched
+inputs cannot become eligible simply by waiting. This is a conservative **Dexter
+application policy**; the [official update schedule](https://jpx-jquants.com/ja/spec/data-update)
+says around 16:30, not guaranteed completion. Each result retains
+`provider_completion_not_guaranteed` and `not_point_in_time_history`, including
+later-day collection. `correctionVintage: current_at_fetch_not_point_in_time`
+remains fixed. No known future data is accepted as historical evidence.
+
+Reconciliation has a closed state vocabulary `approximate | verified` and closed
+reasons. This version produces only `approximate`; `verified` is reserved for a
+future reviewed evidence contract and cannot be supplied as a flag. Reasons are
+`published_rounding_method_unverified`, `published_reference_unavailable`,
+`published_total_difference_present` and `published_component_difference_present`.
+`approximate != unavailable` and `approximate != verified`.
+The existing dated JPX sample is frozen into input on its matching date; other
+dates explicitly have no public reference. Each present market/Other component and
+total records API JPY, public million-JPY and signed JPY difference. There is **no
+production threshold**, rounding guess, tolerance widening or hidden reconciliation.
+Even a zero difference does not produce `verified`. Adding another public reference
+requires reviewed, dated source evidence, not arbitrary caller data.
+
+The future presentation contract must convey: 「J-Quantsの業種別空売りデータ34区分を
+売買代金で加重集計した参考値です。JPX公表値とは丸め・集計方法等により差が生じる
+場合があります。」 The completion warning must convey that Dexter uses a conservative
+collection time based on the normal update schedule, and that the provider does
+not guarantee finalization then. These are data warnings, separate from hard
+unavailable/error states; no UI component is added by this slice.
+
+New `workspace_market_short_input_v2`, `workspace_market_short_artifact_v2` and
+`workspace_market_short_receipt_v2` codecs use a separate Market Data target
+`market_short_tse_regular_market_v2`. The formula/coverage versions are retained;
+the versioned eligibility and reconciliation evidence are part of semantic content.
+The input includes the exact calendar, source rows/queries/fetch evidence, execution
+counts, registry and public reference. Parsing replays calculation and eligibility.
+Same-content refetch may reuse the original immutable artifact, but each receipt
+also retains its own exact observation input and validates it against the receipt's
+admission time. Corrections retain both old and new inputs/artifacts/receipts.
+
+Only canonical dataset `market_short` with exact market scope and V2 artifact/receipt
+codecs can bind. The SQLite immediate transaction revalidates exact archived bytes
+and all required inputs before insert or acknowledgement; current read, shared link
+and Backup/Restore use the same predicate. Metadata/flags, dataset aliases, V1/V2
+mixes, wrong scope, unknown policy or edited results cannot bypass it. A delayed
+binding cannot rewind the current receipt, and conflicting artifacts at an equal
+admission time fail closed using inherited receipt ordering. Sharing a qualified
+market reference does not change issuer ownership or permit price/fundamental/
+issuer-short objects to cross instrument identities.
+
+Backup closure includes every registered V1/V2 object, both the artifact's original
+input and every receipt's observation input, calendar and warning evidence, even
+with no Drawing/AI records. Offline maintenance reuses its validated closure rather
+than bypassing the maintenance lock. Missing/corrupt/unqualified retained bindings
+fail before restore replaces an existing installation; no latest fallback, network
+replay, referenced-cache omission or Drawing loss is allowed.
+
+This slice supplies V2 immutable evidence/codecs and repository eligibility
+boundaries. It does not install a collector, Dashboard job route, membership
+collector, UI projection or AI input. Those remain separate implementation work;
+their absence is not another source reconciliation gate. Existing Snapshot/Strategy
+history, SQLite schema, source identity, security and receipt recovery budgets stay
+unchanged. No broad migration or dependency update is required.
+
+Acceptance: hard-gate negatives; exact 17:30 boundary and official holiday/half-day
+fixtures; weighted/zero numeric cases; present/absent/large JPX difference all remain
+approximate; immutable V1 refusal; forged qualifier denial; bounded source evidence
+and inherited transport regressions; exact refetch/correction recovery; two-Workspace market sharing without
+issuer mixing; no-Drawing/AI backup restore of current data and complete closure;
+failed restore preserves existing Drawings. Validate broad persistence/Market Data
+regressions, type checking and full CI; ordinary tests make no live API/LLM calls.
 
 ## 7. Workspace API, navigation and AI
 

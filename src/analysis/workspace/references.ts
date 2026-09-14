@@ -16,6 +16,7 @@ import { WorkspaceFinancialCodec, financialTarget } from './financial-artifact.j
 import { verifyAiInput } from './ai-verify.js';
 import { validateAiResult } from './ai-objects.js';
 import { bindingQualificationV1 } from './market-short-qualification.js';
+import { marketShortCodecsV2, requireMarketShortBindingV2 } from './market-short-objects-v2.js';
 
 export type ObjectRow = { object_key: string; path: string; codec: string; digest: string; metadata: string };
 export type VerifiedObject = { ref: ObjectRef; metadata: ObjectMetadata; bytes: Uint8Array };
@@ -62,12 +63,20 @@ export function requireScope(db: WorkspaceDatabase, key: string, expected: Works
  * Registration/archival of unqualified immutable evidence remains permitted.
  */
 export function requireBindingQualification(db: WorkspaceDatabase, scope: WorkspaceScope, dataset: string,
-  artifact: string, receipt: string): void {
+  artifact: string, receipt: string) {
+  return checkBindingQualification(db, scope, dataset, artifact, receipt,
+    ref => JSON.parse(new TextDecoder().decode(resolveReference(db, ref, marketShortCodecsV2).bytes)));
+}
+function checkBindingQualification(db: WorkspaceDatabase, scope: WorkspaceScope, dataset: string,
+  artifact: string, receipt: string, get: (ref: ObjectRef) => unknown) {
   const objects = [artifact, receipt].map(key => {
     const row = objectRow(db, key);
     return { codec: row.codec, metadata: parse(ObjectMetadataSchema, JSON.parse(row.metadata)) };
   });
-  if (bindingQualificationV1(scope, dataset, objects).state === 'unqualified') fail('reference_conflict');
+  if (bindingQualificationV1(scope, dataset, objects).state === 'unqualified') {
+    return requireMarketShortBindingV2(scope, dataset, rowRef(objectRow(db, artifact)), rowRef(objectRow(db, receipt)), get);
+  }
+  return null;
 }
 function publishObject(db: WorkspaceDatabase, object: VerifiedObject, checkpoint?: PublicationCheckpoint): void {
   db.assertAvailable();
@@ -339,7 +348,12 @@ export function validateReferences(db: WorkspaceDatabase, codecs: ReferenceCodec
   for (const binding of db.sqlite.query<{ scope: string; dataset: string; artifact: string; receipt: string; frozen_identity: string | null }, []>('SELECT * FROM artifact_bindings').all()) {
     parse(Token, binding.dataset);
     const scope = parse(ScopeSchema, JSON.parse(binding.scope));
-    requireBindingQualification(db, scope, binding.dataset, binding.artifact, binding.receipt);
+    // The offline maintenance lock intentionally forbids live resolveReference.
+    // Replay from the complete, digest/codec-validated closure collected above.
+    checkBindingQualification(db, scope, binding.dataset, binding.artifact, binding.receipt, ref => {
+      const object = byKey.get(objectKey(ref)) ?? fail('reference_missing');
+      return JSON.parse(new TextDecoder().decode(object.bytes));
+    });
     if (scope.kind === 'instrument-owned') {
       const identity = parse(FrozenIdentitySchema, binding.frozen_identity ? JSON.parse(binding.frozen_identity) : null);
       const episode = db.sqlite.query<{ episode_from: string; episode_through: string | null }, [number, string, string, string, number]>(`SELECT r.episode_from,r.episode_through FROM catalog_rows r
