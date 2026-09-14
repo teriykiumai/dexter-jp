@@ -4,7 +4,7 @@
 
 **Date:** 2026-09-12
 
-**Status:** Ordinary-stock implementation through Step 7 frozen-input AI/history is merged (PR #123). Step 8 Dashboard cutover is the current candidate. Numeric forecast yield, cross-date identity and ETF/REIT capabilities remain gated; later steps require their own implementation, validation, review and merge.
+**Status:** Implementation through Step 8 Dashboard cutover is merged (PR #124, `8e656c1`). SW-M0 whole-market short source verification is the current candidate: live coverage is complete, but reconciliation with the published total remains incomplete. SW-M1 production integration stays closed. Numeric forecast yield, cross-date identity and ETF/REIT capabilities remain gated; later steps require their own implementation, validation, review and merge.
 
 ## 1. Authority and migration boundary
 
@@ -668,6 +668,90 @@ coverage/duplicate constituents produce canonical unavailable, not a subset labe
 whole market. Unrecognized schema/category, incomplete pages, invalid/nonfinite or
 negative source amounts fail collection. For T=0, preserve observed turnover and
 mark the ratio unavailable. Do not add totals that overlap constituent rows.
+
+### SW-M0 source gate and evidence (2026-09-14)
+
+This step adds an explicit diagnostic and pure coverage/aggregation checks only.
+It does not register `market_short_ratio`, start a Dashboard job, write a DB,
+artifact or receipt, or change UI/AI inputs. SW-M1 remains a separate reviewed step.
+
+The candidate registry `tse_short_turnover_34_categories_v1` fixes the 33 official
+sector codes plus `9999`, once each, in source code and a canonical registry digest.
+It uses `market-scoped` / `tse_regular_market_short_selling`, source definition
+`jpx_short_selling_daily_including_foreign_securities_v1` and calculation version
+`market_short_turnover_weighted_v1`. Its policy floor is 2026-09-10, with no fixed
+end date while that reviewed definition remains unchanged; this is not proof of
+earlier coverage. A definition/category/schema change requires a new source review
+and version, not automatic widening. This candidate registry is **not activated**
+by a successful field/coverage check alone.
+
+The [JPX source page](https://www.jpx.co.jp/markets/statistics-equities/short-selling/index.html)
+defines regular-market trades in stocks, ETF, REIT and subscription warrant
+securities. The [dated industry table](https://www.jpx.co.jp/markets/statistics-equities/short-selling/t13vrt000001y46z-att/260910-g.pdf)
+identifies its Other row as ETF, REIT and preferred equity contribution securities,
+includes foreign securities, and includes margin trading within short selling.
+The [official code list](https://jpx-jquants.com/en/spec/eq-master/sector33code)
+maps Other to `9999`. These are the provider's aggregate categories, not a local
+issuer membership reconstruction; no assumption is made about an individual
+instrument's historical classification. The scope must be labelled TSE regular
+market, not all Japanese trading venues or ordinary stocks alone.
+
+The [API specification](https://jpx-jquants.com/ja/spec/mkt-short-ratio)
+supports `GET /v2/markets/short-ratio?date=YYYY-MM-DD` across all categories, with
+pagination. It supplies JPY amounts where the public tables use rounded million
+JPY. The diagnostic reuses the existing authenticated/bounded reader, validates
+the exact five-field row schema and requested date, sorts by fixed code, and sums
+`ShrtWithResVa + ShrtNoResVa` as S, then `SellExShortVa + S` as T. Ratio is
+`100 * (S / T)` in percent; no intermediate public-table rounding is applied.
+Amounts and aggregate sums must remain finite, nonnegative and within the safe
+numeric magnitude. Missing category/null amount/duplicate code yields unavailable
+with no subset total. Unknown fields/codes, malformed data or incomplete pagination
+fail collection. Zero turnover is preserved with an unavailable ratio. No
+instrumentId is accepted, assigned or inferred by this market-scoped diagnostic.
+
+Run only by an explicit operation:
+
+```text
+bun run src/analysis/workspace/market-short-source-smoke.ts --confirm-external-fetch
+```
+
+No flag means no credential read or network. The fixed sample is 2026-09-10:
+one logical query, at most 5 attempts/pages, 200 rows, 2 MiB, 30 seconds/request,
+60 seconds overall, no retries, and at most 5 requests/minute (respect a lower
+configured rate). Ordinary tests use synthetic responses and consume no quota.
+Output contains normalized-input/registry digests, totals, discrepancies and
+numeric request metrics, never keys, raw source rows or provider error text.
+
+Authorized live evidence at `2026-09-14T04:28:57.224Z`: **1 attempt, 1 page,
+34 rows, 4,519 bytes**, all required codes including 9999, no duplicates/missing
+categories. Normalized input digest:
+`sha256:d27d7841c3f65d65f7a56f085b36f9718c22228bd1a4adbb49ee650a299df6e0`.
+Registry digest:
+`sha256:d6c5fc1ba2c9768b1a6aff9624d7440d90966ddf7e6746623b9a85153857af39`.
+This verifies this dated query with the configured subscription, not long-history
+entitlement, continuous historical completeness or production readiness.
+
+The diagnostic compares each of three components and their total, both for the
+market and Other, with the [dated JPX total](https://www.jpx.co.jp/markets/statistics-equities/short-selling/t13vrt000001y46z-att/260910-m.pdf)
+and industry table. The diagnostic requires an absolute difference **below
+one million JPY per cell**, without assuming a specific rounding mode. Actual
+market component differences (API minus public JPY) are +759,105 / +262,888 /
++748,764; their sum differs from the public total by **+1,770,757 JPY**. Other
+component/total differences are all below one million JPY. Therefore the live
+gate is **incomplete**, with CLI exit 1, despite complete 34-category coverage.
+Summing separately rounded public components could explain the total discrepancy,
+but the checked specification does not establish that procedure. Do not silently
+widen tolerance or promote an approximate reconciliation to exact evidence.
+
+Before SW-M1 production activation, establish the published total's calculation/
+rounding semantics from authoritative evidence or obtain a corrected source,
+then review the reconciliation rule and rerun the bounded diagnostic as needed.
+Only that unresolved total/source-definition evidence blocks this source gate;
+SW-M1 must separately implement immutable market inputs/receipts, shared-reference
+validation/backup closure and explicit job/read/UI integration. Future production
+collection also needs trading-date/cutoff handling: the
+[published update time](https://jpx-jquants.com/ja/spec/data-update) is around
+16:30 JST, not a completion guarantee, and no uncollected/missing day is zero.
 
 ## 7. Workspace API, navigation and AI
 
