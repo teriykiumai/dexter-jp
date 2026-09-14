@@ -206,7 +206,7 @@ export class WorkspaceRepository {
       const committed = this.committedBinding(scope, artifact, receipt, dataset, identity);
       // Recovery acknowledges the exact committed result without moving a current
       // pointer backwards, even if a later catalog generation is now active.
-      if (committed) return committed;
+      if (committed.id) return committed.id;
       if (!this.identityMatches(identity)) fail('identity_review_required');
       const row = this.db.sqlite.query<{ episode_from: string; episode_through: string | null }, [number, string]>(
         'SELECT episode_from,episode_through FROM catalog_rows WHERE generation=? AND instrument_id=?').get(identity.catalogGeneration, identity.instrumentId)!;
@@ -225,22 +225,34 @@ export class WorkspaceRepository {
     if (!r.dependencies.some(ref => objectKey(ref) === objectKey(artifact)) || r.effectiveDate !== a.effectiveDate
       || r.sourceDefinition !== a.sourceDefinition || r.calculationVersion !== a.calculationVersion) fail('reference_conflict');
     const committed = this.committedBinding(scope, artifact, receipt, dataset, identity);
-    if (committed) return committed;
+    if (committed.id) return committed.id;
+    let advance = true;
+    if (committed.qualification) {
+      const previous = this.db.sqlite.query<Binding, [string, string]>(`SELECT b.* FROM data_sync_state s
+        JOIN artifact_bindings b USING(binding_id) WHERE s.scope=? AND s.dataset=?`).get(scopeKey(scope), dataset);
+      if (previous) {
+        if (previous.scope !== scopeKey(scope) || previous.dataset !== dataset) fail('reference_conflict');
+        const prior = requireBindingQualification(this.db, scope, dataset, previous.artifact, previous.receipt)?.receipt ?? fail('reference_conflict');
+        const next = committed.qualification.receipt;
+        if (prior.acceptedAt === next.acceptedAt && prior.artifactIdentity.artifactDigest !== next.artifactIdentity.artifactDigest) fail('reference_conflict');
+        advance = next.acceptedAt > prior.acceptedAt || next.acceptedAt === prior.acceptedAt && next.jobId < prior.jobId;
+      }
+    }
     const id = randomUUID();
     this.db.sqlite.run('INSERT INTO artifact_bindings VALUES (?,?,?,?,?,?)', [id, scopeKey(scope), dataset, objectKey(artifact), objectKey(receipt), identity ? json(identity) : null]);
-    this.db.sqlite.run(`INSERT INTO data_sync_state VALUES (?,?,?,'available')
+    if (advance) this.db.sqlite.run(`INSERT INTO data_sync_state VALUES (?,?,?,'available')
       ON CONFLICT(scope,dataset) DO UPDATE SET binding_id=excluded.binding_id,status='available'`, [scopeKey(scope), dataset, id]);
     return id;
   }
-  private committedBinding(scope: WorkspaceScope, artifact: ObjectRef, receipt: ObjectRef, dataset: string, identity: FrozenIdentity | null): string | null {
+  private committedBinding(scope: WorkspaceScope, artifact: ObjectRef, receipt: ObjectRef, dataset: string, identity: FrozenIdentity | null) {
     // Runs inside the writer transaction, including acknowledgement of an existing binding.
-    requireBindingQualification(this.db, scope, dataset, objectKey(artifact), objectKey(receipt));
+    const qualification = requireBindingQualification(this.db, scope, dataset, objectKey(artifact), objectKey(receipt));
     const previous = this.db.sqlite.query<Binding, [string, string]>(
       'SELECT * FROM artifact_bindings WHERE artifact=? AND receipt=?').get(objectKey(artifact), objectKey(receipt));
-    if (!previous) return null;
+    if (!previous) return { id: null, qualification };
     if (previous.scope !== scopeKey(scope) || previous.dataset !== dataset
       || previous.frozen_identity !== (identity ? json(identity) : null)) fail('reference_conflict');
-    return previous.binding_id;
+    return { id: previous.binding_id, qualification };
   }
   linkContext(instrumentId: string, role: string, bindingId: string, membership: ObjectRef): void {
     parse(Id, instrumentId); parse(Token, role); parse(Id, bindingId);

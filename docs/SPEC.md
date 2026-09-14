@@ -586,6 +586,14 @@ realtimeや取引所現在値を意味しない。1321/2633はJPY建てETF市場
 - 個別の公開/機関別空売りと所属業種の空売り売買代金/比率をStep 5へ移す。
   市場全体の空売り売買代金/比率は新規の後続必須SW-M0/M1とする。業種比率の単純平均
   を使わず、正確な対象範囲・欠損規則を持つ売買代金の分子/分母で計算する。
+  SW-M1の`workspace_market_short_binding_qualification_v2`では、公式calendar上の
+  TSE session、exact 34カテゴリ、日付/schema/数値/pagination/取得budgetをhard gateとする。
+  当日17:30 JST以降というDexterの保守的な利用policyを満たせば参考指標として利用可能。
+  17:30はproviderのcompletion保証ではなくwarningを保持する。JPX公表値との丸め・集計・
+  訂正vintage差は`approximate`と理由・差額evidenceで表現し、差額の閾値で利用を禁止しない。
+  `approximate`は`verified`でも`unavailable`でもない。V1の未検証Artifactは昇格させず、
+  新V2入力・Artifact・receiptだけに新policyを適用する。訂正前のhistorical vintageを
+  証明したとは扱わず、過去Snapshot・Strategy検証・AI履歴へ混入させない。
 - Workspace AIの初期profileは`fundamental`/`supply_demand`。明示操作でのみ開始し、
   保存済みtyped inputをexact referenceとともにfreezeして解釈する。Agentの追加取得、
   Peer入力、Drawing自動入力は禁止。結果は`AnalysisRunArtifactV1`へimmutable保存し、
