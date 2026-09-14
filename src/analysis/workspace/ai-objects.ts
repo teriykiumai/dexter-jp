@@ -8,8 +8,10 @@ function aiDependencies(selection: AiInput['selection']): ObjectRef[] {
 }
 
 export function aiAsOf(input: AiInput): AnalysisRunArtifactV1['asOf'] {
-  return input.profile === 'fundamental' ? [{ source: 'financial', through: input.data.through, checkedAt: input.data.checkedAt }]
-    : input.data.datasets.map(dataset => ({ source: dataset.dataset, through: dataset.through, checkedAt: dataset.checkedAt }));
+  if (input.profile === 'supply_demand') return input.data.datasets.map(dataset => ({ source: dataset.dataset, through: dataset.through, checkedAt: dataset.checkedAt }));
+  const asOf: AnalysisRunArtifactV1['asOf'] = [{ source: 'financial', through: input.data.through, checkedAt: input.data.checkedAt }];
+  if (input.technicalObservation) asOf.push({ source: 'technical', ...input.technicalObservation });
+  return asOf;
 }
 
 export function validateInterpretation(input: AiInput, value: unknown) {

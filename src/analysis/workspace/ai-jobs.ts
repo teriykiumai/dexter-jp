@@ -64,7 +64,8 @@ export class WorkspaceAiJobs {
   }
   async start(instrumentId: string, profile: AiProfile): Promise<AiJobView> {
     parse(Id, instrumentId); parse(AiProfileSchema, profile); await this.initialize();
-    if (this.blocked || this.admitting || this.pending.size || this.active()) fail('database_busy');
+    if (this.blocked) fail('database_busy');
+    if (this.admitting || this.pending.size || this.active()) fail('revision_conflict');
     if (!this.model.configured() || !this.model.runtime) throw new Error('model_unavailable');
     this.admitting = true;
     const id = randomUUID(), createdAt = new Date().toISOString(), db = this.repository.db;

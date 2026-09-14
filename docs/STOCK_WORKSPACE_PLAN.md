@@ -725,6 +725,12 @@ neither the Browser nor AI reconstructs financial values. The complete underlyin
 normalized inputs/artifacts/receipts remain in their dependency closure. No other
 profile's data, Snapshot, Peer, Drawing, research tool or memory context is included.
 
+Fundamental also freezes `technicalObservation` from the exact selected Technical
+receipt (artifact data date and receipt checked-at). Result `asOf` keeps separate
+financial and technical entries; it never labels a newer price with the financial
+source date. Verification/recovery rebuilds both from saved references. Without a
+Technical binding, the observation is null and no technical as-of entry is invented.
+
 A short SQLite transaction selects the references. Existing isolated Bun read
 processes perform expensive validation/projection; a second `BEGIN IMMEDIATE`
 compares the entire selection and frozen identity before job admission. Changes
@@ -751,6 +757,16 @@ the active request and never publishes a late response. It cannot promise that t
 provider did not already process that request. Another attempt always requires a
 new explicit action/run. Bad/missing model configuration leaves the rest of the
 Dashboard usable. Current model availability is not inferred from a key's presence.
+Ordinary active/admitting/pending-slot conflicts return `revision_conflict` (HTTP
+409) before creating a run; the Browser reloads history/current activity without
+the ambiguity latch. Unresolved publication and unexpected storage failures retain
+the fail-closed error path.
+
+Automated tests use injected models/fetch mocks. When an authorized live OpenAI
+smoke is necessary, explicitly select a low-cost test model (currently
+[`gpt-5-nano`](https://developers.openai.com/api/docs/models/gpt-5-nano))
+and keep the one-request/no-retry/token budget; never inherit the user's normal
+analysis model merely for a smoke. This does not change the product's selected model.
 
 SQLite V5 preserves foundation rows and adds versioned execution/publication fields.
 Foundation rows without an execution timestamp retain their exact references but are

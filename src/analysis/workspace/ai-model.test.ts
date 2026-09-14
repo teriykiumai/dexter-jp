@@ -31,6 +31,7 @@ test('AI contracts reject cross-profile citations, new numeric prose, unknown fi
   expect(AiInputSchema.safeParse(input).success).toBe(true);
   expect(AiInputSchema.safeParse({ ...input, drawings: [] }).success).toBe(false);
   expect(AiInputSchema.safeParse({ ...input, profile: 'peer' }).success).toBe(false);
+  expect(AiInputSchema.safeParse({ ...input, technicalObservation: { through: '2026-10-01', checkedAt: input.createdAt } }).success).toBe(false);
   for (const text of ['値は123', '値は９９', '値はⅨ']) expect(() => validateInterpretation(input, { ...output, observations: [{ text, sources: ['financial'] }] })).toThrow();
   expect(() => validateInterpretation(input, { ...output, observations: [{ text: '業種データ', sources: ['sector_short'] }] })).toThrow();
   expect(() => validateInterpretation(input, { ...output, score: 99 })).toThrow();
@@ -38,6 +39,7 @@ test('AI contracts reject cross-profile citations, new numeric prose, unknown fi
   const run = { version: 'analysis_run_artifact_v1' as const, runId: input.runId, instrumentId: input.selection.identity.instrumentId, profile: input.profile,
     profileVersion: input.profileVersion, input: ref, createdAt: input.createdAt, completedAt: input.createdAt, runtime: input.runtime, asOf: aiAsOf(input), interpretation: output };
   expect(validateAiResult(input, ref, run)).toEqual(run);
+  expect(run.asOf).toEqual([{ source: 'financial', through: null, checkedAt: null }]);
   expect(() => validateAiResult(input, ref, { ...run, instrumentId: input.runId })).toThrow();
   expect(() => validateAiResult(input, ref, { ...run, asOf: [] })).toThrow();
 });

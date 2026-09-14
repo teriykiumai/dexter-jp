@@ -1,7 +1,7 @@
 import type { WorkspaceRepository } from './repository.js';
 import { parse, fail, json, objectKey, scopeKey, type ObjectRef } from './contracts.js';
 import { objectRow, rowRef, resolveReference, type VerifiedObject } from './references.js';
-import { workspaceDataCodecs, EpisodeObjectSchema } from './data-objects.js';
+import { workspaceDataCodecs, EpisodeObjectSchema, ReceiptObjectSchema } from './data-objects.js';
 import { AiInputSchema, AiSelectionSchema, type AiInput, type AiSelection, type AiProfile, type AiRuntime } from './ai-contracts.js';
 import { readWorkspaceFinancial } from '../../dashboard/workspace-financial.js';
 import { readWorkspaceSupply } from '../../dashboard/workspace-supply.js';
@@ -32,7 +32,15 @@ export function buildAiInput(repository: WorkspaceRepository, selection: AiSelec
   if (episode.instrumentId !== selection.identity.instrumentId || episode.observation.Code !== selection.identity.code) fail('reference_conflict');
   const data = profile === 'fundamental' ? readWorkspaceFinancial(repository, selection.identity.instrumentId, false, selection, read)
     : readWorkspaceSupply(repository, selection.identity.instrumentId, false, selection, read);
-  const input = parse(AiInputSchema, { version: 'workspace_ai_input_v1', runId, createdAt, profile, profileVersion: 'saved_interpretation_v1', selection, runtime, data });
+  let technicalObservation = null;
+  if (profile === 'fundamental' && selection.technical) {
+    const receipt = parse(ReceiptObjectSchema, get(selection.technical.receipt));
+    if (receipt.identity.instrumentId !== selection.identity.instrumentId || receipt.identity.provider !== selection.identity.provider
+      || receipt.identity.code !== selection.identity.code || json(receipt.artifact) !== json(selection.technical.artifact)) fail('reference_conflict');
+    technicalObservation = { through: receipt.receipt.artifactIdentity.dataDate, checkedAt: receipt.receipt.checkedAt };
+  }
+  const input = parse(AiInputSchema, { version: 'workspace_ai_input_v1', runId, createdAt, profile, profileVersion: 'saved_interpretation_v1', selection, runtime, data,
+    ...(profile === 'fundamental' ? { technicalObservation } : {}) });
   // No silent truncation of issuer reports or source tables; the user sees why it cannot run.
   if (new TextEncoder().encode(json(input)).byteLength > 96 * 1024) fail('invalid_input');
   return input;

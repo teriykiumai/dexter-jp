@@ -12,7 +12,8 @@ export function syntheticAiModel(invoke: AiModel['invoke'] = async input => synt
 export function syntheticAiInput(): AiInput {
   const instrumentId = '00000000-0000-4000-8000-000000000001';
   return { version: 'workspace_ai_input_v1', runId: '00000000-0000-4000-8000-000000000002', createdAt: '2026-09-11T09:00:00.000Z',
-    profile: 'fundamental', profileVersion: 'saved_interpretation_v1', runtime: { providerId: 'openai', model: 'gpt-5.6-terra', reasoningEffort: 'medium' },
+    profile: 'fundamental', profileVersion: 'saved_interpretation_v1', technicalObservation: null,
+    runtime: { providerId: 'openai', model: 'gpt-5.6-terra', reasoningEffort: 'medium' },
     selection: { identity: { instrumentId, provider: 'jquants', code: '72030', mappingRevision: 1, catalogGeneration: 1 },
       master: { path: 'synthetic.json', codec: 'workspace_episode_v1', digest: `sha256:${'0'.repeat(64)}` },
       financial: null, technical: null, margin: null, issuer_short: null, sector_short: null },

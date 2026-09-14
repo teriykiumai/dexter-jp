@@ -79,7 +79,7 @@ test('AI history rejects foreign identity and never starts a model on navigation
   expect(await (await page.request.get(`${base}test/ai-counts`)).json()).toEqual({ calls: 0 });
 });
 
-test('AI active polling suspends while hidden and latches a foreign job response until reload', async ({ page }) => {
+test('AI slot conflict adopts the existing run, suspends hidden polling and still latches a foreign response', async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (window as Window & { hiddenFixture?: boolean }).hiddenFixture ? 'hidden' : 'visible' });
   });
@@ -100,12 +100,19 @@ test('AI active polling suspends while hidden and latches a foreign job response
   await page.route(`**/instruments/${id}/ai/jobs/${job.id}`, route => {
     polls++; return route.fulfill({ json: foreign ? { ...job, instrumentId: '00000000-0000-4000-8000-000000000099' } : job });
   });
-  await page.reload(); await expect.poll(() => polls).toBeGreaterThan(0);
+  let posts = 0;
+  await page.route(`**/instruments/${id}/ai/jobs`, route => { posts++; return route.fulfill({ status: 409,
+    json: { schemaVersion: 'workspace_error_v1', error: { code: 'revision_conflict' } } }); });
+  await region.getByRole('button', { name: '保存済み入力でAI分析を実行', exact: true }).click();
+  await expect(region.getByRole('status')).toHaveText('需給分析: AI分析中');
+  await expect(region.getByRole('button', { name: 'AI履歴を読み直す', exact: true })).toBeEnabled();
+  await expect(region.getByText(/AI状態を確認できません/)).toHaveCount(0);
+  expect(posts).toBe(1); await expect.poll(() => polls).toBeGreaterThan(0);
   await page.evaluate(() => { (window as Window & { hiddenFixture?: boolean }).hiddenFixture = true; document.dispatchEvent(new Event('visibilitychange')); });
   const hidden = polls; await page.waitForTimeout(1300); expect(polls).toBe(hidden);
   foreign = true;
   await page.evaluate(() => { (window as Window & { hiddenFixture?: boolean }).hiddenFixture = false; document.dispatchEvent(new Event('visibilitychange')); });
-  await expect(region.getByRole('alert')).toContainText('AI状態を確認できません');
+  await expect(region.getByRole('alert').filter({ hasText: 'AI状態を確認できません' })).toBeVisible();
   const failed = polls; await page.waitForTimeout(1300); expect(polls).toBe(failed);
   foreign = false; await page.reload(); await expect.poll(() => polls).toBeGreaterThan(failed);
   expect(await (await page.request.get(`${base}test/ai-counts`)).json()).toEqual({ calls: 0 });

@@ -11,9 +11,12 @@ import { type AiInput } from './ai-contracts.js';
 import { backupWorkspace, restoreWorkspace } from './backup.js';
 import { WorkspaceDatabase } from './database.js';
 import { WorkspaceRepository } from './repository.js';
-import { workspaceDataCodecs } from './data-objects.js';
-import { referencePath, validateReferences } from './references.js';
-import { json } from './contracts.js';
+import { workspaceDataCodecs, retainWorkspaceObject, EpisodeObjectSchema, ReceiptObjectSchema } from './data-objects.js';
+import { referencePath, validateReferences, resolveReference } from './references.js';
+import { json, parse } from './contracts.js';
+import { financialArtifact } from './financial-objects.js';
+import { collectWorkspaceCatalog } from './data-source.js';
+import { validateAiResult } from './ai-objects.js';
 
 async function fixture() {
   const f = await financialFixture(true);
@@ -60,24 +63,56 @@ test('AI missing inputs and missing key do not invoke a model or collect data', 
   } finally { f.dispose(); }
 }, 60_000);
 
-test('AI freezes exact profile inputs, keeps immutable history after data update, and restores the full closure', async () => {
+test('AI records financial and newer exact Technical as-of independently through refresh, restart and backup', async () => {
   const f = await fixture(), inputs: AiInput[] = [];
   const jobs = new WorkspaceAiJobs(f.repository, syntheticAiModel(async input => { inputs.push(input); return syntheticAiOutput(input); }));
   try {
+    const financial = f.repository.current({ kind: 'instrument-owned', instrumentId: f.id }, 'financial')!;
+    const saved = financialArtifact(JSON.parse(new TextDecoder().decode(resolveReference(f.db, financial, workspaceDataCodecs).bytes)));
+    expect(saved.dataDate).toBe('2026-09-11');
+    // Offline synthetic continuity only; the production historical identity gate stays closed.
+    const acceptedAt = '2026-10-01T08:00:00.000Z', signal = new AbortController().signal;
+    f.advance(Date.parse(acceptedAt) - f.environment.wallNowMs());
+    const catalog = await collectWorkspaceCatalog({ jobId: randomUUID(), acceptedAt, signal,
+      dispatch: start => start(signal), shareSource: (_key, load) => load(), recordProgress: () => {}, waitBeforeRetry: async () => {} }, f.environment);
+    const master = await retainWorkspaceObject(f.db, 'workspace_catalog_v1', catalog), previous = saved.input.masterEvidence;
+    const episode = parse(EpisodeObjectSchema, JSON.parse(new TextDecoder().decode(resolveReference(f.db, previous, workspaceDataCodecs).bytes)));
+    const observation = catalog.rows[0]!;
+    const evidence = await retainWorkspaceObject(f.db, 'workspace_episode_v1', { ...episode, observation, catalog: master, previous });
+    await f.repository.acceptCatalog(f.repository.requestCatalog(catalog.date), [{ instrumentId: f.id, assetType: 'stock',
+      provider: 'jquants', code: observation.Code, label: observation.CoName, mappingRevision: saved.input.identity.mappingRevision,
+      episodeFrom: episode.from, episodeThrough: null, evidence }], master);
+    let summaries = 0;
+    f.setTransform(path => { if (path.endsWith('/summary')) summaries++; });
     f.advance(); expect((await f.jobs.wait(await f.jobs.start('technical', f.id))).state).toBe('published');
     const calls = f.calls(), job = await jobs.start(f.id, 'fundamental'); await jobs.wait(job.id);
     expect(jobs.get(f.id, job.id).state).toBe('published'); expect(inputs).toHaveLength(1);
     const before = await jobs.detail(f.id, job.id);
-    expect(before.input.profile).toBe('fundamental'); expect(before.input.selection.margin).toBeNull();
+    if (before.input.profile !== 'fundamental') throw new Error('Unexpected profile');
+    expect(before.input.selection.margin).toBeNull();
+    expect(before.input.data.projection?.priceReference?.date).toBe('2026-10-01');
+    const technical = parse(ReceiptObjectSchema, JSON.parse(new TextDecoder().decode(resolveReference(f.db, before.input.selection.technical!.receipt, workspaceDataCodecs).bytes)));
+    expect(before.result!.asOf).toEqual([
+      { source: 'financial', through: '2026-09-11', checkedAt: before.input.data.checkedAt },
+      { source: 'technical', through: '2026-10-01', checkedAt: technical.receipt.checkedAt },
+    ]);
+    expect(before.input.technicalObservation).toEqual({ through: '2026-10-01', checkedAt: technical.receipt.checkedAt });
+    const financialCheckedAt = before.input.data.checkedAt;
+    expect(() => validateAiResult(before.input, before.job.input, { ...before.result, asOf: before.result!.asOf.slice(0, 1) })).toThrow('reference_conflict');
+    expect(() => validateAiResult(before.input, before.job.input, { ...before.result, asOf: before.result!.asOf.map(item => item.source === 'technical' ? { ...item, checkedAt: financialCheckedAt } : item) })).toThrow('reference_conflict');
     expect(json(inputs)).not.toMatch(/drawings|peerComparison|rawPrompt/);
     expect(f.calls()).toBe(calls);
-    f.advance(); f.setTransform((path, rows) => { if (path.endsWith('/daily')) { rows.at(-1)!.C = 107; rows.at(-1)!.AdjC = 107; } });
+    f.advance(); f.setTransform((path, rows) => { if (path.endsWith('/summary')) summaries++;
+      if (path.endsWith('/daily')) { rows.at(-1)!.C = 107; rows.at(-1)!.AdjC = 107; } });
     expect((await f.jobs.wait(await f.jobs.start('technical', f.id))).state).toBe('published');
     expect(await jobs.detail(f.id, job.id)).toEqual(before); expect(inputs).toHaveLength(1);
+    expect(summaries).toBe(0);
+    expect(f.repository.current({ kind: 'instrument-owned', instrumentId: f.id }, 'financial')).toEqual(financial);
     expect(() => jobs.get(randomUUID(), job.id)).toThrow('not_found');
     expect(() => f.db.sqlite.run("UPDATE analysis_jobs SET state='interrupted' WHERE job_id=?", [job.id])).toThrow('immutable');
     validateReferences(f.db, workspaceDataCodecs);
-    f.db.close();
+    const restarted = await f.restart(), afterRestart = new WorkspaceAiJobs(restarted.repository, syntheticAiModel(async () => { throw new Error('must not replay'); }));
+    await afterRestart.initialize(); expect(await afterRestart.detail(f.id, job.id)).toEqual(before); restarted.db.close();
     const backup = resolve(f.directory, 'ai-backup'), restored = resolve(f.directory, 'ai-restored');
     backupWorkspace(f.root, backup, workspaceDataCodecs); restoreWorkspace(backup, restored, workspaceDataCodecs);
     const db = new WorkspaceDatabase(restored), reopened = new WorkspaceAiJobs(new WorkspaceRepository(db), syntheticAiModel(async () => { throw new Error('must not replay'); }));
@@ -123,7 +158,7 @@ test('AI cancellation, concurrent admission, safe failure and invalid output nev
   try {
     f.advance(); expect((await f.jobs.wait(await f.jobs.start('technical', f.id))).state).toBe('published');
     const job = await jobs.start(f.id, 'fundamental'); await entered.promise;
-    await expect(jobs.start(f.id, 'fundamental')).rejects.toThrow('database_busy');
+    await expect(jobs.start(f.id, 'fundamental')).rejects.toThrow('revision_conflict');
     expect(f.repository.search('7203')).toHaveLength(1);
     const prefs = f.repository.preferences(f.id);
     f.repository.savePreferences(f.id, { ...prefs.value, interval: 'month' }, prefs.revision);

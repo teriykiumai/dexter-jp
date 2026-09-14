@@ -7,6 +7,38 @@ import { AiJobViewSchema, AiHistorySchema, AiDetailSchema } from '../analysis/wo
 import { WorkspaceDashboardApi } from './workspace-api.js';
 import { DashboardSessionV1 } from './session.js';
 
+test('AI admission and active-slot conflicts are 409 without another run; unresolved publication stays 500', async () => {
+  const f = await financialFixture(true), session = new DashboardSessionV1(); let calls = 0;
+  const admitting = Promise.withResolvers<void>(), accept = Promise.withResolvers<void>();
+  const invoked = Promise.withResolvers<void>(), finish = Promise.withResolvers<void>();
+  const ai = new WorkspaceAiJobs(f.repository, syntheticAiModel(async input => { calls++; invoked.resolve(); await finish.promise; return syntheticAiOutput(input); }),
+    async phase => {
+      if (phase === 'before_admission') { admitting.resolve(); await accept.promise; }
+      if (phase === 'before_result_write') throw new Error('Synthetic ambiguous publication');
+    });
+  const api = new WorkspaceDashboardApi(f.jobs, session, ai), url = new URL(`http://127.0.0.1:3000/api/workspace/instruments/${f.id}/ai/jobs`);
+  const start = () => api.handle(new Request(url, { method: 'POST', headers: { host: url.host, origin: url.origin,
+    'Content-Type': 'application/json', 'X-Dexter-CSRF': session.csrfToken }, body: JSON.stringify({ profile: 'fundamental' }) }), url, url.pathname.slice(1).split('/'));
+  let jobId: string | undefined;
+  try {
+    expect((await f.jobs.wait(await f.jobs.start('financial', f.id))).state).toBe('published');
+    const first = start(); await admitting.promise;
+    const beforeAdmission = (await start())!;
+    expect(beforeAdmission.status).toBe(409); expect(await beforeAdmission.json()).toMatchObject({ error: { code: 'revision_conflict' } });
+    expect(f.db.sqlite.query('SELECT * FROM analysis_jobs').all()).toHaveLength(0); expect(calls).toBe(0);
+    accept.resolve(); const response = (await first)!; expect(response.status).toBe(202);
+    const job = AiJobViewSchema.parse(await response.json()); jobId = job.id; await invoked.promise;
+    const active = (await start())!; expect(active.status).toBe(409);
+    expect(await active.json()).toMatchObject({ error: { code: 'revision_conflict' } });
+    expect((await ai.history(f.id)).active?.id).toBe(job.id);
+    expect(f.db.sqlite.query('SELECT * FROM analysis_jobs').all()).toHaveLength(1); expect(calls).toBe(1);
+    finish.resolve(); await ai.wait(job.id);
+    expect(ai.get(f.id, job.id).error).toBe('publication_unresolved');
+    const ambiguous = (await start())!; expect(ambiguous.status).toBe(500);
+    expect(await ambiguous.json()).toMatchObject({ error: { code: 'database_busy' } }); expect(calls).toBe(1);
+  } finally { accept.resolve(); finish.resolve(); if (jobId) await ai.wait(jobId); f.dispose(); }
+}, 60_000);
+
 test('AI API enforces same-origin explicit actions, profile schema, exact ownership and read-only history', async () => {
   const f = await financialFixture(), session = new DashboardSessionV1(); let calls = 0;
   const ai = new WorkspaceAiJobs(f.repository, syntheticAiModel(async input => { calls++; return syntheticAiOutput(input); }));

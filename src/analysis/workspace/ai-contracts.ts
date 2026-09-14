@@ -17,11 +17,13 @@ export type AiSelection = z.infer<typeof AiSelectionSchema>;
 const common = { version: z.literal('workspace_ai_input_v1'), runId: z.uuid(), createdAt: z.iso.datetime(),
   profileVersion: z.literal('saved_interpretation_v1'), selection: AiSelectionSchema, runtime: AiRuntimeSchema };
 export const AiInputSchema = z.discriminatedUnion('profile', [
-  z.object({ ...common, profile: z.literal('fundamental'), data: WorkspaceFinancialSchema }).strict(),
+  z.object({ ...common, profile: z.literal('fundamental'), data: WorkspaceFinancialSchema,
+    technicalObservation: z.object({ through: z.iso.date(), checkedAt: z.iso.datetime() }).strict().nullable() }).strict(),
   z.object({ ...common, profile: z.literal('supply_demand'), data: WorkspaceSupplySchema }).strict(),
 ]).refine(input => input.data.instrumentId === input.selection.identity.instrumentId
   && (input.profile === 'fundamental'
     ? input.selection.margin === null && input.selection.issuer_short === null && input.selection.sector_short === null
+      && (input.selection.technical === null) === (input.technicalObservation === null)
     : input.selection.financial === null && input.selection.technical === null));
 export type AiInput = z.infer<typeof AiInputSchema>;
 const statement = z.object({
@@ -34,7 +36,7 @@ export type AiInterpretation = z.infer<typeof AiInterpretationSchema>;
 export const AnalysisRunArtifactV1Schema = z.object({ version: z.literal('analysis_run_artifact_v1'), runId: z.uuid(), instrumentId: z.uuid(),
   profile: AiProfileSchema, profileVersion: z.literal('saved_interpretation_v1'), input: AiRefSchema, createdAt: z.iso.datetime(),
   completedAt: z.iso.datetime(), runtime: AiRuntimeSchema,
-  asOf: z.array(z.object({ source: z.enum(['financial', 'margin', 'issuer_short', 'sector_short']), through: z.iso.date().nullable(),
+  asOf: z.array(z.object({ source: z.enum(['financial', 'technical', 'margin', 'issuer_short', 'sector_short']), through: z.iso.date().nullable(),
     checkedAt: z.iso.datetime().nullable() }).strict()).min(1).max(3), interpretation: AiInterpretationSchema }).strict()
   .refine(value => value.completedAt >= value.createdAt);
 export type AnalysisRunArtifactV1 = z.infer<typeof AnalysisRunArtifactV1Schema>;
