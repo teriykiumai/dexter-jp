@@ -260,6 +260,17 @@ part of this target hierarchy. Their component descriptions and DR migration not
 below remain legacy compatibility references, not requirements to recreate them.
 Removing their navigation never removes exact-data access from retained features.
 
+Step 8 makes Workspace the default landing and keeps `保存済み分析` as the second
+common navigation link. Legacy history uses four tabs: `概要・レポート`,
+`株価・テクニカル`, `保存済み配当`, `需給・空売り`. Retired URLs use the existing
+page heading, Card and recovery Button pattern. The displayed Snapshot's exact JSON
+link uses the secondary Button styling with native anchor semantics and touch/focus
+geometry. These replace the legacy global navigation/seven-tab requirements below;
+all palette, spacing, typography, accessibility and exact-data rules remain intact.
+If a legacy Snapshot has no immutable history address, use the same secondary
+anchor styling with native download semantics and the label
+`このSnapshotのJSONを保存（全項目）` for its frozen displayed payload.
+
 ## 5. Component styling
 
 ### 5.1 Page shell, panels, and cards

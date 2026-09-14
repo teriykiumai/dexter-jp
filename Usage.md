@@ -1,40 +1,32 @@
 # Dexter JP Usage Guide
 
-Dexter JPの日本株総合分析、Canonical AnalysisSnapshot、Local Dashboard、
-Analysis Watchlistを利用するための操作手順です。
+DashboardはStock Workspaceを入口とし、保存済みSnapshotの履歴とCLIも利用できます。
+起動コマンドは引き続き `bun run dashboard` です。
 
-このガイドでは、次の一連の流れを扱います。
+`http://127.0.0.1:3000/`（または `/workspace`）から、次の順に操作します。
 
-```text
-CLIで日本株を分析
-        ↓
-Canonical AnalysisSnapshot生成
-        ↓
-.dexter/analysis/ に自動保存
-        ↓
-Local Dashboard起動
-        ↓
-Analysis Watchlist
-        ↓
-Single Stock Dashboard
-        ├─ 保存済み分析の比較
-        ├─ 保存済みPeer percentileのRadar
-        └─ 明示的なStrategy validation runの実行・閲覧
-```
+1. 未取得なら「銘柄一覧を取得・更新」を押し、普通株を検索して開く。
+2. 「日足データを取得・更新」を押して、日・週・月の価格と出来高を表示する。
+3. Horizontal / Trendline / Fibonacciを作成し、明示保存する。保存済みDrawingはserver再起動後も復元される。
+4. 必要な需給・財務データを明示取得し、保存済み入力でAI分析を実行する。
 
-Phase 1.5ではSnapshot、JSON persistence、Read-only API、Single Stock Dashboard、
-Analysis Watchlistを順に追加しました。これは実装stepの呼称であり、現在の
-`schemaVersion`とは別です。
+起動、保存済みデータの検索・表示、DrawingにSnapshotやLLM API keyは不要です。
+取得操作にはJ-Quants設定、AI実行には選択したproviderの設定が必要です。
+検索・表示切替・履歴の再読込から外部APIやLLMを自動実行しません。
+現在は普通株が先行し、ETF/REIT・分足はsource gate待ちです。
+予想配当利回りはidentity／配当と価格の一株basisが未検証なら利用不可のままです。
 
-Phase 3では、同一銘柄のimmutableな保存済みSnapshot 2件を比較する機能と、既存の
-7つのPeer percentileを表示するRadarを追加しました。どちらも保存済み値を読む
-Dashboard機能であり、外部sourceの再取得、再分析、Snapshot変更、売買判断は行いません。
-総合スコアは評価計画だけを定義し、runtime scoreは実装していません。
+既存Snapshotは「保存済み分析」（`/?view=history`）から開きます。
+同一銘柄の保存済みSnapshot比較、exact履歴URLと全項目JSONは維持します。
+旧`latest.json`だけがある場合は、detail下部の「このSnapshotのJSONを保存（全項目）」で
+表示時点の全項目を保存できます。表示中だけ有効なダウンロード用リンクのため、
+継続して参照する場合はJSONファイルを保存してください。後から履歴が増えても
+表示中のダウンロード内容が別の最新Snapshotへ切り替わることはありません。
+Peer/Radar、市場概況、市場／セクター、Strategy Validation画面は退役しました。
+旧市場・Strategy URLは退役案内を表示し、ジョブを実行しません。
+StrategyのCLI・API・immutable run/historyは引き続き利用できます。
 
-Phase 4では、保存済みSnapshotに事前記録されたEntry / Stop / Targetの
-outcome監査と、過去基準日を指定した`technical_251_strategy_v1`
-再構成キャンペーンを追加しました。これらは独立したimmutable research runであり、
-Snapshotを変更せず、StrategyのPASS / FAIL、売買推奨、runtime scoreを生成しません。
+以下のSnapshot・CLI説明は互換機能の操作手順です。
 
 現在のSnapshot compatibilityは以下です。
 
@@ -456,10 +448,10 @@ http://localhost:3000/
 
 # 11. Analysis Portfolio / Watchlist
 
-V5ではroot画面がAnalysis Watchlistになっています。
+保存済みSnapshotの一覧は、共通ナビゲーションの「保存済み分析」から開きます。
 
 ```text
-http://127.0.0.1:3000/
+http://127.0.0.1:3000/?view=history
 ```
 
 `.dexter/analysis/`に保存されている各tickerについて、immutable historyから解決した
@@ -648,18 +640,16 @@ ROE
 Trend
 ```
 
-## 6つのタブとURL state
+## 保存済み履歴の4つのタブとURL state
 
-detail画面は次の6タブで構成されます。
+保存済みSnapshotのdetail画面は次の4タブで構成されます。
 
 | tab ID | 表示label | 主な内容 |
 | --- | --- | --- |
 | `report` | 概要・レポート | 保存済み分析の比較、Final Report |
 | `technical` | 株価・テクニカル | 価格、テクニカル、Strategy |
-| `fundamentals` | 比較・配当 | Peer Comparison / Radar、Advanced Dividend |
+| `fundamentals` | 保存済み配当 | Snapshotに保存されたAdvanced Dividend |
 | `supply-demand` | 需給・空売り | 信用需給、公開空売り残高報告 |
-| `market` | 市場・セクター | 投資部門別、市場相関、sector分析 |
-| `validation` | 戦略検証 | 明示選択したStrategy validation run / caseの実行・閲覧 |
 
 選択中のtickerとtabはURLへ保存されます。
 
@@ -668,7 +658,7 @@ http://127.0.0.1:3000/?ticker=7203&tab=fundamentals
 ```
 
 BrowserのBack / Forwardとreloadでも同じ画面を復元します。`tab`がない、または未知の
-値の場合は`report`へ戻ります。V1〜V9のどのSnapshotでも6タブは維持され、古いschemaに
+値の場合は`report`へ戻ります。V1〜V9のどのSnapshotでも4タブは維持され、古いschemaに
 存在しないsectionをvalid zeroとして扱いません。
 
 ## Price Structure
@@ -701,7 +691,7 @@ Dashboard
 
 ## Phase 2 analysis cards
 
-Snapshot versionと収集結果に応じて、以下のstructured sectionも表示します。
+Snapshot versionと収集結果に応じて、以下のstructured sectionを保存しています。退役した市場関連sectionは、detail下部の「このSnapshotの保存済みJSON（全項目）」から参照してください。
 
 ```text
 Advanced Technical
@@ -720,7 +710,7 @@ source/resultが実際に0だった場合はvalid zeroとして区別します�
 Advanced TechnicalはRSI14、MACD 12/26/9、Bollinger Bands 20/2σの最新値を表示します。
 Advanced Dividendはactual/forecast amount、source payout context、および利用可能な
 event情報を表示します。Reported Short Positionsはreporter/fund単位を維持し、
-Investor Type FlowsはTokyo/Nagoya市場全体のweekly contextとして表示します。
+Investor Type Flowsの保存値はTokyo/Nagoya市場全体のweekly contextです。
 Sector BenchmarkとSector Short-selling FlowはTSE 33-sector contextであり、個別銘柄
 自身のflowではありません。
 
@@ -758,8 +748,8 @@ Snapshot変更は行いません。
 
 ## Phase 4 Strategy Validation
 
-`validation / 戦略検証`は、事前に固定したEntry / Stop / Targetの後に日足で
-観測できたoutcomeを、point-in-time / no-look-ahead契約で監査するresearch画面です。
+Strategy Validationは、事前に固定したEntry / Stop / Targetの後に日足で
+観測できたoutcomeを、point-in-time / no-look-ahead契約で監査するCLI・APIです。
 次の2モードを混同しません。
 
 | mode | confidence | 意味 |
@@ -825,23 +815,9 @@ bun run validate:strategy -- --manifest ./campaign.json
 bun run validate:strategy -- --manifest ./campaign.json --confirm-external-fetch
 ```
 
-### Dashboardから実行・閲覧する
+### Dashboardの退役
 
-1. detail画面の`戦略検証`タブを開く。
-2. 保存済みSnapshot、またはCampaign JSONを選ぶ。
-3. `ローカルPreflightを実行`で最少request数、rate、期限とwarningを確認する。
-4. 外部送信とsubscription quota消費の可能性を明示的に確認してJobを開始する。
-5. 完了後は`結果を明示的に開く`、または保存済みrunを自分で選択する。
-
-同時に実行できるjobは全体で1件です。完了してもlatest runを自動選択したり、
-画面を自動遷移したりしません。Campaignの集計は常にcampaign-globalで、現在の
-tickerで絞り込まれるのはcase一覧だけです。
-
-run / case選択はURLに保存されます。
-
-```text
-/?ticker=7203&tab=validation&validationRun=<runId>&validationCase=<caseId>
-```
+Strategy Validation画面はStep 8で退役しました。実行には上記CLI、保存済みrunの参照には後述のStrategy validation APIを使用します。
 
 ### 保存先と完了性
 
@@ -861,53 +837,9 @@ outcomeは観測結果です。Strategyの採用可否、PASS / FAIL、Buy / Sel
 
 ---
 
-# 16. Peer Comparison / Peer Radar
+# 16. 保存済みPeerデータ
 
-以下を表示します。
-
-```text
-Target
-Peer Median
-Rank
-Percentile
-```
-
-対象metric:
-
-```text
-PER
-PBR
-ROE
-ROIC
-Operating Margin
-Revenue Growth
-Dividend Yield
-```
-
-Market Cap Priorityも表示します。
-
-```text
-適用済み
-```
-
-または:
-
-```text
-未適用
-```
-
-候補企業のmarket capが不足している場合などは、無理に適用済みと表示しません。
-
-## Peer Radar
-
-`fundamentals / 比較・配当`では、同じ7指標についてSnapshotに保存済みの
-direction-normalized percentileをRadarと正確な表で表示します。表には対象企業、
-同業中央値、順位、percentile、有効Peer数、方向、data date、状態を表示します。
-
-Radarは表示専用です。Browserでpercentileを再計算したり、値を0〜1へclampしたり、
-Peer eligibilityを再判定したりしません。1軸でも欠損、範囲外、direction mismatch、
-sample/cohort/rank不整合がある場合はpolygon全体を表示せず、partial polygonも作りません。
-SVGの色は良否を示さず、正確な値と利用状態は常設の表をauthorityとして確認します。
+Peer Comparison / Radar画面はStep 8で退役しました。CLI・Snapshotの保存値は維持し、detail下部のexact JSONリンクから全項目を参照できます。PeerはWorkspace AIの入力には含めません。
 
 ---
 
@@ -930,7 +862,9 @@ Supply-Demand Engineの結果を表示しています。
 
 ---
 
-# 18. Market Correlation
+# 18. 保存済みMarket Correlation（JSON / CLI）
+
+市場／セクター画面は退役しました。以下はimmutable Snapshotに保存される値の意味であり、Workspaceに再計算・移設する要件ではありません。
 
 TOPIXとの相関を表示します。
 
@@ -1358,10 +1292,10 @@ CLI:
 bun run dashboard
 ```
 
-Browser:
+Browserで「保存済み分析」を開きます:
 
 ```text
-http://127.0.0.1:3000/
+http://127.0.0.1:3000/?view=history
 ```
 
 Watchlist:
@@ -1378,18 +1312,10 @@ Detail:
 http://127.0.0.1:3000/?ticker=7203
 ```
 
-任意のStrategy validation:
+任意のStrategy validationはCLIで実行します。
 
-```text
-戦略検証タブ
- ↓
-保存済みSnapshotまたはCampaign JSONを選択
- ↓
-ローカルPreflight
- ↓
-外部送信とquotaを明示確認
- ↓
-Job完了後にrunを明示選択
+```bash
+bun run validate:strategy -- --ticker 7203 --snapshot-id <snapshotId>
 ```
 
 ---
@@ -1687,6 +1613,12 @@ Dashboard consumerはありません。Phase 4はoutcomeを観測するだけで
 # 34. Architecture Summary
 
 ```text
+Stock Workspace (default Dashboard)
+        ├─ explicit catalog/EOD/supply/financial jobs → immutable artifacts/receipts
+        ├─ instrument bindings / preferences / Drawings → Workspace SQLite
+        └─ explicit AI → frozen exact input → immutable analysis/history
+
+Legacy CLI and saved Snapshot history
 EDINET DB / J-Quants
         ↓
 Typed Source Results → Deterministic Engines → Standard Agent Snapshot Collector
@@ -1697,8 +1629,7 @@ Typed Source Results → Deterministic Engines → Standard Agent Snapshot Colle
                                               ↓
                                           Dashboard
                                               ├─ Watchlist / report
-                                              ├─ Comparison
-                                              └─ Radar
+                                              └─ Comparison / exact Snapshot JSON
 
 Exact Snapshot or Campaign manifest
         ↓
@@ -1706,7 +1637,7 @@ Explicit preflight / confirmation / job → bounded J-Quants fetch
         ↓
 Deterministic outcome validation → immutable research run
         ↓
-Strategy validation API → Dashboard validation tab
+Strategy validation API / CLI / saved run history
 ```
 
 通常のAnalysis表示経路でDashboardが読むのは保存済みSnapshotであり、Financial
@@ -1749,10 +1680,10 @@ CLI:
 bun run dashboard
 ```
 
-Browser:
+Browserで「保存済み分析」を開きます:
 
 ```text
-http://127.0.0.1:3000/
+http://127.0.0.1:3000/?view=history
 ```
 
 以上で:

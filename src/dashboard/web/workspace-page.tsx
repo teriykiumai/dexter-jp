@@ -7,7 +7,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { z } from 'zod';
 import { Button, Card, DashboardDesign, TableScroll } from './primitives.js';
 import { PriceChart, LIGHTWEIGHT_CHARTS_NOTICE } from './chart.js';
-import { buildMarketOverviewPath } from './presentation.js';
 import { workspaceTerminal, WorkspaceJobViewSchema, WorkspaceItemSchema, WorkspaceSearchSchema, WorkspaceRecentsSchema,
   WorkspaceViewSchema, WorkspaceActiveSchema,
   type WorkspaceCandidate, type WorkspaceItem, type WorkspaceView, type WorkspaceJobView } from '../workspace-contracts.js';
@@ -114,10 +113,10 @@ export function WorkspacePage() {
   return <DashboardDesign>
     <header className="dashboard-page-header"><div className="design-content dashboard-header-content">
       <span className="dashboard-wordmark">DEXTER / JP</span><nav className="dashboard-page-nav" aria-label="共通ナビゲーション">
-        <a href="/workspace" aria-current="page">銘柄Workspace</a><a href="/">保存済み分析</a><a href={buildMarketOverviewPath('')}>市場概況</a>
+        <a href="/workspace" aria-current="page">銘柄Workspace</a><a href="/?view=history">保存済み分析</a>
       </nav></div></header>
     <main className="design-content design-stack">
-      <h1>Stock Workspace</h1>
+      <h1 data-main-heading tabIndex={-1}>Stock Workspace</h1>
       <div className="design-actions"><Button aria-expanded={searchExpanded} aria-controls="workspace-search" onClick={() => setSearchExpanded(!searchExpanded)}>銘柄検索・最近開いた銘柄</Button></div>
       <div id="workspace-search" hidden={!searchExpanded}><Card title="普通株を検索"><div className="design-stack">
         <label className="design-field">銘柄名・証券コード<input type="search" value={query} maxLength={200} onChange={event => setQuery(event.target.value)} /></label>

@@ -6,6 +6,13 @@
 
 **前提:** 完全な個人利用・ローカル実行。
 
+Dashboardの起動は `bun run dashboard`。`http://127.0.0.1:3000/` でStock
+Workspaceを開きます。起動・保存済みデータの検索・Drawingの利用にSnapshotや
+LLM API keyは不要です。明示的な銘柄一覧／EOD取得にはJ-Quantsの設定、明示的な
+AI分析には選択したproviderの設定が必要です。現在のWorkspaceは普通株が先行し、
+ETF/REITはsource gate待ちです。既存Snapshotは共通ナビゲーションの
+「保存済み分析」（`/?view=history`）から開きます。詳しい操作は `Usage.md` を参照してください。
+
 ## 1. このファイルの役割
 
 このファイルには **ユーザー自身が行う作業だけ** を記載する。
@@ -186,7 +193,7 @@ Dexter JP本体で利用するLLMに応じて、必要なLLM資格情報を追�
 - `.env` をGitHubへcommitしない
 - APIキーをREADME / issue / chat log等へ貼らない
 - APIキーをソースコードへ直接書かない
-- Strategy validationのCLI / Dashboardが表示する外部送信、最少request数、
+- Strategy validationのCLI / APIが表示する外部送信、最少request数、
   rateとsubscription quotaのwarningを、実行ごとに確認する
 - `JQUANTS_REQUESTS_PER_MINUTE`は契約上限を自動取得しないため、契約値より
   高い設定にしない

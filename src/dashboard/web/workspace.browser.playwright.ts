@@ -18,10 +18,57 @@ test.beforeEach(async () => {
 });
 test.afterEach(async () => { child.kill(); await new Promise<void>(resolve => child.once('exit', () => resolve())); });
 
+test('Step 8 landing, history and cross-shell Back/Forward do not collect data or start AI', async ({ page }) => {
+  const requests: string[] = [], errors: string[] = [];
+  page.on('request', request => { const url = new URL(request.url()); if (url.pathname.startsWith('/api/')) requests.push(`${request.method()} ${url.pathname}`); });
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto(base);
+  await expect(page.getByRole('heading', { name: 'Stock Workspace', exact: true })).toBeVisible();
+  await expect(page.getByLabel('銘柄名・証券コード')).toBeVisible();
+  expect(requests.length).toBeGreaterThan(0);
+  expect(requests.every(request => request.startsWith('GET /api/workspace/'))).toBe(true);
+  await expect(page.getByRole('link', { name: '市場概況', exact: true })).toHaveCount(0);
+  await page.getByRole('link', { name: '保存済み分析', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '保存済み分析はありません', exact: true })).toBeVisible();
+  expect(new URL(page.url()).search).toBe('?view=history');
+  await page.reload();
+  await expect(page.getByRole('heading', { name: '保存済み分析はありません', exact: true })).toBeVisible();
+  await page.goBack();
+  await expect(page.getByRole('heading', { name: 'Stock Workspace', exact: true })).toBeVisible();
+  await page.goForward();
+  await expect(page.getByRole('heading', { name: '保存済み分析はありません', exact: true })).toBeVisible();
+  await page.evaluate(() => { history.pushState({}, '', '/workspace'); dispatchEvent(new PopStateEvent('popstate')); });
+  await expect(page.getByRole('heading', { name: 'Stock Workspace', exact: true })).toBeVisible();
+  await page.goBack();
+  await expect(page.getByRole('heading', { name: '保存済み分析はありません', exact: true })).toBeVisible();
+  expect(requests.every(request => request.startsWith('GET '))).toBe(true);
+  expect(requests.some(request => /market-data|strategy-validation/.test(request))).toBe(false);
+  expect(await (await page.request.get(`${base}test/counts`)).json()).toEqual({ calls: 0 });
+  expect(await (await page.request.get(`${base}test/ai-counts`)).json()).toEqual({ calls: 0 });
+  expect(errors).toEqual([]);
+});
+
+test('Step 8 Workspace landing uses DESIGN at every required width', async ({ page }, testInfo) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto(base);
+  for (const width of [320, 390, 680, 768, 980, 1024, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(page.getByRole('heading', { name: 'Stock Workspace', exact: true })).toHaveCSS('font-size', '24px');
+    await expect(page.locator('.dashboard-design')).toHaveCSS('color-scheme', 'light');
+    await page.getByLabel('銘柄名・証券コード').focus();
+    await expect(page.getByLabel('銘柄名・証券コード')).toHaveCSS('outline-width', '2px');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    const targets = await page.locator('button:visible, nav a, input:visible').evaluateAll(elements => elements.map(element => element.getBoundingClientRect().height));
+    expect(targets.every(height => height >= 44)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`workspace-landing-${width}.png`), fullPage: true });
+  }
+  expect(await (await page.request.get(`${base}test/counts`)).json()).toEqual({ calls: 0 });
+});
+
 test('AI explicit supply interpretation survives reload and keeps chart navigation independent', async ({ page }) => {
   test.setTimeout(100_000);
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
-  await page.goto(`${base}workspace`);
+  await page.goto(base);
   await page.getByRole('button', { name: '銘柄一覧を取得・更新' }).click();
   await page.getByRole('button', { name: '72030 Synthetic', exact: true }).click();
   await page.getByRole('button', { name: '日足データを取得・更新' }).click();

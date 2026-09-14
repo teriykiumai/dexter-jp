@@ -4,7 +4,7 @@
 
 **Date:** 2026-09-12
 
-**Status:** Ordinary-stock implementation through Step 6 staged financial collection/display is merged (PR #122). Step 7 frozen-input AI jobs and history are the current candidate. Numeric forecast yield and cross-date identity remain gated; later steps require their own implementation, validation, review and merge.
+**Status:** Ordinary-stock implementation through Step 7 frozen-input AI/history is merged (PR #123). Step 8 Dashboard cutover is the current candidate. Numeric forecast yield, cross-date identity and ETF/REIT capabilities remain gated; later steps require their own implementation, validation, review and merge.
 
 ## 1. Authority and migration boundary
 
@@ -1004,6 +1004,50 @@ after Workspace replacements are validated. Preserve legacy Snapshot history acc
 without making it the new landing/input path. First remove navigation/dependencies;
 only then remove demonstrably dead UI code. Do not delete shared source/receipt,
 Strategy job coordination/API, engine/history or CLI as a side effect of tab removal.
+
+### Step 8 implementation contract
+
+`bun run dashboard` and the localhost server/security boundary stay unchanged.
+The default `/` opens Stock Workspace without a Snapshot or LLM key; `/workspace`
+and its exact instrument/interval links remain supported. The common header has
+Workspace and saved-history links. `/?view=history` is the explicit Snapshot list;
+existing `/?ticker=...` and exact base/target comparison links remain readable.
+Browser Back/Forward across these shells must unmount the prior owner, cancel its
+reads and preserve the destination URL. Landing/navigation never admit a data/AI job.
+
+The saved-history viewer keeps report/comparison, Technical, saved dividend and
+issuer supply/demand tabs. Peer/Radar, Market Overview, Market/Sector and Strategy
+Validation are detached from production composition and navigation. Valid former
+`view=market-overview` or `tab=market-overview|market|validation` URLs display a
+retirement notice with explicit recovery links, without any dataset/job reads or
+mutations and without silently selecting a different tab. Invalid or duplicated
+owned selectors remain errors. Unknown detail tabs retain the inherited report
+fallback; unknown query metadata remains inert in legacy history routes.
+
+History's global missing/uncollected summary still includes retired sections. An
+exact JSON link for the displayed Snapshot preserves access to all stored fields;
+it never substitutes latest or writes the artifact.
+For legacy `latest.json` with no matching immutable history, export the validated
+displayed payload as a frozen browser JSON download instead of linking a latest
+selector. Its object URL belongs to that displayed Snapshot and is revoked on
+replacement/unmount; the downloaded file remains usable. Adding history cannot
+retarget the existing download. No repository migration or artifact write occurs.
+Retired detail URLs validate any comparison and Strategy selectors with the existing
+strict parsers before showing the notice; invalid pairs/UUIDs/duplicates are errors.
+
+Existing Snapshot comparison and historical dividend presentation remain compatibility features, not Workspace
+inputs or new dividend-history functionality. Source/artifact/receipt codecs,
+Strategy engines/history/API, CLI, shared coordination and recovery are unchanged.
+Detached UI modules may remain as legacy source; they have no production entry.
+
+This is a gated ordinary-stock cutover, not proof that ETF/REIT or the outstanding
+Step 6 cross-date identity / forecast-price basis gates have closed. Keep explicit
+unavailable states and SW-M0/M1 and intraday as their separate mandatory steps.
+Acceptance includes default-root M1 coverage, history/exact-JSON compatibility,
+zero source/model calls on retired URLs and navigation, full Dashboard browser
+regression, all seven DESIGN viewport widths, inherited security/persistence tests,
+and the unchanged 256-inspection/10,000-filename recovery regression. No automatic
+receipt cleanup, new runtime, dependency or release tag is part of this step.
 
 ### Step 4C implementation contract
 

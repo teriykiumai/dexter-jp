@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { createElement, type ComponentProps } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { parseHTML } from 'linkedom';
-import { DashboardRouteError, MarketOverviewPage, Watchlist } from './watchlist.js';
+import { DashboardRouteError, RetiredDashboardPage, Watchlist } from './watchlist.js';
 import type { WatchlistItemView } from './presentation.js';
 
 const available = (text: string) => ({ text, available: true });
@@ -15,7 +15,7 @@ const item: WatchlistItemView = {
   latestDataDateRaw: '2026-08-21', generatedAt: available('2026-08-23 10:02 JST'),
   generatedAtRaw: '2026-08-23T01:02:03.000Z', stale: true,
 };
-const navigation = { currentSearch: '?future=keep', onShowWatchlist: () => {}, onShowMarketOverview: () => {} };
+const navigation = { currentSearch: '?future=keep', onShowWatchlist: () => {} };
 function renderWatchlist(overrides: Partial<ComponentProps<typeof Watchlist>> = {}) {
   return parseHTML(renderToStaticMarkup(createElement(Watchlist, {
     ...navigation, items: [item], sortKey: 'latestDataDate', onSort: () => {}, onSelect: () => {},
@@ -68,7 +68,7 @@ describe('complete Watchlist light surface', () => {
       expect(document.querySelector('h1')?.textContent).toBe('保存済み分析');
       expect(document.querySelector('.watchlist-summary')).toBeNull();
       expect(document.querySelector('table')).toBeNull();
-      expect([...document.querySelectorAll('nav a')].map(link => link.textContent)).toEqual(['銘柄Workspace', '保存済み分析', '市場概況']);
+      expect([...document.querySelectorAll('nav a')].map(link => link.textContent)).toEqual(['銘柄Workspace', '保存済み分析']);
       expect(document.querySelector('nav a')?.getAttribute('href')).toBe('/workspace');
       expect(document.querySelector(error ? '[role="alert"]' : '[role="status"]')).not.toBeNull();
       expect(document.querySelector('h2')?.textContent).not.toBe('保存済み分析はありません');
@@ -85,13 +85,13 @@ describe('complete Watchlist light surface', () => {
     expect([...document.querySelectorAll('h1, h2, h3')].map(heading => heading.tagName)).toEqual(['H1', 'H2', 'H3']);
   });
 
-  test('global initial loading disables execution until job admission is known; scoped errors read nothing', () => {
-    const global = parseHTML(renderToStaticMarkup(createElement(MarketOverviewPage, { ...navigation, navigationRevision: 0 }))).document;
-    expect(global.querySelector('h1')?.textContent).toBe('市場概況');
-    expect(global.querySelector('.design-badge')?.textContent).toBe('全市場共通');
-    expect(global.querySelector('a[aria-current="page"]')?.getAttribute('href')).toContain('view=market-overview');
+  test('retired screens expose history recovery without a data or job component', () => {
+    const global = parseHTML(renderToStaticMarkup(createElement(RetiredDashboardPage, navigation))).document;
+    expect(global.querySelector('h1')?.textContent).toBe('この画面は退役しました');
+    expect(global.querySelector('a[href*="market-overview"]')).toBeNull();
+    expect(global.querySelector('a[aria-current]')).toBeNull();
     expect(global.querySelectorAll('table, [role="tab"]').length).toBe(0);
-    expect(global.querySelector('button')?.hasAttribute('disabled')).toBe(true);
+    expect(global.querySelector('button')?.textContent).toBe('保存済み分析の一覧へ戻る');
     const invalid = parseHTML(renderToStaticMarkup(createElement(DashboardRouteError, {
       ...navigation, reason: 'conflicting_owner',
     }))).document;
