@@ -18,6 +18,106 @@ test.beforeEach(async () => {
 });
 test.afterEach(async () => { child.kill(); await new Promise<void>(resolve => child.once('exit', () => resolve())); });
 
+test('AI explicit supply interpretation survives reload and keeps chart navigation independent', async ({ page }) => {
+  test.setTimeout(100_000);
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto(`${base}workspace`);
+  await page.getByRole('button', { name: '銘柄一覧を取得・更新' }).click();
+  await page.getByRole('button', { name: '72030 Synthetic', exact: true }).click();
+  await page.getByRole('button', { name: '日足データを取得・更新' }).click();
+  await expect(page.getByRole('heading', { name: '価格・出来高', exact: true })).toBeVisible({ timeout: 30_000 });
+  const region = page.getByRole('region', { name: 'AI分析・履歴', exact: true });
+  await expect(region.getByText('AI履歴はありません。')).toBeVisible();
+  expect(await (await page.request.get(`${base}test/ai-counts`)).json()).toEqual({ calls: 0 });
+  await region.getByRole('button', { name: '保存済み入力でAI分析を実行', exact: true }).click();
+  await expect(region.getByText(/分析に使える保存済みデータが不足/)).toBeVisible();
+  expect(await (await page.request.get(`${base}test/ai-counts`)).json()).toEqual({ calls: 0 });
+  await page.request.post(`${base}test/supply`);
+  await page.getByRole('button', { name: '所属業種の空売りを取得・更新', exact: true }).click();
+  await expect(page.getByRole('cell', { name: '40%', exact: true })).toBeVisible({ timeout: 30_000 });
+  const before = await (await page.request.get(`${base}test/counts`)).json();
+  await page.request.post(`${base}test/ai-delay`);
+  await region.getByLabel('分析の種類').selectOption('supply_demand');
+  await region.getByRole('button', { name: '保存済み入力でAI分析を実行', exact: true }).focus(); await page.keyboard.press('Enter');
+  await expect(region.getByRole('status')).toContainText(/入力を保存済み|AI分析中/, { timeout: 15_000 });
+  await page.getByLabel('表示間隔').selectOption('week'); await page.getByLabel('表示間隔').selectOption('month');
+  await page.reload();
+  const saved = region.getByRole('listitem').filter({ has: page.getByRole('button', { name: '需給分析の固定入力と結果を開く', exact: true }) });
+  await expect(saved.locator('p')).toContainText(/\/ 保存済み$/, { timeout: 30_000 }); await saved.getByRole('button').click();
+  await expect(region.getByText('AIの解釈', { exact: true })).toBeVisible({ timeout: 15_000 });
+  await expect(region.getByText(/保存された開示データを確認できます/)).toBeVisible();
+  await region.getByText('固定入力: 所属業種の空売り', { exact: true }).click();
+  await expect(region.getByRole('cell', { name: '40%', exact: true })).toBeVisible();
+  expect(await (await page.request.get(`${base}test/counts`)).json()).toEqual(before);
+  expect(await (await page.request.get(`${base}test/ai-counts`)).json()).toEqual({ calls: 1 });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await region.screenshot({ path: '.dexter/workspace-ai-mobile.png' });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), { timeout: 1000 }).toBe(true); expect(errors).toEqual([]);
+});
+
+test('AI history rejects foreign identity and never starts a model on navigation or failed read', async ({ page }) => {
+  await page.goto(`${base}workspace`);
+  await page.getByRole('button', { name: '銘柄一覧を取得・更新' }).click();
+  await page.getByRole('button', { name: '72030 Synthetic', exact: true }).click();
+  const region = page.getByRole('region', { name: 'AI分析・履歴', exact: true });
+  await expect(region.getByText('AI履歴はありません。')).toBeVisible();
+  const id = new URL(page.url()).searchParams.get('instrument')!;
+  await page.route(`**/instruments/${id}/ai`, async route => {
+    const response = await route.fetch(), value = await response.json();
+    await route.fulfill({ json: { ...value, instrumentId: '00000000-0000-4000-8000-000000000099' } });
+  });
+  await page.reload();
+  await expect(region.getByRole('alert')).toContainText('AI状態を確認できません');
+  await expect(region.getByRole('button', { name: '保存済み入力でAI分析を実行', exact: true })).toBeDisabled();
+  await page.unroute(`**/instruments/${id}/ai`);
+  await page.goBack();
+  await expect(region).toHaveCount(0);
+  await page.getByRole('button', { name: '72030 Synthetic', exact: true }).click();
+  await expect(region.getByRole('alert')).toContainText('AI状態を確認できません');
+  await page.reload();
+  await expect(region.getByRole('button', { name: '保存済み入力でAI分析を実行', exact: true })).toBeEnabled();
+  expect(await (await page.request.get(`${base}test/ai-counts`)).json()).toEqual({ calls: 0 });
+});
+
+test('AI slot conflict adopts the existing run, suspends hidden polling and still latches a foreign response', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (window as Window & { hiddenFixture?: boolean }).hiddenFixture ? 'hidden' : 'visible' });
+  });
+  await page.goto(`${base}workspace`);
+  await page.getByRole('button', { name: '銘柄一覧を取得・更新' }).click();
+  await page.getByRole('button', { name: '72030 Synthetic', exact: true }).click();
+  const region = page.getByRole('region', { name: 'AI分析・履歴', exact: true });
+  await expect(region.getByText('AI履歴はありません。')).toBeVisible();
+  const id = new URL(page.url()).searchParams.get('instrument')!;
+  const job = { schemaVersion: 'workspace_ai_job_v1', id: '00000000-0000-4000-8000-000000000001', instrumentId: id,
+    profile: 'supply_demand', createdAt: '2026-09-11T09:00:00.000Z', state: 'running', error: null, result: null,
+    input: { path: 'poll-fixture.json', codec: 'workspace_ai_input_v1', digest: `sha256:${'a'.repeat(64)}` } };
+  let polls = 0, foreign = false;
+  await page.route(`**/instruments/${id}/ai`, async route => {
+    const response = await route.fetch(), value = await response.json();
+    await route.fulfill({ json: { ...value, active: job, busy: true } });
+  });
+  await page.route(`**/instruments/${id}/ai/jobs/${job.id}`, route => {
+    polls++; return route.fulfill({ json: foreign ? { ...job, instrumentId: '00000000-0000-4000-8000-000000000099' } : job });
+  });
+  let posts = 0;
+  await page.route(`**/instruments/${id}/ai/jobs`, route => { posts++; return route.fulfill({ status: 409,
+    json: { schemaVersion: 'workspace_error_v1', error: { code: 'revision_conflict' } } }); });
+  await region.getByRole('button', { name: '保存済み入力でAI分析を実行', exact: true }).click();
+  await expect(region.getByRole('status')).toHaveText('需給分析: AI分析中');
+  await expect(region.getByRole('button', { name: 'AI履歴を読み直す', exact: true })).toBeEnabled();
+  await expect(region.getByText(/AI状態を確認できません/)).toHaveCount(0);
+  expect(posts).toBe(1); await expect.poll(() => polls).toBeGreaterThan(0);
+  await page.evaluate(() => { (window as Window & { hiddenFixture?: boolean }).hiddenFixture = true; document.dispatchEvent(new Event('visibilitychange')); });
+  const hidden = polls; await page.waitForTimeout(1300); expect(polls).toBe(hidden);
+  foreign = true;
+  await page.evaluate(() => { (window as Window & { hiddenFixture?: boolean }).hiddenFixture = false; document.dispatchEvent(new Event('visibilitychange')); });
+  await expect(region.getByRole('alert').filter({ hasText: 'AI状態を確認できません' })).toBeVisible();
+  const failed = polls; await page.waitForTimeout(1300); expect(polls).toBe(failed);
+  foreign = false; await page.reload(); await expect.poll(() => polls).toBeGreaterThan(failed);
+  expect(await (await page.request.get(`${base}test/ai-counts`)).json()).toEqual({ calls: 0 });
+});
+
 test('financial explicit acquisition retains unavailable identity, daily denominator and saved state on reload', async ({ page }) => {
   test.setTimeout(90_000);
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));

@@ -60,9 +60,9 @@ describe('Workspace backup reference closure and crash recovery', () => {
   test('includes prepared jobs, saved analysis and exact input dependencies without executing any job', async () => {
     const f = await setup(); f.repository.openWorkspace(f.instrumentId); f.repository.saveDrawing(f.drawing, 0);
     const input = fixtureObject(f.objectRoot, f.scope, [f.artifact]); await registerReferences(f.db, f.objectRoot, [input], fixtureCodecs);
-    f.db.sqlite.run("INSERT INTO analysis_jobs VALUES (?,?,?, ?,NULL,'prepared')", [randomUUID(), f.instrumentId, 'fundamental', objectKey(input)]);
+    f.db.sqlite.run("INSERT INTO analysis_jobs(job_id,instrument_id,profile,input_object,result_object,state) VALUES (?,?,?, ?,NULL,'prepared')", [randomUUID(), f.instrumentId, 'fundamental', objectKey(input)]);
     const result = fixtureObject(f.objectRoot, f.scope, [input]); await registerReferences(f.db, f.objectRoot, [result], fixtureCodecs);
-    f.db.sqlite.run("INSERT INTO analysis_jobs VALUES (?,?,?,?,?,'published')", [randomUUID(), f.instrumentId, 'supply_demand', objectKey(input), objectKey(result)]);
+    f.db.sqlite.run("INSERT INTO analysis_jobs(job_id,instrument_id,profile,input_object,result_object,state) VALUES (?,?,?,?,?,'published')", [randomUUID(), f.instrumentId, 'supply_demand', objectKey(input), objectKey(result)]);
     const packageRoot = resolve(f.directory, 'backup'), restored = resolve(f.directory, 'restored');
     f.db.close(); backupWorkspace(f.root, packageRoot, fixtureCodecs);
     const manifest = validateWorkspaceBackup(packageRoot, fixtureCodecs);

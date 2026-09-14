@@ -1,7 +1,7 @@
 import type { Database } from 'bun:sqlite';
 import { digest, fail, json } from './contracts.js';
 
-export const WORKSPACE_SCHEMA_VERSION = 4;
+export const WORKSPACE_SCHEMA_VERSION = 5;
 const ddl = `
 CREATE TABLE workspace_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
 INSERT INTO workspace_meta VALUES ('object_store_layout','object-key-v1');
@@ -134,6 +134,31 @@ ${workspaceJobsDdl.replace("kind IN ('catalog','technical')", "kind IN ('catalog
   .replace("(kind='technical')", "(kind<>'catalog')")}
 INSERT INTO workspace_data_jobs SELECT * FROM workspace_data_jobs_v3;
 DROP TABLE workspace_data_jobs_v3;
+` }, { version: 5, sql: `
+DROP INDEX analysis_owner;
+ALTER TABLE analysis_jobs RENAME TO analysis_jobs_foundation;
+CREATE TABLE analysis_jobs (
+  job_id TEXT PRIMARY KEY, instrument_id TEXT NOT NULL REFERENCES workspaces(instrument_id),
+  profile TEXT NOT NULL CHECK(profile IN ('fundamental','supply_demand')),
+  input_object TEXT NOT NULL REFERENCES immutable_objects(object_key),
+  result_object TEXT REFERENCES immutable_objects(object_key),
+  state TEXT NOT NULL CHECK(state IN ('prepared','running','publishing','published','interrupted','failed','cancelled','insufficient_inputs')),
+  accepted_at TEXT, publication TEXT CHECK(publication IS NULL OR json_valid(publication)), error TEXT,
+  CHECK((state='published') = (result_object IS NOT NULL)),
+  CHECK(state <> 'publishing' OR publication IS NOT NULL)
+) STRICT;
+INSERT INTO analysis_jobs(job_id,instrument_id,profile,input_object,result_object,state)
+  SELECT * FROM analysis_jobs_foundation;
+DROP TABLE analysis_jobs_foundation;
+CREATE INDEX analysis_owner ON analysis_jobs(instrument_id,accepted_at DESC,job_id DESC);
+CREATE UNIQUE INDEX one_active_analysis ON analysis_jobs((1))
+  WHERE accepted_at IS NOT NULL AND state IN ('prepared','running','publishing');
+CREATE TRIGGER analysis_identity_update BEFORE UPDATE OF job_id,instrument_id,profile,input_object,accepted_at ON analysis_jobs
+  BEGIN SELECT RAISE(ABORT,'immutable'); END;
+CREATE TRIGGER analysis_publication_update BEFORE UPDATE OF publication ON analysis_jobs
+  WHEN OLD.publication IS NOT NULL AND NEW.publication IS NOT OLD.publication BEGIN SELECT RAISE(ABORT,'immutable'); END;
+CREATE TRIGGER analysis_published_update BEFORE UPDATE ON analysis_jobs WHEN OLD.state='published'
+  BEGIN SELECT RAISE(ABORT,'immutable'); END;
 ` }] as const;
 /** Each version is atomic, including its marker. Failed DDL never replaces the old DB. */
 export function migrateWorkspace(db: Database, migrations: readonly { version: number; sql: string }[] = WORKSPACE_MIGRATIONS): void {

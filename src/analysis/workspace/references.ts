@@ -13,6 +13,8 @@ import { SupplyPreparedSchema, SupplyReceiptSchema, supplyArtifact } from './sup
 import { WorkspaceSupplyCodec, supplyTarget } from './supply-artifact.js';
 import { FinancialPreparedSchema, FinancialReceiptSchema, financialArtifact } from './financial-objects.js';
 import { WorkspaceFinancialCodec, financialTarget } from './financial-artifact.js';
+import { verifyAiInput } from './ai-verify.js';
+import { validateAiResult } from './ai-objects.js';
 
 export type ObjectRow = { object_key: string; path: string; codec: string; digest: string; metadata: string };
 export type VerifiedObject = { ref: ObjectRef; metadata: ObjectMetadata; bytes: Uint8Array };
@@ -204,6 +206,25 @@ export function validateReferences(db: WorkspaceDatabase, codecs: ReferenceCodec
   validateDataObjectLinks(objects);
   if (objects.length !== rows.length) fail('reference_missing');
   const byKey = new Map(objects.map(object => [objectKey(object.ref), object]));
+  if (db.sqlite.query<{ user_version: number }, []>('PRAGMA user_version').get()!.user_version >= 5) {
+    for (const job of db.sqlite.query<{ job_id: string; instrument_id: string; profile: string; state: string; input_object: string;
+      result_object: string | null; accepted_at: string; publication: string | null }, []>('SELECT * FROM analysis_jobs WHERE accepted_at IS NOT NULL').all()) {
+      // A journaled candidate must be locally reconciled before a backup can claim closure.
+      if (job.state === 'publishing') fail('backup_invalid');
+      const inputRef = rowRef(objectRow(db, job.input_object)), input = verifyAiInput(db, inputRef, byKey);
+      if (input.runId !== job.job_id || input.selection.identity.instrumentId !== job.instrument_id
+        || input.profile !== job.profile || input.createdAt !== job.accepted_at) fail('reference_conflict');
+      if (job.result_object) {
+        const ref = rowRef(objectRow(db, job.result_object));
+        if (job.state !== 'published' || ref.codec !== 'analysis_run_artifact_v1' || job.publication !== json(ref)) fail('reference_conflict');
+        validateAiResult(input, inputRef, JSON.parse(new TextDecoder().decode(byKey.get(job.result_object)!.bytes)));
+      } else if (job.publication) {
+        // Failed publication candidates are audit metadata, not live references.
+        const candidate = parse(ObjectRefSchema, JSON.parse(job.publication));
+        if (candidate.path !== `${job.job_id}.json` || candidate.codec !== 'analysis_run_artifact_v1' || job.state !== 'interrupted') fail('reference_conflict');
+      }
+    }
+  }
   if (db.sqlite.query<{ user_version: number }, []>('PRAGMA user_version').get()!.user_version >= 2) {
     const value = (key: string) => {
       const object = byKey.get(key) ?? fail('reference_missing');

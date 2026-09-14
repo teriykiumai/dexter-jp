@@ -4,7 +4,7 @@
 
 **Date:** 2026-09-12
 
-**Status:** Ordinary-stock implementation through Step 5 and Step 6 source-field verification are merged (PR #120/#121). Step 6 staged financial collection, persistence and display are the current candidate. Numeric forecast yield and cross-date identity remain gated; later steps require their own implementation, validation, review and merge.
+**Status:** Ordinary-stock implementation through Step 6 staged financial collection/display is merged (PR #122). Step 7 frozen-input AI jobs and history are the current candidate. Numeric forecast yield and cross-date identity remain gated; later steps require their own implementation, validation, review and merge.
 
 ## 1. Authority and migration boundary
 
@@ -712,6 +712,87 @@ exact result locally; never automatically repeat an LLM invocation. A model resu
 that cannot be proven durable remains interrupted/ambiguous, not successful. Another
 LLM attempt requires a new explicit user action and a distinct run. AI busy/failure
 does not block chart navigation or Drawing writes.
+
+### Step 7 implementation contract
+
+`workspace_ai_input_v1` freezes the selected profile, `saved_interpretation_v1`,
+run/instrument identity, model runtime, exact catalog/mapping evidence and selected
+bindings. Fundamental includes the existing versioned financial view and its exact
+financial/daily-price references. Supply/demand includes the three existing versioned
+dataset views, issuer references and shared-sector membership. These views are typed,
+server-calculated, formatted source tables with explicit missing states and dates;
+neither the Browser nor AI reconstructs financial values. The complete underlying
+normalized inputs/artifacts/receipts remain in their dependency closure. No other
+profile's data, Snapshot, Peer, Drawing, research tool or memory context is included.
+
+Fundamental also freezes `technicalObservation` from the exact selected Technical
+receipt (artifact data date and receipt checked-at). Result `asOf` keeps separate
+financial and technical entries; it never labels a newer price with the financial
+source date. Verification/recovery rebuilds both from saved references. Without a
+Technical binding, the observation is null and no technical as-of entry is invented.
+
+A short SQLite transaction selects the references. Existing isolated Bun read
+processes perform expensive validation/projection; a second `BEGIN IMMEDIATE`
+compares the entire selection and frozen identity before job admission. Changes
+during preparation reject admission without an LLM call. Persist the exact input
+before invocation. Missing eligible profile data records `insufficient_inputs`
+without a call; an input over 96 KiB is rejected without silent row truncation.
+Readers/backup recompute the saved projection from its exact references, never from
+current pointers. Old activated mapping evidence remains required.
+
+The existing model factory/selected model connection is reused with an empty tool
+allowlist. The general Standard loop is not entered because it can research/retry.
+Each explicit action admits at most one invocation, with SDK/LangChain retry disabled,
+60 seconds total invocation-phase budget (including its input verification), and
+4,096 output tokens. OpenAI Responses requests use `store: false`; this is not a
+claim about provider retention policy. The adapter accepts only bounded strict JSON,
+rejects tool calls/incomplete results, and returns cited qualitative observations and
+limitations. Prose contains no numeric characters; numeric values remain in fixed
+source tables. Source roles are restricted by profile. Schema/provenance validation
+does not certify the semantic truth of AI prose or enable a trading/score engine.
+
+AI has one durable active slot and an independent admission guard; it neither consumes
+the J-Quants rate lease nor blocks data jobs, search or Drawing writes. Cancel aborts
+the active request and never publishes a late response. It cannot promise that the
+provider did not already process that request. Another attempt always requires a
+new explicit action/run. Bad/missing model configuration leaves the rest of the
+Dashboard usable. Current model availability is not inferred from a key's presence.
+Ordinary active/admitting/pending-slot conflicts return `revision_conflict` (HTTP
+409) before creating a run; the Browser reloads history/current activity without
+the ambiguity latch. Unresolved publication and unexpected storage failures retain
+the fail-closed error path.
+
+Automated tests use injected models/fetch mocks. When an authorized live OpenAI
+smoke is necessary, explicitly select a low-cost test model (currently
+[`gpt-5-nano`](https://developers.openai.com/api/docs/models/gpt-5-nano))
+and keep the one-request/no-retry/token budget; never inherit the user's normal
+analysis model merely for a smoke. This does not change the product's selected model.
+
+SQLite V5 preserves foundation rows and adds versioned execution/publication fields.
+Foundation rows without an execution timestamp retain their exact references but are
+not adopted as production AI runs. New phases are prepared -> running -> publishing
+-> published, or insufficient_inputs / failed / cancelled / interrupted. Before
+writing a result, journal its exact reference; publish create-only bytes, register
+the object/closure, then commit success. After restart, prepared/running becomes
+interrupted. A publishing job reconciles only its exact journaled file/archive:
+valid bytes can finalize, absent bytes become interrupted, corrupt/ambiguous bytes
+block AI admission. There is no model replay, alternate-latest lookup or identity
+retargeting. `AnalysisRunArtifactV1` includes exact input, runtime, source as-of dates,
+interpretation and validated profile/source references.
+
+Backup includes every new input/result reference and closure. Unresolved publishing
+jobs must first reconcile locally. A published journal equals the result reference;
+an interrupted candidate with no published object is explicitly non-resolvable audit
+metadata, not a retained live reference. Offline validation uses the verified package
+closure without disabling the ordinary online maintenance guard.
+
+Guarded `/api/workspace/instruments/:id/ai` history uses 20-row keyset pages; `/jobs`
+accepts only an explicit profile POST, `/jobs/:runId` reads/cancels that instrument's
+job, and `/runs/:runId` reads exact input/result. The supporting AI region provides
+profile selection, explicit execution/cancel, fixed-input tables and saved history.
+Only matching active jobs poll while visible; failed/ambiguous reads stop polling and
+require page reload. Navigating or refreshing current data never launches analysis.
+Legacy Snapshot/CLI/Strategy behavior, Step 6 gates and Step 8 cutover remain unchanged.
 
 ## 8. Security and receipt compatibility
 

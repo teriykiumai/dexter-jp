@@ -18,10 +18,13 @@ export function runFinancialWorker(request: Extract<FinancialWorkerRequest, { op
 export function runFinancialWorker(request: Extract<FinancialWorkerRequest, { operation: 'publish' | 'recover' }>, signal?: AbortSignal): Promise<Publication>;
 export function runFinancialWorker(request: Extract<FinancialWorkerRequest, { operation: 'read' }>, signal?: AbortSignal): Promise<WorkspaceFinancialView>;
 export async function runFinancialWorker(request: FinancialWorkerRequest, signal?: AbortSignal): Promise<unknown> {
+  return runWorkspaceProcess(new URL('./financial-worker-process.ts', import.meta.url), request, signal);
+}
+export async function runWorkspaceProcess(script: URL, request: unknown, signal?: AbortSignal): Promise<unknown> {
   if (signal?.aborted) throw new WorkspaceError('invalid_input');
   // Large financial graphs triggered repeated Bun/Windows worker teardown crashes.
   // Keep the same runtime and read-only DB boundary in an isolated process.
-  const child = Bun.spawn([process.execPath, fileURLToPath(new URL('./financial-worker-process.ts', import.meta.url))],
+  const child = Bun.spawn([process.execPath, fileURLToPath(script)],
     { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe', windowsHide: true });
   const abort = () => child.kill();
   const timer = setTimeout(abort, 60_000); signal?.addEventListener('abort', abort, { once: true });

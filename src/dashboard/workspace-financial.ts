@@ -1,11 +1,12 @@
 import type { WorkspaceRepository } from '../analysis/workspace/repository.js';
-import { scopeKey, objectKey, parse, fail } from '../analysis/workspace/contracts.js';
-import { objectRow, rowRef, resolveReference } from '../analysis/workspace/references.js';
+import { scopeKey, objectKey, parse, fail, type ObjectRef } from '../analysis/workspace/contracts.js';
+import { objectRow, rowRef, resolveReference, type VerifiedObject } from '../analysis/workspace/references.js';
 import { workspaceDataCodecs } from '../analysis/workspace/data-objects.js';
 import { financialArtifact, FinancialReceiptSchema, validateFinancialLinks } from '../analysis/workspace/financial-objects.js';
 import { selectFinancial, type FinancialUnavailable } from '../analysis/workspace/financial-artifact.js';
 import { verifiedTechnical } from '../analysis/workspace/verified-technical.js';
 import { WorkspaceFinancialSchema, type WorkspaceFinancialView } from './workspace-contracts.js';
+import type { AiSelection } from '../analysis/workspace/ai-contracts.js';
 
 const reasons: Record<FinancialUnavailable, string> = { missing_data: '開示値が欠損', historical_identity_unverified: '対象期間の銘柄帰属を未確認',
   no_eligible_disclosure: '利用可能な開示なし', availability_calendar_unavailable: '開示の利用可能日を確認できません',
@@ -16,9 +17,13 @@ const display = (value: number | null | undefined, reason: FinancialUnavailable 
 
 export function readWorkspaceFinancial(repository: WorkspaceRepository, instrumentId: string): WorkspaceFinancialView;
 export function readWorkspaceFinancial(repository: WorkspaceRepository, instrumentId: string, uncollectedOnly: true): WorkspaceFinancialView | null;
-export function readWorkspaceFinancial(repository: WorkspaceRepository, instrumentId: string, uncollectedOnly = false): WorkspaceFinancialView | null {
+export function readWorkspaceFinancial(repository: WorkspaceRepository, instrumentId: string, uncollectedOnly: false, selection: AiSelection, readExact?: (ref: ObjectRef) => VerifiedObject): WorkspaceFinancialView;
+export function readWorkspaceFinancial(repository: WorkspaceRepository, instrumentId: string, uncollectedOnly = false, selection?: AiSelection,
+  readExact?: (ref: ObjectRef) => VerifiedObject): WorkspaceFinancialView | null {
   const db = repository.db, scope = scopeKey({ kind: 'instrument-owned', instrumentId });
-  const binding = (dataset: string) => db.sqlite.query<{ artifact: string; receipt: string }, [string, string]>(`SELECT b.artifact,b.receipt
+  const binding = (dataset: 'financial' | 'technical') => selection
+    ? selection[dataset] ? { artifact: objectKey(selection[dataset]!.artifact), receipt: objectKey(selection[dataset]!.receipt) } : null
+    : db.sqlite.query<{ artifact: string; receipt: string }, [string, string]>(`SELECT b.artifact,b.receipt
     FROM data_sync_state s JOIN artifact_bindings b USING(binding_id) WHERE s.scope=? AND s.dataset=? AND s.status='available'`).get(scope, dataset);
   const saved = binding('financial');
   const base: WorkspaceFinancialView = { schemaVersion: 'workspace_financial_view_v1', instrumentId, state: 'not_collected',
@@ -26,7 +31,7 @@ export function readWorkspaceFinancial(repository: WorkspaceRepository, instrume
     note: '取得元: J-Quants（JPX）。通期の会社財務・実績配当性向と会社予想年間配当です。取得時点の訂正を含み、過去時点の情報ではありません。' };
   if (!saved) return base;
   if (uncollectedOnly) return null;
-  const read = (key: string) => resolveReference(db, rowRef(objectRow(db, key)), workspaceDataCodecs);
+  const read = (key: string) => readExact ? readExact(rowRef(objectRow(db, key))) : resolveReference(db, rowRef(objectRow(db, key)), workspaceDataCodecs);
   const decode = (key: string) => JSON.parse(new TextDecoder().decode(read(key).bytes));
   for (const key of [saved.artifact, saved.receipt]) validateFinancialLinks(read(key), ref => decode(objectKey(ref)));
   const artifact = financialArtifact(decode(saved.artifact)), receipt = parse(FinancialReceiptSchema, decode(saved.receipt));
@@ -34,7 +39,7 @@ export function readWorkspaceFinancial(repository: WorkspaceRepository, instrume
   let price: NonNullable<WorkspaceFinancialView['projection']>['priceReference'] = null;
   const technical = binding('technical');
   if (technical) {
-    const value = verifiedTechnical(db, instrumentId, rowRef(objectRow(db, technical.artifact)), rowRef(objectRow(db, technical.receipt)));
+    const value = verifiedTechnical(db, instrumentId, rowRef(objectRow(db, technical.artifact)), rowRef(objectRow(db, technical.receipt)), undefined, readExact);
     if (value.input.identity.code !== artifact.input.identity.code) fail('reference_conflict');
     const last = value.input.daily.filter(row => row.Date >= value.input.eligibilityFrom && row.Date <= value.input.queryTo).at(-1);
     if (last) price = { artifact: rowRef(objectRow(db, technical.artifact)), receipt: rowRef(objectRow(db, technical.receipt)), date: last.Date, close: last.C };
