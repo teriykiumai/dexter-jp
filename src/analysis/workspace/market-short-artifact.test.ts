@@ -1,18 +1,18 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { unlinkSync } from 'node:fs';
+import { unlinkSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { MarketDataRepositoryV1 } from '../market-data/repository.js';
 import { MarketDataTargetV1Schema } from '../market-data/contracts.js';
 import { MARKET_SHORT_COVERAGE_V1, MARKET_SHORT_COVERAGE_DIGEST_V1 } from './market-short-source-gate.js';
 import { MARKET_SHORT_SCOPE_V1, WorkspaceMarketShortCodec, marketShortInput, type MarketShortInput } from './market-short-artifact.js';
-import { digest, json, objectKey, type ObjectRef } from './contracts.js';
+import { digest, json, objectKey, scopeKey, type ObjectRef } from './contracts.js';
 import { retainWorkspaceObject, stageWorkspaceObject, workspaceDataCodecs } from './data-objects.js';
-import { registerReferences, resolveReference, validateReferences, referencePath } from './references.js';
+import { registerReferences, resolveReference, validateReferences, referencePath, referenceRoots } from './references.js';
 import { WorkspaceDatabase } from './database.js';
 import { WorkspaceRepository } from './repository.js';
 import { backupWorkspace, restoreWorkspace, validateWorkspaceBackup } from './backup.js';
-import { fixtureCodecs, fixtureWorkspace } from './test-fixtures.js';
+import { fixtureCodecs, fixtureObject, fixtureWorkspace } from './test-fixtures.js';
 
 const acceptedAt = '2026-09-14T00:00:00.000Z', checkedAt = '2026-09-14T00:02:00.000Z';
 const codec = new WorkspaceMarketShortCodec();
@@ -200,5 +200,57 @@ describe('SW-M1 exact publication and backup closure without source activation',
     f.db.close(); backupWorkspace(f.root, packageRoot, codecs);
     unlinkSync(referencePath(packageRoot, saved.inputRef));
     expect(() => restoreWorkspace(packageRoot, resolve(f.directory, 'restored'), codecs)).toThrow('reference_missing');
+  });
+  test.each(['market_short', 'market_short_ratio', 'alias'])('unverified market data cannot acquire a %s binding/current pointer', async dataset => {
+    const f = await fixture(), saved = await publish(f);
+    expect(() => f.repository.bindContext(MARKET_SHORT_SCOPE_V1, saved.artifact, saved.receipt, dataset)).toThrow('reference_conflict');
+    expect(f.repository.current(MARKET_SHORT_SCOPE_V1, dataset)).toBeNull();
+    expect(f.db.sqlite.query('SELECT * FROM artifact_bindings').all()).toHaveLength(1);
+    expect(f.db.sqlite.query('SELECT * FROM data_sync_state').all()).toHaveLength(1);
+    // Denying activation never removes archived evidence or the pre-existing instrument data.
+    expect(resolveReference(f.db, saved.receipt, codecs).metadata.scope).toEqual(MARKET_SHORT_SCOPE_V1);
+    expect(f.repository.current(f.scope, 'technical')).toEqual(f.artifact);
+    expect(() => validateReferences(f.db, codecs)).not.toThrow();
+  });
+  function forceBinding(db: WorkspaceDatabase, saved: { artifact: ObjectRef; receipt: ObjectRef }, dataset = 'market_short') {
+    const id = randomUUID(), scope = scopeKey(MARKET_SHORT_SCOPE_V1);
+    db.sqlite.run('INSERT INTO artifact_bindings VALUES (?,?,?,?,?,NULL)', [id, scope, dataset, objectKey(saved.artifact), objectKey(saved.receipt)]);
+    db.sqlite.run("INSERT INTO data_sync_state VALUES (?,?,?,'available')", [scope, dataset, id]);
+    return id;
+  }
+  test.each(['market_short', 'alias'])('forged %s bindings cannot be adopted by recovery, reads or shared links', async dataset => {
+    const f = await fixture(), saved = await publish(f), id = forceBinding(f.db, saved, dataset);
+    f.repository.openWorkspace(f.instrumentId);
+    const membership = fixtureObject(f.objectRoot, f.scope, [saved.artifact]);
+    await registerReferences(f.db, f.objectRoot, [membership], codecs);
+    expect(() => f.repository.bindContext(MARKET_SHORT_SCOPE_V1, saved.artifact, saved.receipt, dataset)).toThrow('reference_conflict');
+    expect(() => f.repository.current(MARKET_SHORT_SCOPE_V1, dataset)).toThrow('reference_conflict');
+    expect(() => f.repository.linkContext(f.instrumentId, dataset, id, membership)).toThrow('reference_conflict');
+    expect(f.db.sqlite.query('SELECT * FROM shared_context_links').all()).toHaveLength(0);
+    expect(() => validateReferences(f.db, codecs)).toThrow('reference_conflict');
+    f.db.sqlite.run("UPDATE data_sync_state SET binding_id=? WHERE scope=? AND dataset='technical'", [id, scopeKey(f.scope)]);
+    expect(() => f.repository.current(f.scope, 'technical')).toThrow('reference_conflict');
+    // Exact audit reads remain possible and never silently substitute a latest artifact.
+    expect(resolveReference(f.db, saved.artifact, codecs).ref).toEqual(saved.artifact);
+  });
+  test.each(['backup', 'restore'] as const)('%s rejects an unqualified binding without losing Drawings or archived inputs', async operation => {
+    const f = await fixture(), saved = await publish(f), packageRoot = resolve(f.directory, 'backup'), restored = resolve(f.directory, 'restored');
+    f.repository.openWorkspace(f.instrumentId); f.repository.saveDrawing(f.drawing, 0);
+    if (operation === 'backup') {
+      forceBinding(f.db, saved); f.db.close();
+      expect(() => backupWorkspace(f.root, packageRoot, codecs)).toThrow('reference_conflict');
+    } else {
+      f.db.close(); backupWorkspace(f.root, packageRoot, codecs); restoreWorkspace(packageRoot, restored, codecs);
+      const manifest = validateWorkspaceBackup(packageRoot, codecs), packageDb = new WorkspaceDatabase(packageRoot);
+      let roots: ReturnType<typeof referenceRoots>;
+      try { forceBinding(packageDb, saved); roots = referenceRoots(packageDb); } finally { packageDb.close(); }
+      // Keep the package hash, roots and FK graph coherent: qualification, not checksum failure, must stop restore.
+      writeFileSync(resolve(packageRoot, 'manifest.json'), json({ ...manifest, roots,
+        databaseDigest: digest(readFileSync(resolve(packageRoot, 'workspace.sqlite'))) }));
+      expect(() => restoreWorkspace(packageRoot, restored, codecs)).toThrow('reference_conflict');
+    }
+    const db = new WorkspaceDatabase(operation === 'backup' ? f.root : restored); opened.push(db);
+    expect(new WorkspaceRepository(db).drawings(f.instrumentId)).toEqual([f.drawing]);
+    expect(resolveReference(db, saved.inputRef, codecs).ref).toEqual(saved.inputRef);
   });
 });

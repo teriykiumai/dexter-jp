@@ -5,7 +5,7 @@ import { WorkspaceDatabase } from './database.js';
 import { DateValue, DEFAULT_PREFERENCES, DrawingSchema, FrozenIdentitySchema, Id, ObjectRefSchema,
   PreferencesSchema, ScopeSchema, Token, fail, json, objectKey, parse, restoredDrawing, safe, scopeKey,
   type ChartPreferences, type FrozenIdentity, type ObjectRef, type StoredDrawing, type WorkspaceScope } from './contracts.js';
-import { metadataFor, objectRow, requireScope, rowRef } from './references.js';
+import { metadataFor, objectRow, requireScope, requireBindingQualification, rowRef } from './references.js';
 
 const CatalogRowSchema = z.object({ instrumentId: Id, assetType: z.enum(['stock', 'etf', 'reit']),
   provider: Token, code: Token, label: z.string().trim().min(1).max(200), mappingRevision: z.number().int().positive(),
@@ -233,6 +233,8 @@ export class WorkspaceRepository {
     return id;
   }
   private committedBinding(scope: WorkspaceScope, artifact: ObjectRef, receipt: ObjectRef, dataset: string, identity: FrozenIdentity | null): string | null {
+    // Runs inside the writer transaction, including acknowledgement of an existing binding.
+    requireBindingQualification(this.db, scope, dataset, objectKey(artifact), objectKey(receipt));
     const previous = this.db.sqlite.query<Binding, [string, string]>(
       'SELECT * FROM artifact_bindings WHERE artifact=? AND receipt=?').get(objectKey(artifact), objectKey(receipt));
     if (!previous) return null;
@@ -245,7 +247,9 @@ export class WorkspaceRepository {
     this.db.transaction(() => {
       const binding = this.db.sqlite.query<Binding, [string]>('SELECT * FROM artifact_bindings WHERE binding_id=?').get(bindingId) ?? fail('not_found');
       if (binding.dataset !== role) fail('reference_conflict');
-      if (parse(ScopeSchema, JSON.parse(binding.scope)).kind === 'instrument-owned') fail('reference_conflict');
+      const scope = parse(ScopeSchema, JSON.parse(binding.scope));
+      if (scope.kind === 'instrument-owned') fail('reference_conflict');
+      requireBindingQualification(this.db, scope, role, binding.artifact, binding.receipt);
       const evidence = requireScope(this.db, objectKey(membership), { kind: 'instrument-owned', instrumentId });
       if (evidence.effectiveDate !== metadataFor(this.db, binding.artifact).effectiveDate
         || !evidence.dependencies.some(ref => objectKey(ref) === binding.artifact)) fail('reference_conflict');
@@ -255,8 +259,11 @@ export class WorkspaceRepository {
   }
   current(scope: WorkspaceScope, dataset: string): ObjectRef | null {
     this.db.assertAvailable(); parse(Token, dataset);
-    const row = this.db.sqlite.query<{ artifact: string }, [string, string]>(`SELECT b.artifact FROM data_sync_state s
+    const row = this.db.sqlite.query<Binding, [string, string]>(`SELECT b.* FROM data_sync_state s
       JOIN artifact_bindings b USING(binding_id) WHERE s.scope=? AND s.dataset=? AND s.status='available'`).get(scopeKey(scope), dataset);
-    return row ? rowRef(objectRow(this.db, row.artifact)) : null;
+    if (!row) return null;
+    if (row.scope !== scopeKey(scope) || row.dataset !== dataset) fail('reference_conflict');
+    requireBindingQualification(this.db, scope, dataset, row.artifact, row.receipt);
+    return rowRef(objectRow(this.db, row.artifact));
   }
 }
