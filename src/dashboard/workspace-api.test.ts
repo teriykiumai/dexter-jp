@@ -33,6 +33,8 @@ test('Workspace guarded API: explicit catalog/EOD, read-only search/open URL, ex
     for (const headers of forbidden)
       expect((await call('jobs', 'POST', { kind: 'catalog' }, headers)).status).toBe(403);
     expect((await call('jobs', 'POST', { kind: 'catalog', extra: true })).status).toBe(400);
+    for (const kind of ['market_short', 'market_short_ratio'])
+      expect((await call('jobs', 'POST', { kind })).status).toBe(400);
     expect((await call('search?q=1&q=2')).status).toBe(400); expect(f.calls()).toBe(0);
     const catalog = await (await call('jobs', 'POST', { kind: 'catalog' })).json() as WorkspaceJobView;
     expect((await f.jobs.wait(catalog.id)).state).toBe('published');

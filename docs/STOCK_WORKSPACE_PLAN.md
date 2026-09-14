@@ -4,7 +4,7 @@
 
 **Date:** 2026-09-12
 
-**Status:** Implementation through Step 8 Dashboard cutover is merged (PR #124, `8e656c1`). SW-M0 whole-market short source verification is the current candidate: live coverage is complete, but reconciliation with the published total remains incomplete. SW-M1 production integration stays closed. Numeric forecast yield, cross-date identity and ETF/REIT capabilities remain gated; later steps require their own implementation, validation, review and merge.
+**Status:** Implementation through Step 8 Dashboard cutover is merged (PR #124, `8e656c1`). SW-M0 diagnostics are merged (PR #125, `6ecab88`): live coverage is complete, but reconciliation with the published total remains incomplete. The current SW-M1 candidate implements immutable storage and exact-reference verification only; production collection, binding/read/UI integration remains closed. Numeric forecast yield, cross-date identity and ETF/REIT capabilities remain gated; later steps require their own implementation, validation, review and merge.
 
 ## 1. Authority and migration boundary
 
@@ -752,6 +752,50 @@ validation/backup closure and explicit job/read/UI integration. Future productio
 collection also needs trading-date/cutoff handling: the
 [published update time](https://jpx-jquants.com/ja/spec/data-update) is around
 16:30 JST, not a completion guarantee, and no uncollected/missing day is zero.
+
+### SW-M1 immutable storage foundation
+
+The first implementation slice adds `workspace_market_short_input_v1`,
+`workspace_market_short_artifact_v1` and `workspace_market_short_receipt_v1`
+codecs. It does not complete SW-M1 or activate `market_short_ratio`. Only offline
+synthetic tests exercise publication; no collector, Dashboard job, current binding,
+shared Workspace link, read projection or AI input is installed by this slice.
+
+Inputs freeze the exact date-only query, complete pagination evidence (at most
+5 pages / 200 rows), canonically ordered rows, the full versioned registry and its
+digest. Scope is exactly `market-scoped`, universe
+`tse_regular_market_short_selling`, definition `tse_short_turnover_34_categories_v1`.
+No ticker, instrument identity or inferred membership is accepted. Every input
+retains `sourceQualification: unverified` and
+`correctionVintage: current_at_fetch_not_point_in_time`. A coverage result of
+`available` means the diagnostic can calculate all constituents; it is not a
+production qualification. These saved inputs cannot be relabelled verified.
+Production activation requires separately reviewed qualification/schema handling
+after the source gate; it must preserve these immutable diagnostic records.
+
+The artifact replays the SW-M0 weighted calculation from its embedded exact input
+and requires a digest-matching input reference. Receipt validation fixes the market
+target, exact artifact identity and collection time. Its dependency closure is
+receipt -> artifact -> immutable input (including the registry). Registered inputs
+are persistent roots even without Drawing, AI, or a current binding; Backup/Restore
+must retain them and reject missing or substituted dependencies without latest
+fallback. Instrument/sector/other-market ownership cannot accept these objects.
+
+Refetch timing and pagination boundaries do not alter semantic content identity.
+The existing Market Data repository may reuse the original artifact and its exact
+input, while recording a new observation receipt. A source correction changes
+content identity and preserves both versions. No receipt count/retention/recovery
+budget changes are introduced. A same-day artifact is rejected before 17:30 JST,
+matching the existing conservative supply boundary; this alone proves neither a
+trading session nor provider completion. Production trading-date/cutoff handling
+and shared Workspace association remain part of the gated integration slice.
+
+Acceptance: offline weighted/missing/zero/boundary tests; exact receipt replay after
+refetch/correction; Backup/Restore with no Drawing/AI and no original source files;
+missing input rejection; incompatible scope rejection; and market-job requests
+still rejected before any source access. This financial/persistence boundary uses
+broad Workspace/Market Data regressions, affected Dashboard API tests and strict
+type checking; user-facing UI behavior is unchanged.
 
 ## 7. Workspace API, navigation and AI
 
