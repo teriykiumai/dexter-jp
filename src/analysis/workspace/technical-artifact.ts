@@ -12,6 +12,9 @@ export class WorkspaceTechnicalCodec {
   constructor(ticker: string) { this.target = createTechnicalArtifactCodecV1(ticker).target; }
   build(source: TechnicalChartDatasetV1, input: TechnicalInput) {
     const legacy = createTechnicalArtifactCodecV1(source.ticker).parse(source);
+    return this.buildVerifiedSource(legacy, input);
+  }
+  private buildVerifiedSource(legacy: TechnicalChartDatasetV1, input: TechnicalInput) {
     const calculated = calculateWorkspaceTechnical(input);
     const sourcePayloadDigest = digest(json({ version: 'workspace_technical_source_v2',
       source: legacy.sourcePayloadDigest, input: calculated.input }));
@@ -35,7 +38,7 @@ export class WorkspaceTechnicalCodec {
       const expected = digestMarketSourceInputV1(technicalSourceIdentityV1(role, source), rows, value => value as CanonicalJsonValue);
       if (source.sourceInputs.find(item => item.role === role)?.inputDigest !== expected) fail('reference_conflict');
     }
-    const value = this.build(source, input);
+    const value = this.buildVerifiedSource(source, input);
     if (json(raw) !== json(value)) fail('reference_conflict');
     safe(value); return value;
   }
