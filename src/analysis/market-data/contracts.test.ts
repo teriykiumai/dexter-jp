@@ -2,11 +2,31 @@ import { describe, expect, test } from 'bun:test';
 import { z } from 'zod';
 import { canonicalJsonV1, sha256CanonicalJsonV1, type CanonicalJsonValue } from '../snapshot/canonical-json.js';
 import { MarketDataArtifactCodecV1 } from './artifact-codec.js';
-import { digestMarketDataSourcePayloadV1, digestMarketSourceInputV1, marketDataRolesV1,
+import { assertMarketDataSafeV1, digestMarketDataSourcePayloadV1, digestMarketSourceInputV1, marketDataRolesV1,
   MARKET_DATA_MODULE_IDS_V1, MarketDataSourcePayloadEnvelopeV1Schema, SourceInputV1Schema } from './contracts.js';
 import { fixtureArtifact, fixtureCodec, fixtureDraft, sourceInputIdentity, overviewFixtureSchema } from './repository-test-fixtures.js';
 
 describe('Market Data source identity and strict codec', () => {
+  test('large repeated rows retain string safety without rescanning the environment per field', () => {
+    let scans = 0;
+    const environment = new Proxy({ JQUANTS_API_KEY: 'fixture-configured-secret' }, {
+      get(target, key, receiver) { if (key === 'JQUANTS_API_KEY') scans++; return Reflect.get(target, key, receiver); },
+    });
+    const rows = Array.from({ length: 8000 }, () => ({ state: 'available', date: '2026-09-14', value: 0 }));
+    expect(() => assertMarketDataSafeV1(rows, environment)).not.toThrow();
+    expect(scans).toBeGreaterThan(0);
+    expect(scans).toBeLessThan(100);
+    for (const unsafe of ['fixture-configured-secret', 'sk-proj-abcdefghijklmnop', '-----BEGIN PRIVATE KEY-----',
+      'C:\\private\\credentials', 'bad\u0000text', 'x'.repeat(200_001)]) {
+      expect(() => assertMarketDataSafeV1([...rows, { value: unsafe }], environment)).toThrow();
+      expect(() => assertMarketDataSafeV1([...rows, { [unsafe]: 'available' }], environment)).toThrow();
+    }
+    // An earlier safe check is not an approval under a different secret configuration.
+    const value = { label: 'future-configured-secret' }, mutableEnvironment: NodeJS.ProcessEnv = {};
+    assertMarketDataSafeV1(value, mutableEnvironment);
+    mutableEnvironment.JQUANTS_API_KEY = value.label;
+    expect(() => assertMarketDataSafeV1(value, mutableEnvironment)).toThrow();
+  });
   test('literal root envelope golden bytes and digest; no cyclic artifact/path preimage', () => {
     const envelope = { kind: 'dexter_market_data_source_payload', version: 1,
       target: { kind: 'technical', ticker: '7203', jquantsCode: '72030' },

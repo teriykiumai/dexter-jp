@@ -170,9 +170,14 @@ export function digestMarketSourceInputV1<T extends CanonicalJsonValue>(raw: unk
 export function assertMarketDataSafeV1(value: CanonicalJsonValue, environment: NodeJS.ProcessEnv): void {
   // Reuse the existing configured-secret, marker, control-character and path grammar.
   // Walk individual strings so the Evaluator logical-input cap is not an artifact cap.
+  // Repeated field names/values share one check within this synchronous walk only.
+  // Never retain approvals across calls: configured secrets may have changed.
+  const checked = new Set<string>();
   function visit(item: CanonicalJsonValue): void {
     if (typeof item === 'string') {
+      if (checked.has(item)) return;
       assertEvaluatorInputSafe({ reportMarkdown: '', logicalInput: item, evidenceManifest: item }, environment);
+      checked.add(item);
     } else if (Array.isArray(item)) item.forEach(visit);
     else if (item !== null && typeof item === 'object') {
       for (const [key, child] of Object.entries(item)) { visit(key); visit(child); }
