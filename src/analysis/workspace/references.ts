@@ -17,6 +17,8 @@ import { verifyAiInput } from './ai-verify.js';
 import { validateAiResult } from './ai-objects.js';
 import { bindingQualificationV1 } from './market-short-qualification.js';
 import { marketShortCodecsV2, requireMarketShortBindingV2 } from './market-short-objects-v2.js';
+import { validateMarketShortJob } from './market-short-job-contract.js';
+import type { WorkspaceDataJob } from './data-jobs.js';
 
 export type ObjectRow = { object_key: string; path: string; codec: string; digest: string; metadata: string };
 export type VerifiedObject = { ref: ObjectRef; metadata: ObjectMetadata; bytes: Uint8Array };
@@ -251,11 +253,12 @@ export function validateReferences(db: WorkspaceDatabase, codecs: ReferenceCodec
       const object = byKey.get(key) ?? fail('reference_missing');
       return JSON.parse(new TextDecoder().decode(object.bytes));
     };
-    for (const job of db.sqlite.query<{ job_id: string; kind: string; state: string; accepted_at: string; identity: string | null;
-      master_object: string | null; input_object: string | null; result_object: string | null; generation: number | null }, []>('SELECT * FROM workspace_data_jobs').all()) {
+    for (const job of db.sqlite.query<WorkspaceDataJob, []>('SELECT * FROM workspace_data_jobs').all()) {
       // Resolve ambiguous publication before an offline backup can claim closure.
       if (job.state === 'publishing') fail('backup_invalid');
-      if (job.kind === 'technical') {
+      if (job.kind === 'market_short') {
+        validateMarketShortJob(db, job, key => ({ ref: byKey.get(key)?.ref ?? fail('reference_missing'), value: value(key) }));
+      } else if (job.kind === 'technical') {
         const identity = parse(FrozenIdentitySchema, JSON.parse(job.identity!));
         const episode = parse(EpisodeObjectSchema, value(job.master_object!));
         if (identity.instrumentId !== episode.instrumentId || identity.code !== episode.observation.Code) fail('reference_conflict');
